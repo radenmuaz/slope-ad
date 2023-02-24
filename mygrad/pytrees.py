@@ -52,10 +52,6 @@ class NodeType(NamedTuple):
     from_iterable: Callable
 
 
-# def register_pytree_node(ty: Type, to_iter: Callable, from_iter: Callable) -> None:
-#     node_types[ty] = NodeType(str(ty), to_iter, from_iter)
-
-
 class PyTreeDef(NamedTuple):
     node_type: NodeType
     node_metadata: Hashable

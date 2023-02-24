@@ -1,6 +1,6 @@
 import numpy as np
 
-from mygrad import pt, trc, utils, reg
+from mygrad import pytrees as pt, tracing as trc, utils, registry as reg
 
 
 class JVPTracer(trc.Tracer):

@@ -1,7 +1,7 @@
 from typing import Tuple
 import numpy as np
 
-from mygrad import pm
+from mygrad import primitives as pm
 from mygrad import utils
 
 

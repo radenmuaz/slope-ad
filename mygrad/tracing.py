@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Type, Optional, Any, List
 import operator as op
 
-from mygrad import arrays, reg
+from mygrad import arrays, registry as reg
 import numpy as np
 
 
@@ -87,7 +87,7 @@ class Tracer:
             raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
 
 
-class EvalTrace(trc.Trace):
+class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
     def process_primitive(self, primitive, tracers, params):

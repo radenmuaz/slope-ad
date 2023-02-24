@@ -1,6 +1,6 @@
 from typing import NamedTuple
 import numpy as np
-from mygrad import trc
+from mygrad import tracing as trc
 
 
 class Primitive(NamedTuple):

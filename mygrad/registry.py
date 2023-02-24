@@ -1,5 +1,5 @@
 import numpy as np
-from mygrad import trc
+from mygrad import tracing as trc
 from typing import List, Optional, Dict, Callable, Type
 
 

@@ -1,4 +1,5 @@
-def swap(f): return lambda x, y: f(y, x)
+def swap(f):
+    return lambda x, y: f(y, x)
 
 
 def unzip2(pairs):
@@ -8,11 +9,17 @@ def unzip2(pairs):
         lst2.append(x2)
     return lst1, lst2
 
+
 map_ = map
+
+
 def map(f, *xs):
     return list(map_(f, *xs))
 
+
 zip_ = zip
+
+
 def zip(*args):
     fst, *rest = args = map(list, args)
     n = len(fst)

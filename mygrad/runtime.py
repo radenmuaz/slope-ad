@@ -12,6 +12,7 @@ class MainTrace(NamedTuple):
     trace_type: Type["Trace"]
     global_data: Optional[Any]
 
+
 class Trace:
     main: MainTrace
 
@@ -26,6 +27,7 @@ class Trace:
 
     def run_llop(self, LLOp, tracers, params):
         raise NotImplementedError
+
 
 class Tracer:
     _trace: Trace
@@ -60,24 +62,28 @@ class Tracer:
         except AttributeError:
             raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
 
+
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
+
     def run_llop(self, llop, tracers, params):
         return llop.forward(*tracers, **params)
 
+
 class Runtime:
     JAX_TYPES = {
-    bool,
-    int,
-    float,
-    np.bool_,
-    np.int32,
-    np.int64,
-    np.float32,
-    np.float64,
-    np.ndarray,
+        bool,
+        int,
+        float,
+        np.bool_,
+        np.int32,
+        np.int64,
+        np.float32,
+        np.float64,
+        np.ndarray,
     }
-    def __init__ (self, jax_types = JAX_TYPES):
+
+    def __init__(self, jax_types=JAX_TYPES):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.node_types = dict()
@@ -107,14 +113,11 @@ class Runtime:
         finally:
             self.trace_stack.pop()
 
-
     def bind(self, prim, *args, **params):
         top_trace = self.find_top_trace(args)
         tracers = [self.full_raise(top_trace, arg) for arg in args]
         outs = top_trace.run_llop(prim, tracers, params)
         return [self.full_lower(out) for out in outs]
-
-
 
     def find_top_trace(self, xs) -> Trace:
         top_main = max(
@@ -126,13 +129,11 @@ class Runtime:
             top_main = self.dynamic_trace
         return top_main.trace_type(top_main)
 
-
     def full_lower(self, val: Any):
         if isinstance(val, Tracer):
             return val.full_lower()
         else:
             return val
-
 
     def full_raise(self, trace: Trace, val: Any) -> Tracer:
         if not isinstance(val, Tracer):
@@ -148,7 +149,6 @@ class Runtime:
         else:  # val._trace.level == level
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
-
     def get_aval(self, x):
         if isinstance(x, Tracer):
             return x.aval
@@ -156,7 +156,6 @@ class Runtime:
             return arrays.ConcreteArray(np.asarray(x))
         else:
             raise TypeError(x)
-
 
     @contextmanager
     def new_dynamic(self, main: MainTrace):

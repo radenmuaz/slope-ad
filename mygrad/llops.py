@@ -1,16 +1,21 @@
 from typing import NamedTuple
 import numpy as np
 import mygrad
+
+
 class LLOp:
     @classmethod
     def forward(cls, *args):
         raise NotImplementedError
+
     @classmethod
     def reverse(cls, *args):
         raise NotImplementedError
+
     @classmethod
     def vmap(cls, *args):
         raise NotImplementedError
+
     @classmethod
     def jvp(cls, *args):
         raise NotImplementedError
@@ -20,6 +25,7 @@ class LLOp:
         (out,) = mygrad.RT.bind(cls, *args, **params)
         return out
 
+
 class Add(LLOp):
     @classmethod
     def forward(cls, x, y):
@@ -28,6 +34,7 @@ class Add(LLOp):
     @classmethod
     def reverse(cls, x, y):
         return [np.add(x, -y)]
+
 
 class Mul(LLOp):
     @classmethod

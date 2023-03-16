@@ -147,9 +147,7 @@ class PartialEvalTrace(Trace):
             PartialEvalTracer(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
-        eqn = JaxprEqnRecipe(
-            LLOp, tracers_in, params, avals_out, map(ref, tracers_out)
-        )
+        eqn = JaxprEqnRecipe(LLOp, tracers_in, params, avals_out, map(ref, tracers_out))
         for t in tracers_out:
             t.recipe = eqn
         return tracers_out

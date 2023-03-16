@@ -1,7 +1,7 @@
 from typing import Tuple
 import numpy as np
 
-from mygrad import primitives as pm
+from mygrad import llops
 from mygrad import utils
 
 
@@ -18,13 +18,11 @@ class ShapedArray:
     def ndim(self):
         return len(self.shape)
 
-    _neg = staticmethod(pm.neg)
-    _add = staticmethod(pm.add)
-    _radd = staticmethod(utils.swap(pm.add))
-    _mul = staticmethod(pm.mul)
-    _rmul = staticmethod(utils.swap(pm.mul))
-    _gt = staticmethod(pm.greater)
-    _lt = staticmethod(pm.less)
+    _neg = staticmethod(llops.Neg.bind1)
+    _add = staticmethod(llops.Add.bind1)
+    _radd = staticmethod(utils.swap(llops.Add.bind1))
+    _mul = staticmethod(llops.Mul.bind1)
+    _rmul = staticmethod(utils.swap(llops.Mul.bind1))
 
     @staticmethod
     def _bool(tracer):

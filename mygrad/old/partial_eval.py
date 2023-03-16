@@ -91,7 +91,7 @@ class ConstRecipe(NamedTuple):
 
 
 class JaxprEqnRecipe(NamedTuple):
-    prim: Primitive
+    prim: LLOp
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[ShapedArray]
@@ -134,21 +134,21 @@ class PartialEvalTrace(Trace):
             pval = PartialVal.unknown(raise_to_shaped(tracer.aval))
             return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return bind(primitive, *map(full_lower, tracers), **params)
-        rule = partial_eval_rules.get(primitive)
+            return bind(LLOp, *map(full_lower, tracers), **params)
+        rule = partial_eval_rules.get(LLOp)
         if rule:
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = abstract_eval_rules[primitive](*avals_in, **params)
+        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
         tracers_out = [
             PartialEvalTracer(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
         eqn = JaxprEqnRecipe(
-            primitive, tracers_in, params, avals_out, map(ref, tracers_out)
+            LLOp, tracers_in, params, avals_out, map(ref, tracers_out)
         )
         for t in tracers_out:
             t.recipe = eqn
@@ -302,7 +302,7 @@ def partial_eval_jaxpr(
     map(write, in_unknowns, jaxpr.in_binders)
     for eqn in jaxpr.eqns:
         unks_in = map(read, eqn.inputs)
-        rule = partial_eval_jaxpr_rules.get(eqn.primitive)
+        rule = partial_eval_jaxpr_rules.get(eqn.LLOp)
         if rule:
             eqn1, eqn2, unks_out, res = rule(unks_in, eqn)
             eqns1.append(eqn1)
@@ -311,7 +311,7 @@ def partial_eval_jaxpr(
             map(write, unks_out, eqn.out_binders)
         elif any(unks_in):
             inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, eqn.inputs)]
-            eqns2.append(JaxprEqn(eqn.primitive, inputs, eqn.params, eqn.out_binders))
+            eqns2.append(JaxprEqn(eqn.LLOp, inputs, eqn.params, eqn.out_binders))
             map(partial(write, True), eqn.out_binders)
         else:
             eqns1.append(eqn)

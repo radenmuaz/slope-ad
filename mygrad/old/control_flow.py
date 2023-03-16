@@ -20,7 +20,7 @@ def cond(pred, true_fn, false_fn, *operands):
     return tree_unflatten(out_tree, outs)
 
 
-cond_p = Primitive("cond")
+cond_p = LLOp("cond")
 
 
 def _join_jaxpr_consts(
@@ -270,7 +270,7 @@ def pprint_cond(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
     new_params = {k: v for k, v in eqn.params.items() if not k.endswith("jaxpr")}
     lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
     rhs = (
-        pp(eqn.primitive.name)
+        pp(eqn.LLOp.name)
         >> pp_params(new_params)
         >> pp(
             " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)

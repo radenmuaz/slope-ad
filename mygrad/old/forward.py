@@ -1,6 +1,6 @@
 import numpy as np
 
-from mygrad import pytrees as pt, tracing as trc, utils, registry as reg
+from mygrad import pytrees as pt, runtime as reg, tracing as trc, utils
 
 
 class JVPTracer(trc.Tracer):
@@ -17,9 +17,9 @@ class JVPTracer(trc.Tracer):
 class JVPTrace(trc.Trace):
     pure = lift = lambda self, val: JVPTracer(self, val, trc.zeros_like(val))
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
-        jvp_rule = reg.jvp_rules[primitive]
+        jvp_rule = reg.jvp_rules[LLOp]
         primal_outs, tangent_outs = jvp_rule(primals_in, tangents_in, **params)
         return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
 

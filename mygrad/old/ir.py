@@ -2,7 +2,7 @@ from typing import Type, List, Tuple, Sequence, Optional, Any, Union, NamedTuple
 from collections import defaultdict
 from mygrad import arr
 from mygrad import trc
-from mygrad import pm
+from mygrad import llops
 import numpy as np
 import operator as op
 
@@ -27,7 +27,7 @@ Atom = Union[Var, Lit]
 
 
 class JaxprEqn(NamedTuple):
-    primitive: pm.Primitive
+    LLOp: llops.LLOp
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Var]
@@ -80,7 +80,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = abstract_eval_rules[eqn.primitive](*in_types, **eqn.params)
+        out_types = abstract_eval_rules[eqn.LLOp](*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -118,7 +118,7 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
     map(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
         in_vals = map(read, eqn.inputs)
-        outs = bind(eqn.primitive, *in_vals, **eqn.params)
+        outs = bind(eqn.LLOp, *in_vals, **eqn.params)
         map(write, eqn.out_binders, outs)
     return map(read, jaxpr.outs)
 
@@ -165,13 +165,13 @@ class JaxprTrace(Trace):
 
     pure = lift = get_or_make_const_tracer
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = abstract_eval_rules[primitive](*avals_in, **params)
+        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_eqn(JaxprEqn(primitive, inputs, params, outvars))
+        self.builder.add_eqn(JaxprEqn(LLOp, inputs, params, outvars))
         return out_tracers
 
     @property
@@ -241,7 +241,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     literals = dict(zip(lit_binders, map(Lit, lit_vals)))
     new_eqns = [
         JaxprEqn(
-            eqn.primitive,
+            eqn.LLOp,
             [literals.get(x, x) for x in eqn.inputs],
             eqn.params,
             eqn.out_binders,

@@ -23,20 +23,20 @@ xe = xc._xla
 xops = xc._xla.ops
 
 
-class Primitive(NamedTuple):
+class LLOp(NamedTuple):
     name: str
 
 
-add_p = Primitive("add")
-mul_p = Primitive("mul")
-neg_p = Primitive("neg")
-sin_p = Primitive("sin")
-cos_p = Primitive("cos")
-reduce_sum_p = Primitive("reduce_sum")
-greater_p = Primitive("greater")
-less_p = Primitive("less")
-transpose_p = Primitive("transpose")
-broadcast_p = Primitive("broadcast")
+add_p = LLOp("add")
+mul_p = LLOp("mul")
+neg_p = LLOp("neg")
+sin_p = LLOp("sin")
+cos_p = LLOp("cos")
+reduce_sum_p = LLOp("reduce_sum")
+greater_p = LLOp("greater")
+less_p = LLOp("less")
+transpose_p = LLOp("transpose")
+broadcast_p = LLOp("broadcast")
 
 
 def add(x, y):
@@ -91,7 +91,7 @@ def bind1(prim, *args, **params):
 def bind(prim, *args, **params):
     top_trace = find_top_trace(args)
     tracers = [full_raise(top_trace, arg) for arg in args]
-    outs = top_trace.process_primitive(prim, tracers, params)
+    outs = top_trace.run_llop(prim, tracers, params)
     return [full_lower(out) for out in outs]
 
 
@@ -129,7 +129,7 @@ class Trace:
     def lift(self, val):
         assert False  # must override
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         assert False  # must override
 
 
@@ -305,13 +305,13 @@ def full_raise(trace: Trace, val: Any) -> Tracer:
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
-    def process_primitive(self, primitive, tracers, params):
-        return impl_rules[primitive](*tracers, **params)
+    def run_llop(self, LLOp, tracers, params):
+        return impl_rules[LLOp](*tracers, **params)
 
 
 trace_stack.append(MainTrace(0, EvalTrace, None))  # special bottom of the stack
 
-# NB: in JAX, instead of a dict we attach impl rules to the Primitive instance
+# NB: in JAX, instead of a dict we attach impl rules to the LLOp instance
 impl_rules = {}
 
 impl_rules[add_p] = lambda x, y: [np.add(x, y)]
@@ -379,9 +379,9 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     pure = lift = lambda self, val: JVPTracer(self, val, zeros_like(val))
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        jvp_rule = jvp_rules[primitive]
+        jvp_rule = jvp_rules[LLOp]
         primal_outs, tangent_outs = jvp_rule(primals_in, tangents_in, **params)
         return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
 
@@ -634,9 +634,9 @@ class BatchTracer(Tracer):
 class BatchTrace(Trace):
     pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
-        vmap_rule = vmap_rules[primitive]
+        vmap_rule = vmap_rules[LLOp]
         val_outs, bdim_outs = vmap_rule(self.axis_size, vals_in, bdims_in, **params)
         return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
 
@@ -749,7 +749,7 @@ Atom = Union[Var, Lit]
 
 
 class JaxprEqn(NamedTuple):
-    primitive: Primitive
+    LLOp: LLOp
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Var]
@@ -786,7 +786,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = abstract_eval_rules[eqn.primitive](*in_types, **eqn.params)
+        out_types = abstract_eval_rules[eqn.LLOp](*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -824,7 +824,7 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
     map(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
         in_vals = map(read, eqn.inputs)
-        outs = bind(eqn.primitive, *in_vals, **eqn.params)
+        outs = bind(eqn.LLOp, *in_vals, **eqn.params)
         map(write, eqn.out_binders, outs)
     return map(read, jaxpr.outs)
 
@@ -871,13 +871,13 @@ class JaxprTrace(Trace):
 
     pure = lift = get_or_make_const_tracer
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = abstract_eval_rules[primitive](*avals_in, **params)
+        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_eqn(JaxprEqn(primitive, inputs, params, outvars))
+        self.builder.add_eqn(JaxprEqn(LLOp, inputs, params, outvars))
         return out_tracers
 
     @property
@@ -947,7 +947,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     literals = dict(zip(lit_binders, map(Lit, lit_vals)))
     new_eqns = [
         JaxprEqn(
-            eqn.primitive,
+            eqn.LLOp,
             [literals.get(x, x) for x in eqn.inputs],
             eqn.params,
             eqn.out_binders,
@@ -1082,13 +1082,13 @@ def var_str(names: DefaultDict[Var, str], v: Var) -> str:
 
 
 def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
-    rule = pp_rules.get(eqn.primitive)
+    rule = pp_rules.get(eqn.LLOp)
     if rule:
         return rule(names, eqn)
     else:
         lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
         rhs = (
-            pp(eqn.primitive.name)
+            pp(eqn.LLOp.name)
             >> pp_params(eqn.params)
             >> pp(
                 " ".join(
@@ -1108,7 +1108,7 @@ def pp_params(params: Dict[str, Any]) -> PPrint:
 
 
 Jaxpr.__repr__ = lambda self: str(pp_jaxpr(self))
-pp_rules: Dict[Primitive, Callable[..., PPrint]] = {}
+pp_rules: Dict[LLOp, Callable[..., PPrint]] = {}
 
 
 @contextmanager
@@ -1163,7 +1163,7 @@ class IDHashable:
         return type(other) is IDHashable and id(self.val) == id(other.val)
 
 
-xla_call_p = Primitive("xla_call")
+xla_call_p = LLOp("xla_call")
 
 
 def xla_call_impl(*args, jaxpr: Jaxpr, num_consts: int):
@@ -1222,7 +1222,7 @@ def jaxpr_subcomp(c: xe.XlaBuilder, jaxpr: Jaxpr, args: List[xe.XlaOp]) -> xe.Xl
     for eqn in jaxpr.eqns:
         in_avals = [x.aval for x in eqn.inputs]
         in_vals = map(read, eqn.inputs)
-        rule = xla_translations[eqn.primitive]
+        rule = xla_translations[eqn.LLOp]
         out_vals = rule(c, in_avals, in_vals, **eqn.params)
         map(write, eqn.out_binders, out_vals)
     return map(read, jaxpr.outs)
@@ -1422,7 +1422,7 @@ def pprint_xla_call(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
     lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
     params_without_jaxpr = {k: v for k, v in eqn.params.items() if k != "jaxpr"}
     rhs = (
-        pp(eqn.primitive.name)
+        pp(eqn.LLOp.name)
         >> pp_params(params_without_jaxpr)
         >> pp(
             " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
@@ -1527,7 +1527,7 @@ class ConstRecipe(NamedTuple):
 
 
 class JaxprEqnRecipe(NamedTuple):
-    prim: Primitive
+    prim: LLOp
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[ShapedArray]
@@ -1570,21 +1570,21 @@ class PartialEvalTrace(Trace):
             pval = PartialVal.unknown(raise_to_shaped(tracer.aval))
             return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
-    def process_primitive(self, primitive, tracers, params):
+    def run_llop(self, LLOp, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return bind(primitive, *map(full_lower, tracers), **params)
-        rule = partial_eval_rules.get(primitive)
+            return bind(LLOp, *map(full_lower, tracers), **params)
+        rule = partial_eval_rules.get(LLOp)
         if rule:
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = abstract_eval_rules[primitive](*avals_in, **params)
+        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
         tracers_out = [
             PartialEvalTracer(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
         eqn = JaxprEqnRecipe(
-            primitive, tracers_in, params, avals_out, map(ref, tracers_out)
+            LLOp, tracers_in, params, avals_out, map(ref, tracers_out)
         )
         for t in tracers_out:
             t.recipe = eqn
@@ -1738,7 +1738,7 @@ def partial_eval_jaxpr(
     map(write, in_unknowns, jaxpr.in_binders)
     for eqn in jaxpr.eqns:
         unks_in = map(read, eqn.inputs)
-        rule = partial_eval_jaxpr_rules.get(eqn.primitive)
+        rule = partial_eval_jaxpr_rules.get(eqn.LLOp)
         if rule:
             eqn1, eqn2, unks_out, res = rule(unks_in, eqn)
             eqns1.append(eqn1)
@@ -1747,7 +1747,7 @@ def partial_eval_jaxpr(
             map(write, unks_out, eqn.out_binders)
         elif any(unks_in):
             inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, eqn.inputs)]
-            eqns2.append(JaxprEqn(eqn.primitive, inputs, eqn.params, eqn.out_binders))
+            eqns2.append(JaxprEqn(eqn.LLOp, inputs, eqn.params, eqn.out_binders))
             map(partial(write, True), eqn.out_binders)
         else:
             eqns1.append(eqn)
@@ -1889,7 +1889,7 @@ def eval_jaxpr_transposed(
     for eqn in jaxpr.eqns[::-1]:
         primals_in = map(read_primal, eqn.inputs)
         cts_in = map(read_cotangent, eqn.out_binders)
-        rule = transpose_rules[eqn.primitive]
+        rule = transpose_rules[eqn.LLOp]
         cts_out = rule(cts_in, *primals_in, **eqn.params)
         map(write_cotangent, eqn.inputs, cts_out)
 
@@ -2002,7 +2002,7 @@ def cond(pred, true_fn, false_fn, *operands):
     return tree_unflatten(out_tree, outs)
 
 
-cond_p = Primitive("cond")
+cond_p = LLOp("cond")
 
 
 def _join_jaxpr_consts(
@@ -2252,7 +2252,7 @@ def pprint_cond(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
     new_params = {k: v for k, v in eqn.params.items() if not k.endswith("jaxpr")}
     lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
     rhs = (
-        pp(eqn.primitive.name)
+        pp(eqn.LLOp.name)
         >> pp_params(new_params)
         >> pp(
             " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)

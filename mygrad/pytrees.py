@@ -12,7 +12,7 @@ from typing import (
 )
 import itertools
 
-from mygrad import utils
+from mygrad import runtime as reg, utils
 
 
 def flatten_fun(f, in_tree):
@@ -71,7 +71,7 @@ def tree_flatten(x: Any) -> Tuple[List[Any], PyTreeDef]:
 
 
 def _tree_flatten(x: Any) -> Tuple[Iterable, PyTreeDef]:
-    node_type = node_types.get(type(x))
+    node_type = reg.node_types.get(type(x))
     if node_type:
         node_metadata, children = node_type.to_iterable(x)
         children_flat, child_trees = utils.unzip2(map(_tree_flatten, children))

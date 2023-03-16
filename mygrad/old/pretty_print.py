@@ -46,12 +46,12 @@ def vcat(ps: List[PPrint]) -> PPrint:
 #     return f'{names[v]}:{v.aval.str_short()}'
 
 # def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
-#     rule = pp_rules.get(eqn.primitive)
+#     rule = pp_rules.get(eqn.LLOp)
 #     if rule:
 #         return rule(names, eqn)
 #     else:
 #         lhs = pp(' '.join(var_str(names, v) for v in eqn.out_binders))
-#         rhs = (pp(eqn.primitive.name) >> pp_params(eqn.params) >>
+#         rhs = (pp(eqn.LLOp.name) >> pp_params(eqn.params) >>
 #            pp(' '.join(names[x] if isinstance(x, Var) else str(x.val)
 #                        for x in eqn.inputs)))
 #         return lhs >> pp(' = ') >> rhs

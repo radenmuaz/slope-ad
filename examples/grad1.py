@@ -1,15 +1,15 @@
 import mygrad
-from mygrad import pm
-from mygrad import fwd
+from mygrad import llops
+# from mygrad import fwd
 
 
 def f(x):
-    y = pm.sin(x) * 2.0
-    z = -y + x
-    return z
+    y = llops.Mul.bind1(x, 2.0)
+    return y
 
 
 x, xdot = 3.0, 1.0
-y, ydot = fwd.jvp(f, (x,), (xdot,))
-print(y)
-print(ydot)
+print(f(x))
+# print(y)
+# y, ydot = fwd.jvp(f, (x,), (xdot,))
+# print(ydot)

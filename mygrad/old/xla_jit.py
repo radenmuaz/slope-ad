@@ -21,7 +21,7 @@ class IDHashable:
         return type(other) is IDHashable and id(self.val) == id(other.val)
 
 
-xla_call_p = Primitive("xla_call")
+xla_call_p = LLOp("xla_call")
 
 
 def xla_call_impl(*args, jaxpr: Jaxpr, num_consts: int):
@@ -80,7 +80,7 @@ def jaxpr_subcomp(c: xe.XlaBuilder, jaxpr: Jaxpr, args: List[xe.XlaOp]) -> xe.Xl
     for eqn in jaxpr.eqns:
         in_avals = [x.aval for x in eqn.inputs]
         in_vals = map(read, eqn.inputs)
-        rule = xla_translations[eqn.primitive]
+        rule = xla_translations[eqn.LLOp]
         out_vals = rule(c, in_avals, in_vals, **eqn.params)
         map(write, eqn.out_binders, out_vals)
     return map(read, jaxpr.outs)

@@ -1,56 +1,51 @@
-from typing import NamedTuple
-import numpy as np
 import mygrad
-
-
+from mygrad.runtime import Runtime
 class LLOp:
-    @classmethod
-    def forward(cls, *args):
+    @staticmethod
+    def forward(*args):
         raise NotImplementedError
 
-    @classmethod
-    def reverse(cls, *args):
+    @staticmethod
+    def vmap(*args):
         raise NotImplementedError
 
-    @classmethod
-    def vmap(cls, *args):
-        raise NotImplementedError
-
-    @classmethod
-    def jvp(cls, *args):
+    @staticmethod
+    def jvp(*args):
         raise NotImplementedError
 
     @classmethod
     def bind1(cls, *args, **params):
-        (out,) = mygrad.RT.bind(cls, *args, **params)
+        (out,) = Runtime.active.bind(cls, *args, **params)
         return out
 
 
+class Identity(LLOp):
+    @staticmethod
+    def forward(x):
+        return [x]
+
 class Add(LLOp):
-    @classmethod
-    def forward(cls, x, y):
-        return [np.add(x, y)]
+    @staticmethod
+    def forward(x, y):
+        return [x + y]
 
-    @classmethod
-    def reverse(cls, x, y):
-        return [np.add(x, -y)]
-
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x + y], [x_dot + y_dot]
 
 class Mul(LLOp):
-    @classmethod
-    def forward(cls, x, y):
-        return [np.multiply(x, y)]
+    @staticmethod
+    def forward(x, y):
+        return [x * y]
 
-    @classmethod
-    def reverse(cls, x, y):
-        return [np.divide(x, -y)]
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x * y], [x_dot * y + x * y_dot]
 
 
 class Neg(LLOp):
-    @classmethod
-    def forward(cls, x):
-        return [np.negative(x)]
-
-    @classmethod
-    def reverse(cls, x):
-        return [np.negative(x)]
+    @staticmethod
+    def forward(x):
+        return [-x]

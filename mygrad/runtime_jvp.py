@@ -1,9 +1,8 @@
 import numpy as np
+import mygrad
+from mygrad import pytrees, runtime, utils
 
-from mygrad import pytrees as pt, runtime as reg, tracing as trc, utils
-
-
-class JVPTracer(trc.Tracer):
+class JVPTracer(runtime.Tracer):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -11,35 +10,41 @@ class JVPTracer(trc.Tracer):
 
     @property
     def aval(self):
-        return trc.get_aval(self.primal)
+        return self.get_aval(self.primal)
 
 
-class JVPTrace(trc.Trace):
-    pure = lift = lambda self, val: JVPTracer(self, val, trc.zeros_like(val))
+class JVPTrace(runtime.Trace):
+    # pure = lift = lambda self, val: JVPTracer(self, val, runtime.Tracer.zeros_like(val))
+    # pure = lift = lambda self, val: JVPTracer(self, val, np.zeros(val.shape, val.dtype))
+    def pure(self, val):
+        aval = runtime.Tracer.get_aval(val)
+        zeros_like = np.zeros(val.shape, val.dtype)
+        return JVPTracer(self, val, zeros_like)
+    lift = pure
 
-    def run_llop(self, LLOp, tracers, params):
+
+    def run_llop(self, llop, tracers, params):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
-        jvp_rule = reg.jvp_rules[LLOp]
-        primal_outs, tangent_outs = jvp_rule(primals_in, tangents_in, **params)
+        primal_outs, tangent_outs = llop.jvp(primals_in, tangents_in, **params)
         return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
 
 
 def jvp_v1(f, primals, tangents):
-    with trc.new_main(JVPTrace) as main:
+    with runtime.Runtime.active.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
         out = f(*tracers_in)
-        tracer_out = trc.full_raise(trace, out)
+        tracer_out = runtime.Runtime.RT.full_raise(trace, out)
         primal_out, tangent_out = tracer_out.primal, tracer_out.tangent
     return primal_out, tangent_out
 
 
 def jvp_flat(f, primals, tangents):
-    with trc.new_main(JVPTrace) as main:
+    with runtime.Runtime.active.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
         outs = f(*tracers_in)
-        tracers_out = [trc.full_raise(trace, out) for out in outs]
+        tracers_out = [runtime.Runtime.active.full_raise(trace, out) for out in outs]
         primals_out, tangents_out = utils.unzip2(
             (t.primal, t.tangent) for t in tracers_out
         )
@@ -47,14 +52,14 @@ def jvp_flat(f, primals, tangents):
 
 
 def jvp(f, primals, tangents):
-    primals_flat, in_tree = pt.tree_flatten(primals)
-    tangents_flat, in_tree2 = pt.tree_flatten(tangents)
+    primals_flat, in_tree = pytrees.tree_flatten(primals)
+    tangents_flat, in_tree2 = pytrees.tree_flatten(tangents)
     if in_tree != in_tree2:
         raise TypeError
-    f, out_tree = pt.flatten_fun(f, in_tree)
+    f, out_tree = pytrees.flatten_fun(f, in_tree)
     primals_out_flat, tangents_out_flat = jvp_flat(f, primals_flat, tangents_flat)
-    primals_out = pt.tree_unflatten(out_tree(), primals_out_flat)
-    tangents_out = pt.tree_unflatten(out_tree(), tangents_out_flat)
+    primals_out = pytrees.tree_unflatten(out_tree(), primals_out_flat)
+    tangents_out = pytrees.tree_unflatten(out_tree(), tangents_out_flat)
     return primals_out, tangents_out
 
 

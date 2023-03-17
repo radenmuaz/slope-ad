@@ -1,9 +1,9 @@
 from typing import NamedTuple
 from contextlib import contextmanager
-from typing import Type, Optional, Any, List
+from typing import Type, Optional, Any, List, Tuple
 import operator as op
 
-from mygrad import arrays, utils, pytrees
+from mygrad import arrays, llops, utils, pytrees
 import numpy as np
 
 
@@ -28,41 +28,6 @@ class Trace:
     def run_llop(self, LLOp, tracers, params):
         raise NotImplementedError
 
-
-class Tracer:
-    _trace: Trace
-
-    __array_priority__ = 1000
-
-    @property
-    def aval(self):
-        assert False  # must override
-
-    def full_lower(self):
-        return self  # default implementation
-
-    def __neg__(self):
-        return self.aval._neg(self)
-
-    def __add__(self, other):
-        return self.aval._add(self, other)
-
-    def __radd__(self, other):
-        return self.aval._radd(self, other)
-
-    def __mul__(self, other):
-        return self.aval._mul(self, other)
-
-    def __rmul__(self, other):
-        return self.aval._rmul(self, other)
-
-    def __getattr__(self, name):
-        try:
-            return getattr(self.aval, name)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
-
-
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
@@ -70,24 +35,79 @@ class EvalTrace(Trace):
         return llop.forward(*tracers, **params)
 
 
-class Runtime:
-    JAX_TYPES = {
-        bool,
-        int,
-        float,
-        np.bool_,
-        np.int32,
-        np.int64,
-        np.float32,
-        np.float64,
-        np.ndarray,
-    }
+class Tracer:
+    _trace: Trace
 
-    def __init__(self, jax_types=JAX_TYPES):
+    __array_priority__ = 1000
+    @property
+    def aval(self):
+        raise NotImplementedError
+    @classmethod
+    def raise_to_shaped(cls, aval):
+        return cls.shaped(aval.shape, aval.dtype)
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __neg__(self):
+        return llops.Neg.bind1(self)
+
+    def __add__(self, other):
+        return llops.Add.bind1(self, other)
+
+    def __radd__(self, other):
+        return llops.Add.bind1(other, self)
+
+    def __mul__(self, other):
+        return llops.Mul.bind1(self, other)
+
+    def __rmul__(self, other):
+        return self.aval._rmul(other, self)
+
+    def __bool__(self):
+        return self.aval._bool(self)
+
+    def __nonzero__(self):
+        return self.aval._nonzero(self)
+
+
+    @classmethod
+    def get_aval(cls, x):
+        if isinstance(x, cls):
+            return x.aval
+        print(f"warn: {x} ({type(x)}) is not Tracer")
+        return arrays.ConcreteArray(x)
+
+    def full_lower(self):
+        return self  # default implementation
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.aval, name)
+        except AttributeError:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+
+    def zeros_like(self, val):
+        aval = self.get_aval(val)
+        return np.zeros(aval.shape, aval.dtype)
+
+class Runtime:
+    RTs = []
+
+    @classmethod
+    @property
+    def active(cls, *args, **kwargs):
+        if len(cls.RTs) == 0:
+            print('init new runtime')
+            cls(*args, **kwargs)
+        return cls.RTs[-1]
+
+
+    def __init__(self):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.node_types = dict()
-        self.jax_types = jax_types
         self.trace_stack += [MainTrace(0, EvalTrace, None)]
 
         self.node_types[tuple] = pytrees.NodeType(
@@ -101,6 +121,7 @@ class Runtime:
             lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
+        self.RTs += [self]
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
@@ -137,7 +158,6 @@ class Runtime:
 
     def full_raise(self, trace: Trace, val: Any) -> Tracer:
         if not isinstance(val, Tracer):
-            assert type(val) in self.jax_types
             return trace.pure(val)
         level = trace.main.level
         if val._trace.main is trace.main:
@@ -149,13 +169,8 @@ class Runtime:
         else:  # val._trace.level == level
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
-    def get_aval(self, x):
-        if isinstance(x, Tracer):
-            return x.aval
-        elif type(x) in self.jax_types:
-            return arrays.ConcreteArray(np.asarray(x))
-        else:
-            raise TypeError(x)
+
+        # raise TypeError(x)
 
     @contextmanager
     def new_dynamic(self, main: MainTrace):
@@ -166,6 +181,3 @@ class Runtime:
         finally:
             dynamic_trace = prev_dynamic_trace
 
-    def zeros_like(self, val):
-        aval = self.get_aval(val)
-        return np.zeros(aval.shape, aval.dtype)

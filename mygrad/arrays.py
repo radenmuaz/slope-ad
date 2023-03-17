@@ -18,12 +18,6 @@ class ShapedArray:
     def ndim(self):
         return len(self.shape)
 
-    _neg = staticmethod(llops.Neg.bind1)
-    _add = staticmethod(llops.Add.bind1)
-    _radd = staticmethod(utils.swap(llops.Add.bind1))
-    _mul = staticmethod(llops.Mul.bind1)
-    _rmul = staticmethod(utils.swap(llops.Mul.bind1))
-
     @staticmethod
     def _bool(tracer):
         raise Exception("ShapedArray can't be unambiguously converted to bool")

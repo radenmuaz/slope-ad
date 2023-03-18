@@ -79,7 +79,7 @@ def pamygrad.mygrad.RTial_eval_flat(
     return jaxpr, pvals_out, consts
 
 
-from weakref impomygrad.mygrad.RT ref, ReferenceType
+from weakrefimport ref, ReferenceType
 
 
 class LambdaBindingRecipe(NamedTuple):
@@ -142,7 +142,7 @@ class Pamygrad.mygrad.RTialEvalTrace(Trace):
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
+        avals_out = forward_shape_rules[LLOp](*avals_in, **params)
         tracers_out = [
             Pamygrad.mygrad.RTialEvalTracer(self, Pamygrad.mygrad.RTialVal.unknown(aval), None)
             for aval in avals_out

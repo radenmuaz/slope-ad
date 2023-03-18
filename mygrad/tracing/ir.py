@@ -5,8 +5,12 @@ import numpy as np
 import operator as op
 
 from mygrad.arrays import ShapedArray
-from mygrad.runtime import Runtime
-from mygrad.tracing import Tracer, Trace
+from mygrad.tracing.base import Tracer, Trace
+from mygrad import utils
+from mygrad.pretty_print import pp, vcat
+import string
+import itertools as it
+from typing import DefaultDict
 class Var:
     aval: ShapedArray
 
@@ -61,8 +65,8 @@ class Jaxpr(NamedTuple):
 
 
 class Jaxpmygrad.RType(NamedTuple):
-    in_types: List[arr.ShapedArray]
-    out_types: List[arr.ShapedArray]
+    in_types: List[ShapedArray]
+    out_types: List[ShapedArray]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_shomygrad.RT() for aval in self.in_types)
@@ -80,7 +84,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> Jaxpmygrad.RType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = abstract_eval_rules[eqn.LLOp](*in_types, **eqn.params)
+        out_types = forward_shape_rules[eqn.LLOp](*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -94,7 +98,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> Jaxpmygrad.RType:
     return Jaxpmygrad.RType(in_types, out_types)
 
 
-def typecheck_atom(env: Set[Var], x: Atom) -> arr.ShapedArray:
+def typecheck_atom(env: Set[Var], x: Atom) -> ShapedArray:
     if isinstance(x, Var):
         if x not in env:
             raise TypeError("unbound variable")
@@ -102,7 +106,7 @@ def typecheck_atom(env: Set[Var], x: Atom) -> arr.ShapedArray:
     elif isinstance(x, Lit):
         return ShapedArray.raise_to_shaped(Tracer.get_aval(x.val))
     else:
-        assemygrad.RT False
+        assert False
 
 
 def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
@@ -112,7 +116,7 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
         return env[x] if type(x) is Var else x.val
 
     def write(v: Var, val: Any) -> None:
-        assemygrad.RT v not in env  # single-assignment
+        assert v not in env  # single-assignment
         env[v] = val
 
     map(write, jaxpr.in_binders, args)
@@ -128,30 +132,52 @@ def jaxpr_as_fun(jaxpr: Jaxpr):
 
 
 def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
-    assemygrad.RT 0 <= n <= len(lst)
+    assert 0 <= n <= len(lst)
     return lst[:n], lst[n:]
 
 
-def pamygrad.RTition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assemygrad.RT len(bs) == len(l)
+def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
+    assert len(bs) == len(l)
     lists = lst1, lst2 = [], []
     for b, x in zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
 
 
-class Jaxpmygrad.RTracer(Tracer):
+def var_str(names: DefaultDict[Var, str], v: Var) -> str:
+    return f'{names[v]}:{v.aval.str_shomygrad.mygrad.RT()}'
+
+def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
+    rule = pp_rules.get(eqn.LLOp)
+    if rule:
+        return rule(names, eqn)
+    else:
+        lhs = pp(' '.join(var_str(names, v) for v in eqn.out_binders))
+        rhs = (pp(eqn.LLOp.name) >> pp_params(eqn.params) >>
+           pp(' '.join(names[x] if isinstance(x, Var) else str(x.val)
+                       for x in eqn.inputs)))
+        return lhs >> pp(' = ') >> rhs
+
+def pp_params(params: Dict[str, Any]) -> PPrint:
+    items = sorted(params.items())
+    if items:
+        return pp(' [ ') >> vcat([pp(f'{k}={v}') for k, v in items]) >> pp(' ] ')
+    else:
+        return pp(' ')
+
+
+class JaxprTracer(Tracer):
     __slots__ = ["aval"]
-    aval: arr.ShapedArray
+    aval: ShapedArray
 
     def __init__(self, trace, aval):
         self._trace = trace
         self.aval = aval
 
 
-class Jaxpmygrad.RTrace(Trace):
+class JaxprTrace(Trace):
     def new_arg(self, aval: ShapedArray) -> Jaxpmygrad.RTracer:
-        aval = trc.raise_to_shaped(aval)
+        aval = ShapedArray.raise_to_shaped(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
         return tracer
@@ -167,7 +193,7 @@ class Jaxpmygrad.RTrace(Trace):
 
     def run_llop(self, LLOp, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
+        avals_out = forward_shape_rules[LLOp](*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
@@ -179,7 +205,7 @@ class Jaxpmygrad.RTrace(Trace):
         return self.main.global_data
 
 
-abstract_eval_rules = {}
+forward_shape_rules = {}
 
 
 class JaxprBuilder:
@@ -205,13 +231,13 @@ class JaxprBuilder:
         self.eqns.append(eqn)
 
     def add_var(self, tracer: Jaxpmygrad.RTracer) -> Var:
-        assemygrad.RT id(tracer) not in self.tracer_to_var
+        assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
         return var
 
     def getvar(self, tracer: Jaxpmygrad.RTracer) -> Var:
         var = self.tracer_to_var.get(id(tracer))
-        assemygrad.RT var is not None
+        assert var is not None
         return var
 
     def add_const(self, tracer: Jaxpmygrad.RTracer, val: Any) -> Var:
@@ -236,8 +262,8 @@ class JaxprBuilder:
 def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]:
     const_binders, other_binders = split_list(jaxpr.in_binders, len(consts))
     scalars = [type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts]
-    new_const_binders, lit_binders = pamygrad.RTition_list(scalars, const_binders)
-    new_consts, lit_vals = pamygrad.RTition_list(scalars, consts)
+    new_const_binders, lit_binders = partition_list(scalars, const_binders)
+    new_consts, lit_vals = partition_list(scalars, consts)
     literals = dict(zip(lit_binders, map(Lit, lit_vals)))
     new_eqns = [
         JaxprEqn(
@@ -254,86 +280,17 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     return new_jaxpr, new_consts
 
 
-def binop_abstract_eval(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
-    if not isinstance(x, ShapedArray) or not isinstance(y, ShapedArray):
-        raise TypeError
-    if ShapedArray.raise_to_shaped(x) != ShapedArray.raise_to_shaped(y):
-        raise TypeError
-    return [ShapedArray(x.shape, x.dtype)]
 
+# @lru_cache()  # ShapedArrays are hashable
+# def make_jaxpr_v1(f, *avals_in):
+#     avals_in, in_tree = tree_flatten(avals_in)
+#     f, out_tree = flatten_fun(f, in_tree)
 
-abstract_eval_rules[add_p] = binop_abstract_eval
-abstract_eval_rules[mul_p] = binop_abstract_eval
-
-
-def compare_abstract_eval(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
-    if not isinstance(x, ShapedArray) or not isinstance(y, ShapedArray):
-        raise TypeError
-    if x.shape != y.shape:
-        raise TypeError
-    return [ShapedArray(x.shape, np.dtype("bool"))]
-    abstract_eval_rules[greater_p] = compare_abstract_eval
-    abstract_eval_rules[less_p] = compare_abstract_eval
-
-
-def vectorized_unop_abstract_eval(x: ShapedArray) -> List[ShapedArray]:
-    return [ShapedArray(x.shape, x.dtype)]
-
-
-abstract_eval_rules[sin_p] = vectorized_unop_abstract_eval
-abstract_eval_rules[cos_p] = vectorized_unop_abstract_eval
-abstract_eval_rules[neg_p] = vectorized_unop_abstract_eval
-
-
-def reduce_sum_abstract_eval(
-    x: ShapedArray, *, axis: Tuple[int, ...]
-) -> List[ShapedArray]:
-    axis_ = set(axis)
-    new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
-    return [ShapedArray(tuple(new_shape), x.dtype)]
-
-
-abstract_eval_rules[reduce_sum_p] = reduce_sum_abstract_eval
-
-
-def broadcast_abstract_eval(
-    x: ShapedArray, *, shape: Sequence[int], axes: Sequence[int]
-) -> List[ShapedArray]:
-    return [ShapedArray(tuple(shape), x.dtype)]
-
-
-abstract_eval_rules[broadcast_p] = broadcast_abstract_eval
-
-
-@lru_cache()  # ShapedArrays are hashable
-def make_jaxpr_v1(f, *avals_in):
-    avals_in, in_tree = tree_flatten(avals_in)
-    f, out_tree = flatten_fun(f, in_tree)
-
-    builder = JaxprBuilder()
-    with new_main(Jaxpmygrad.RTrace, builder) as main:
-        trace = Jaxpmygrad.RTrace(main)
-        tracers_in = [trace.new_arg(aval) for aval in avals_in]
-        outs = f(*tracers_in)
-        tracers_out = [full_raise(trace, out) for out in outs]
-        jaxpr, consts = builder.build(tracers_in, tracers_out)
-    return jaxpr, consts, out_tree()
-
-
-@lru_cache()
-def make_jaxpr(
-    f: Callable,
-    *avals_in: ShapedArray,
-) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
-    avals_in, in_tree = tree_flatten(avals_in)
-    f, out_tree = flatten_fun(f, in_tree)
-
-    builder = JaxprBuilder()
-    with new_main(Jaxpmygrad.RTrace, builder) as main:
-        with new_dynamic(main):
-            trace = Jaxpmygrad.RTrace(main)
-            tracers_in = [trace.new_arg(aval) for aval in avals_in]
-            outs = f(*tracers_in)
-            tracers_out = [full_raise(trace, out) for out in outs]
-            jaxpr, consts = builder.build(tracers_in, tracers_out)
-    return jaxpr, consts, out_tree()
+#     builder = JaxprBuilder()
+#     with new_main(Jaxpmygrad.RTrace, builder) as main:
+#         trace = Jaxpmygrad.RTrace(main)
+#         tracers_in = [trace.new_arg(aval) for aval in avals_in]
+#         outs = f(*tracers_in)
+#         tracers_out = [full_raise(trace, out) for out in outs]
+#         jaxpr, consts = builder.build(tracers_in, tracers_out)
+#     return jaxpr, consts, out_tree()

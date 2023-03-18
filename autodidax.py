@@ -786,7 +786,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> Jaxpmygrad.RType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = abstract_eval_rules[eqn.LLOp](*in_types, **eqn.params)
+        out_types = forward_shape_rules[eqn.LLOp](*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -873,7 +873,7 @@ class Jaxpmygrad.RTrace(Trace):
 
     def run_llop(self, LLOp, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
+        avals_out = forward_shape_rules[LLOp](*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
@@ -885,7 +885,7 @@ class Jaxpmygrad.RTrace(Trace):
         return self.main.global_data
 
 
-abstract_eval_rules = {}
+forward_shape_rules = {}
 
 
 class JaxprBuilder:
@@ -960,7 +960,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     return new_jaxpr, new_consts
 
 
-def binop_abstract_eval(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
+def binop_forward_shape(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
     if not isinstance(x, ShapedArray) or not isinstance(y, ShapedArray):
         raise TypeError
     if raise_to_shaped(x) != raise_to_shaped(y):
@@ -968,30 +968,30 @@ def binop_abstract_eval(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
     return [ShapedArray(x.shape, x.dtype)]
 
 
-abstract_eval_rules[add_p] = binop_abstract_eval
-abstract_eval_rules[mul_p] = binop_abstract_eval
+forward_shape_rules[add_p] = binop_forward_shape
+forward_shape_rules[mul_p] = binop_forward_shape
 
 
-def compare_abstract_eval(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
+def compare_forward_shape(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
     if not isinstance(x, ShapedArray) or not isinstance(y, ShapedArray):
         raise TypeError
     if x.shape != y.shape:
         raise TypeError
     return [ShapedArray(x.shape, np.dtype("bool"))]
-    abstract_eval_rules[greater_p] = compare_abstract_eval
-    abstract_eval_rules[less_p] = compare_abstract_eval
+    forward_shape_rules[greater_p] = compare_forward_shape
+    forward_shape_rules[less_p] = compare_forward_shape
 
 
-def vectorized_unop_abstract_eval(x: ShapedArray) -> List[ShapedArray]:
+def vectorized_unop_forward_shape(x: ShapedArray) -> List[ShapedArray]:
     return [ShapedArray(x.shape, x.dtype)]
 
 
-abstract_eval_rules[sin_p] = vectorized_unop_abstract_eval
-abstract_eval_rules[cos_p] = vectorized_unop_abstract_eval
-abstract_eval_rules[neg_p] = vectorized_unop_abstract_eval
+forward_shape_rules[sin_p] = vectorized_unop_forward_shape
+forward_shape_rules[cos_p] = vectorized_unop_forward_shape
+forward_shape_rules[neg_p] = vectorized_unop_forward_shape
 
 
-def reduce_sum_abstract_eval(
+def reduce_sum_forward_shape(
     x: ShapedArray, *, axis: Tuple[int, ...]
 ) -> List[ShapedArray]:
     axis_ = set(axis)
@@ -999,16 +999,16 @@ def reduce_sum_abstract_eval(
     return [ShapedArray(tuple(new_shape), x.dtype)]
 
 
-abstract_eval_rules[reduce_sum_p] = reduce_sum_abstract_eval
+forward_shape_rules[reduce_sum_p] = reduce_sum_forward_shape
 
 
-def broadcast_abstract_eval(
+def broadcast_forward_shape(
     x: ShapedArray, *, shape: Sequence[int], axes: Sequence[int]
 ) -> List[ShapedArray]:
     return [ShapedArray(tuple(shape), x.dtype)]
 
 
-abstract_eval_rules[broadcast_p] = broadcast_abstract_eval
+forward_shape_rules[broadcast_p] = broadcast_forward_shape
 
 
 @lru_cache()  # ShapedArrays are hashable
@@ -1350,7 +1350,7 @@ def unmapped_aval(
         return ShapedArray(tuple(shape), aval.dtype)
 
 
-def xla_call_abstract_eval_rule(*in_types, jaxpr, num_consts):
+def xla_call_forward_shape_rule(*in_types, jaxpr, num_consts):
     del num_consts  # Unused
     jaxpr_type = typecheck_jaxpr(jaxpr)
     if not all(t1 == t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
@@ -1358,7 +1358,7 @@ def xla_call_abstract_eval_rule(*in_types, jaxpr, num_consts):
     return jaxpr_type.out_types
 
 
-abstract_eval_rules[xla_call_p] = xla_call_abstract_eval_rule
+forward_shape_rules[xla_call_p] = xla_call_forward_shape_rule
 
 
 def xla_call_translation(c, in_avals, in_vals, *, jaxpr, num_consts):
@@ -1578,7 +1578,7 @@ class Pamygrad.RTialEvalTrace(Trace):
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
+        avals_out = forward_shape_rules[LLOp](*avals_in, **params)
         tracers_out = [
             Pamygrad.RTialEvalTracer(self, Pamygrad.RTialVal.unknown(aval), None)
             for aval in avals_out
@@ -2080,7 +2080,7 @@ def cond_vmap_rule(axis_size, vals_in, dims_in, *, true_jaxpr, false_jaxpr):
 vmap_rules[cond_p] = cond_vmap_rule
 
 
-def cond_abstract_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
+def cond_forward_shape(pred_type, *in_types, true_jaxpr, false_jaxpr):
     if pred_type != ShapedArray((), np.dtype("bool")):
         raise TypeError
     jaxpr_type = typecheck_jaxpr(true_jaxpr)
@@ -2091,7 +2091,7 @@ def cond_abstract_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
     return jaxpr_type.out_types
 
 
-abstract_eval_rules[cond_p] = cond_abstract_eval
+forward_shape_rules[cond_p] = cond_forward_shape
 
 
 def cond_translation(c, in_avals, in_vals, *, true_jaxpr, false_jaxpr):

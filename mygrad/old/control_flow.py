@@ -100,7 +100,7 @@ def cond_vmap_rule(axis_size, vals_in, dims_in, *, true_jaxpr, false_jaxpr):
 vmap_rules[cond_p] = cond_vmap_rule
 
 
-def cond_abstract_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
+def cond_forward_shape(pred_type, *in_types, true_jaxpr, false_jaxpr):
     if pred_type != ShapedArray((), np.dtype("bool")):
         raise TypeError
     jaxpr_type = typecheck_jaxpr(true_jaxpr)
@@ -111,7 +111,7 @@ def cond_abstract_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
     return jaxpr_type.out_types
 
 
-abstract_eval_rules[cond_p] = cond_abstract_eval
+forward_shape_rules[cond_p] = cond_forward_shape
 
 
 def cond_translation(c, in_avals, in_vals, *, true_jaxpr, false_jaxpr):

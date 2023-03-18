@@ -1,6 +1,6 @@
 from typing import NamedTuple
 from contextlib import contextmanager
-from typing import Type, Optional, Any, List, Tuple
+from typing import Type, Optional, Any, List, Tuple, Callable
 import operator as op
 import itertools
 import numpy as np
@@ -8,8 +8,13 @@ import numpy as np
 from mygrad import utils
 from mygrad.tracing.base import Trace, Tracer, MainTrace
 from mygrad.tracing.eager import EagerTrace
+from mygrad.tracing.ir import Jaxpr, JaxprBuilder, JaxprTrace
+from mygrad.arrays import ShapedArray
 
-from mygrad.pytrees import NodeType
+from mygrad.pytrees import NodeType, PyTreeDef
+from mygrad import pytrees
+
+from functools import lru_cache
 
 class Runtime:
     RTs = []
@@ -100,4 +105,24 @@ class Runtime:
             yield
         finally:
             dynamic_trace = prev_dynamic_trace
+
+    @lru_cache()
+    def make_jaxpr(
+        self,
+        f: Callable,
+        *avals_in: ShapedArray,
+    ) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
+        avals_in, in_tree = pytrees.tree_flatten(avals_in)
+        f, out_tree = pytrees.flatten_fun(f, in_tree)
+
+        builder = JaxprBuilder()
+        with self.new_main(JaxprTrace, builder) as main:
+            with self.new_dynamic(main):
+                trace = JaxprTrace(main)
+                tracers_in = [trace.new_arg(aval) for aval in avals_in]
+                outs = f(*tracers_in)
+                tracers_out = [self.full_raise(trace, out) for out in outs]
+                jaxpr, consts = builder.build(tracers_in, tracers_out)
+        return jaxpr, consts, out_tree()
+
 

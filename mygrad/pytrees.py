@@ -10,13 +10,13 @@ from typing import (
     Iterable,
     Iterator,
 )
+import mygrad
+from mygrad import utils
 
 class Empty:
     pass
-import mygrad
 empty = Empty()
 
-from mygrad import utils
 import itertools
 class Store:
     val = empty

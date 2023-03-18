@@ -27,7 +27,7 @@ def _join_jaxpr_consts(
     jaxpr1: Jaxpr, jaxpr2: Jaxpr, n1: int, n2: int
 ) -> Tuple[Jaxpr, Jaxpr]:
     jaxpr1_type, jaxpr2_type = typecheck_jaxpr(jaxpr1), typecheck_jaxpr(jaxpr2)
-    assert jaxpr1_type.in_types[n1:] == jaxpr2_type.in_types[n2:]
+    mygrad.mygrad.RT jaxpr1_type.in_types[n1:] == jaxpr2_type.in_types[n2:]
     consts1, rest1 = split_list(jaxpr1.in_binders, n1)
     consts2, rest2 = split_list(jaxpr2.in_binders, n2)
     new_jaxpr1 = Jaxpr(consts1 + consts2 + rest1, jaxpr1.eqns, jaxpr1.outs)
@@ -36,7 +36,7 @@ def _join_jaxpr_consts(
 
 
 def bind_cond(pred, *args, true_jaxpr, false_jaxpr):
-    assert len(args) == len(true_jaxpr.in_binders) == len(false_jaxpr.in_binders)
+    mygrad.mygrad.RT len(args) == len(true_jaxpr.in_binders) == len(false_jaxpr.in_binders)
     return bind(cond_p, pred, *args, true_jaxpr=true_jaxpr, false_jaxpr=false_jaxpr)
 
 
@@ -58,7 +58,7 @@ def cond_jvp_rule(primals, tangents, *, true_jaxpr, false_jaxpr):
     true_jaxpr, false_jaxpr = _join_jaxpr_consts(
         true_jaxpr, false_jaxpr, len(true_consts), len(false_consts)
     )
-    assert typecheck_jaxpr(true_jaxpr) == typecheck_jaxpr(false_jaxpr)
+    mygrad.mygrad.RT typecheck_jaxpr(true_jaxpr) == typecheck_jaxpr(false_jaxpr)
     outs = bind_cond(
         pred,
         *true_consts,
@@ -85,7 +85,7 @@ def cond_vmap_rule(axis_size, vals_in, dims_in, *, true_jaxpr, false_jaxpr):
     true_jaxpr, false_jaxpr = _join_jaxpr_consts(
         true_jaxpr, false_jaxpr, len(true_consts), len(false_consts)
     )
-    assert typecheck_jaxpr(true_jaxpr) == typecheck_jaxpr(false_jaxpr)
+    mygrad.mygrad.RT typecheck_jaxpr(true_jaxpr) == typecheck_jaxpr(false_jaxpr)
     outs = bind_cond(
         pred,
         *true_consts,
@@ -133,7 +133,7 @@ def cond_translation(c, in_avals, in_vals, *, true_jaxpr, false_jaxpr):
 
     int_etype = xc.dtype_to_etype(np.dtype("int32"))
     out = xops.Conditional(
-        xops.ConvertElementType(pred, int_etype), [false_comp, true_comp], [operand] * 2
+        xops.Convemygrad.mygrad.RTElementType(pred, int_etype), [false_comp, true_comp], [operand] * 2
     )
     return destructure_tuple(c, out)
 
@@ -141,23 +141,23 @@ def cond_translation(c, in_avals, in_vals, *, true_jaxpr, false_jaxpr):
 xla_translations[cond_p] = cond_translation
 
 
-def cond_partial_eval(trace, tracers, *, true_jaxpr, false_jaxpr):
+def cond_pamygrad.mygrad.RTial_eval(trace, tracers, *, true_jaxpr, false_jaxpr):
     pred_tracer, *tracers = tracers
-    assert pred_tracer.pval.is_known
+    mygrad.mygrad.RT pred_tracer.pval.is_known
     pred = pred_tracer.pval.const
     in_uks = [not t.pval.is_known for t in tracers]
 
-    *jaxprs, out_uks, num_res = _cond_partial_eval(true_jaxpr, false_jaxpr, in_uks)
+    *jaxprs, out_uks, num_res = _cond_pamygrad.mygrad.RTial_eval(true_jaxpr, false_jaxpr, in_uks)
     t_jaxpr1, f_jaxpr1, t_jaxpr2, f_jaxpr2 = jaxprs
 
-    known_tracers, unknown_tracers = partition_list(in_uks, tracers)
+    known_tracers, unknown_tracers = pamygrad.mygrad.RTition_list(in_uks, tracers)
     known_vals = [t.pval.const for t in known_tracers]
     outs1_res = bind_cond(pred, *known_vals, true_jaxpr=t_jaxpr1, false_jaxpr=f_jaxpr1)
     outs1, res = split_list(outs1_res, len(outs1_res) - num_res)
     pred_tracer_ = trace.instantiate_const(full_raise(trace, pred_tracer))
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
     outs2 = [
-        PartialEvalTracer(trace, PartialVal.unknown(v.aval), None)
+        Pamygrad.mygrad.RTialEvalTracer(trace, Pamygrad.mygrad.RTialVal.unknown(v.aval), None)
         for v in t_jaxpr2.outs
     ]
     eqn = JaxprEqnRecipe(
@@ -172,23 +172,23 @@ def cond_partial_eval(trace, tracers, *, true_jaxpr, false_jaxpr):
     return merge_lists(out_uks, outs1, outs2)
 
 
-partial_eval_rules[cond_p] = cond_partial_eval
+pamygrad.mygrad.RTial_eval_rules[cond_p] = cond_pamygrad.mygrad.RTial_eval
 
 
-def _cond_partial_eval(
+def _cond_pamygrad.mygrad.RTial_eval(
     true_jaxpr: Jaxpr, false_jaxpr: Jaxpr, in_uks: List[bool]
 ) -> Tuple[Jaxpr, Jaxpr, Jaxpr, Jaxpr, List[bool], int]:
-    _, _, t_out_uks, _ = partial_eval_jaxpr(true_jaxpr, in_uks)
-    _, _, f_out_uks, _ = partial_eval_jaxpr(false_jaxpr, in_uks)
+    _, _, t_out_uks, _ = pamygrad.mygrad.RTial_eval_jaxpr(true_jaxpr, in_uks)
+    _, _, f_out_uks, _ = pamygrad.mygrad.RTial_eval_jaxpr(false_jaxpr, in_uks)
     out_uks = map(op.or_, t_out_uks, f_out_uks)
 
-    t_jaxpr1, t_jaxpr2, _, t_nres = partial_eval_jaxpr(true_jaxpr, in_uks, out_uks)
-    f_jaxpr1, f_jaxpr2, _, f_nres = partial_eval_jaxpr(false_jaxpr, in_uks, out_uks)
+    t_jaxpr1, t_jaxpr2, _, t_nres = pamygrad.mygrad.RTial_eval_jaxpr(true_jaxpr, in_uks, out_uks)
+    f_jaxpr1, f_jaxpr2, _, f_nres = pamygrad.mygrad.RTial_eval_jaxpr(false_jaxpr, in_uks, out_uks)
 
     t_jaxpr1, f_jaxpr1 = _join_jaxpr_res(t_jaxpr1, f_jaxpr1, t_nres, f_nres)
     t_jaxpr2, f_jaxpr2 = _join_jaxpr_consts(t_jaxpr2, f_jaxpr2, t_nres, f_nres)
-    assert typecheck_jaxpr(t_jaxpr1) == typecheck_jaxpr(f_jaxpr1)
-    assert typecheck_jaxpr(t_jaxpr2) == typecheck_jaxpr(f_jaxpr2)
+    mygrad.mygrad.RT typecheck_jaxpr(t_jaxpr1) == typecheck_jaxpr(f_jaxpr1)
+    mygrad.mygrad.RT typecheck_jaxpr(t_jaxpr2) == typecheck_jaxpr(f_jaxpr2)
     num_res = t_nres + f_nres
 
     return t_jaxpr1, f_jaxpr1, t_jaxpr2, f_jaxpr2, out_uks, num_res
@@ -200,7 +200,7 @@ def _join_jaxpr_res(
     jaxpr1_type, jaxpr2_type = typecheck_jaxpr(jaxpr1), typecheck_jaxpr(jaxpr2)
     out_types1, _ = split_list(jaxpr1_type.out_types, len(jaxpr1.outs) - n1)
     out_types2, _ = split_list(jaxpr2_type.out_types, len(jaxpr2.outs) - n2)
-    assert out_types1 == out_types2
+    mygrad.mygrad.RT out_types1 == out_types2
     outs1, res1 = split_list(jaxpr1.outs, len(jaxpr1.outs) - n1)
     outs2, res2 = split_list(jaxpr2.outs, len(jaxpr2.outs) - n2)
     zeros_like1 = [Lit(np.zeros(v.aval.shape, v.aval.dtype)) for v in res1]
@@ -215,12 +215,12 @@ def cond_peval_eqn(
     eqn: JaxprEqn,
 ) -> Tuple[JaxprEqn, JaxprEqn, List[bool], List[Atom]]:
     pred_unk, *unks_in = unks_in
-    assert not pred_unk
+    mygrad.mygrad.RT not pred_unk
     true_jaxpr, false_jaxpr = eqn.params["true_jaxpr"], eqn.params["false_jaxpr"]
-    *jaxprs, unks_out, num_res = _cond_partial_eval(true_jaxpr, false_jaxpr, unks_in)
+    *jaxprs, unks_out, num_res = _cond_pamygrad.mygrad.RTial_eval(true_jaxpr, false_jaxpr, unks_in)
     t_jaxpr1, f_jaxpr1, t_jaxpr2, f_jaxpr2 = jaxprs
-    ins1, ins2 = partition_list(unks_in, eqn.inputs[1:])
-    outs1, outs2 = partition_list(unks_out, eqn.out_binders)
+    ins1, ins2 = pamygrad.mygrad.RTition_list(unks_in, eqn.inputs[1:])
+    outs1, outs2 = pamygrad.mygrad.RTition_list(unks_out, eqn.out_binders)
     residuals, _ = split_list(t_jaxpr2.in_binders, num_res)
     eqn1 = JaxprEqn(
         cond_p,
@@ -238,7 +238,7 @@ def cond_peval_eqn(
     return eqn1, eqn2, unks_out, res
 
 
-partial_eval_jaxpr_rules[cond_p] = cond_peval_eqn
+pamygrad.mygrad.RTial_eval_jaxpr_rules[cond_p] = cond_peval_eqn
 
 
 def cond_transpose_rule(cts, pred, *invals, true_jaxpr, false_jaxpr):

@@ -10,6 +10,10 @@ class ShapedArray:
     shape: Tuple[int, ...]
     dtype: np.dtype
 
+    @classmethod
+    def raise_to_shaped(cls, aval):
+        return cls(aval.shape, aval.dtype)
+
     def __init__(self, shape, dtype):
         self.shape = shape
         self.dtype = dtype
@@ -20,11 +24,11 @@ class ShapedArray:
 
     @staticmethod
     def _bool(tracer):
-        raise Exception("ShapedArray can't be unambiguously converted to bool")
+        raise Exception("ShapedArray can't be unambiguously convemygrad.RTed to bool")
 
     @staticmethod
     def _nonzero(tracer):
-        raise Exception("ShapedArray can't be unambiguously converted to bool")
+        raise Exception("ShapedArray can't be unambiguously convemygrad.RTed to bool")
 
     def str_short(self):
         return f'{self.dtype.name}[{",".join(str(d) for d in self.shape)}]'
@@ -60,6 +64,11 @@ class ConcreteArray(ShapedArray):
     def _nonzero(tracer):
         return bool(tracer.aval.val)
 
-
-def raise_to_shaped(aval):
-    return ShapedArray(aval.shape, aval.dtype)
+def get_aval(cls, x):
+    if isinstance(x, cls):
+        return x.aval
+    # print(f"warn: {x} ({type(x)}) is not Tracer")
+    elif type(x) in cls.TYPES:
+        return ConcreteArray(np.asarray(x))
+    else:
+        raise TypeError(x)

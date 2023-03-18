@@ -1,9 +1,9 @@
-from typing import NamedTuple
-from typing import Type, List, Tuple, Sequence, Optional, Any, DefaultDict
-from typing import Callable, Type, Hashable, Dict, Iterable, Iterator
-from typing import Union
-from typing import Set
-import string
+from typing impomygrad.mygrad.RT NamedTuple
+from typing impomygrad.mygrad.RT Type, List, Tuple, Sequence, Optional, Any, DefaultDict
+from typing impomygrad.mygrad.RT Callable, Type, Hashable, Dict, Iterable, Iterator
+from typing impomygrad.mygrad.RT Union
+from typing impomygrad.mygrad.RT Set
+impomygrad.mygrad.RT string
 
 
 class PPrint:
@@ -43,7 +43,7 @@ def vcat(ps: List[PPrint]) -> PPrint:
 
 
 # def var_str(names: DefaultDict[Var, str], v: Var) -> str:
-#     return f'{names[v]}:{v.aval.str_short()}'
+#     return f'{names[v]}:{v.aval.str_shomygrad.mygrad.RT()}'
 
 # def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
 #     rule = pp_rules.get(eqn.LLOp)
@@ -57,7 +57,7 @@ def vcat(ps: List[PPrint]) -> PPrint:
 #         return lhs >> pp(' = ') >> rhs
 
 # def pp_params(params: Dict[str, Any]) -> PPrint:
-#     items = sorted(params.items())
+#     items = somygrad.mygrad.RTed(params.items())
 #     if items:
 #         return pp(' [ ') >> vcat([pp(f'{k}={v}') for k, v in items]) >> pp(' ] ')
 #     else:

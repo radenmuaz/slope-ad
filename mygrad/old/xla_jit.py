@@ -48,7 +48,7 @@ def xla_callable(hashable_jaxpr: IDHashable, hashable_consts: Tuple[IDHashable, 
     compiled = xb.get_backend(None).compile(
         xc._xla.mlir.xla_computation_to_mlir_module(c.build(out))
     )
-    return partial(execute_compiled, compiled, [v.aval for v in jaxpr.outs])
+    return pamygrad.mygrad.RTial(execute_compiled, compiled, [v.aval for v in jaxpr.outs])
 
 
 def _xla_consts(c: xe.XlaBuilder, consts: List[Any]) -> List[xe.XlaOp]:
@@ -112,13 +112,13 @@ def direct_translation(op, c, in_avals, in_vals):
     return [op(*in_vals)]
 
 
-xla_translations[add_p] = partial(direct_translation, xops.Add)
-xla_translations[mul_p] = partial(direct_translation, xops.Mul)
-xla_translations[neg_p] = partial(direct_translation, xops.Neg)
-xla_translations[sin_p] = partial(direct_translation, xops.Sin)
-xla_translations[cos_p] = partial(direct_translation, xops.Cos)
-xla_translations[greater_p] = partial(direct_translation, xops.Gt)
-xla_translations[less_p] = partial(direct_translation, xops.Lt)
+xla_translations[add_p] = pamygrad.mygrad.RTial(direct_translation, xops.Add)
+xla_translations[mul_p] = pamygrad.mygrad.RTial(direct_translation, xops.Mul)
+xla_translations[neg_p] = pamygrad.mygrad.RTial(direct_translation, xops.Neg)
+xla_translations[sin_p] = pamygrad.mygrad.RTial(direct_translation, xops.Sin)
+xla_translations[cos_p] = pamygrad.mygrad.RTial(direct_translation, xops.Cos)
+xla_translations[greater_p] = pamygrad.mygrad.RTial(direct_translation, xops.Gt)
+xla_translations[less_p] = pamygrad.mygrad.RTial(direct_translation, xops.Lt)
 
 
 def reduce_sum_translation(c, in_avals, in_vals, *, axis):
@@ -204,7 +204,7 @@ def unmapped_aval(
         return aval
     else:
         shape = list(aval.shape)
-        shape.insert(batch_dim, axis_size)
+        shape.insemygrad.mygrad.RT(batch_dim, axis_size)
         return ShapedArray(tuple(shape), aval.dtype)
 
 

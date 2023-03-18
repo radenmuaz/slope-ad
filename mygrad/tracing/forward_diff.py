@@ -1,8 +1,10 @@
 import numpy as np
 import mygrad
-from mygrad import pytrees, runtime, utils
-
-class JVPTracer(runtime.Tracer):
+from mygrad import utils
+from mygrad.runtime import Runtime
+from mygrad.tracing.base import Trace, Tracer
+from mygrad import pytrees
+class JVPTracer(Tracer):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -13,12 +15,10 @@ class JVPTracer(runtime.Tracer):
         return self.get_aval(self.primal)
 
 
-class JVPTrace(runtime.Trace):
-    # pure = lift = lambda self, val: JVPTracer(self, val, runtime.Tracer.zeros_like(val))
-    # pure = lift = lambda self, val: JVPTracer(self, val, np.zeros(val.shape, val.dtype))
+class JVPTrace(Trace):
     def pure(self, val):
-        aval = runtime.Tracer.get_aval(val)
-        zeros_like = np.zeros(val.shape, val.dtype)
+        aval = Tracer.get_aval(val)
+        zeros_like = np.zeros(aval.shape, aval.dtype)
         return JVPTracer(self, val, zeros_like)
     lift = pure
 
@@ -30,21 +30,21 @@ class JVPTrace(runtime.Trace):
 
 
 def jvp_v1(f, primals, tangents):
-    with runtime.Runtime.active.new_main(JVPTrace) as main:
+    with mygrad.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
         out = f(*tracers_in)
-        tracer_out = runtime.Runtime.RT.full_raise(trace, out)
+        tracer_out = mygrad.RT.full_raise(trace, out)
         primal_out, tangent_out = tracer_out.primal, tracer_out.tangent
     return primal_out, tangent_out
 
 
 def jvp_flat(f, primals, tangents):
-    with runtime.Runtime.active.new_main(JVPTrace) as main:
+    with mygrad.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
         outs = f(*tracers_in)
-        tracers_out = [runtime.Runtime.active.full_raise(trace, out) for out in outs]
+        tracers_out = [mygrad.RT.full_raise(trace, out) for out in outs]
         primals_out, tangents_out = utils.unzip2(
             (t.primal, t.tangent) for t in tracers_out
         )

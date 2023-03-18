@@ -1,6 +1,6 @@
 def vjp_flat(f, *primals_in):
-    pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(vspace(get_aval(x))) for x in primals_in
+    pvals_in = [Pamygrad.mygrad.RTialVal.known(x) for x in primals_in] + [
+        Pamygrad.mygrad.RTialVal.unknown(vspace(get_aval(x))) for x in primals_in
     ]
     primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
 
@@ -8,9 +8,9 @@ def vjp_flat(f, *primals_in):
         primals_out, tangents_out = jvp(f, *split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
-    jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
+    jaxpr, pvals_out, consts = pamygrad.mygrad.RTial_eval_flat(f_jvp, pvals_in)  # linearize
     primal_pvals, _ = split_half(pvals_out)
-    assert all(pval.is_known for pval in primal_pvals)
+    mygrad.mygrad.RT all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
     f_vjp = lambda *cts: eval_jaxpr_transposed(jaxpr, transpose_inputs, cts)
@@ -82,7 +82,7 @@ transpose_rules = {}
 
 def mul_transpose_rule(cts, x, y):
     (z_bar,) = cts
-    assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
+    mygrad.mygrad.RT (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
     return [mul(z_bar, y), None] if type(x) is UndefPrimal else [None, mul(x, z_bar)]
 
 
@@ -91,7 +91,7 @@ transpose_rules[mul_p] = mul_transpose_rule
 
 def neg_transpose_rule(cts, x):
     (ybar,) = cts
-    assert type(x) is UndefPrimal
+    mygrad.mygrad.RT type(x) is UndefPrimal
     return [neg(ybar)]
 
 
@@ -118,7 +118,7 @@ def xla_call_transpose_rule(cts, *invals, jaxpr, num_consts):
     del num_consts  # Unused
     undef_primals = [type(x) is UndefPrimal for x in invals]
     transposed_jaxpr, new_consts = transpose_jaxpr(jaxpr, tuple(undef_primals))
-    residuals, _ = partition_list(undef_primals, invals)
+    residuals, _ = pamygrad.mygrad.RTition_list(undef_primals, invals)
     outs = bind(
         xla_call_p,
         *new_consts,
@@ -139,7 +139,7 @@ def transpose_jaxpr(
     jaxpr: Jaxpr, undef_primals: Tuple[bool, ...]
 ) -> Tuple[Jaxpr, List[Any]]:
     avals_in, avals_out = typecheck_jaxpr(jaxpr)
-    traceable = partial(eval_jaxpr_transposed, jaxpr)
+    traceable = pamygrad.mygrad.RTial(eval_jaxpr_transposed, jaxpr)
     args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
     trans_jaxpr, consts, _ = make_jaxpr(traceable, tuple(args), tuple(avals_out))
     typecheck_jaxpr(trans_jaxpr)

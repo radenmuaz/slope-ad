@@ -2,98 +2,18 @@ from typing import NamedTuple
 from contextlib import contextmanager
 from typing import Type, Optional, Any, List, Tuple
 import operator as op
-
-from mygrad import arrays, llops, utils, pytrees
+import itertools
 import numpy as np
 
+from mygrad import utils
+from mygrad.tracing.base import Trace, Tracer, MainTrace
+from mygrad.tracing.eager import EagerTrace
 
-class MainTrace(NamedTuple):
-    level: int
-    trace_type: Type["Trace"]
-    global_data: Optional[Any]
-
-
-class Trace:
-    main: MainTrace
-
-    def __init__(self, main: MainTrace) -> None:
-        self.main = main
-
-    def pure(self, val):
-        raise NotImplementedError
-
-    def lift(self, val):
-        raise NotImplementedError
-
-    def run_llop(self, LLOp, tracers, params):
-        raise NotImplementedError
-
-class EvalTrace(Trace):
-    pure = lift = lambda self, x: x
-
-    def run_llop(self, llop, tracers, params):
-        return llop.forward(*tracers, **params)
-
-
-class Tracer:
-    _trace: Trace
-
-    __array_priority__ = 1000
-    @property
-    def aval(self):
-        raise NotImplementedError
-    @classmethod
-    def raise_to_shaped(cls, aval):
-        return cls.shaped(aval.shape, aval.dtype)
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    def __neg__(self):
-        return llops.Neg.bind1(self)
-
-    def __add__(self, other):
-        return llops.Add.bind1(self, other)
-
-    def __radd__(self, other):
-        return llops.Add.bind1(other, self)
-
-    def __mul__(self, other):
-        return llops.Mul.bind1(self, other)
-
-    def __rmul__(self, other):
-        return self.aval._rmul(other, self)
-
-    def __bool__(self):
-        return self.aval._bool(self)
-
-    def __nonzero__(self):
-        return self.aval._nonzero(self)
-
-
-    @classmethod
-    def get_aval(cls, x):
-        if isinstance(x, cls):
-            return x.aval
-        print(f"warn: {x} ({type(x)}) is not Tracer")
-        return arrays.ConcreteArray(x)
-
-    def full_lower(self):
-        return self  # default implementation
-
-    def __getattr__(self, name):
-        try:
-            return getattr(self.aval, name)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
-
-    def zeros_like(self, val):
-        aval = self.get_aval(val)
-        return np.zeros(aval.shape, aval.dtype)
+from mygrad.pytrees import NodeType
 
 class Runtime:
     RTs = []
+
 
     @classmethod
     @property
@@ -103,25 +23,25 @@ class Runtime:
             cls(*args, **kwargs)
         return cls.RTs[-1]
 
-
     def __init__(self):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.node_types = dict()
-        self.trace_stack += [MainTrace(0, EvalTrace, None)]
+        self.trace_stack += [MainTrace(0, EagerTrace, None)]
 
-        self.node_types[tuple] = pytrees.NodeType(
+        self.node_types[tuple] = NodeType(
             str(tuple), lambda x: (None, x), lambda _, xs: tuple(xs)
         )
-        self.node_types[list] = pytrees.NodeType(
+        self.node_types[list] = NodeType(
             str(list), lambda x: (None, x), lambda _, xs: list(xs)
         )
-        self.node_types[dict] = pytrees.NodeType(
+        self.node_types[dict] = NodeType(
             str(dict),
             lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
         self.RTs += [self]
+
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):

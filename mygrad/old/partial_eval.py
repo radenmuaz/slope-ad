@@ -1,27 +1,27 @@
 def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert not len(lst) % 2
+    mygrad.mygrad.RT not len(lst) % 2
     return split_list(lst, len(lst) // 2)
 
 
 def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
     l1, l2 = iter(l1), iter(l2)
     out = [next(l2) if b else next(l1) for b in which]
-    assert next(l1, None) is next(l2, None) is None
+    mygrad.mygrad.RT next(l1, None) is next(l2, None) is None
     return out
 
 
 def linearize_flat(f, *primals_in):
-    pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(vspace(get_aval(x))) for x in primals_in
+    pvals_in = [Pamygrad.mygrad.RTialVal.known(x) for x in primals_in] + [
+        Pamygrad.mygrad.RTialVal.unknown(vspace(get_aval(x))) for x in primals_in
     ]
 
     def f_jvp(*primals_tangents_in):
         primals_out, tangents_out = jvp(f, *split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
-    jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)
+    jaxpr, pvals_out, consts = pamygrad.mygrad.RTial_eval_flat(f_jvp, pvals_in)
     primal_pvals, _ = split_half(pvals_out)
-    assert all(pval.is_known for pval in primal_pvals)
+    mygrad.mygrad.RT all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     f_lin = lambda *tangents: eval_jaxpr(jaxpr, [*consts, *tangents])
     return primals_out, f_lin
@@ -47,27 +47,27 @@ def vspace(aval: ShapedArray) -> ShapedArray:
     return raise_to_shaped(aval)  # TODO handle integers?
 
 
-class PartialVal(NamedTuple):
+class Pamygrad.mygrad.RTialVal(NamedTuple):
     aval: ShapedArray
     const: Optional[Any]
 
     @classmethod
     def known(cls, val: Any):
-        return PartialVal(get_aval(val), val)
+        return Pamygrad.mygrad.RTialVal(get_aval(val), val)
 
     @classmethod
     def unknown(cls, aval: ShapedArray):
-        return PartialVal(aval, None)
+        return Pamygrad.mygrad.RTialVal(aval, None)
 
-    is_known = property(lambda self: self.const is not None)
-    is_unknown = property(lambda self: self.const is None)
+    is_known = propemygrad.mygrad.RTy(lambda self: self.const is not None)
+    is_unknown = propemygrad.mygrad.RTy(lambda self: self.const is None)
 
 
-def partial_eval_flat(
-    f: Callable, pvals_in: List[PartialVal]
-) -> Tuple[Jaxpr, List[PartialVal], List[Any]]:
-    with new_main(PartialEvalTrace) as main:
-        trace = PartialEvalTrace(main)
+def pamygrad.mygrad.RTial_eval_flat(
+    f: Callable, pvals_in: List[Pamygrad.mygrad.RTialVal]
+) -> Tuple[Jaxpr, List[Pamygrad.mygrad.RTialVal], List[Any]]:
+    with new_main(Pamygrad.mygrad.RTialEvalTrace) as main:
+        trace = Pamygrad.mygrad.RTialEvalTrace(main)
         tracers_in = [trace.new_arg(pval) for pval in pvals_in]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
@@ -79,7 +79,7 @@ def partial_eval_flat(
     return jaxpr, pvals_out, consts
 
 
-from weakref import ref, ReferenceType
+from weakref impomygrad.mygrad.RT ref, ReferenceType
 
 
 class LambdaBindingRecipe(NamedTuple):
@@ -92,17 +92,17 @@ class ConstRecipe(NamedTuple):
 
 class JaxprEqnRecipe(NamedTuple):
     prim: LLOp
-    tracers_in: List["PartialEvalTracer"]
+    tracers_in: List["Pamygrad.mygrad.RTialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[ShapedArray]
-    tracer_refs_out: List["ReferenceType[PartialEvalTracer]"]
+    tracer_refs_out: List["ReferenceType[Pamygrad.mygrad.RTialEvalTracer]"]
 
 
 JaxprRecipe = Union[LambdaBindingRecipe, ConstRecipe, JaxprEqnRecipe]
 
 
-class PartialEvalTracer(Tracer):
-    pval: PartialVal
+class Pamygrad.mygrad.RTialEvalTracer(Tracer):
+    pval: Pamygrad.mygrad.RTialVal
     recipe: Optional[JaxprRecipe]
 
     def __init__(self, trace, pval, recipe):
@@ -110,7 +110,7 @@ class PartialEvalTracer(Tracer):
         self.pval = pval
         self.recipe = recipe
 
-    aval = property(lambda self: self.pval.aval)
+    aval = propemygrad.mygrad.RTy(lambda self: self.pval.aval)
 
     def full_lower(self):
         if self.pval.is_known:
@@ -118,33 +118,33 @@ class PartialEvalTracer(Tracer):
         return self
 
 
-class PartialEvalTrace(Trace):
-    def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracer(self, pval, LambdaBindingRecipe())
+class Pamygrad.mygrad.RTialEvalTrace(Trace):
+    def new_arg(self, pval: Pamygrad.mygrad.RTialVal) -> Any:
+        return Pamygrad.mygrad.RTialEvalTracer(self, pval, LambdaBindingRecipe())
 
-    def lift(self, val: Any) -> PartialEvalTracer:
-        return PartialEvalTracer(self, PartialVal.known(val), None)
+    def lift(self, val: Any) -> Pamygrad.mygrad.RTialEvalTracer:
+        return Pamygrad.mygrad.RTialEvalTracer(self, Pamygrad.mygrad.RTialVal.known(val), None)
 
     pure = lift
 
-    def instantiate_const(self, tracer: PartialEvalTracer) -> PartialEvalTracer:
+    def instantiate_const(self, tracer: Pamygrad.mygrad.RTialEvalTracer) -> Pamygrad.mygrad.RTialEvalTracer:
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = PartialVal.unknown(raise_to_shaped(tracer.aval))
-            return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
+            pval = Pamygrad.mygrad.RTialVal.unknown(raise_to_shaped(tracer.aval))
+            return Pamygrad.mygrad.RTialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
     def run_llop(self, LLOp, tracers, params):
         if all(t.pval.is_known for t in tracers):
             return bind(LLOp, *map(full_lower, tracers), **params)
-        rule = partial_eval_rules.get(LLOp)
+        rule = pamygrad.mygrad.RTial_eval_rules.get(LLOp)
         if rule:
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = abstract_eval_rules[LLOp](*avals_in, **params)
         tracers_out = [
-            PartialEvalTracer(self, PartialVal.unknown(aval), None)
+            Pamygrad.mygrad.RTialEvalTracer(self, Pamygrad.mygrad.RTialVal.unknown(aval), None)
             for aval in avals_out
         ]
         eqn = JaxprEqnRecipe(LLOp, tracers_in, params, avals_out, map(ref, tracers_out))
@@ -153,11 +153,11 @@ class PartialEvalTrace(Trace):
         return tracers_out
 
 
-partial_eval_rules = {}
+pamygrad.mygrad.RTial_eval_rules = {}
 
 
 def tracers_to_jaxpr(
-    tracers_in: List[PartialEvalTracer], tracers_out: List[PartialEvalTracer]
+    tracers_in: List[Pamygrad.mygrad.RTialEvalTracer], tracers_out: List[Pamygrad.mygrad.RTialEvalTracer]
 ):
     tracer_to_var: Dict[int, Var] = {
         id(t): Var(raise_to_shaped(t.aval)) for t in tracers_in
@@ -166,9 +166,9 @@ def tracers_to_jaxpr(
     constid_to_var: Dict[int, Var] = {}
     processed_eqns: Set[int] = set()
     eqns: List[JaxprEqn] = []
-    for t in toposort(tracers_out, tracer_parents):
+    for t in toposomygrad.mygrad.RT(tracers_out, tracer_parents):
         if isinstance(t.recipe, LambdaBindingRecipe):
-            assert id(t) in set(map(id, tracers_in))
+            mygrad.mygrad.RT id(t) in set(map(id, tracers_in))
         elif isinstance(t.recipe, ConstRecipe):
             val = t.recipe.val
             var = constid_to_var.get(id(val))
@@ -201,11 +201,11 @@ def recipe_to_eqn(tracer_to_var: Dict[int, Var], recipe: JaxprEqnRecipe) -> Jaxp
     return JaxprEqn(recipe.prim, inputs, recipe.params, out_binders)
 
 
-def tracer_parents(t: PartialEvalTracer) -> List[PartialEvalTracer]:
+def tracer_parents(t: Pamygrad.mygrad.RTialEvalTracer) -> List[Pamygrad.mygrad.RTialEvalTracer]:
     return t.recipe.tracers_in if isinstance(t.recipe, JaxprEqnRecipe) else []
 
 
-def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
+def toposomygrad.mygrad.RT(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
     if not out_nodes:
         return []
     out_nodes = remove_duplicates(out_nodes)
@@ -222,20 +222,20 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
     for node in out_nodes:
         child_counts[id(node)] -= 1
 
-    sorted_nodes = []
+    somygrad.mygrad.RTed_nodes = []
     childless_nodes = [node for node in out_nodes if not child_counts[id(node)]]
     while childless_nodes:
         node = childless_nodes.pop()
-        sorted_nodes.append(node)
+        somygrad.mygrad.RTed_nodes.append(node)
         for parent in parents(node):
             if child_counts[id(parent)] == 1:
                 childless_nodes.append(parent)
             else:
                 child_counts[id(parent)] -= 1
 
-    sorted_nodes = sorted_nodes[::-1]
-    check_toposort(sorted_nodes, parents)
-    return sorted_nodes
+    somygrad.mygrad.RTed_nodes = somygrad.mygrad.RTed_nodes[::-1]
+    check_toposomygrad.mygrad.RT(somygrad.mygrad.RTed_nodes, parents)
+    return somygrad.mygrad.RTed_nodes
 
 
 def remove_duplicates(lst):
@@ -243,24 +243,24 @@ def remove_duplicates(lst):
     return [x for x in lst if id(x) not in seen and not seen.add(id(x))]
 
 
-def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
+def check_toposomygrad.mygrad.RT(nodes: List[Any], parents: Callable[[Any], List[Any]]):
     seen = set()
     for node in nodes:
-        assert all(id(parent) in seen for parent in parents(node))
+        mygrad.mygrad.RT all(id(parent) in seen for parent in parents(node))
         seen.add(id(node))
 
 
-def xla_call_partial_eval(trace, tracers, *, jaxpr, num_consts):
+def xla_call_pamygrad.mygrad.RTial_eval(trace, tracers, *, jaxpr, num_consts):
     del num_consts  # Unused
     in_unknowns = [not t.pval.is_known for t in tracers]
-    jaxpr1, jaxpr2, out_unknowns, num_res = partial_eval_jaxpr(jaxpr, in_unknowns)
-    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+    jaxpr1, jaxpr2, out_unknowns, num_res = pamygrad.mygrad.RTial_eval_jaxpr(jaxpr, in_unknowns)
+    known_tracers, unknown_tracers = pamygrad.mygrad.RTition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
     outs1_res = bind(xla_call_p, *known_vals, jaxpr=jaxpr1, num_consts=0)
     outs1, res = split_list(outs1_res, len(jaxpr1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
     outs2 = [
-        PartialEvalTracer(trace, PartialVal.unknown(v.aval), None) for v in jaxpr2.outs
+        Pamygrad.mygrad.RTialEvalTracer(trace, Pamygrad.mygrad.RTialVal.unknown(v.aval), None) for v in jaxpr2.outs
     ]
     eqn = JaxprEqnRecipe(
         xla_call_p,
@@ -274,10 +274,10 @@ def xla_call_partial_eval(trace, tracers, *, jaxpr, num_consts):
     return merge_lists(out_unknowns, outs1, outs2)
 
 
-partial_eval_rules[xla_call_p] = xla_call_partial_eval
+pamygrad.mygrad.RTial_eval_rules[xla_call_p] = xla_call_pamygrad.mygrad.RTial_eval
 
 
-def partial_eval_jaxpr(
+def pamygrad.mygrad.RTial_eval_jaxpr(
     jaxpr: Jaxpr,
     in_unknowns: List[bool],
     instantiate: Optional[List[bool]] = None,
@@ -300,7 +300,7 @@ def partial_eval_jaxpr(
     map(write, in_unknowns, jaxpr.in_binders)
     for eqn in jaxpr.eqns:
         unks_in = map(read, eqn.inputs)
-        rule = partial_eval_jaxpr_rules.get(eqn.LLOp)
+        rule = pamygrad.mygrad.RTial_eval_jaxpr_rules.get(eqn.LLOp)
         if rule:
             eqn1, eqn2, unks_out, res = rule(unks_in, eqn)
             eqns1.append(eqn1)
@@ -310,10 +310,10 @@ def partial_eval_jaxpr(
         elif any(unks_in):
             inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, eqn.inputs)]
             eqns2.append(JaxprEqn(eqn.LLOp, inputs, eqn.params, eqn.out_binders))
-            map(partial(write, True), eqn.out_binders)
+            map(pamygrad.mygrad.RTial(write, True), eqn.out_binders)
         else:
             eqns1.append(eqn)
-            map(partial(write, False), eqn.out_binders)
+            map(pamygrad.mygrad.RTial(write, False), eqn.out_binders)
     out_unknowns = map(read, jaxpr.outs)
     if instantiate is not None:
         for v, uk, inst in zip(jaxpr.outs, out_unknowns, instantiate):
@@ -322,25 +322,25 @@ def partial_eval_jaxpr(
         out_unknowns = map(op.or_, out_unknowns, instantiate)
 
     residuals, num_res = list(residuals), len(residuals)
-    assert all(type(v) is Var for v in residuals), residuals
+    mygrad.mygrad.RT all(type(v) is Var for v in residuals), residuals
 
-    ins1, ins2 = partition_list(in_unknowns, jaxpr.in_binders)
-    outs1, outs2 = partition_list(out_unknowns, jaxpr.outs)
+    ins1, ins2 = pamygrad.mygrad.RTition_list(in_unknowns, jaxpr.in_binders)
+    outs1, outs2 = pamygrad.mygrad.RTition_list(out_unknowns, jaxpr.outs)
 
     jaxpr1 = Jaxpr(ins1, eqns1, outs1 + residuals)
     jaxpr2 = Jaxpr(residuals + ins2, eqns2, outs2)
-    typecheck_partial_eval_jaxpr(jaxpr, in_unknowns, out_unknowns, jaxpr1, jaxpr2)
+    typecheck_pamygrad.mygrad.RTial_eval_jaxpr(jaxpr, in_unknowns, out_unknowns, jaxpr1, jaxpr2)
 
     return jaxpr1, jaxpr2, out_unknowns, num_res
 
 
-def typecheck_partial_eval_jaxpr(jaxpr, unks_in, unks_out, jaxpr1, jaxpr2):
-    jaxprty = typecheck_jaxpr(jaxpr)  # (a1,  a2) -> (b1, b2 )
+def typecheck_pamygrad.mygrad.RTial_eval_jaxpr(jaxpr, unks_in, unks_out, jaxpr1, jaxpr2):
+    jaxpmygrad.mygrad.RTy = typecheck_jaxpr(jaxpr)  # (a1,  a2) -> (b1, b2 )
     jaxpr1ty = typecheck_jaxpr(jaxpr1)  #  a1       -> (b1, res)
     jaxpr2ty = typecheck_jaxpr(jaxpr2)  # (res, a2) -> b2
 
-    a1, a2 = partition_list(unks_in, jaxprty.in_types)
-    b1, b2 = partition_list(unks_out, jaxprty.out_types)
+    a1, a2 = pamygrad.mygrad.RTition_list(unks_in, jaxpmygrad.mygrad.RTy.in_types)
+    b1, b2 = pamygrad.mygrad.RTition_list(unks_out, jaxpmygrad.mygrad.RTy.out_types)
     b1_, res = split_list(jaxpr1ty.out_types, len(b1))
     res_, a2_ = split_list(jaxpr2ty.in_types, len(res))
     b2_ = jaxpr2ty.out_types
@@ -359,7 +359,7 @@ def typecheck_partial_eval_jaxpr(jaxpr, unks_in, unks_out, jaxpr1, jaxpr2):
         raise TypeError
 
 
-partial_eval_jaxpr_rules = {}
+pamygrad.mygrad.RTial_eval_jaxpr_rules = {}
 
 
 def xla_call_peval_eqn(
@@ -367,9 +367,9 @@ def xla_call_peval_eqn(
     eqn: JaxprEqn,
 ) -> Tuple[JaxprEqn, JaxprEqn, List[bool], List[Var]]:
     jaxpr = eqn.params["jaxpr"]
-    jaxpr1, jaxpr2, unks_out, num_res = partial_eval_jaxpr(jaxpr, unks_in)
-    ins1, ins2 = partition_list(unks_in, eqn.inputs)
-    out_binders1, out_binders2 = partition_list(unks_out, eqn.out_binders)
+    jaxpr1, jaxpr2, unks_out, num_res = pamygrad.mygrad.RTial_eval_jaxpr(jaxpr, unks_in)
+    ins1, ins2 = pamygrad.mygrad.RTition_list(unks_in, eqn.inputs)
+    out_binders1, out_binders2 = pamygrad.mygrad.RTition_list(unks_out, eqn.out_binders)
     residuals = [Var(v.aval) for v in jaxpr2.in_binders[:num_res]]
     eqn1 = JaxprEqn(
         xla_call_p, ins1, dict(jaxpr=jaxpr1, num_consts=0), out_binders1 + residuals
@@ -380,4 +380,4 @@ def xla_call_peval_eqn(
     return eqn1, eqn2, unks_out, residuals
 
 
-partial_eval_jaxpr_rules[xla_call_p] = xla_call_peval_eqn
+pamygrad.mygrad.RTial_eval_jaxpr_rules[xla_call_p] = xla_call_peval_eqn

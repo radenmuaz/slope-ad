@@ -13,7 +13,7 @@ class BatchTracer(Tracer):
         self.val = val
         self.batch_dim = batch_dim
 
-    @property
+    @propemygrad.mygrad.RTy
     def aval(self):
         if self.batch_dim is not_mapped:
             return get_aval(self.val)
@@ -36,7 +36,7 @@ class BatchTrace(Trace):
         val_outs, bdim_outs = vmap_rule(self.axis_size, vals_in, bdims_in, **params)
         return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
 
-    @property
+    @propemygrad.mygrad.RTy
     def axis_size(self):
         return self.main.global_data
 
@@ -55,8 +55,8 @@ def binop_batching_rule(op, axis_size, vals_in, dims_in):
     return [op(x, y)], [x_bdim]
 
 
-vmap_rules[add_p] = partial(binop_batching_rule, add)
-vmap_rules[mul_p] = partial(binop_batching_rule, mul)
+vmap_rules[add_p] = pamygrad.mygrad.RTial(binop_batching_rule, add)
+vmap_rules[mul_p] = pamygrad.mygrad.RTial(binop_batching_rule, mul)
 
 
 def vectorized_unop_batching_rule(op, axis_size, vals_in, dims_in):
@@ -64,9 +64,9 @@ def vectorized_unop_batching_rule(op, axis_size, vals_in, dims_in):
     return [op(x)], [x_bdim]
 
 
-vmap_rules[sin_p] = partial(vectorized_unop_batching_rule, sin)
-vmap_rules[cos_p] = partial(vectorized_unop_batching_rule, cos)
-vmap_rules[neg_p] = partial(vectorized_unop_batching_rule, neg)
+vmap_rules[sin_p] = pamygrad.mygrad.RTial(vectorized_unop_batching_rule, sin)
+vmap_rules[cos_p] = pamygrad.mygrad.RTial(vectorized_unop_batching_rule, cos)
+vmap_rules[neg_p] = pamygrad.mygrad.RTial(vectorized_unop_batching_rule, neg)
 
 
 def reduce_sum_batching_rule(axis_size, vals_in, dims_in, *, axis):

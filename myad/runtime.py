@@ -1,20 +1,11 @@
-from typing import NamedTuple
 from contextlib import contextmanager
-from typing import Type, Optional, Any, List, Tuple, Callable
+from typing import Type, Optional, Any, List
 import operator as op
-import itertools
-import numpy as np
 
-from myad import utils
+from myad import utils, tracing
 from myad.tracing import Trace, Tracer, MainTrace
-from myad.eager_eval import EagerEvalTrace
-from myad.ir import Jaxpr, JaxprBuilder, JaxprTrace
-from myad.array_shape import ArrayShape
 
-from myad.pytrees import NodeType, PyTreeDef
-from myad import pytrees
-
-from functools import lru_cache
+from myad.pytrees import NodeType
 
 
 class Runtime:
@@ -28,7 +19,7 @@ class Runtime:
             cls(*args, **kwargs)
         return cls.RTs[-1]
 
-    def __init__(self, root_trace=MainTrace(0, EagerEvalTrace, None)):
+    def __init__(self, root_trace=MainTrace(0, tracing.EagerEvalTrace, None)):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.node_types = dict()
@@ -77,7 +68,6 @@ class Runtime:
         return top_main.trace_type(top_main)
 
     def full_lower(self, val: Any):
-
         if isinstance(val, Tracer):
             return val.full_lower()
         else:
@@ -97,3 +87,13 @@ class Runtime:
             raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
         else:  # val._trace.level == level
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
+
+    def bind(self, llop, *args, **params):
+        top_trace = self.find_top_trace(args)
+        tracers = [self.full_raise(top_trace, arg) for arg in args]
+        outs = top_trace.run_llop(llop, tracers, params)
+        lowered = [self.full_lower(out) for out in outs]
+        return lowered
+
+    def bind1(self, *args, **params):
+        return self.bind(*args, **params)[0]

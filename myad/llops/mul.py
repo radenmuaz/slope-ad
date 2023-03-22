@@ -1,5 +1,5 @@
 from myad.llops.base import LLOp
-from myad.array_shape import ArrayShape
+from myad.tensor_shape import TensorShape
 from typing import List
 
 class Mul(LLOp):
@@ -13,13 +13,9 @@ class Mul(LLOp):
         return [x * y], [x_dot * y + x * y_dot]
 
     @staticmethod
-    def shape_forward(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
-        if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
+    def shape_forward(x: TensorShape, y: TensorShape) -> List[TensorShape]:
+        if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
             raise TypeError
-        if  ArrayShape.from_numpy(x) !=  ArrayShape.from_numpy(y):
+        if  TensorShape.from_numpy(x) !=  TensorShape.from_numpy(y):
             raise TypeError
-        return [ArrayShape(x.shape, x.dtype)]
-
-    @staticmethod
-    def pprint():
-        return None
+        return [TensorShape(x.shape, x.dtype)]

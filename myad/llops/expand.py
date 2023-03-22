@@ -1,14 +1,19 @@
 from myad.llops.base import LLOp
-from myad.array_shape import ArrayShape
+from myad.tensor_shape import TensorShape
 from typing import Tuple, List, Sequence
 
 import numpy as np
-
-
 class Expand(LLOp):
     @staticmethod
-    def forward(x, *, axis):
-        return [np.broadcast_to(x, axis)]
+    def forward(x, *, shape, axes):
+        for axis in sorted(axes):
+            # out_ndim = len(axis) + x.ndim
+            # shape_it = iter(x.shape)
+            # shape = [1 if ax in axis else next(shape_it)
+            #          for ax in range(out_ndim)]
+            # x = x.reshape(shape)
+            x = np.expand_dims(x, axis)
+        return [x.broadcast(shape)]
 
     # @staticmethod
     # def jvp(primals, tangents):
@@ -17,6 +22,6 @@ class Expand(LLOp):
 
     @staticmethod
     def shape_forward(
-        x: ArrayShape, *, shape: Sequence[int], axes: Sequence[int]
-    ) -> List[ArrayShape]:
-        return [ArrayShape(tuple(shape), x.dtype)]
+        x: TensorShape, *, shape: Sequence[int], axes: Sequence[int]
+    ) -> List[TensorShape]:
+        return [TensorShape(tuple(shape), x.dtype)]

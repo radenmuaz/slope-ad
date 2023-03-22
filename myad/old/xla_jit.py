@@ -61,11 +61,11 @@ def _xla_consts(c: xe.XlaBuilder, consts: List[Any]) -> List[xe.XlaOp]:
     return [xla_consts[id(cnst)] for cnst in consts]
 
 
-def _xla_params(c: xe.XlaBuilder, avals_in: List[ArrayShape]) -> List[xe.XlaOp]:
+def _xla_params(c: xe.XlaBuilder, avals_in: List[TensorShape]) -> List[xe.XlaOp]:
     return [xops.Parameter(c, i, _xla_shape(a)) for i, a in enumerate(avals_in)]
 
 
-def _xla_shape(aval: ArrayShape) -> xe.Shape:
+def _xla_shape(aval: TensorShape) -> xe.Shape:
     return xc.Shape.array_shape(xc.dtype_to_etype(aval.dtype), aval.shape)
 
 
@@ -101,7 +101,7 @@ input_handlers = {
 }
 
 
-def handle_result(aval: ArrayShape, buf):
+def handle_result(aval: TensorShape, buf):
     del aval  # Unused for now
     return np.asarray(buf)
 
@@ -127,7 +127,7 @@ def reduce_sum_translation(c, in_avals, in_vals, *, axis):
     (x_aval,), (x,) = in_avals, in_vals
     zero = xops.ConstantLiteral(c, np.array(0, x_aval.dtype))
     subc = xc.XlaBuilder("add")
-    shape = _xla_shape(ArrayShape((), x_aval.dtype))
+    shape = _xla_shape(TensorShape((), x_aval.dtype))
     xops.Add(xops.Parameter(subc, 0, shape), xops.Parameter(subc, 1, shape))
     return [xops.Reduce(c, [x], [zero], subc.build(), axis)]
 
@@ -200,14 +200,14 @@ def vmap_jaxpr(
 
 
 def unmapped_aval(
-    axis_size: int, batch_dim: BatchAxis, aval: ArrayShape
-) -> ArrayShape:
+    axis_size: int, batch_dim: BatchAxis, aval: TensorShape
+) -> TensorShape:
     if batch_dim is not_mapped:
         return aval
     else:
         shape = list(aval.shape)
         shape.insemygrad.mygrad.RT(batch_dim, axis_size)
-        return ArrayShape(tuple(shape), aval.dtype)
+        return TensorShape(tuple(shape), aval.dtype)
 
 
 def xla_call_shape_forward_rule(*in_types, jaxpr, num_consts):
@@ -239,5 +239,5 @@ def destructure_tuple(c, tup):
     return [xops.GetTupleElement(tup, i) for i in range(num_elements)]
 
 
-def handle_result(aval: ArrayShape, buf):  # noqa: F811
+def handle_result(aval: TensorShape, buf):  # noqa: F811
     return DeviceArray(aval, buf)

@@ -1,11 +1,8 @@
 import myad
-from myad import llops
-from myad.forward_diff import jvp
-from myad.ir import make_jaxpr
 import numpy as np
-from myad.array_shape import ArrayShape
-from myad.tracing import Trace, Tracer, MainTrace
+from myad.tensor_shape import TensorShape
 
+from myad.tensor import Tensor, new_tensor
 # from mygrad import fwd
 
 # from myad.array import Array
@@ -13,18 +10,23 @@ from myad.tracing import Trace, Tracer, MainTrace
 
 def f(x):
     # y = llops.Mul.bind(x, np.array([2.0]))
-    y = llops.Mul.bind1(x, x)
+    # breakpoint()
+    y = x*x
+    y = y+x
     # y = x*x
     # y = y+x
 
     return y
 
 
-x, x_dot = np.array([3.0]), np.array([1.0])
+x, x_dot = new_tensor([3.0]), new_tensor([1.0])
 y = f(x)
-print(y)
-y, y_dot = jvp(f, (x,), (x_dot,))
-print(y, y_dot)
-jaxpr, consts, _ = make_jaxpr(f, ArrayShape.from_numpy(x))
+print('eval', y)
+
+y, y_dot = myad.jvp(f, (x,), (x_dot,))
+print('jvp', y, y_dot)
+
+jaxpr, consts, _ = myad.make_jaxpr(f, TensorShape.from_numpy(x))
+print('jaxpr')
 print(jaxpr)
 

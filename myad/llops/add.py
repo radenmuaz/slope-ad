@@ -1,5 +1,5 @@
 from myad.llops.base import LLOp
-from myad.arrays import ShapedArray
+from myad.array_shape import ArrayShape
 from typing import List
 
 
@@ -11,12 +11,15 @@ class Add(LLOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
+        breakpoint()
         return [x + y], [x_dot + y_dot]
 
     @staticmethod
-    def binop_shape_forward(x: ShapedArray, y: ShapedArray) -> List[ShapedArray]:
-        if not isinstance(x, ShapedArray) or not isinstance(y, ShapedArray):
+    def shape_forward(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+        breakpoint()
+        if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
-        if ShapedArray.raise_to_shaped(x) != ShapedArray.raise_to_shaped(y):
+        if  ArrayShape.from_numpy(x) !=  ArrayShape.from_numpy(y):
             raise TypeError
-        return [ShapedArray(x.shape, x.dtype)]
+        return [ArrayShape(x.shape, x.dtype)]
+

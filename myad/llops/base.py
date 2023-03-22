@@ -1,7 +1,4 @@
 import myad
-import numpy as np
-from myad.arrays import ShapedArray
-from typing import List, Tuple
 
 
 class LLOp:
@@ -22,6 +19,17 @@ class LLOp:
         raise NotImplementedError
 
     @classmethod
+    def bind(cls, *args, **params):
+        top_trace = myad.RT.find_top_trace(args)
+        tracers = [myad.RT.full_raise(top_trace, arg) for arg in args]
+        outs = top_trace.run_llop(cls, tracers, params)
+        lowered = [myad.RT.full_lower(out) for out in outs]
+        return lowered
+
+    @classmethod
     def bind1(cls, *args, **params):
-        (out,) = myad.RT.bind(cls, *args, **params)
-        return out
+        top_trace = myad.RT.find_top_trace(args)
+        tracers = [myad.RT.full_raise(top_trace, arg) for arg in args]
+        outs = top_trace.run_llop(cls, tracers, params)
+        lowered = [myad.RT.full_lower(out) for out in outs]
+        return lowered[0]

@@ -1,5 +1,5 @@
 from myad.llops.base import LLOp
-from myad.arrays import ShapedArray
+from myad.array_shape import ArrayShape
 from typing import Tuple, List, Sequence
 
 import numpy as np
@@ -17,6 +17,6 @@ class Expand(LLOp):
 
     @staticmethod
     def shape_forward(
-        x: ShapedArray, *, shape: Sequence[int], axes: Sequence[int]
-    ) -> List[ShapedArray]:
-        return [ShapedArray(tuple(shape), x.dtype)]
+        x: ArrayShape, *, shape: Sequence[int], axes: Sequence[int]
+    ) -> List[ArrayShape]:
+        return [ArrayShape(tuple(shape), x.dtype)]

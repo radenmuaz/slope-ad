@@ -101,7 +101,7 @@ vmap_rules[cond_p] = cond_vmap_rule
 
 
 def cond_shape_forward(pred_type, *in_types, true_jaxpr, false_jaxpr):
-    if pred_type != ShapedArray((), np.dtype("bool")):
+    if pred_type != ArrayShape((), np.dtype("bool")):
         raise TypeError
     jaxpr_type = typecheck_jaxpr(true_jaxpr)
     if jaxpr_type != typecheck_jaxpr(false_jaxpr):

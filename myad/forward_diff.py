@@ -2,7 +2,7 @@ import numpy as np
 import myad
 from myad import utils
 from myad.runtime import Runtime
-from myad.tracing.base import Trace, Tracer
+from myad.tracing import Trace, Tracer
 from myad import pytrees
 
 
@@ -29,17 +29,6 @@ class JVPTrace(Trace):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = llop.jvp(primals_in, tangents_in, **params)
         return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
-
-
-def jvp_v1(f, primals, tangents):
-    with myad.RT.new_main(JVPTrace) as main:
-        trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
-        out = f(*tracers_in)
-        tracer_out = myad.RT.full_raise(trace, out)
-        primal_out, tangent_out = tracer_out.primal, tracer_out.tangent
-    return primal_out, tangent_out
-
 
 def jvp_flat(f, primals, tangents):
     with myad.RT.new_main(JVPTrace) as main:

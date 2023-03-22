@@ -1,5 +1,5 @@
 from myad.llops.base import LLOp
-from myad.arrays import ShapedArray
+from myad.array_shape import ArrayShape
 from typing import Tuple, List
 
 import numpy as np
@@ -16,7 +16,7 @@ class Sum(LLOp):
         return [x * y], [x_dot * y + x * y_dot]
 
     @staticmethod
-    def shape_forward(x: ShapedArray, *, axis: Tuple[int, ...]) -> List[ShapedArray]:
+    def shape_forward(x: ArrayShape, *, axis: Tuple[int, ...]) -> List[ArrayShape]:
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
-        return [ShapedArray(tuple(new_shape), x.dtype)]
+        return [ArrayShape(tuple(new_shape), x.dtype)]

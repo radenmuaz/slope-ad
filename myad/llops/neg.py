@@ -1,5 +1,5 @@
 from myad.llops.base import LLOp
-from myad.arrays import ShapedArray
+from myad.array_shape import ArrayShape
 from typing import List
 
 
@@ -14,5 +14,5 @@ class Neg(LLOp):
         return [-x], [-x_dot]
 
     @staticmethod
-    def shape_forward(x: ShapedArray) -> List[ShapedArray]:
-        return [ShapedArray(x.shape, x.dtype)]
+    def shape_forward(x: ArrayShape) -> List[ArrayShape]:
+        return [ArrayShape(x.shape, x.dtype)]

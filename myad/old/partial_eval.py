@@ -43,12 +43,12 @@ def linearize(f, *primals_in):
     return primals_out, f_lin
 
 
-def vspace(aval: ShapedArray) -> ShapedArray:
+def vspace(aval: ArrayShape) -> ArrayShape:
     return raise_to_shaped(aval)  # TODO handle integers?
 
 
 class Pamygrad.mygrad.RTialVal(NamedTuple):
-    aval: ShapedArray
+    aval: ArrayShape
     const: Optional[Any]
 
     @classmethod
@@ -56,7 +56,7 @@ class Pamygrad.mygrad.RTialVal(NamedTuple):
         return Pamygrad.mygrad.RTialVal(get_aval(val), val)
 
     @classmethod
-    def unknown(cls, aval: ShapedArray):
+    def unknown(cls, aval: ArrayShape):
         return Pamygrad.mygrad.RTialVal(aval, None)
 
     is_known = propemygrad.mygrad.RTy(lambda self: self.const is not None)
@@ -94,7 +94,7 @@ class JaxprEqnRecipe(NamedTuple):
     prim: LLOp
     tracers_in: List["Pamygrad.mygrad.RTialEvalTracer"]
     params: Dict[str, Any]
-    avals_out: List[ShapedArray]
+    avals_out: List[ArrayShape]
     tracer_refs_out: List["ReferenceType[Pamygrad.mygrad.RTialEvalTracer]"]
 
 

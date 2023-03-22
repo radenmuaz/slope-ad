@@ -6,8 +6,10 @@ import operator as op
 from myad import llops
 import numpy as np
 
-from myad import arrays
+from myad.array import Array
 
+from typing import Tuple
+import numpy as np
 
 class MainTrace(NamedTuple):
     level: int
@@ -82,7 +84,7 @@ class Tracer:
             return x.aval
         # print(f"warn: {x} ({type(x)}) is not Tracer")
         elif type(x) in cls.TYPES:
-            return arrays.ConcreteArray(np.asarray(x))
+            return Array(np.asarray(x))
         else:
             raise TypeError(x)
 
@@ -98,3 +100,4 @@ class Tracer:
     def zeros_like(self, val):
         aval = self.get_aval(val)
         return np.zeros(aval.shape, aval.dtype)
+

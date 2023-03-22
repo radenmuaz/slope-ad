@@ -32,7 +32,7 @@ def vjp(f, *primals_in):
 
 
 class UndefPrimal(NamedTuple):
-    aval: ShapedArray
+    aval: ArrayShape
 
 
 register_pytree_node(

@@ -18,8 +18,8 @@ import numpy as np
 import operator as op
 
 import myad
-from myad.arrays import ShapedArray
-from myad.tracing.base import Tracer, Trace
+from myad.array_shape import ArrayShape
+from myad.tracing import Tracer, Trace
 from myad.llops.base import LLOp
 import itertools as it
 from myad.pretty_print import PPrint, pp, vcat
@@ -31,7 +31,7 @@ from functools import lru_cache
 
 
 class Var:
-    aval: ShapedArray
+    aval: ArrayShape
 
     def __init__(self, aval):
         self.aval = aval
@@ -39,10 +39,10 @@ class Var:
 
 class Lit:
     val: Any
-    aval: ShapedArray
+    aval: ArrayShape
 
     def __init__(self, val):
-        self.aval = aval = ShapedArray.raise_to_shaped(Tracer.get_aval(val))
+        self.aval = aval = ArrayShape.from_numpy(Tracer.get_aval(val))
         self.val = np.array(val, aval.dtype)
 
 
@@ -85,8 +85,8 @@ class Jaxpr(NamedTuple):
 
 
 class JaxprType(NamedTuple):
-    in_types: List[ShapedArray]
-    out_types: List[ShapedArray]
+    in_types: List[ArrayShape]
+    out_types: List[ArrayShape]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_short() for aval in self.in_types)
@@ -118,13 +118,13 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     return JaxprType(in_types, out_types)
 
 
-def typecheck_atom(env: Set[Var], x: Atom) -> ShapedArray:
+def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
     if isinstance(x, Var):
         if x not in env:
             raise TypeError("unbound variable")
         return x.aval
     elif isinstance(x, Lit):
-        return ShapedArray.raise_to_shaped(Tracer.get_aval(x.val))
+        return ArrayShape.from_numpy(Tracer.get_aval(x.val))
     else:
         assert False
 
@@ -194,7 +194,7 @@ def pp_params(params: Dict[str, Any]) -> PPrint:
 
 class JaxprTracer(Tracer):
     __slots__ = ["aval"]
-    aval: ShapedArray
+    aval: ArrayShape
 
     def __init__(self, trace, aval):
         self._trace = trace
@@ -202,8 +202,8 @@ class JaxprTracer(Tracer):
 
 
 class JaxprTrace(Trace):
-    def new_arg(self, aval: ShapedArray) -> JaxprTracer:
-        aval = ShapedArray.raise_to_shaped(aval)
+    def new_arg(self, aval: ArrayShape) -> JaxprTracer:
+        aval = ArrayShape.from_numpy(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
 
@@ -213,7 +213,7 @@ class JaxprTrace(Trace):
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
             tracer = self.builder.new_tracer(
-                self, ShapedArray.raise_to_shaped(Tracer.get_aval(val))
+                self, ArrayShape.from_numpy(Tracer.get_aval(val))
             )
             self.builder.add_const(tracer, val)
         return tracer
@@ -248,7 +248,7 @@ class JaxprBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: JaxprTrace, aval: ShapedArray) -> JaxprTracer:
+    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracer:
         tracer = JaxprTracer(trace, aval)
         self.tracers.append(tracer)
         return tracer
@@ -309,7 +309,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
 @lru_cache()
 def make_jaxpr(
     f: Callable,
-    *avals_in: ShapedArray,
+    *avals_in: ArrayShape,
 ) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
     avals_in, in_tree = pytrees.tree_flatten(avals_in)
     f, out_tree = pytrees.flatten_fun(f, in_tree)

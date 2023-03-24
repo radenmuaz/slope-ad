@@ -91,7 +91,7 @@ class ConstRecipe(NamedTuple):
 
 
 class JaxprEqnRecipe(NamedTuple):
-    prim: LLOp
+    prim: Op
     tracers_in: List["Pamygrad.mygrad.RTialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[TensorShape]
@@ -134,20 +134,20 @@ class Pamygrad.mygrad.RTialEvalTrace(Trace):
             pval = Pamygrad.mygrad.RTialVal.unknown(raise_to_shaped(tracer.aval))
             return Pamygrad.mygrad.RTialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
-    def run_llop(self, LLOp, tracers, params):
+    def run_op(self, Op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return bind(LLOp, *map(full_lower, tracers), **params)
-        rule = pamygrad.mygrad.RTial_eval_rules.get(LLOp)
+            return bind(Op, *map(full_lower, tracers), **params)
+        rule = pamygrad.mygrad.RTial_eval_rules.get(Op)
         if rule:
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = shape_forward_rules[LLOp](*avals_in, **params)
+        avals_out = shape_forward_rules[Op](*avals_in, **params)
         tracers_out = [
             Pamygrad.mygrad.RTialEvalTracer(self, Pamygrad.mygrad.RTialVal.unknown(aval), None)
             for aval in avals_out
         ]
-        eqn = JaxprEqnRecipe(LLOp, tracers_in, params, avals_out, map(ref, tracers_out))
+        eqn = JaxprEqnRecipe(Op, tracers_in, params, avals_out, map(ref, tracers_out))
         for t in tracers_out:
             t.recipe = eqn
         return tracers_out
@@ -300,7 +300,7 @@ def pamygrad.mygrad.RTial_eval_jaxpr(
     map(write, in_unknowns, jaxpr.in_binders)
     for eqn in jaxpr.eqns:
         unks_in = map(read, eqn.inputs)
-        rule = pamygrad.mygrad.RTial_eval_jaxpr_rules.get(eqn.LLOp)
+        rule = pamygrad.mygrad.RTial_eval_jaxpr_rules.get(eqn.Op)
         if rule:
             eqn1, eqn2, unks_out, res = rule(unks_in, eqn)
             eqns1.append(eqn1)
@@ -309,7 +309,7 @@ def pamygrad.mygrad.RTial_eval_jaxpr(
             map(write, unks_out, eqn.out_binders)
         elif any(unks_in):
             inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, eqn.inputs)]
-            eqns2.append(JaxprEqn(eqn.LLOp, inputs, eqn.params, eqn.out_binders))
+            eqns2.append(JaxprEqn(eqn.Op, inputs, eqn.params, eqn.out_binders))
             map(pamygrad.mygrad.RTial(write, True), eqn.out_binders)
         else:
             eqns1.append(eqn)

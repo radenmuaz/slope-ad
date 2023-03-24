@@ -1,7 +1,7 @@
-from myad.llops.base import LLOp
+from myad.ops.base import UnaryOp
 
 
-class Identity(LLOp):
+class Identity(UnaryOp):
     @staticmethod
     def forward(x):
         return [x]

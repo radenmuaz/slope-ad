@@ -1,9 +1,9 @@
-from myad.llops.base import LLOp
+from myad.ops.base import ReduceOp
 from myad.tensor_shape import TensorShape
 from typing import Tuple, List
 
 
-class Sum(LLOp):
+class Sum(ReduceOp):
     @staticmethod
     def forward(x, *, axis):
         return [x.sum(axis)]

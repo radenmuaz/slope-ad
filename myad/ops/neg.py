@@ -1,9 +1,9 @@
-from myad.llops.base import LLOp
+from myad.ops.base import UnaryOp
 from myad.tensor_shape import TensorShape
 from typing import List
 
 
-class Neg(LLOp):
+class Neg(UnaryOp):
     @staticmethod
     def forward(x):
         return [-x]

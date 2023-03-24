@@ -1,9 +1,9 @@
-from myad.llops.base import LLOp
+from myad.ops.base import ShapeOp
 from myad.tensor_shape import TensorShape
 from typing import Tuple, List, Sequence
 
 import numpy as np
-class Expand(LLOp):
+class Expand(ShapeOp):
     @staticmethod
     def forward(x, *, shape, axes):
         for axis in sorted(axes):

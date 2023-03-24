@@ -1,6 +1,6 @@
 import numpy as np
-Tensor = np.ndarray
-new_tensor = np.array
+Tensor = np
+
 # # import numpy as np
 
 # # class Tensor:
@@ -248,7 +248,7 @@ new_tensor = np.array
 # ## Public functions
 
 
-# def new_tensor(obj, dtype=None, copy=True, order=None):
+# def Tensor.array(obj, dtype=None, copy=True, order=None):
 #     """ Tensor(obj, dtype=None, copy=True, order=None)
 
 #     Create a new Tensor. If obj is an Tensor, and copy=False, a view

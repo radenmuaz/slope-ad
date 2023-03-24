@@ -88,10 +88,10 @@ class Runtime:
         else:  # val._trace.level == level
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
-    def bind(self, llop, *args, **params):
+    def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
         tracers = [self.full_raise(top_trace, arg) for arg in args]
-        outs = top_trace.run_llop(llop, tracers, params)
+        outs = top_trace.run_op(op, tracers, params)
         lowered = [self.full_lower(out) for out in outs]
         return lowered
 

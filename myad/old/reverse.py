@@ -66,7 +66,7 @@ def eval_jaxpr_transposed(
     for eqn in jaxpr.eqns[::-1]:
         primals_in = map(read_primal, eqn.inputs)
         cts_in = map(read_cotangent, eqn.out_binders)
-        rule = transpose_rules[eqn.LLOp]
+        rule = transpose_rules[eqn.Op]
         cts_out = rule(cts_in, *primals_in, **eqn.params)
         map(write_cotangent, eqn.inputs, cts_out)
 

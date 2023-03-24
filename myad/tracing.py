@@ -23,9 +23,9 @@ import operator as op
 
 from myad.tensor import Tensor
 import myad
-from myad import llops, utils, pytrees
+from myad import ops, utils, pytrees
 from myad.tensor_shape import TensorShape
-from myad.llops.base import LLOp
+from myad.ops.base import Op
 import itertools as it
 from myad.pretty_print import PPrint, pp, vcat
 from myad import utils
@@ -53,7 +53,7 @@ class Trace:
     def lift(self, val):
         raise NotImplementedError
 
-    def run_llop(self, llop, tracers, params):
+    def run_op(self, op, tracers, params):
         raise NotImplementedError
 
 
@@ -82,24 +82,24 @@ class Tracer:
         return len(self.shape)
 
     def __neg__(self):
-        return myad.RT.bind1(llops.Neg, self)
+        return myad.RT.bind1(ops.Neg, self)
 
     def __add__(self, other):
-        return myad.RT.bind1(llops.Add, self, other)
+        return myad.RT.bind1(ops.Add, self, other)
 
     def __radd__(self, other):
-        return myad.RT.bind1(llops.Add, other, self)
+        return myad.RT.bind1(ops.Add, other, self)
 
     def __mul__(self, other):
-        return myad.RT.bind1(llops.Mul, self, other)
+        return myad.RT.bind1(ops.Mul, self, other)
 
     def __rmul__(self, other):
-        return myad.RT.bind1(llops.Mul, other, self)
+        return myad.RT.bind1(ops.Mul, other, self)
 
     def expand(self, shape, axes):
-        return myad.RT.bind1(llops.Expand, self, shape, axes)
+        return myad.RT.bind1(ops.Expand, self, shape, axes)
     def transpose(self, perm):
-        return myad.RT.bind1(llops.Transpose, self, perm)
+        return myad.RT.bind1(ops.Transpose, self, perm)
 
     def __bool__(self):
         return self.aval._bool(self)
@@ -113,7 +113,7 @@ class Tracer:
             return x.aval
         # print(f"warn: {x} ({type(x)}) is not Tracer")
         elif type(x) in cls.TYPES:
-            return Tensor(x)
+            return Tensor.array(x)
         else:
             raise TypeError(x)
 
@@ -144,9 +144,9 @@ class EagerEvalTrace(Trace):
 
     lift = pure
 
-    def run_llop(self, llop, tracers, params):
+    def run_op(self, op, tracers, params):
         val_ins  = [t.val for t in tracers]
-        eval_outs = llop.forward(*val_ins, **params)
+        eval_outs = op.forward(*val_ins, **params)
         return [EagerEvalTracer(self, x,) for x in eval_outs]
 
 
@@ -157,34 +157,9 @@ def mapped_aval(batch_dim, aval):
     del shape[batch_dim]
     return TensorShape(tuple(shape), aval.dtype)
 
+not_mapped = None
 
-def move_batch_axis(axis_size, src, dst, x):
-    if src is not_mapped:
-        target_shape = list(np.shape(x))
-        target_shape.insert(dst, axis_size)
-        return x.expand(target_shape, [dst])
-    elif src == dst:
-        return x
-    else:
-        return moveaxis(x, src, dst)
-
-
-def moveaxis(x, src: int, dst: int):
-    perm = [i for i in range(np.ndim(x)) if i != src]
-    perm.insert(dst, src)
-    return x.transpose(perm)
-
-
-
-class NotMapped:
-    pass
-
-
-not_mapped = NotMapped()
-
-BatchAxis = Union[NotMapped, int]
-
-
+BatchAxis = Union[None, int]
 
 class BatchTracer(Tracer):
     def __init__(self, trace, val, batch_dim: BatchAxis):
@@ -209,9 +184,9 @@ class BatchTracer(Tracer):
 class BatchTrace(Trace):
     pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
 
-    def run_llop(self, llop, tracers, params):
+    def run_op(self, op, tracers, params):
         vals_in, bdims_in = utils.unzip2((t.val, t.batch_dim) for t in tracers)
-        val_outs, bdim_outs = llop.vmap(self.axis_size, vals_in, bdims_in, **params)
+        val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
         return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
 
     @property
@@ -219,6 +194,18 @@ class BatchTrace(Trace):
         return self.main.global_data
 
 def vmap_flat(f, in_axes, *args):
+    def move_batch_axis(axis_size, src, dst, x):
+        if src is not_mapped:
+            target_shape = list(np.shape(x))
+            target_shape.insert(dst, axis_size)
+            return Tensor.broadcast_to(x, target_shape, [dst])
+        elif src == dst:
+            return x
+        else:
+            perm = [i for i in range(np.ndim(x)) if i != src]
+            perm.insert(dst, src)
+            return x.transpose(perm)
+            # return moveaxis(x, src, dst)
     (axis_size,) = {x.shape[ax] for x, ax in zip(args, in_axes) if ax is not not_mapped}
     with myad.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
@@ -233,6 +220,7 @@ def vmap_flat(f, in_axes, *args):
         move_batch_axis(axis_size, bdim, 0, val_out)
         for val_out, bdim in zip(vals_out, bdims_out)
     ]
+    breakpoint()
     return outs_transposed
 
 
@@ -253,8 +241,8 @@ def vmap(f, in_axes):
 # class EagerEvalTrace(Trace):
 #     pure = lift = lambda self, x: x
 
-#     def run_llop(self, llop, tracers, params):
-#         return llop.forward(*tracers, **params)
+#     def run_op(self, op, tracers, params):
+#         return op.forward(*tracers, **params)
 
 
 
@@ -277,9 +265,9 @@ class JVPTrace(Trace):
 
     lift = pure
 
-    def run_llop(self, llop, tracers, params):
+    def run_op(self, op, tracers, params):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
-        primal_outs, tangent_outs = llop.jvp(primals_in, tangents_in, **params)
+        primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
 
 def jvp_flat(f, primals, tangents):
@@ -336,7 +324,7 @@ Atom = Union[Var, Lit]
 
 
 class JaxprEqn(NamedTuple):
-    llop: LLOp
+    op: Op
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Var]
@@ -390,7 +378,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = eqn.llop.shape_forward(*in_types, **eqn.params)
+        out_types = eqn.op.shape_forward(*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -428,7 +416,7 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
     map(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
         in_vals = map(read, eqn.inputs)
-        outs = myad.RT.bind(eqn.LLOp, *in_vals, **eqn.params)
+        outs = myad.RT.bind(eqn.Op, *in_vals, **eqn.params)
         map(write, eqn.out_binders, outs)
     return map(read, jaxpr.outs)
 
@@ -455,13 +443,13 @@ def var_str(names: DefaultDict[Var, str], v: Var) -> str:
 
 
 def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
-    rule = eqn.llop.pprint
+    rule = eqn.op.pprint
     # if rule() is not None:
     #     return rule(names, eqn)
     # else:
     lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
     rhs = (
-        pp(repr(eqn.llop.__class__))
+        pp(repr(eqn.op.__class__))
         >> pp_params(eqn.params)
         >> pp(
             " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
@@ -506,13 +494,13 @@ class JaxprTrace(Trace):
 
     pure = lift = get_or_make_const_tracer
 
-    def run_llop(self, LLOp, tracers, params):
+    def run_op(self, Op, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = LLOp.shape_forward(*avals_in, **params)
+        avals_out = Op.shape_forward(*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_eqn(JaxprEqn(LLOp, inputs, params, outvars))
+        self.builder.add_eqn(JaxprEqn(Op, inputs, params, outvars))
         return out_tracers
 
     @property
@@ -579,7 +567,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     literals = dict(zip(lit_binders, map(Lit, lit_vals)))
     new_eqns = [
         JaxprEqn(
-            eqn.llop,
+            eqn.op,
             [literals.get(x, x) for x in eqn.inputs],
             eqn.params,
             eqn.out_binders,

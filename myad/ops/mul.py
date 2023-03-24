@@ -1,8 +1,8 @@
-from myad.llops.base import LLOp
+from myad.ops.base import BinaryOp
 from myad.tensor_shape import TensorShape
 from typing import List
 
-class Mul(LLOp):
+class Mul(BinaryOp):
     @staticmethod
     def forward(x, y):
         return [x * y]

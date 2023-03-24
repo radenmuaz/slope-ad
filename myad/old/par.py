@@ -30,9 +30,9 @@ class BatchTracer(Tracer):
 class BatchTrace(Trace):
     pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
 
-    def run_llop(self, LLOp, tracers, params):
+    def run_op(self, Op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
-        vmap_rule = vmap_rules[LLOp]
+        vmap_rule = vmap_rules[Op]
         val_outs, bdim_outs = vmap_rule(self.axis_size, vals_in, bdims_in, **params)
         return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
 

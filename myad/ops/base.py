@@ -58,7 +58,7 @@ class ReduceOp(Op):
         (x,), (x_bdim,) = vals_in, dims_in
         new_axis = tuple(ax + (x_bdim <= ax) for ax in axis)
         out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
-        return [cls.forward(x, new_axis)], [out_bdim]
+        return [myad.RT.bind1(cls, x, new_axis)], [out_bdim]
 
 class ShapeOp(Op):
     pass

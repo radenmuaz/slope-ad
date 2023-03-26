@@ -1,5 +1,6 @@
 import numpy as np
 Tensor = np
+# Tensor.expand = Tensor.broadcast_to
 
 # # import numpy as np
 

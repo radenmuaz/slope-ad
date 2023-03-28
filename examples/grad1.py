@@ -28,7 +28,6 @@ def add_one_to_a_scalar(scalar):
   return Tensor.array(1) + scalar
 
 vector_in = np.arange(3.)
-breakpoint()
 vector_out = myad.vmap(add_one_to_a_scalar, (0,))(vector_in)
 
 print(vector_in)

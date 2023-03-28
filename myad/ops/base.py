@@ -1,25 +1,34 @@
 import myad
-from myad import tracing
 from myad.tensor import Tensor
+from myad.tensor_shape import TensorShape
+from typing import List, Tuple, Any
+from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
 
-class Op:
+
+class Op(ABC):
     @staticmethod
-    def forward(*args):
+    @abstractmethod
+    def eval(*args):
         raise NotImplementedError
 
     @staticmethod
+    @abstractmethod
     def vmap(*args):
         raise NotImplementedError
 
     @staticmethod
+    @abstractmethod
     def jvp(*args):
         raise NotImplementedError
 
     @staticmethod
-    def shape_forward(*args):
+    @abstractmethod
+    def shape_eval(*args: Any, **kwargs: Any) -> Any :
         raise NotImplementedError
 
     @staticmethod
+    @abstractmethod
     def pprint():
         return None
 
@@ -27,7 +36,11 @@ class UnaryOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in):
         (x,), (x_bdim,) = vals_in, dims_in
-        return [cls.forward(x)], [x_bdim]
+        return [cls.eval(x)], [x_bdim]
+
+    @staticmethod
+    def shape_eval(x: TensorShape) -> List[TensorShape]:
+        return [TensorShape(x.shape, x.dtype)]
 
 class BinaryOp(Op):
     @classmethod
@@ -52,6 +65,14 @@ class BinaryOp(Op):
                 y = move_batch_axis(axis_size, y_bdim, x_bdim, y)
         return [myad.RT.bind1(cls, x, y)], [x_bdim]
 
+    @staticmethod
+    def shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
+        if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
+            raise TypeError
+        if  TensorShape.from_numpy(x) !=  TensorShape.from_numpy(y):
+            raise TypeError
+        return [TensorShape(x.shape, x.dtype)]
+
 class ReduceOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, *, axis):
@@ -60,5 +81,14 @@ class ReduceOp(Op):
         out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
         return [myad.RT.bind1(cls, x, new_axis)], [out_bdim]
 
+
+    @staticmethod
+    def shape_eval(x: TensorShape, *, axis: Tuple[int, ...]) -> List[TensorShape]:
+        axis_ = set(axis)
+        new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
+        return [TensorShape(tuple(new_shape), x.dtype)]
+
+
 class ShapeOp(Op):
     pass
+

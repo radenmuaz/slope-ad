@@ -142,7 +142,7 @@ class Pamygrad.mygrad.RTialEvalTrace(Trace):
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = shape_forward_rules[Op](*avals_in, **params)
+        avals_out = shape_eval_rules[Op](*avals_in, **params)
         tracers_out = [
             Pamygrad.mygrad.RTialEvalTracer(self, Pamygrad.mygrad.RTialVal.unknown(aval), None)
             for aval in avals_out

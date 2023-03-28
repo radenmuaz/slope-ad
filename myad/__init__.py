@@ -1,7 +1,2 @@
-from myad import runtime, tracing
-RT = runtime.Runtime.active
-
-vmap = tracing.vmap
-jvp = tracing.jvp
-make_jaxpr = tracing.make_jaxpr
-
+from myad.core import Runtime, vmap, jvp, make_jaxpr
+RT = Runtime()

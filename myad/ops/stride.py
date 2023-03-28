@@ -1,7 +1,7 @@
 from myad.ops.base import ShapeOp
 
 
-class Transpose(ShapeOp):
+class Stride(ShapeOp):
     @staticmethod
-    def forward(x, *, perm):
+    def eval(x, *, perm):
         return [x.transpose(perm)]

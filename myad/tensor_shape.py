@@ -19,11 +19,11 @@ class TensorShape:
 
     @staticmethod
     def _bool(tracer):
-        raise Exception("TensorShape can't be unambiguously convemygrad.RTed to bool")
+        raise Exception("TensorShape can't be unambiguously converted to bool")
 
     @staticmethod
     def _nonzero(tracer):
-        raise Exception("TensorShape can't be unambiguously convemygrad.RTed to bool")
+        raise Exception("TensorShape can't be unambiguously converted to bool")
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'

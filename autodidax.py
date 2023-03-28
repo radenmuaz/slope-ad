@@ -786,7 +786,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
 
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
-        out_types = shape_forward_rules[eqn.Op](*in_types, **eqn.params)
+        out_types = shape_eval_rules[eqn.Op](*in_types, **eqn.params)
         for out_binder, out_type in zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
@@ -873,7 +873,7 @@ class JaxprTrace(Trace):
 
     def run_op(self, Op, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = shape_forward_rules[Op](*avals_in, **params)
+        avals_out = shape_eval_rules[Op](*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
@@ -885,7 +885,7 @@ class JaxprTrace(Trace):
         return self.main.global_data
 
 
-shape_forward_rules = {}
+shape_eval_rules = {}
 
 
 class JaxprBuilder:
@@ -960,7 +960,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     return new_jaxpr, new_consts
 
 
-def binop_shape_forward(x: TensorShape, y: TensorShape) -> List[TensorShape]:
+def binop_shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
     if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
         raise TypeError
     if raise_to_shaped(x) != raise_to_shaped(y):
@@ -968,30 +968,30 @@ def binop_shape_forward(x: TensorShape, y: TensorShape) -> List[TensorShape]:
     return [TensorShape(x.shape, x.dtype)]
 
 
-shape_forward_rules[add_p] = binop_shape_forward
-shape_forward_rules[mul_p] = binop_shape_forward
+shape_eval_rules[add_p] = binop_shape_eval
+shape_eval_rules[mul_p] = binop_shape_eval
 
 
-def compare_shape_forward(x: TensorShape, y: TensorShape) -> List[TensorShape]:
+def compare_shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
     if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
         raise TypeError
     if x.shape != y.shape:
         raise TypeError
     return [TensorShape(x.shape, np.dtype("bool"))]
-    shape_forward_rules[greater_p] = compare_shape_forward
-    shape_forward_rules[less_p] = compare_shape_forward
+    shape_eval_rules[greater_p] = compare_shape_eval
+    shape_eval_rules[less_p] = compare_shape_eval
 
 
-def vectorized_unop_shape_forward(x: TensorShape) -> List[TensorShape]:
+def vectorized_unop_shape_eval(x: TensorShape) -> List[TensorShape]:
     return [TensorShape(x.shape, x.dtype)]
 
 
-shape_forward_rules[sin_p] = vectorized_unop_shape_forward
-shape_forward_rules[cos_p] = vectorized_unop_shape_forward
-shape_forward_rules[neg_p] = vectorized_unop_shape_forward
+shape_eval_rules[sin_p] = vectorized_unop_shape_eval
+shape_eval_rules[cos_p] = vectorized_unop_shape_eval
+shape_eval_rules[neg_p] = vectorized_unop_shape_eval
 
 
-def reduce_sum_shape_forward(
+def reduce_sum_shape_eval(
     x: TensorShape, *, axis: Tuple[int, ...]
 ) -> List[TensorShape]:
     axis_ = set(axis)
@@ -999,16 +999,16 @@ def reduce_sum_shape_forward(
     return [TensorShape(tuple(new_shape), x.dtype)]
 
 
-shape_forward_rules[reduce_sum_p] = reduce_sum_shape_forward
+shape_eval_rules[reduce_sum_p] = reduce_sum_shape_eval
 
 
-def broadcast_shape_forward(
+def broadcast_shape_eval(
     x: TensorShape, *, shape: Sequence[int], axes: Sequence[int]
 ) -> List[TensorShape]:
     return [TensorShape(tuple(shape), x.dtype)]
 
 
-shape_forward_rules[broadcast_p] = broadcast_shape_forward
+shape_eval_rules[broadcast_p] = broadcast_shape_eval
 
 
 @lru_cache()  # TensorShapes are hashable
@@ -1350,7 +1350,7 @@ def unmapped_aval(
         return TensorShape(tuple(shape), aval.dtype)
 
 
-def xla_call_shape_forward_rule(*in_types, jaxpr, num_consts):
+def xla_call_shape_eval_rule(*in_types, jaxpr, num_consts):
     del num_consts  # Unused
     jaxpr_type = typecheck_jaxpr(jaxpr)
     if not all(t1 == t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
@@ -1358,7 +1358,7 @@ def xla_call_shape_forward_rule(*in_types, jaxpr, num_consts):
     return jaxpr_type.out_types
 
 
-shape_forward_rules[xla_call_p] = xla_call_shape_forward_rule
+shape_eval_rules[xla_call_p] = xla_call_shape_eval_rule
 
 
 def xla_call_translation(c, in_avals, in_vals, *, jaxpr, num_consts):
@@ -1578,7 +1578,7 @@ class partialEvalTrace(Trace):
             return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = shape_forward_rules[Op](*avals_in, **params)
+        avals_out = shape_eval_rules[Op](*avals_in, **params)
         tracers_out = [
             partialEvalTracer(self, partialVal.unknown(aval), None)
             for aval in avals_out
@@ -2080,7 +2080,7 @@ def cond_vmap_rule(axis_size, vals_in, dims_in, *, true_jaxpr, false_jaxpr):
 vmap_rules[cond_p] = cond_vmap_rule
 
 
-def cond_shape_forward(pred_type, *in_types, true_jaxpr, false_jaxpr):
+def cond_shape_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
     if pred_type != TensorShape((), np.dtype("bool")):
         raise TypeError
     jaxpr_type = typecheck_jaxpr(true_jaxpr)
@@ -2091,7 +2091,7 @@ def cond_shape_forward(pred_type, *in_types, true_jaxpr, false_jaxpr):
     return jaxpr_type.out_types
 
 
-shape_forward_rules[cond_p] = cond_shape_forward
+shape_eval_rules[cond_p] = cond_shape_eval
 
 
 def cond_translation(c, in_avals, in_vals, *, true_jaxpr, false_jaxpr):

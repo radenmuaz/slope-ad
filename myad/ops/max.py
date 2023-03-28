@@ -1,4 +1,5 @@
 from myad.ops.base import ReduceOp
+from myad.tensor_shape import TensorShape
 from typing import Tuple, List
 
 

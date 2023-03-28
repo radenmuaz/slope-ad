@@ -210,7 +210,7 @@ def unmapped_aval(
         return TensorShape(tuple(shape), aval.dtype)
 
 
-def xla_call_shape_forward_rule(*in_types, jaxpr, num_consts):
+def xla_call_shape_eval_rule(*in_types, jaxpr, num_consts):
     del num_consts  # Unused
     jaxpr_type = typecheck_jaxpr(jaxpr)
     if not all(t1 == t2 for t1, t2 in zip(jaxpr_type.in_types, in_types)):
@@ -218,7 +218,7 @@ def xla_call_shape_forward_rule(*in_types, jaxpr, num_consts):
     return jaxpr_type.out_types
 
 
-shape_forward_rules[xla_call_p] = xla_call_shape_forward_rule
+shape_eval_rules[xla_call_p] = xla_call_shape_eval_rule
 
 
 def xla_call_translation(c, in_avals, in_vals, *, jaxpr, num_consts):

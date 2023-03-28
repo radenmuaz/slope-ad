@@ -1,8 +1,7 @@
 from myad.ops.base import ShapeOp
-import numpy as np
 
 
-class Reshape(ShapeOp):
+class Crop(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
-        return [np.reshape(x, perm)]
+        return [x.transpose(perm)]

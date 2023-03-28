@@ -45,10 +45,10 @@ class PyTreeDef(NamedTuple):
     node_metadata: Hashable
     child_treedefs: Tuple["PyTreeDef", ...]
 
-    class Leaf:
-        pass
+class Leaf:
+    pass
 
-    leaf = Leaf()
+leaf = Leaf()
 
 
 def tree_flatten(x: Any) -> Tuple[List[Any], Any]:
@@ -60,7 +60,7 @@ def tree_flatten(x: Any) -> Tuple[List[Any], Any]:
             flattened = itertools.chain.from_iterable(children_flat)
             return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
         else:
-            return [x], PyTreeDef.leaf
+            return [x], leaf
 
     children_iter, treedef = _tree_flatten(x)
     return list(children_iter), treedef
@@ -68,7 +68,7 @@ def tree_flatten(x: Any) -> Tuple[List[Any], Any]:
 
 def tree_unflatten(treedef: PyTreeDef, xs: List[Any]) -> Any:
     def _tree_unflatten(treedef: PyTreeDef, xs: Iterator) -> Any:
-        if treedef is PyTreeDef.leaf:
+        if treedef is leaf:
             return next(xs)
         else:
             children = (_tree_unflatten(t, xs) for t in treedef.child_treedefs)

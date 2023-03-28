@@ -9,17 +9,16 @@ from myad.pytrees import NodeType
 
 
 class Runtime:
-    RTs = []
+    RTs: List["Runtime"] = []
 
-    @classmethod
     @property
-    def active(cls, *args, **kwargs):
-        if len(cls.RTs) == 0:
+    def active(self, *args, **kwargs):
+        if len(self.RTs) == 0:
             print("init new runtime")
-            cls(*args, **kwargs)
-        return cls.RTs[-1]
+            self(*args, **kwargs)
+        return self.RTs[-1]
 
-    def __init__(self, root_trace=MainTrace(0, tracing.EagerEvalTrace, None)):
+    def __init__(self, root_trace=MainTrace(0, tracing.EvalTrace, None)):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.node_types = dict()

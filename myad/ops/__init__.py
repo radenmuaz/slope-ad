@@ -11,4 +11,3 @@ from myad.ops.sum import Sum
 # ShapeOps
 from myad.ops.expand import Expand
 from myad.ops.reshape import Reshape
-from myad.ops.transpose import Transpose

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 import numpy as np
 
 from typing import (
+    Sequence,
     Callable,
     NamedTuple,
     Dict,
@@ -130,12 +131,12 @@ class Leaf:
 leaf = Leaf()
 
 
-def tree_flatten(x: Any) -> Tuple[List[Any], Any]:
+def tree_flatten(x: Any) -> Any:
     def _tree_flatten(x: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
         node_type = myad.RT.node_types.get(type(x))
         if node_type:
             node_metadata, children = node_type.to_iterable(x)
-            children_flat, child_trees = unzip2(map(_tree_flatten, children))
+            children_flat, child_trees = unzip2(mymap(_tree_flatten, children))
             flattened = itertools.chain.from_iterable(children_flat)
             return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
         else:
@@ -321,7 +322,7 @@ class BatchTrace(Trace):
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
-        return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
+        return [BatchTracer(self, x, bd) for x, bd in myzip(val_outs, bdim_outs)]
 
     @property
     def axis_size(self):
@@ -340,19 +341,19 @@ def vmap_flat(f, in_axes, *args):
             perm.insert(dst, src)
             return x.transpose(perm)
             # return moveaxis(x, src, dst)
-    (axis_size,) = {x.shape[ax] for x, ax in zip(args, in_axes) if ax is not not_mapped}
+    (axis_size,) = {x.shape[ax] for x, ax in myzip(args, in_axes) if ax is not not_mapped}
     with myad.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
             BatchTracer(trace, x, ax) if ax is not None else x
-            for x, ax in zip(args, in_axes)
+            for x, ax in myzip(args, in_axes)
         ]
         outs = f(*tracers_in)
         tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
     outs_transposed = [
         move_batch_axis(axis_size, bdim, 0, val_out)
-        for val_out, bdim in zip(vals_out, bdims_out)
+        for val_out, bdim in myzip(vals_out, bdims_out)
     ]
     return outs_transposed
 
@@ -401,12 +402,12 @@ class JVPTrace(Trace):
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
-        return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
+        return [JVPTracer(self, x, t) for x, t in myzip(primal_outs, tangent_outs)]
 
 def jvp_flat(f, primals, tangents):
     with myad.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
+        tracers_in = [JVPTracer(trace, x, t) for x, t in myzip(primals, tangents)]
         outs = f(*tracers_in)
         tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
         primals_out, tangents_out = unzip2(
@@ -438,6 +439,7 @@ def jacfwd(f, x):
     return vmap(pushfwd, (0,))(vecs_in)
 
 class Var:
+    val = None
     aval: TensorShape
 
     def __init__(self, aval):
@@ -454,19 +456,20 @@ class Lit:
 
 
 Atom = Union[Var, Lit]
+# Atom = Union[Var, Lit, Tracer]
 
 
 class JaxprEqn(NamedTuple):
     op: Op
     inputs: List[Atom]
     params: Dict[str, Any]
-    out_binders: List[Var]
+    out_binders: List[Atom]
 
 
 class Jaxpr(NamedTuple):
-    in_binders: List[Var]
+    in_binders: Any
     eqns: List[JaxprEqn]
-    outs: List[Atom]
+    outs: Any
 
     def __hash__(self):
         return id(self)
@@ -513,7 +516,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
-        for out_binder, out_type in zip(eqn.out_binders, out_types):
+        for out_binder, out_type in myzip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
         for out_binder in eqn.out_binders:
@@ -547,12 +550,12 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
         assert v not in env  # single-assignment
         env[v] = val
 
-    map(write, jaxpr.in_binders, args)
+    mymap(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
-        in_vals = map(read, eqn.inputs)
-        outs = myad.RT.bind(eqn.Op, *in_vals, **eqn.params)
-        map(write, eqn.out_binders, outs)
-    return map(read, jaxpr.outs)
+        in_vals = mymap(read, eqn.inputs)
+        outs = myad.RT.bind(eqn.op, *in_vals, **eqn.params)
+        mymap(write, eqn.out_binders, outs)
+    return mymap(read, jaxpr.outs)
 
 
 def jaxpr_as_fun(jaxpr: Jaxpr):
@@ -566,13 +569,16 @@ def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
 
 def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     assert len(bs) == len(l)
-    lists = lst1, lst2 = [], []
-    for b, x in zip(bs, l):
+    lst1: List[Any] = []
+    lst2: List[Any] = []
+    lists = lst1, lst2
+    # lists = lst1: List[Any], lst2: List[Any] = list(), list()
+    for b, x in myzip(bs, l):
         lists[b].append(x)
     return lst1, lst2
 
 
-def var_str(names: DefaultDict[Var, str], v: Var) -> str:
+def var_str(names: DefaultDict[Var, str], v) -> str:
     return f"{names[v]}:{v.aval.str_short()}"
 
 
@@ -645,7 +651,7 @@ class JaxprTrace(Trace):
 class JaxprBuilder:
     eqns: List[JaxprEqn]
     tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, JaxprTracer]
+    const_tracers: Dict[int, Tracer]
     constvals: Dict[Var, Any]
     tracers: List[JaxprTracer]
 
@@ -681,7 +687,7 @@ class JaxprBuilder:
         return var
 
     def build(
-        self, in_tracers: List[JaxprTracer], out_tracers: List[JaxprTracer]
+        self, in_tracers: Any, out_tracers: Any
     ) -> Tuple[Jaxpr, List[Any]]:
         constvars, constvals = unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
@@ -698,7 +704,7 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     scalars = [type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts]
     new_const_binders, lit_binders = partition_list(scalars, const_binders)
     new_consts, lit_vals = partition_list(scalars, consts)
-    literals = dict(zip(lit_binders, map(Lit, lit_vals)))
+    literals = dict(zip(lit_binders, mymap(Lit, lit_vals)))
     new_eqns = [
         JaxprEqn(
             eqn.op,
@@ -748,7 +754,7 @@ class Runtime:
         )
         self.node_types[dict] = NodeType(
             str(dict),
-            lambda d: map(tuple, unzip2(sorted(d.items()))),
+            lambda d: mymap(tuple, unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
 
@@ -825,19 +831,17 @@ def unzip2(pairs):
     return lst1, lst2
 
 
-map_ = map
 
 
-def map(f, *xs):
-    return list(map_(f, *xs))
+def mymap(f: Any, *xs: Any) -> Any:
+    return list(map(f, *xs))
 
 
-zip_ = zip
 
 
-def zip(*args):
-    fst, *rest = args = map(list, args)
+def myzip(*args: Any)-> Any:
+    fst, *rest = args = mymap(list, args)
     n = len(fst)
     for arg in rest:
         assert len(arg) == n
-    return list(zip_(*args))
+    return list(zip(*args))

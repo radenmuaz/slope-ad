@@ -40,7 +40,7 @@ import operator as op
 from myad.tensor import Tensor
 import myad
 from myad import ops
-from myad.tensor_shape import TensorShape
+from myad.tensor_shape  import TensorShape
 from myad.ops.base import Op
 import itertools as it
 import string
@@ -53,7 +53,6 @@ from typing import Callable, Type, Hashable, Dict, Iterable, Iterator
 from typing import Union
 from typing import Set
 import string
-
 
 class PPrint:
     lines: List[Tuple[int, str]]

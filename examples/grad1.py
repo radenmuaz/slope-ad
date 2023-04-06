@@ -1,6 +1,5 @@
 import myad
 import numpy as np
-from myad.tensor_shape import TensorShape
 
 from myad.tensor import Tensor
 # from mygrad import fwd

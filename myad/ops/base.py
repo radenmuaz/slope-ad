@@ -1,7 +1,7 @@
 import myad
 from myad.tensor import Tensor
-from myad.tensor_shape import TensorShape
-from typing import List, Tuple, Any
+from myad.tensor_shape  import TensorShape
+from typing import List, Tuple, Sequence, Any
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 
@@ -92,3 +92,195 @@ class ReduceOp(Op):
 class ShapeOp(Op):
     pass
 
+
+#-----------------------
+# UnaryOps
+#-----------------------
+
+
+class Identity(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [x]
+
+
+class Exp(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [Tensor.exp(x)]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        return [Tensor.exp(x)], [x_dot * Tensor.exp(x)]
+
+class Log(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [Tensor.log(x)]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        return [Tensor.log(x)], [x_dot / x]
+
+
+class Neg(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [-x]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        return [-x], [-x_dot]
+
+
+
+#-----------------------
+# BinaryOps
+#-----------------------
+
+class Add(BinaryOp):
+    @staticmethod
+    def eval(x, y):
+        return [x + y]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x + y], [x_dot + y_dot]
+
+
+class Sub(BinaryOp):
+    @staticmethod
+    def eval(x, y):
+        return [x - y]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x + y], [x_dot + y_dot]
+
+class Mul(BinaryOp):
+    @staticmethod
+    def eval(x, y):
+        return [x * y]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x * y], [x_dot * y + x * y_dot]
+
+    @staticmethod
+    def T(ct, x, y):
+        z_bar, = ct
+        assert (x is None) ^ (y is None)
+        return [(z_bar * y), None] if x is None else [None, (x * z_bar)]
+
+
+class Div(BinaryOp):
+    @staticmethod
+    def eval(x, y):
+        return [x / y]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
+
+
+class Pow(BinaryOp):
+    @staticmethod
+    def eval(x, y):
+        return [x ** y]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x * y], [x_dot * y + x * y_dot]
+
+
+#-----------------------
+# ReduceOps
+#-----------------------
+
+class Max(ReduceOp):
+    @staticmethod
+    def eval(x, *, axis):
+        return [x.sum(axis)]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x * y], [x_dot * y + x * y_dot]
+
+
+
+class Sum(ReduceOp):
+    @staticmethod
+    def eval(x, *, axis):
+        return [x.sum(axis)]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x, y), (x_dot, y_dot) = primals, tangents
+        return [x * y], [x_dot * y + x * y_dot]
+
+
+#-----------------------
+# ShapeOps
+#-----------------------
+
+class Expand(ShapeOp):
+    @staticmethod
+    def eval(x, *, shape, axes):
+        for axis in sorted(axes):
+            # out_ndim = len(axis) + x.ndim
+            # shape_it = iter(x.shape)
+            # shape = [1 if ax in axis else next(shape_it)
+            #          for ax in range(out_ndim)]
+            # x = x.reshape(shape)
+            x = Tensor.expand_dims(x, axis)
+        return [x.broadcast(shape)]
+
+    # @staticmethod
+    # def jvp(primals, tangents):
+    #     (x, y), (x_dot, y_dot) = primals, tangents
+    #     return [x * y], [x_dot * y + x * y_dot]
+
+    @staticmethod
+    def shape_eval(
+        x: TensorShape, shape: Sequence[int], axes: Sequence[int]
+    ) -> List[TensorShape]:
+        return [TensorShape(tuple(shape), x.dtype)]
+
+
+
+class Crop(ShapeOp):
+    @staticmethod
+    def eval(x, *, perm):
+        return [x.transpose(perm)]
+
+
+
+
+class Reshape(ShapeOp):
+    @staticmethod
+    def eval(x, *, perm):
+        return [np.reshape(x, perm)]
+
+
+
+
+class Permute(ShapeOp):
+    @staticmethod
+    def eval(x, *, perm):
+        return [x.transpose(perm)]
+
+
+
+class Pad(ShapeOp):
+    @staticmethod
+    def eval(x, *, perm):
+        return [x.transpose(perm)]

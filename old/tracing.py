@@ -23,16 +23,18 @@ import operator as op
 
 from myad.tensor import Tensor
 import myad
-from myad import ops, utils, pytrees
-from myad.tensor_shape import TensorShape
+from myad import ops, pytrees
+from myad.tensor_shape  import TensorShape
 from myad.ops.base import Op
 import itertools as it
 from myad.pretty_print import PPrint, pp, vcat
-from myad import utils
+from old import utils
 from myad import pytrees
 from myad.pytrees import PyTreeDef
 import string
 from functools import lru_cache
+
+from old import utils
 
 
 class MainTrace(NamedTuple):

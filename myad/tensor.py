@@ -1,4 +1,5 @@
 import numpy as np
+
 Tensor = np
 # Tensor.expand = Tensor.broadcast_to
 
@@ -125,7 +126,6 @@ Tensor = np
 # nan = float('nan')
 
 
-
 # def _convert_dtype(dtype, to='numpy'):
 #     """ Convert dtype, if could not find, pass as it was.
 #     """
@@ -243,7 +243,6 @@ Tensor = np
 # def _zerositer(n):
 #     for i in xrange(n):
 #         yield 0
-
 
 
 # ## Public functions
@@ -1503,8 +1502,6 @@ Tensor = np
 #             jump = len(comp)//shp[-1]
 #             n_comp +=1
 #         return comp
-
-
 
 
 # class nditer:

@@ -1,12 +1,14 @@
 import numpy as np
 from typing import Tuple
+
+from myad.tensor import Tensor
 class TensorShape:
     array_abstraction_level = 1
     shape: Tuple[int, ...]
     dtype: np.dtype
 
     @classmethod
-    def from_numpy(cls, aval):
+    def like(cls, aval):
         return cls(aval.shape, aval.dtype)
 
     def __init__(self, shape, dtype):
@@ -40,3 +42,22 @@ class TensorShape:
 
     def __repr__(self):
         return f"TensorShape(shape={self.shape}, dtype={self.dtype})"
+
+
+
+class ValuedTensorShape(TensorShape):
+    array_abstraction_level = 2
+    val: Tensor
+
+    def __init__(self, val):
+        self.val = val
+        self.shape = val.shape
+        self.dtype = val.dtype
+
+    @staticmethod
+    def _bool(tracer):
+        return bool(tracer.aval.val)
+
+    @staticmethod
+    def _nonzero(tracer):
+        return bool(tracer.aval.val)

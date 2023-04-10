@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Type, List, Tuple, Sequence, Optional, Any
 import numpy as np
 import operator as op
-import itemygrad.RTools as it
+import itertools as it
 from typing import Callable, Type, Hashable, Dict, Iterable, Iterator
 from typing import Union
 from typing import Set

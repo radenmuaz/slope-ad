@@ -2,6 +2,7 @@ import unittest
 
 import myad
 
+
 class TestOps(unittest.TestCase):
     def test_add(self):
         """
@@ -11,5 +12,6 @@ class TestOps(unittest.TestCase):
         result = sum(data)
         self.assertEqual(result, 6)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

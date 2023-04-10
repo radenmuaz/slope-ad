@@ -1,3 +1,4 @@
+
 def jit(f):
     def f_jitted(*args):
         avals_in = [raise_to_shaped(get_aval(x)) for x in args]
@@ -48,9 +49,7 @@ def xla_callable(hashable_jaxpr: IDHashable, hashable_consts: Tuple[IDHashable, 
     compiled = xb.get_backend(None).compile(
         xc._xla.mlir.xla_computation_to_mlir_module(c.build(out))
     )
-    return pamygrad.mygrad.RTial(
-        execute_compiled, compiled, [v.aval for v in jaxpr.outs]
-    )
+    return partial(execute_compiled, compiled, [v.aval for v in jaxpr.outs])
 
 
 def _xla_consts(c: xe.XlaBuilder, consts: List[Any]) -> List[xe.XlaOp]:
@@ -114,13 +113,13 @@ def direct_translation(op, c, in_avals, in_vals):
     return [op(*in_vals)]
 
 
-xla_translations[add_p] = pamygrad.mygrad.RTial(direct_translation, xops.Add)
-xla_translations[mul_p] = pamygrad.mygrad.RTial(direct_translation, xops.Mul)
-xla_translations[neg_p] = pamygrad.mygrad.RTial(direct_translation, xops.Neg)
-xla_translations[sin_p] = pamygrad.mygrad.RTial(direct_translation, xops.Sin)
-xla_translations[cos_p] = pamygrad.mygrad.RTial(direct_translation, xops.Cos)
-xla_translations[greater_p] = pamygrad.mygrad.RTial(direct_translation, xops.Gt)
-xla_translations[less_p] = pamygrad.mygrad.RTial(direct_translation, xops.Lt)
+xla_translations[add_p] = partial(direct_translation, xops.Add)
+xla_translations[mul_p] = partial(direct_translation, xops.Mul)
+xla_translations[neg_p] = partial(direct_translation, xops.Neg)
+xla_translations[sin_p] = partial(direct_translation, xops.Sin)
+xla_translations[cos_p] = partial(direct_translation, xops.Cos)
+xla_translations[greater_p] = partial(direct_translation, xops.Gt)
+xla_translations[less_p] = partial(direct_translation, xops.Lt)
 
 
 def reduce_sum_translation(c, in_avals, in_vals, *, axis):
@@ -153,7 +152,7 @@ def xla_call_jvp_rule(primals, tangents, *, jaxpr, num_consts):
         *primals,
         *tangents,
         jaxpr=new_jaxpr,
-        num_consts=len(new_consts)
+        num_consts=len(new_consts),
     )
     n = len(outs) // 2
     primals_out, tangents_out = outs[:n], outs[n:]
@@ -206,7 +205,7 @@ def unmapped_aval(
         return aval
     else:
         shape = list(aval.shape)
-        shape.insemygrad.mygrad.RT(batch_dim, axis_size)
+        shape.insemygrad.RT(batch_dim, axis_size)
         return TensorShape(tuple(shape), aval.dtype)
 
 
@@ -241,3 +240,54 @@ def destructure_tuple(c, tup):
 
 def handle_result(aval: TensorShape, buf):  # noqa: F811
     return DeviceArray(aval, buf)
+
+
+class DeviceArray:
+    buf: Any
+    aval: TensorShape
+
+    def __init__(self, aval, buf):
+        self.aval = aval
+        self.buf = buf
+
+    dtype = property(lambda self: self.aval.dtype)
+    shape = property(lambda self: self.aval.shape)
+    ndim = property(lambda self: self.aval.ndim)
+
+    def __array__(self):
+        return np.asarray(self.buf)
+
+    def __repr__(self):
+        return repr(np.asarray(self.buf))
+
+    def __str__(self):
+        return str(np.asarray(self.buf))
+
+    _neg = staticmethod(neg)
+    _add = staticmethod(add)
+    _radd = staticmethod(add)
+    _mul = staticmethod(mul)
+    _rmul = staticmethod(mul)
+    _gt = staticmethod(greater)
+    _lt = staticmethod(less)
+
+
+input_handlers[DeviceArray] = lambda x: x.buf
+
+jax_types.add(DeviceArray)
+
+
+def pprint_xla_call(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
+    lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
+    params_without_jaxpr = {k: v for k, v in eqn.params.items() if k != "jaxpr"}
+    rhs = (
+        pp(eqn.Op.name)
+        >> pp_params(params_without_jaxpr)
+        >> pp(
+            " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
+        )
+    )
+    return vcat([lhs >> pp(" = ") >> rhs, pp_jaxpr(eqn.params["jaxpr"]).indent(2)])
+
+
+pp_rules[xla_call_p] = pprint_xla_call

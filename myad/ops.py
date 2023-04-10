@@ -1,8 +1,7 @@
 import myad
 from myad.tensor import Tensor
-from myad.tensor_shape  import TensorShape
+from myad.tensor_shape import TensorShape
 from typing import List, Tuple, Sequence, Any
-from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 
 
@@ -24,13 +23,14 @@ class Op(ABC):
 
     @staticmethod
     @abstractmethod
-    def shape_eval(*args: Any, **kwargs: Any) -> Any :
+    def shape_eval(*args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
     def pprint():
         return None
+
 
 class UnaryOp(Op):
     @classmethod
@@ -41,6 +41,7 @@ class UnaryOp(Op):
     @staticmethod
     def shape_eval(x: TensorShape) -> List[TensorShape]:
         return [TensorShape(x.shape, x.dtype)]
+
 
 class BinaryOp(Op):
     @classmethod
@@ -56,6 +57,7 @@ class BinaryOp(Op):
                 perm = [i for i in range(x.ndim) if i != src]
                 perm.insert(dst, src)
                 return x.transpose(perm)
+
         (x, y), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
@@ -69,9 +71,10 @@ class BinaryOp(Op):
     def shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
         if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
             raise TypeError
-        if  TensorShape.from_numpy(x) !=  TensorShape.from_numpy(y):
+        if TensorShape.from_numpy(x) != TensorShape.from_numpy(y):
             raise TypeError
         return [TensorShape(x.shape, x.dtype)]
+
 
 class ReduceOp(Op):
     @classmethod
@@ -80,7 +83,6 @@ class ReduceOp(Op):
         new_axis = tuple(ax + (x_bdim <= ax) for ax in axis)
         out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
         return [myad.RT.bind1(cls, x, new_axis)], [out_bdim]
-
 
     @staticmethod
     def shape_eval(x: TensorShape, *, axis: Tuple[int, ...]) -> List[TensorShape]:
@@ -93,9 +95,9 @@ class ShapeOp(Op):
     pass
 
 
-#-----------------------
+# -----------------------
 # UnaryOps
-#-----------------------
+# -----------------------
 
 
 class Identity(UnaryOp):
@@ -113,6 +115,7 @@ class Exp(UnaryOp):
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
         return [Tensor.exp(x)], [x_dot * Tensor.exp(x)]
+
 
 class Log(UnaryOp):
     @staticmethod
@@ -136,10 +139,10 @@ class Neg(UnaryOp):
         return [-x], [-x_dot]
 
 
-
-#-----------------------
+# -----------------------
 # BinaryOps
-#-----------------------
+# -----------------------
+
 
 class Add(BinaryOp):
     @staticmethod
@@ -162,6 +165,7 @@ class Sub(BinaryOp):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x + y], [x_dot + y_dot]
 
+
 class Mul(BinaryOp):
     @staticmethod
     def eval(x, y):
@@ -174,7 +178,7 @@ class Mul(BinaryOp):
 
     @staticmethod
     def T(ct, x, y):
-        z_bar, = ct
+        (z_bar,) = ct
         assert (x is None) ^ (y is None)
         return [(z_bar * y), None] if x is None else [None, (x * z_bar)]
 
@@ -193,7 +197,7 @@ class Div(BinaryOp):
 class Pow(BinaryOp):
     @staticmethod
     def eval(x, y):
-        return [x ** y]
+        return [x**y]
 
     @staticmethod
     def jvp(primals, tangents):
@@ -201,9 +205,10 @@ class Pow(BinaryOp):
         return [x * y], [x_dot * y + x * y_dot]
 
 
-#-----------------------
+# -----------------------
 # ReduceOps
-#-----------------------
+# -----------------------
+
 
 class Max(ReduceOp):
     @staticmethod
@@ -214,7 +219,6 @@ class Max(ReduceOp):
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
-
 
 
 class Sum(ReduceOp):
@@ -228,9 +232,10 @@ class Sum(ReduceOp):
         return [x * y], [x_dot * y + x * y_dot]
 
 
-#-----------------------
+# -----------------------
 # ShapeOps
-#-----------------------
+# -----------------------
+
 
 class Expand(ShapeOp):
     @staticmethod
@@ -256,13 +261,10 @@ class Expand(ShapeOp):
         return [TensorShape(tuple(shape), x.dtype)]
 
 
-
 class Crop(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
         return [x.transpose(perm)]
-
-
 
 
 class Reshape(ShapeOp):
@@ -271,13 +273,10 @@ class Reshape(ShapeOp):
         return [np.reshape(x, perm)]
 
 
-
-
 class Permute(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
         return [x.transpose(perm)]
-
 
 
 class Pad(ShapeOp):

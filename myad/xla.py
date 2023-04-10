@@ -1,4 +1,3 @@
-
 def jit(f):
     def f_jitted(*args):
         avals_in = [raise_to_shaped(get_aval(x)) for x in args]

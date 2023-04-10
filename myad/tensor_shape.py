@@ -2,6 +2,8 @@ import numpy as np
 from typing import Tuple
 
 from myad.tensor import Tensor
+
+
 class TensorShape:
     array_abstraction_level = 1
     shape: Tuple[int, ...]
@@ -42,7 +44,6 @@ class TensorShape:
 
     def __repr__(self):
         return f"TensorShape(shape={self.shape}, dtype={self.dtype})"
-
 
 
 class ValuedTensorShape(TensorShape):

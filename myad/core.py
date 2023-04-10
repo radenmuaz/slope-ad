@@ -35,18 +35,13 @@ from typing import (
 from collections import defaultdict
 import numpy as np
 import operator as op
+import string
+from functools import partial, lru_cache
 
 from myad.tensor import Tensor
 import myad
 from myad.tensor_shape import TensorShape, ValuedTensorShape
 from myad import ops
-import string
-from functools import partial, lru_cache
-
-
-import string
-
-
 
 def swap(f):
     return lambda x, y: f(y, x)
@@ -214,12 +209,12 @@ class Tracer:
         bool,
         int,
         float,
-        np.bool_,
-        np.int32,
-        np.int64,
-        np.float32,
-        np.float64,
-        np.ndarray,
+        Tensor.bool_,
+        Tensor.int32,
+        Tensor.int64,
+        Tensor.float32,
+        Tensor.float64,
+        Tensor.ndarray,
     }
     _trace: Trace
 
@@ -265,7 +260,7 @@ class Tracer:
         if isinstance(x, cls):
             return x.aval
         elif type(x) in cls.TYPES:
-            return ValuedTensorShape.like(Tensor.array(x))
+            return ValuedTensorShape(Tensor.array(x))
         else:
             raise TypeError(x)
 
@@ -360,13 +355,13 @@ class BatchTrace(Trace):
 def vmap_flat(f, in_axes, *args):
     def move_batch_axis(axis_size, src, dst, x):
         if src is not_mapped:
-            target_shape = list(np.shape(x))
+            target_shape = list(x.shape)
             target_shape.insert(dst, axis_size)
             return Tensor.broadcast_to(x, target_shape, [dst])
         elif src == dst:
             return x
         else:
-            perm = [i for i in range(np.ndim(x)) if i != src]
+            perm = [i for i in range(Tensor.ndim(x)) if i != src]
             perm.insert(dst, src)
             return x.transpose(perm)
             # return moveaxis(x, src, dst)
@@ -424,7 +419,7 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     def pure(self, val):
         aval = Tracer.get_aval(val)
-        zeros_like = np.zeros(aval.shape, aval.dtype)
+        zeros_like = Tensor.zeros(aval.shape, aval.dtype)
         return JVPTracer(self, val, zeros_like)
 
     lift = pure
@@ -457,14 +452,10 @@ def jvp(f, primals, tangents):
     return primals_out, tangents_out
 
 
-def add_one_to_a_scalar(scalar):
-    assert np.ndim(scalar) == 0
-    return 1 + scalar
-
 
 def jacfwd(f, x):
     pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-    vecs_in = np.eye(np.size(x)).reshape(np.shape(x) * 2)
+    vecs_in = Tensor.eye(Tensor.size(x)).reshape(Tensor.shape(x) * 2)
     return vmap(pushfwd, (0,))(vecs_in)
 
 
@@ -482,7 +473,7 @@ class Lit:
 
     def __init__(self, val):
         self.aval = aval = TensorShape.like(Tracer.get_aval(val))
-        self.val = np.array(val, aval.dtype)
+        self.val = Tensor.array(val, aval.dtype)
 
 
 Atom = Union[Var, Lit]
@@ -655,9 +646,7 @@ class JaxprTrace(Trace):
     def get_or_make_const_tracer(self, val: Any) -> JaxprTracer:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(
-                self, Tracer.get_aval(val)
-            )
+            tracer = self.builder.new_tracer(self, Tracer.get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
@@ -766,7 +755,6 @@ def make_jaxpr(
     return jaxpr, consts, out_tree()
 
 
-
 def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
     assert not len(lst) % 2
     return split_list(lst, len(lst) // 2)
@@ -810,6 +798,7 @@ def linearize(f, *primals_in):
         return tree_unflatten(out_tree(), tangents_out_flat)
 
     return primals_out, f_lin
+
 
 class PartialVal(NamedTuple):
     aval: TensorShape
@@ -1014,7 +1003,6 @@ def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
         seen.add(id(node))
 
 
-
 def partial_eval_jaxpr(
     jaxpr: Jaxpr,
     in_unknowns: List[bool],
@@ -1137,7 +1125,6 @@ class UndefPrimal(NamedTuple):
     aval: TensorShape
 
 
-
 # NB: the analogous function in JAX is called 'backward_pass'
 def eval_jaxpr_transposed(
     jaxpr: Jaxpr, args: List[Any], cotangents: List[Any]
@@ -1153,7 +1140,7 @@ def eval_jaxpr_transposed(
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, np.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, Tensor.zeros(v.aval.shape, v.aval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -1175,14 +1162,10 @@ def eval_jaxpr_transposed(
     ]
 
 
-
-
 def mul_transpose_rule(cts, x, y):
     (z_bar,) = cts
     assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
     return [z_bar * y, None] if type(x) is UndefPrimal else [None, x * z_bar]
-
-
 
 
 def neg_transpose_rule(cts, x):
@@ -1191,21 +1174,14 @@ def neg_transpose_rule(cts, x):
     return [-ybar]
 
 
-
-
 def add_transpose_rule(cts, x, y):
     (z_bar,) = cts
     return [z_bar, z_bar]
 
 
-
-
 def reduce_sum_transpose_rule(cts, x, *, axis):
     (y_bar,) = cts
     return [Tensor.broadcast_to(y_bar, x.aval.shape, axis)]
-
-
-
 
 
 @lru_cache()
@@ -1223,13 +1199,12 @@ def transpose_jaxpr(
 def grad(f):
     def gradfun(x, *xs):
         y, f_vjp = vjp(f, x, *xs)
-        if np.shape(y) != ():
+        if Tensor.shape(y) != ():
             raise TypeError
-        x_bar, *_ = f_vjp(np.ones(np.shape(y), np.result_type(y)))
+        x_bar, *_ = f_vjp(Tensor.ones(Tensor.shape(y), Tensor.result_type(y)))
         return x_bar
 
     return gradfun
-
 
 
 class Runtime:
@@ -1255,7 +1230,6 @@ class Runtime:
             lambda u: (u.aval, ()),
             lambda aval, _: UndefPrimal(aval),
         )
-
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):

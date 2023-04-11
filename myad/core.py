@@ -67,6 +67,17 @@ def myzip(*args: Any) -> Any:
     return list(zip(*args))
 
 
+def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
+    assert not len(lst) % 2
+    return split_list(lst, len(lst) // 2)
+
+
+def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
+    l1, l2 = iter(l1), iter(l2)
+    out = [next(l2) if b else next(l1) for b in which]
+    assert next(l1, None) is next(l2, None) is None
+    return out
+
 class PPrint:
     lines: List[Tuple[int, str]]
 
@@ -711,29 +722,29 @@ class JaxprBuilder:
         out_vars = [t2v(t) for t in out_tracers]
         jaxpr = Jaxpr(in_binders, self.eqns, out_vars)
         typecheck_jaxpr(jaxpr)
-        jaxpr, constvals = _inline_literals(jaxpr, constvals)
+        jaxpr, constvals = self._inline_literals(jaxpr, constvals)
         return jaxpr, constvals
 
 
-def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]:
-    const_binders, other_binders = split_list(jaxpr.in_binders, len(consts))
-    scalars = [type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts]
-    new_const_binders, lit_binders = partition_list(scalars, const_binders)
-    new_consts, lit_vals = partition_list(scalars, consts)
-    literals = dict(zip(lit_binders, mymap(Lit, lit_vals)))
-    new_eqns = [
-        JaxprEqn(
-            eqn.op,
-            [literals.get(x, x) for x in eqn.inputs],
-            eqn.params,
-            eqn.out_binders,
-        )
-        for eqn in jaxpr.eqns
-    ]
-    new_outs = [literals.get(x, x) for x in jaxpr.outs]
-    new_jaxpr = Jaxpr(new_const_binders + other_binders, new_eqns, new_outs)
-    typecheck_jaxpr(new_jaxpr)
-    return new_jaxpr, new_consts
+    def _inline_literals(self, jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]:
+        const_binders, other_binders = split_list(jaxpr.in_binders, len(consts))
+        scalars = [type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts]
+        new_const_binders, lit_binders = partition_list(scalars, const_binders)
+        new_consts, lit_vals = partition_list(scalars, consts)
+        literals = dict(zip(lit_binders, mymap(Lit, lit_vals)))
+        new_eqns = [
+            JaxprEqn(
+                eqn.op,
+                [literals.get(x, x) for x in eqn.inputs],
+                eqn.params,
+                eqn.out_binders,
+            )
+            for eqn in jaxpr.eqns
+        ]
+        new_outs = [literals.get(x, x) for x in jaxpr.outs]
+        new_jaxpr = Jaxpr(new_const_binders + other_binders, new_eqns, new_outs)
+        typecheck_jaxpr(new_jaxpr)
+        return new_jaxpr, new_consts
 
 
 @lru_cache()
@@ -755,16 +766,6 @@ def make_jaxpr(
     return jaxpr, consts, out_tree()
 
 
-def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert not len(lst) % 2
-    return split_list(lst, len(lst) // 2)
-
-
-def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
-    l1, l2 = iter(l1), iter(l2)
-    out = [next(l2) if b else next(l1) for b in which]
-    assert next(l1, None) is next(l2, None) is None
-    return out
 
 
 def linearize_flat(f, *primals_in):
@@ -890,9 +891,6 @@ class PartialEvalTrace(Trace):
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
             return myad.RT.bind(op, *map(myad.RT.full_lower, tracers), **params)
-        rule = partial_eval_rules.get(op)
-        if rule:
-            return rule(self, tracers, **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = op.eval_shape(*avals_in, **params)
@@ -906,7 +904,6 @@ class PartialEvalTrace(Trace):
         return tracers_out
 
 
-partial_eval_rules = {}
 
 
 def tracers_to_jaxpr(
@@ -1026,14 +1023,7 @@ def partial_eval_jaxpr(
     map(write, in_unknowns, jaxpr.in_binders)
     for eqn in jaxpr.eqns:
         unks_in = map(read, eqn.inputs)
-        rule = partial_eval_jaxpr_rules.get(eqn.op)
-        if rule:
-            eqn1, eqn2, unks_out, res = rule(unks_in, eqn)
-            eqns1.append(eqn1)
-            eqns2.append(eqn2)
-            residuals.update(res)
-            map(write, unks_out, eqn.out_binders)
-        elif any(unks_in):
+        if any(unks_in):
             inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, eqn.inputs)]
             eqns2.append(JaxprEqn(eqn.op, inputs, eqn.params, eqn.out_binders))
             map(partial(write, True), eqn.out_binders)
@@ -1083,10 +1073,6 @@ def typecheck_partial_eval_jaxpr(jaxpr, unks_in, unks_out, jaxpr1, jaxpr2):
         raise TypeError
     if b2 != b2_:
         raise TypeError
-
-
-partial_eval_jaxpr_rules = {}
-
 
 def vjp_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [

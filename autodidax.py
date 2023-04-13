@@ -183,7 +183,7 @@ def swap(f):
     return lambda x, y: f(y, x)
 
 
-class TensorShape:
+class ArrayShape:
     array_abstraction_level = 1
     shape: Tuple[int, ...]
     dtype: np.dtype
@@ -206,11 +206,11 @@ class TensorShape:
 
     @staticmethod
     def _bool(tracer):
-        raise Exception("TensorShape can't be unambiguously convemygrad.RTed to bool")
+        raise Exception("ArrayShape can't be unambiguously convemygrad.RTed to bool")
 
     @staticmethod
     def _nonzero(tracer):
-        raise Exception("TensorShape can't be unambiguously convemygrad.RTed to bool")
+        raise Exception("ArrayShape can't be unambiguously convemygrad.RTed to bool")
 
     def str_short(self):
         return f'{self.dtype.name}[{",".join(str(d) for d in self.shape)}]'
@@ -226,10 +226,10 @@ class TensorShape:
         )
 
     def __repr__(self):
-        return f"TensorShape(shape={self.shape}, dtype={self.dtype})"
+        return f"ArrayShape(shape={self.shape}, dtype={self.dtype})"
 
 
-class Array(TensorShape):
+class Array(ArrayShape):
     array_abstraction_level = 2
     val: np.ndarray
 
@@ -582,7 +582,7 @@ def _tree_unflatten(treedef: PyTreeDef, xs: Iterator) -> Any:
 def mapped_aval(batch_dim, aval):
     shape = list(aval.shape)
     del shape[batch_dim]
-    return TensorShape(tuple(shape), aval.dtype)
+    return ArrayShape(tuple(shape), aval.dtype)
 
 
 def move_batch_axis(axis_size, src, dst, x):
@@ -726,11 +726,11 @@ def jacfwd(f, x):
 
 
 def raise_to_shaped(aval):
-    return TensorShape(aval.shape, aval.dtype)
+    return ArrayShape(aval.shape, aval.dtype)
 
 
 class Var:
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, aval):
         self.aval = aval
@@ -738,7 +738,7 @@ class Var:
 
 class Lit:
     val: Any
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, val):
         self.aval = aval = raise_to_shaped(get_aval(val))
@@ -767,8 +767,8 @@ class Jaxpr(NamedTuple):
 
 
 class JaxprType(NamedTuple):
-    in_types: List[TensorShape]
-    out_types: List[TensorShape]
+    in_types: List[ArrayShape]
+    out_types: List[ArrayShape]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_shomygrad.RT() for aval in self.in_types)
@@ -800,7 +800,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     return JaxprType(in_types, out_types)
 
 
-def typecheck_atom(env: Set[Var], x: Atom) -> TensorShape:
+def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
     if isinstance(x, Var):
         if x not in env:
             raise TypeError("unbound variable")
@@ -848,7 +848,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
 
 class JaxprTracer(Tracer):
     __slots__ = ["aval"]
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, trace, aval):
         self._trace = trace
@@ -856,7 +856,7 @@ class JaxprTracer(Tracer):
 
 
 class JaxprTrace(Trace):
-    def new_arg(self, aval: TensorShape) -> JaxprTracer:
+    def new_arg(self, aval: ArrayShape) -> JaxprTracer:
         aval = raise_to_shaped(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
@@ -902,7 +902,7 @@ class JaxprBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: JaxprTrace, aval: TensorShape) -> JaxprTracer:
+    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracer:
         tracer = JaxprTracer(trace, aval)
         self.tracers.append(tracer)
         return tracer
@@ -960,30 +960,30 @@ def _inline_literals(jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]
     return new_jaxpr, new_consts
 
 
-def binop_shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
-    if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
+def binop_shape_eval(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+    if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
         raise TypeError
     if raise_to_shaped(x) != raise_to_shaped(y):
         raise TypeError
-    return [TensorShape(x.shape, x.dtype)]
+    return [ArrayShape(x.shape, x.dtype)]
 
 
 shape_eval_rules[add_p] = binop_shape_eval
 shape_eval_rules[mul_p] = binop_shape_eval
 
 
-def compare_shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
-    if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
+def compare_shape_eval(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+    if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
         raise TypeError
     if x.shape != y.shape:
         raise TypeError
-    return [TensorShape(x.shape, np.dtype("bool"))]
+    return [ArrayShape(x.shape, np.dtype("bool"))]
     shape_eval_rules[greater_p] = compare_shape_eval
     shape_eval_rules[less_p] = compare_shape_eval
 
 
-def vectorized_unop_shape_eval(x: TensorShape) -> List[TensorShape]:
-    return [TensorShape(x.shape, x.dtype)]
+def vectorized_unop_shape_eval(x: ArrayShape) -> List[ArrayShape]:
+    return [ArrayShape(x.shape, x.dtype)]
 
 
 shape_eval_rules[sin_p] = vectorized_unop_shape_eval
@@ -992,26 +992,26 @@ shape_eval_rules[neg_p] = vectorized_unop_shape_eval
 
 
 def reduce_sum_shape_eval(
-    x: TensorShape, *, axis: Tuple[int, ...]
-) -> List[TensorShape]:
+    x: ArrayShape, *, axis: Tuple[int, ...]
+) -> List[ArrayShape]:
     axis_ = set(axis)
     new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
-    return [TensorShape(tuple(new_shape), x.dtype)]
+    return [ArrayShape(tuple(new_shape), x.dtype)]
 
 
 shape_eval_rules[reduce_sum_p] = reduce_sum_shape_eval
 
 
 def broadcast_shape_eval(
-    x: TensorShape, *, shape: Sequence[int], axes: Sequence[int]
-) -> List[TensorShape]:
-    return [TensorShape(tuple(shape), x.dtype)]
+    x: ArrayShape, *, shape: Sequence[int], axes: Sequence[int]
+) -> List[ArrayShape]:
+    return [ArrayShape(tuple(shape), x.dtype)]
 
 
 shape_eval_rules[broadcast_p] = broadcast_shape_eval
 
 
-@lru_cache()  # TensorShapes are hashable
+@lru_cache()  # ArrayShapes are hashable
 def make_jaxpr_v1(f, *avals_in):
     avals_in, in_tree = tree_flatten(avals_in)
     f, out_tree = flatten_fun(f, in_tree)
@@ -1124,7 +1124,7 @@ def new_dynamic(main: MainTrace):
 @lru_cache()
 def make_jaxpr(
     f: Callable,
-    *avals_in: TensorShape,
+    *avals_in: ArrayShape,
 ) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
     avals_in, in_tree = tree_flatten(avals_in)
     f, out_tree = flatten_fun(f, in_tree)
@@ -1201,11 +1201,11 @@ def _xla_consts(c: xe.XlaBuilder, consts: List[Any]) -> List[xe.XlaOp]:
     return [xla_consts[id(cnst)] for cnst in consts]
 
 
-def _xla_params(c: xe.XlaBuilder, avals_in: List[TensorShape]) -> List[xe.XlaOp]:
+def _xla_params(c: xe.XlaBuilder, avals_in: List[ArrayShape]) -> List[xe.XlaOp]:
     return [xops.Parameter(c, i, _xla_shape(a)) for i, a in enumerate(avals_in)]
 
 
-def _xla_shape(aval: TensorShape) -> xe.Shape:
+def _xla_shape(aval: ArrayShape) -> xe.Shape:
     return xc.Shape.array_shape(xc.dtype_to_etype(aval.dtype), aval.shape)
 
 
@@ -1241,7 +1241,7 @@ input_handlers = {
 }
 
 
-def handle_result(aval: TensorShape, buf):
+def handle_result(aval: ArrayShape, buf):
     del aval  # Unused for now
     return np.asarray(buf)
 
@@ -1267,7 +1267,7 @@ def reduce_sum_translation(c, in_avals, in_vals, *, axis):
     (x_aval,), (x,) = in_avals, in_vals
     zero = xops.ConstantLiteral(c, np.array(0, x_aval.dtype))
     subc = xc.XlaBuilder("add")
-    shape = _xla_shape(TensorShape((), x_aval.dtype))
+    shape = _xla_shape(ArrayShape((), x_aval.dtype))
     xops.Add(xops.Parameter(subc, 0, shape), xops.Parameter(subc, 1, shape))
     return [xops.Reduce(c, [x], [zero], subc.build(), axis)]
 
@@ -1340,14 +1340,14 @@ def vmap_jaxpr(
 
 
 def unmapped_aval(
-    axis_size: int, batch_dim: BatchAxis, aval: TensorShape
-) -> TensorShape:
+    axis_size: int, batch_dim: BatchAxis, aval: ArrayShape
+) -> ArrayShape:
     if batch_dim is not_mapped:
         return aval
     else:
         shape = list(aval.shape)
         shape.insemygrad.RT(batch_dim, axis_size)
-        return TensorShape(tuple(shape), aval.dtype)
+        return ArrayShape(tuple(shape), aval.dtype)
 
 
 def xla_call_shape_eval_rule(*in_types, jaxpr, num_consts):
@@ -1379,13 +1379,13 @@ def destructure_tuple(c, tup):
     return [xops.GetTupleElement(tup, i) for i in range(num_elements)]
 
 
-def handle_result(aval: TensorShape, buf):  # noqa: F811
+def handle_result(aval: ArrayShape, buf):  # noqa: F811
     return DeviceArray(aval, buf)
 
 
 class DeviceArray:
     buf: Any
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, aval, buf):
         self.aval = aval
@@ -1479,12 +1479,12 @@ def linearize(f, *primals_in):
     return primals_out, f_lin
 
 
-def vspace(aval: TensorShape) -> TensorShape:
+def vspace(aval: ArrayShape) -> ArrayShape:
     return raise_to_shaped(aval)  # TODO handle integers?
 
 
 class partialVal(NamedTuple):
-    aval: TensorShape
+    aval: ArrayShape
     const: Optional[Any]
 
     @classmethod
@@ -1492,7 +1492,7 @@ class partialVal(NamedTuple):
         return partialVal(get_aval(val), val)
 
     @classmethod
-    def unknown(cls, aval: TensorShape):
+    def unknown(cls, aval: ArrayShape):
         return partialVal(aval, None)
 
     is_known = property(lambda self: self.const is not None)
@@ -1530,7 +1530,7 @@ class JaxprEqnRecipe(NamedTuple):
     prim: Op
     tracers_in: List["partialEvalTracer"]
     params: Dict[str, Any]
-    avals_out: List[TensorShape]
+    avals_out: List[ArrayShape]
     tracer_refs_out: List["ReferenceType[partialEvalTracer]"]
 
 
@@ -1853,7 +1853,7 @@ def vjp(f, *primals_in):
 
 
 class UndefPrimal(NamedTuple):
-    aval: TensorShape
+    aval: ArrayShape
 
 
 register_pytree_node(
@@ -2081,7 +2081,7 @@ vmap_rules[cond_p] = cond_vmap_rule
 
 
 def cond_shape_eval(pred_type, *in_types, true_jaxpr, false_jaxpr):
-    if pred_type != TensorShape((), np.dtype("bool")):
+    if pred_type != ArrayShape((), np.dtype("bool")):
         raise TypeError
     jaxpr_type = typecheck_jaxpr(true_jaxpr)
     if jaxpr_type != typecheck_jaxpr(false_jaxpr):

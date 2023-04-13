@@ -1,6 +1,6 @@
 import myad
-from myad.tensor import Tensor
-from myad.tensor_shape import TensorShape
+import numpy as np
+from myad.array_shape import ArrayShape
 from typing import List, Tuple, Sequence, Any
 from abc import ABC, abstractmethod
 
@@ -39,8 +39,8 @@ class UnaryOp(Op):
         return [cls.eval(x)], [x_bdim]
 
     @staticmethod
-    def shape_eval(x: TensorShape) -> List[TensorShape]:
-        return [TensorShape(x.shape, x.dtype)]
+    def shape_eval(x: ArrayShape) -> List[ArrayShape]:
+        return [ArrayShape(x.shape, x.dtype)]
 
 
 class BinaryOp(Op):
@@ -50,7 +50,7 @@ class BinaryOp(Op):
             if src is None:
                 target_shape = list(x.shape)
                 target_shape.insert(dst, axis_size)
-                return Tensor.broadcast_to(x, target_shape, [dst])
+                return np.broadcast_to(x, target_shape, [dst])
             elif src == dst:
                 return x
             else:
@@ -68,12 +68,12 @@ class BinaryOp(Op):
         return [myad.RT.bind1(cls, x, y)], [x_bdim]
 
     @staticmethod
-    def shape_eval(x: TensorShape, y: TensorShape) -> List[TensorShape]:
-        if not isinstance(x, TensorShape) or not isinstance(y, TensorShape):
+    def shape_eval(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+        if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
-        if TensorShape.from_numpy(x) != TensorShape.from_numpy(y):
+        if ArrayShape.from_numpy(x) != ArrayShape.from_numpy(y):
             raise TypeError
-        return [TensorShape(x.shape, x.dtype)]
+        return [ArrayShape(x.shape, x.dtype)]
 
 
 class ReduceOp(Op):
@@ -85,10 +85,10 @@ class ReduceOp(Op):
         return [myad.RT.bind1(cls, x, new_axis)], [out_bdim]
 
     @staticmethod
-    def shape_eval(x: TensorShape, *, axis: Tuple[int, ...]) -> List[TensorShape]:
+    def shape_eval(x: ArrayShape, *, axis: Tuple[int, ...]) -> List[ArrayShape]:
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
-        return [TensorShape(tuple(new_shape), x.dtype)]
+        return [ArrayShape(tuple(new_shape), x.dtype)]
 
 
 class ShapeOp(Op):
@@ -109,23 +109,23 @@ class Identity(UnaryOp):
 class Exp(UnaryOp):
     @staticmethod
     def eval(x):
-        return [Tensor.exp(x)]
+        return [np.exp(x)]
 
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [Tensor.exp(x)], [x_dot * Tensor.exp(x)]
+        return [np.exp(x)], [x_dot * np.exp(x)]
 
 
 class Log(UnaryOp):
     @staticmethod
     def eval(x):
-        return [Tensor.log(x)]
+        return [np.log(x)]
 
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [Tensor.log(x)], [x_dot / x]
+        return [np.log(x)], [x_dot / x]
 
 
 class Neg(UnaryOp):
@@ -246,7 +246,7 @@ class Expand(ShapeOp):
             # shape = [1 if ax in axis else next(shape_it)
             #          for ax in range(out_ndim)]
             # x = x.reshape(shape)
-            x = Tensor.expand_dims(x, axis)
+            x = np.expand_dims(x, axis)
         return [x.broadcast(shape)]
 
     # @staticmethod
@@ -256,9 +256,9 @@ class Expand(ShapeOp):
 
     @staticmethod
     def shape_eval(
-        x: TensorShape, shape: Sequence[int], axes: Sequence[int]
-    ) -> List[TensorShape]:
-        return [TensorShape(tuple(shape), x.dtype)]
+        x: ArrayShape, shape: Sequence[int], axes: Sequence[int]
+    ) -> List[ArrayShape]:
+        return [ArrayShape(tuple(shape), x.dtype)]
 
 
 class Crop(ShapeOp):

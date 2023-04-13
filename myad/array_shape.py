@@ -1,10 +1,9 @@
 import numpy as np
-from typing import Tuple
-
-from myad.tensor import Tensor
+from typing import Tuple, Any
 
 
-class TensorShape:
+
+class ArrayShape:
     array_abstraction_level = 1
     shape: Tuple[int, ...]
     dtype: np.dtype
@@ -23,11 +22,11 @@ class TensorShape:
 
     @staticmethod
     def _bool(tracer):
-        raise Exception("TensorShape can't be unambiguously converted to bool")
+        raise Exception("ArrayShape can't be unambiguously converted to bool")
 
     @staticmethod
     def _nonzero(tracer):
-        raise Exception("TensorShape can't be unambiguously converted to bool")
+        raise Exception("ArrayShape can't be unambiguously converted to bool")
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -43,12 +42,12 @@ class TensorShape:
         )
 
     def __repr__(self):
-        return f"TensorShape(shape={self.shape}, dtype={self.dtype})"
+        return f"ArrayShape(shape={self.shape}, dtype={self.dtype})"
 
 
-class ValuedTensorShape(TensorShape):
+class ValuedArrayShape(ArrayShape):
     array_abstraction_level = 2
-    val: Tensor
+    val: Any
 
     def __init__(self, val):
         self.val = val

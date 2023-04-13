@@ -38,9 +38,8 @@ import operator as op
 import string
 from functools import partial, lru_cache
 
-from myad.tensor import Tensor
 import myad
-from myad.tensor_shape import TensorShape, ValuedTensorShape
+from myad.array_shape import ArrayShape, ValuedArrayShape
 from myad import ops
 
 def swap(f):
@@ -220,12 +219,12 @@ class Tracer:
         bool,
         int,
         float,
-        Tensor.bool_,
-        Tensor.int32,
-        Tensor.int64,
-        Tensor.float32,
-        Tensor.float64,
-        Tensor.ndarray,
+        np.bool_,
+        np.int32,
+        np.int64,
+        np.float32,
+        np.float64,
+        np.ndarray,
     }
     _trace: Trace
 
@@ -271,7 +270,7 @@ class Tracer:
         if isinstance(x, cls):
             return x.aval
         elif type(x) in cls.TYPES:
-            return ValuedTensorShape(Tensor.array(x))
+            return ValuedArrayShape(np.array(x))
         else:
             raise TypeError(x)
 
@@ -286,7 +285,7 @@ class Tracer:
 
     def zeros_like(self, val):
         aval = self.get_aval(val)
-        return Tensor.zeros(aval.shape, aval.dtype)
+        return np.zeros(aval.shape, aval.dtype)
 
 
 class EvalTracer(Tracer):
@@ -322,7 +321,7 @@ from typing import Union
 def mapped_aval(batch_dim, aval):
     shape = list(aval.shape)
     del shape[batch_dim]
-    return TensorShape(tuple(shape), aval.dtype)
+    return ArrayShape(tuple(shape), aval.dtype)
 
 
 not_mapped = None
@@ -368,11 +367,11 @@ def vmap_flat(f, in_axes, *args):
         if src is not_mapped:
             target_shape = list(x.shape)
             target_shape.insert(dst, axis_size)
-            return Tensor.broadcast_to(x, target_shape, [dst])
+            return np.broadcast_to(x, target_shape, [dst])
         elif src == dst:
             return x
         else:
-            perm = [i for i in range(Tensor.ndim(x)) if i != src]
+            perm = [i for i in range(np.ndim(x)) if i != src]
             perm.insert(dst, src)
             return x.transpose(perm)
             # return moveaxis(x, src, dst)
@@ -430,7 +429,7 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     def pure(self, val):
         aval = Tracer.get_aval(val)
-        zeros_like = Tensor.zeros(aval.shape, aval.dtype)
+        zeros_like = np.zeros(aval.shape, aval.dtype)
         return JVPTracer(self, val, zeros_like)
 
     lift = pure
@@ -466,13 +465,13 @@ def jvp(f, primals, tangents):
 
 def jacfwd(f, x):
     pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-    vecs_in = Tensor.eye(Tensor.size(x)).reshape(Tensor.shape(x) * 2)
+    vecs_in = np.eye(np.size(x)).reshape(np.shape(x) * 2)
     return vmap(pushfwd, (0,))(vecs_in)
 
 
 class Var:
     val = None
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, aval):
         self.aval = aval
@@ -480,11 +479,11 @@ class Var:
 
 class Lit:
     val: Any
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, val):
-        self.aval = aval = TensorShape.like(Tracer.get_aval(val))
-        self.val = Tensor.array(val, aval.dtype)
+        self.aval = aval = ArrayShape.like(Tracer.get_aval(val))
+        self.val = np.array(val, aval.dtype)
 
 
 Atom = Union[Var, Lit]
@@ -527,8 +526,8 @@ class Jaxpr(NamedTuple):
 
 
 class JaxprType(NamedTuple):
-    in_types: List[TensorShape]
-    out_types: List[TensorShape]
+    in_types: List[ArrayShape]
+    out_types: List[ArrayShape]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_short() for aval in self.in_types)
@@ -560,7 +559,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     return JaxprType(in_types, out_types)
 
 
-def typecheck_atom(env: Set[Var], x: Atom) -> TensorShape:
+def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
     if isinstance(x, Var):
         if x not in env:
             raise TypeError("unbound variable")
@@ -639,7 +638,7 @@ def pp_params(params: Dict[str, Any]) -> PPrint:
 
 class JaxprTracer(Tracer):
     __slots__ = ["aval"]
-    aval: TensorShape
+    aval: ArrayShape
 
     def __init__(self, trace, aval):
         self._trace = trace
@@ -648,7 +647,7 @@ class JaxprTracer(Tracer):
 
 class JaxprTrace(Trace):
     def new_arg(self, aval) -> JaxprTracer:
-        aval = TensorShape.like(aval)
+        aval = ArrayShape.like(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
 
@@ -691,7 +690,7 @@ class JaxprBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: JaxprTrace, aval: TensorShape) -> JaxprTracer:
+    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracer:
         tracer = JaxprTracer(trace, aval)
         self.tracers.append(tracer)
         return tracer
@@ -750,7 +749,7 @@ class JaxprBuilder:
 @lru_cache()
 def make_jaxpr(
     f: Callable,
-    *avals_in: TensorShape,
+    *avals_in: ArrayShape,
 ) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
     avals_in, in_tree = tree_flatten(avals_in)
     f, out_tree = flatten_fun(f, in_tree)
@@ -770,7 +769,7 @@ def make_jaxpr(
 
 def linearize_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(TensorShape.like(Tracer.get_aval(x))) for x in primals_in
+        PartialVal.unknown(ArrayShape.like(Tracer.get_aval(x))) for x in primals_in
     ]
 
     def f_jvp(*primals_tangents_in):
@@ -802,7 +801,7 @@ def linearize(f, *primals_in):
 
 
 class PartialVal(NamedTuple):
-    aval: TensorShape
+    aval: ArrayShape
     const: Optional[Any]
 
     @classmethod
@@ -810,7 +809,7 @@ class PartialVal(NamedTuple):
         return PartialVal(Tracer.get_aval(val), val)
 
     @classmethod
-    def unknown(cls, aval: TensorShape):
+    def unknown(cls, aval: ArrayShape):
         return PartialVal(aval, None)
 
     is_known = property(lambda self: self.const is not None)
@@ -848,7 +847,7 @@ class JaxprEqnRecipe(NamedTuple):
     prim: ops.Op
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
-    avals_out: List[TensorShape]
+    avals_out: List[ArrayShape]
     tracer_refs_out: List["ReferenceType[PartialEvalTracer]"]
 
 
@@ -885,7 +884,7 @@ class PartialEvalTrace(Trace):
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = PartialVal.unknown(TensorShape.like(tracer.aval))
+            pval = PartialVal.unknown(ArrayShape.like(tracer.aval))
             return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
@@ -910,7 +909,7 @@ def tracers_to_jaxpr(
     tracers_in: List[PartialEvalTracer], tracers_out: List[PartialEvalTracer]
 ):
     tracer_to_var: Dict[int, Var] = {
-        id(t): Var(TensorShape.like(t.aval)) for t in tracers_in
+        id(t): Var(ArrayShape.like(t.aval)) for t in tracers_in
     }
     constvar_to_val: Dict[int, Any] = {}
     constid_to_var: Dict[int, Var] = {}
@@ -923,7 +922,7 @@ def tracers_to_jaxpr(
             val = t.recipe.val
             var = constid_to_var.get(id(val))
             if var is None:
-                aval = TensorShape.like(Tracer.get_aval(val))
+                aval = ArrayShape.like(Tracer.get_aval(val))
                 var = constid_to_var[id(val)] = Var(aval)
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
@@ -1076,7 +1075,7 @@ def typecheck_partial_eval_jaxpr(jaxpr, unks_in, unks_out, jaxpr1, jaxpr2):
 
 def vjp_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(TensorShape.like(Tracer.get_aval(x))) for x in primals_in
+        PartialVal.unknown(ArrayShape.like(Tracer.get_aval(x))) for x in primals_in
     ]
     primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
 
@@ -1108,7 +1107,7 @@ def vjp(f, *primals_in):
 
 
 class UndefPrimal(NamedTuple):
-    aval: TensorShape
+    aval: ArrayShape
 
 
 # NB: the analogous function in JAX is called 'backward_pass'
@@ -1126,7 +1125,7 @@ def eval_jaxpr_transposed(
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, Tensor.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, np.zeros(v.aval.shape, v.aval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -1167,7 +1166,7 @@ def add_transpose_rule(cts, x, y):
 
 def reduce_sum_transpose_rule(cts, x, *, axis):
     (y_bar,) = cts
-    return [Tensor.broadcast_to(y_bar, x.aval.shape, axis)]
+    return [np.broadcast_to(y_bar, x.aval.shape, axis)]
 
 
 @lru_cache()
@@ -1185,9 +1184,9 @@ def transpose_jaxpr(
 def grad(f):
     def gradfun(x, *xs):
         y, f_vjp = vjp(f, x, *xs)
-        if Tensor.shape(y) != ():
+        if np.shape(y) != ():
             raise TypeError
-        x_bar, *_ = f_vjp(Tensor.ones(Tensor.shape(y), Tensor.result_type(y)))
+        x_bar, *_ = f_vjp(np.ones(np.shape(y), np.result_type(y)))
         return x_bar
 
     return gradfun

@@ -253,6 +253,17 @@ class Tracer:
     def __rmul__(self, other):
         return myad.RT.bind1(ops.Mul, other, self)
 
+    def __div__(self, other):
+        return myad.RT.bind1(ops.Div, self, other)
+
+    def __rdiv__(self, other):
+        return myad.RT.bind1(ops.Div, other, self)
+
+    def __pow__(self, other):
+        return myad.RT.bind1(ops.Pow, self, other)
+
+    
+
     def expand(self, shape, axes):
         return myad.RT.bind1(ops.Expand, self, shape, axes)
 

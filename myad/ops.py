@@ -6,29 +6,33 @@ from abc import ABC, abstractmethod
 
 
 class Op(ABC):
-    @staticmethod
+    @classmethod
+    def do(cls, *args):
+        return myad.RT.bind1(cls, *args)
+
+    @classmethod
     @abstractmethod
-    def eval(*args):
+    def eval(cls, *args):
         raise NotImplementedError
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def vmap(*args):
+    def vmap(cls, *args):
         raise NotImplementedError
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def jvp(*args):
+    def jvp(cls, *args):
         raise NotImplementedError
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def shape_eval(*args: Any, **kwargs: Any) -> Any:
+    def shape_eval(cls, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError
 
-    @staticmethod
+    @classmethod
     @abstractmethod
-    def pprint():
+    def pprint(cls):
         return None
 
 
@@ -36,10 +40,10 @@ class UnaryOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in):
         (x,), (x_bdim,) = vals_in, dims_in
-        return [cls.eval(x)], [x_bdim]
+        return [cls.do(x)], [x_bdim]
 
-    @staticmethod
-    def shape_eval(x: ArrayShape) -> List[ArrayShape]:
+    @classmethod
+    def shape_eval(cls, x: ArrayShape) -> List[ArrayShape]:
         return [ArrayShape(x.shape, x.dtype)]
 
 
@@ -65,13 +69,13 @@ class BinaryOp(Op):
                 x_bdim = y_bdim
             else:
                 y = move_batch_axis(axis_size, y_bdim, x_bdim, y)
-        return [myad.RT.bind1(cls, x, y)], [x_bdim]
+        return [cls.do(x, y)], [x_bdim]
 
-    @staticmethod
-    def shape_eval(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+    @classmethod
+    def shape_eval(cls, x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
-        if ArrayShape.from_numpy(x) != ArrayShape.from_numpy(y):
+        if ArrayShape.like(x) != ArrayShape.like(y):
             raise TypeError
         return [ArrayShape(x.shape, x.dtype)]
 
@@ -82,10 +86,10 @@ class ReduceOp(Op):
         (x,), (x_bdim,) = vals_in, dims_in
         new_axis = tuple(ax + (x_bdim <= ax) for ax in axis)
         out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
-        return [myad.RT.bind1(cls, x, new_axis)], [out_bdim]
+        return [cls.do(x, new_axis)], [out_bdim]
 
-    @staticmethod
-    def shape_eval(x: ArrayShape, *, axis: Tuple[int, ...]) -> List[ArrayShape]:
+    @classmethod
+    def shape_eval(cls, x: ArrayShape, *, axis: Tuple[int, ...]) -> List[ArrayShape]:
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
@@ -101,42 +105,47 @@ class ShapeOp(Op):
 
 
 class Identity(UnaryOp):
-    @staticmethod
-    def eval(x):
+    @classmethod
+    def eval(cls, x):
         return [x]
+    
+    @classmethod
+    def jvp(cls, primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        return [cls.do(x)], [x_dot]
 
 
 class Exp(UnaryOp):
-    @staticmethod
-    def eval(x):
+    @classmethod
+    def eval(cls, x):
         return [np.exp(x)]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [np.exp(x)], [x_dot * np.exp(x)]
+        return [cls.do(x)], [x_dot * cls.do(x)]
 
 
 class Log(UnaryOp):
-    @staticmethod
-    def eval(x):
+    @classmethod
+    def eval(cls, x):
         return [np.log(x)]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [np.log(x)], [x_dot / x]
+        return [cls.do(x)], [x_dot / x]
 
 
 class Neg(UnaryOp):
-    @staticmethod
-    def eval(x):
+    @classmethod
+    def eval(cls, x):
         return [-x]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [-x], [-x_dot]
+        return [cls.do(x)], [-x_dot]
 
 
 # -----------------------
@@ -145,62 +154,72 @@ class Neg(UnaryOp):
 
 
 class Add(BinaryOp):
-    @staticmethod
-    def eval(x, y):
+    @classmethod
+    def eval(cls, x, y):
         return [x + y]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x + y], [x_dot + y_dot]
 
+    @classmethod
+    def T(cls, t, x, y):
+        x_aval = x.aval if ad.is_undefined_primal(x) else _abstractify(x)
+        y_aval = y.aval if ad.is_undefined_primal(y) else _abstractify(y)
+        if type(t) is ad_util.Zero:
+            return [ad_util.Zero(x_aval), ad_util.Zero(y_aval)]
+        else:
+            return [_unbroadcast(x_aval, t), _unbroadcast(y_aval, t)]
+
+
 
 class Sub(BinaryOp):
-    @staticmethod
-    def eval(x, y):
+    @classmethod
+    def eval(cls, x, y):
         return [x - y]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x + y], [x_dot + y_dot]
 
 
 class Mul(BinaryOp):
-    @staticmethod
-    def eval(x, y):
+    @classmethod
+    def eval(cls, x, y):
         return [x * y]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
 
-    @staticmethod
-    def T(ct, x, y):
-        (z_bar,) = ct
+    @classmethod
+    def T(t, x, y):
+        (z_bar,) = t
         assert (x is None) ^ (y is None)
         return [(z_bar * y), None] if x is None else [None, (x * z_bar)]
 
 
 class Div(BinaryOp):
-    @staticmethod
-    def eval(x, y):
+    @classmethod
+    def eval(cls, x, y):
         return [x / y]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
 
 
 class Pow(BinaryOp):
-    @staticmethod
-    def eval(x, y):
+    @classmethod
+    def eval(cls, x, y):
         return [x**y]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
 
@@ -211,23 +230,23 @@ class Pow(BinaryOp):
 
 
 class Max(ReduceOp):
-    @staticmethod
-    def eval(x, *, axis):
+    @classmethod
+    def eval(cls, x, *, axis):
         return [x.sum(axis)]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
 
 
 class Sum(ReduceOp):
-    @staticmethod
-    def eval(x, *, axis):
+    @classmethod
+    def eval(cls, x, *, axis):
         return [x.sum(axis)]
 
-    @staticmethod
-    def jvp(primals, tangents):
+    @classmethod
+    def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
 
@@ -238,8 +257,8 @@ class Sum(ReduceOp):
 
 
 class Expand(ShapeOp):
-    @staticmethod
-    def eval(x, *, shape, axes):
+    @classmethod
+    def eval(cls, x, *, shape, axes):
         for axis in sorted(axes):
             # out_ndim = len(axis) + x.ndim
             # shape_it = iter(x.shape)
@@ -254,32 +273,33 @@ class Expand(ShapeOp):
     #     (x, y), (x_dot, y_dot) = primals, tangents
     #     return [x * y], [x_dot * y + x * y_dot]
 
-    @staticmethod
-    def shape_eval(
+    @classmethod
+
+    def shape_eval(cls,
         x: ArrayShape, shape: Sequence[int], axes: Sequence[int]
     ) -> List[ArrayShape]:
         return [ArrayShape(tuple(shape), x.dtype)]
 
 
 class Crop(ShapeOp):
-    @staticmethod
-    def eval(x, *, perm):
+    @classmethod
+    def eval(cls, x, *, perm):
         return [x.transpose(perm)]
 
 
 class Reshape(ShapeOp):
-    @staticmethod
-    def eval(x, *, perm):
+    @classmethod
+    def eval(cls, x, *, perm):
         return [np.reshape(x, perm)]
 
 
 class Permute(ShapeOp):
-    @staticmethod
-    def eval(x, *, perm):
+    @classmethod
+    def eval(cls, x, *, perm):
         return [x.transpose(perm)]
 
 
 class Pad(ShapeOp):
-    @staticmethod
-    def eval(x, *, perm):
+    @classmethod
+    def eval(cls, x, *, perm):
         return [x.transpose(perm)]

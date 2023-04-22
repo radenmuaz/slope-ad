@@ -1,23 +1,28 @@
 import myad
 import numpy as np
+from myad import ops
+def f(x, y):
+    x = ops.Broadcast.do(x, y.shape, [])
+    return x
 
-def f(x):
-    y = x * x
-    y = y + x
-    return y
+x = np.ones((1, 3))
+y = np.ones((3, 3))
+out = f(x, y)
+print(x)
+print(out)
     
 # x, x_dot = np.array([3.0]), np.array([1.0])
 # y = f(x)
 # print('eval', y)
 
-def add_one_to_a_scalar(scalar):
-    assert np.ndim(scalar) == 0
-    return np.array(1) + scalar
+# def add_one_to_a_scalar(scalar):
+#     assert np.ndim(scalar) == 0
+#     return np.array(1) + scalar
 
-vector_in = np.arange(3.0)
-vector_out = myad.vmap(add_one_to_a_scalar, (0,))(vector_in)
-print(vector_in)
-print(vector_out)
+# vector_in = np.arange(3.0)
+# vector_out = myad.vmap(add_one_to_a_scalar, (0,))(vector_in)
+# print(vector_in)
+# print(vector_out)
 
 # x, x_dot = np.array([3.0]), np.array([1.0])
 # y, y_dot = myad.jvp(f, (x,), (x_dot,))

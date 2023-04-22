@@ -85,14 +85,14 @@ class BinaryOp(Op):
 
 class ReduceOp(Op):
     @classmethod
-    def vmap(cls, axis_size, vals_in, dims_in, *, axis):
+    def vmap(cls, axis_size, vals_in, dims_in, axis):
         (x,), (x_bdim,) = vals_in, dims_in
         new_axis = tuple(ax + (x_bdim <= ax) for ax in axis)
         out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
         return [cls.do(x, new_axis)], [out_bdim]
 
     @classmethod
-    def shape_eval(cls, x: ArrayShape, *, axis: Tuple[int, ...]) -> List[ArrayShape]:
+    def shape_eval(cls, x: ArrayShape, axis: Tuple[int, ...]) -> List[ArrayShape]:
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
@@ -256,7 +256,7 @@ class Max(BinaryOp):
 
 class ReduceMax(ReduceOp):
     @classmethod
-    def eval(cls, x, *, axis):
+    def eval(cls, x, axis):
         return [x.sum(axis)]
 
     @classmethod
@@ -267,7 +267,7 @@ class ReduceMax(ReduceOp):
 
 class ReduceSum(ReduceOp):
     @classmethod
-    def eval(cls, x, *, axis):
+    def eval(cls, x, axis):
         return [x.sum(axis)]
 
     @classmethod
@@ -283,23 +283,17 @@ class ReduceSum(ReduceOp):
 
 class Broadcast(ShapeOp):
     @classmethod
-    def eval(cls, x, *, shape, axes):
+    def eval(cls, x, shape, axes):
         for axis in sorted(axes):
-            # out_ndim = len(axis) + x.ndim
-            # shape_it = iter(x.shape)
-            # shape = [1 if ax in axis else next(shape_it)
-            #          for ax in range(out_ndim)]
-            # x = x.reshape(shape)
             x = np.expand_dims(x, axis)
-        return [x.broadcast(shape)]
-
-    # @staticmethod
-    # def jvp(primals, tangents):
-    #     (x, y), (x_dot, y_dot) = primals, tangents
-    #     return [x * y], [x_dot * y + x * y_dot]
+        return [np.broadcast_to(x, shape)]
 
     @classmethod
+    def jvp(cls, primals, tangents, shape, axes):
+        (x), (x_dot) = primals, tangents
+        return [cls.do(x, shape)], [cls.do(x_dot, shape)]
 
+    @classmethod
     def shape_eval(cls,
         x: ArrayShape, shape: Sequence[int], axes: Sequence[int]
     ) -> List[ArrayShape]:
@@ -314,17 +308,22 @@ class Crop(ShapeOp):
 
 class Reshape(ShapeOp):
     @classmethod
-    def eval(cls, x, *, perm):
+    def eval(cls, x, perm):
         return [np.reshape(x, perm)]
+    
+    @classmethod
+    def jvp(cls, primals, tangents, perm):
+        (x), (x_dot) = primals, tangents
+        return [cls.do(x, perm)], [cls.do(x_dot, perm)]
 
 
 class Transpose(ShapeOp):
     @classmethod
-    def eval(cls, x, *, perm):
+    def eval(cls, x, perm):
         return [x.transpose(perm)]
 
 
 class Pad(ShapeOp):
     @classmethod
-    def eval(cls, x, *, perm):
+    def eval(cls, x, perm):
         return [x.pad(perm)]

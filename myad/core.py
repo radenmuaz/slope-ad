@@ -301,7 +301,7 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
     def run_op(self, op, tracers, params):
-        # print('eval', op, tracers)
+        # breakpoint()
         return op.eval(*tracers, **params)
 
 # class EvalTracer(Tracer):
@@ -383,13 +383,14 @@ def vmap_flat(f, in_axes, *args):
         if src is not_mapped:
             target_shape = list(x.shape)
             target_shape.insert(dst, axis_size)
-            return np.broadcast_to(x, target_shape, [dst])
+            # return np.broadcast_to(x, target_shape, [dst])
+            return ops.Broadcast.do(x, target_shape, [dst])
         elif src == dst:
             return x
         else:
             perm = [i for i in range(np.ndim(x)) if i != src]
             perm.insert(dst, src)
-            return x.transpose(perm)
+            return ops.Transpose.do(x, perm)
             # return moveaxis(x, src, dst)
 
     (axis_size,) = {
@@ -1183,8 +1184,6 @@ class Runtime:
             return val
 
     def full_raise(self, trace: Trace, val: Any) -> Tracer:
-        if isinstance(val, list):
-            breakpoint()
         if not isinstance(val, Tracer):
             return trace.pure(val)
         level = trace.main.level

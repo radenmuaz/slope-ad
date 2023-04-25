@@ -1,15 +1,20 @@
 import myad
 import numpy as np
 from myad import ops
-def f(x, y):
-    x = ops.Broadcast.do(x, y.shape, [])
-    return x
+from myad import F
 
-x = np.ones((1, 3))
-y = np.ones((3, 3))
-out = f(x, y)
-print(x)
+# x = np.ones((1, 3))
+# y = np.ones((3, 1))
+
+x = np.array([[1, 2, 3]]).T
+y = np.array([[1, 2, 3]])
+out = F.dot(x, y)
+print('in')
+print(x, x.shape)
+print(y, y.shape)
+print('out')
 print(out)
+print(out.shape)
     
 # x, x_dot = np.array([3.0]), np.array([1.0])
 # y = f(x)

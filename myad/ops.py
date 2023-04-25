@@ -39,6 +39,16 @@ class Op(ABC):
     def mlir(cls):
         raise NotImplementedError
 
+# class FnOp(Op):
+#     def fn(self, *args):
+#         raise NotImplementedError
+#     def __call__(self, *args):
+#         if myad.RT.trace_stack.trace_type == myad.core.JVPTrace:
+
+    
+#     eval = vmap = jvp = shape_eval = __call__
+
+
 class UnaryOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in):
@@ -51,27 +61,16 @@ class UnaryOp(Op):
 
 
 class BinaryOp(Op):
+    
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in):
-        def move_batch_axis(axis_size, src, dst, x):
-            if src is None:
-                target_shape = list(x.shape)
-                target_shape.insert(dst, axis_size)
-                return Broadcast.do(x, target_shape, [dst])
-            elif src == dst:
-                return x
-            else:
-                perm = [i for i in range(x.ndim) if i != src]
-                perm.insert(dst, src)
-                return Transpose.do(x,perm)
-
         (x, y), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
-                x = move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                x = myad.core.move_batch_axis(axis_size, x_bdim, y_bdim, x)
                 x_bdim = y_bdim
             else:
-                y = move_batch_axis(axis_size, y_bdim, x_bdim, y)
+                y = myad.core.move_batch_axis(axis_size, y_bdim, x_bdim, y)
         return [cls.do(x, y)], [x_bdim]
 
     @classmethod
@@ -263,6 +262,11 @@ class ReduceMax(ReduceOp):
     def jvp(cls, primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
+    
+    @classmethod
+    def T(cls, cts, x):
+        (y_bar,) = cts
+        return [Broadcast(y_bar, x.aval.shape)]
 
 
 class ReduceSum(ReduceOp):
@@ -275,6 +279,11 @@ class ReduceSum(ReduceOp):
         (x, y), (x_dot, y_dot) = primals, tangents
         return [x * y], [x_dot * y + x * y_dot]
 
+    @classmethod
+    def T(cls, cts, x):
+        (y_bar,) = cts
+        return [Broadcast(y_bar, x.aval.shape)]
+
 
 # -----------------------
 # ShapeOps
@@ -283,9 +292,9 @@ class ReduceSum(ReduceOp):
 
 class Broadcast(ShapeOp):
     @classmethod
-    def eval(cls, x, shape, axes):
-        for axis in sorted(axes):
-            x = np.expand_dims(x, axis)
+    def eval(cls, x, shape):
+        # for axis in sorted(axes):
+        #     x = np.expand_dims(x, axis)
         return [np.broadcast_to(x, shape)]
 
     @classmethod
@@ -327,3 +336,4 @@ class Pad(ShapeOp):
     @classmethod
     def eval(cls, x, perm):
         return [x.pad(perm)]
+

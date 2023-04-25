@@ -57,7 +57,7 @@ def list_map(f: Any, *xs: Any) -> Any:
     return list(map(f, *xs))
 
 
-def myzip(*args: Any) -> Any:
+def list_zip(*args: Any) -> Any:
     fst, *rest = args = list_map(list, args)
     n = len(fst)
     for arg in rest:
@@ -340,8 +340,6 @@ def mapped_aval(batch_dim, aval):
     return ArrayShape(tuple(shape), aval.dtype)
 
 
-not_mapped = None
-
 BatchAxis = Union[None, int]
 
 
@@ -353,61 +351,64 @@ class BatchTracer(Tracer):
 
     @property
     def aval(self):
-        if self.batch_dim is not_mapped:
+        if self.batch_dim is None:
             return self.get_aval(self.val)
         else:
             return mapped_aval(self.batch_dim, self.get_aval(self.val))
 
     def full_lower(self):
-        if self.batch_dim is not_mapped:
+        if self.batch_dim is None:
             return myad.RT.full_lower(self.val)
         else:
             return self
 
 
 class BatchTrace(Trace):
-    pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
+    pure = lift = lambda self, val: BatchTracer(self, val, None)
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
-        return [BatchTracer(self, x, bd) for x, bd in myzip(val_outs, bdim_outs)]
+        return [BatchTracer(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @property
     def axis_size(self):
         return self.main.global_data
 
+def move_batch_axis(axis_size, src, dst, x):
+    if src is None:
+        target_shape = list(x.shape)
+        target_shape.insert(dst, axis_size)
+        out_ndim = len(target_shape)
+        if type(dst) in (tuple, list):
+            out_ndim += 1
+        reshape_shape = [1 if ax==dst else target_shape for ax in range(out_ndim)]
+        x = ops.Reshape.do(x, reshape_shape)
+        x = ops.Broadcast.do(x, target_shape)
+        return x
+    elif src == dst:
+        return x
+    else:
+        perm = [i for i in range(np.ndim(x)) if i != src]
+        perm.insert(dst, src)
+        return ops.Transpose.do(x, perm)
 
 def vmap_flat(f, in_axes, *args):
-    def move_batch_axis(axis_size, src, dst, x):
-        if src is not_mapped:
-            target_shape = list(x.shape)
-            target_shape.insert(dst, axis_size)
-            # return np.broadcast_to(x, target_shape, [dst])
-            return ops.Broadcast.do(x, target_shape, [dst])
-        elif src == dst:
-            return x
-        else:
-            perm = [i for i in range(np.ndim(x)) if i != src]
-            perm.insert(dst, src)
-            return ops.Transpose.do(x, perm)
-            # return moveaxis(x, src, dst)
-
     (axis_size,) = {
-        x.shape[ax] for x, ax in myzip(args, in_axes) if ax is not not_mapped
+        x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None
     }
     with myad.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
             BatchTracer(trace, x, ax) if ax is not None else x
-            for x, ax in myzip(args, in_axes)
+            for x, ax in list_zip(args, in_axes)
         ]
         outs = f(*tracers_in)
         tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
     outs_transposed = [
         move_batch_axis(axis_size, bdim, 0, val_out)
-        for val_out, bdim in myzip(vals_out, bdims_out)
+        for val_out, bdim in list_zip(vals_out, bdims_out)
     ]
     return outs_transposed
 
@@ -454,13 +455,13 @@ class JVPTrace(Trace):
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
-        return [JVPTracer(self, x, t) for x, t in myzip(primal_outs, tangent_outs)]
+        return [JVPTracer(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)]
 
 
 def jvp_flat(f, primals, tangents):
     with myad.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in myzip(primals, tangents)]
+        tracers_in = [JVPTracer(trace, x, t) for x, t in list_zip(primals, tangents)]
         outs = f(*tracers_in)
         tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
         primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
@@ -563,7 +564,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
-        for out_binder, out_type in myzip(eqn.out_binders, out_types):
+        for out_binder, out_type in list_zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
         for out_binder in eqn.out_binders:
@@ -620,7 +621,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     lst2: List[Any] = []
     lists = lst1, lst2
     # lists = lst1: List[Any], lst2: List[Any] = list(), list()
-    for b, x in myzip(bs, l):
+    for b, x in list_zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
 
@@ -1205,8 +1206,6 @@ class Runtime:
 
     def bind1(self, *args, **params):
         return self.bind(*args, **params)[0]
-
-
 
 # def partial_eval_jaxpr(
 #     jaxpr: Jaxpr,

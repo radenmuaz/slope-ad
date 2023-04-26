@@ -1096,6 +1096,7 @@ def eval_jaxpr_transposed(
         for v, x in zip(jaxpr.in_binders, args)
         if type(x) is UndefPrimal
     ]
+    breakpoint()
     return ret
 
 def grad(f):

@@ -275,11 +275,20 @@ class Tracer:
     def __nonzero__(self):
         return self.aval._nonzero(self)
 
-    @classmethod
-    def get_aval(cls, x):
-        if isinstance(x, cls):
+    # @classmethod
+    # def get_aval(cls, x):
+    #     if isinstance(x, cls):
+    #         return x.aval
+    #     elif type(x) in cls.TYPES:
+    #         return ValuedArrayShape(np.array(x))
+    #     else:
+    #         raise TypeError(x)
+    
+    @staticmethod
+    def get_aval(x):
+        if isinstance(x, Tracer):
             return x.aval
-        elif type(x) in cls.TYPES:
+        elif type(x) in Tracer.TYPES:
             return ValuedArrayShape(np.array(x))
         else:
             raise TypeError(x)
@@ -1080,38 +1089,14 @@ def eval_jaxpr_transposed(
     for eqn in jaxpr.eqns[::-1]:
         primals_in = list_map(read_primal, eqn.inputs)
         cts_in = list_map(read_cotangent, eqn.out_binders)
-        rule = eqn.op.T
-        cts_out = rule(cts_in, *primals_in, **eqn.params)
+        cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         list_map(write_cotangent, eqn.inputs, cts_out)
-    return [
+    ret = [
         read_cotangent(v)
         for v, x in zip(jaxpr.in_binders, args)
         if type(x) is UndefPrimal
     ]
-
-
-def mul_transpose_rule(cts, x, y):
-    (z_bar,) = cts
-    assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
-    return [z_bar * y, None] if type(x) is UndefPrimal else [None, x * z_bar]
-
-
-def neg_transpose_rule(cts, x):
-    (ybar,) = cts
-    assert type(x) is UndefPrimal
-    return [-ybar]
-
-
-def add_transpose_rule(cts, x, y):
-    (z_bar,) = cts
-    return [z_bar, z_bar]
-
-
-def reduce_sum_transpose_rule(cts, x, *, axis):
-    (y_bar,) = cts
-    return [np.broadcast_to(y_bar, x.aval.shape, axis)]
-
-
+    return ret
 
 def grad(f):
     def gradfun(x, *xs):

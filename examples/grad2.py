@@ -24,17 +24,22 @@ from myad import ops
 # print(out.shape)
 
 # x = np.array([[1, 2, 3], [1, 2, 3]]).T
+
+
+# dot product
 x = np.random.randn(2,3)
 y = np.random.randn(2,3)
 
-def f(x):
-    out = ops.dot(x, ops.T(x))
+def f(x, y):
+    out = ops.dot(x, ops.T(y))
     out = ops.reduce_sum(out, axis=(0,1))
     return out
 
-l = myad.grad(f)(x)
-print('l')
-print(l)
+out, grad_out = myad.grad(f)(x, y)
+print(x)
+print(y)
+print(out)
+print(grad_out)
 
 
 # def f(x,y):

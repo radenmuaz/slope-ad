@@ -41,6 +41,15 @@ import myad
 from myad.array_shape import ArrayShape, ValuedArrayShape
 from myad import ops
 
+def full_like(self, val, fill_val):
+    return np.full(val.shape, fill_val, val.dtype)
+
+def ones_like(self, val):
+    return np.ones(val.shape, val.dtype)
+
+def zeros_like(self, val):
+    return np.zeros(val.shape, val.dtype)
+
 def swap(f):
     return lambda x, y: f(y, x)
 
@@ -302,9 +311,6 @@ class Tracer:
         except AttributeError:
             raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
 
-    def zeros_like(self, val):
-        aval = self.get_aval(val)
-        return np.zeros(aval.shape, aval.dtype)
 
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
@@ -1096,7 +1102,6 @@ def eval_jaxpr_transposed(
         for v, x in zip(jaxpr.in_binders, args)
         if type(x) is UndefPrimal
     ]
-    breakpoint()
     return ret
 
 def grad(f):
@@ -1104,8 +1109,8 @@ def grad(f):
         y, f_vjp = vjp(f, x, *xs)
         if np.shape(y) != ():
             raise TypeError
-        x_bar, *_ = f_vjp(np.ones(np.shape(y), np.result_type(y)))
-        return x_bar
+        out = f_vjp(np.ones(np.shape(y), np.result_type(y)))
+        return y, out
 
     return gradfun
 

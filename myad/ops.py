@@ -87,7 +87,7 @@ class ReduceOp(Op):
         return [myad.RT.bind1(x, axis=new_axis)], [out_bdim]
 
     @staticmethod
-    def shape_eval(x: ArrayShape, axis: Tuple[int, ...], orig_shape) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, axis: Tuple[int, ...]) -> List[ArrayShape]:
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
@@ -195,7 +195,7 @@ class Mul(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [mul(x,y)], [add(mul(x_dot, y), mul(x, y_dot))]
+        return [x*y], [x_dot*y + x*y_dot]
 
     @staticmethod
     def T(cts, x, y):
@@ -203,7 +203,7 @@ class Mul(BinaryOp):
         if type(x) is myad.core.UndefPrimal:
             return [(mul(z_bar, y)), None] 
         elif type(y) is myad.core.UndefPrimal:
-            return [None, (mul(x, z_bar))]
+            return [None, x * z_bar]
 
 
 class Div(BinaryOp):
@@ -214,29 +214,12 @@ class Div(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [div(x, y)], [(div(x_dot, y)) + (-y_dot * x * (y**-2))]
+        return [x / y], [(x_dot/y) + (-y_dot * x * (y**-2))]
     
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
         return [z_bar / y, None]
-
-
-class Pow(BinaryOp):
-    @staticmethod
-    def eval(x, y):
-        return [x**y]
-
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), (x_dot, y_dot) = primals, tangents
-        return [x * y], [x_dot * y + x * y_dot]
-    
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar / y, None]
-
 
 class Max(BinaryOp):
     @staticmethod
@@ -325,22 +308,21 @@ class ReduceMax(ReduceOp):
 
 class ReduceSum(ReduceOp):
     @staticmethod
-    def eval(x, *, axis, orig_shape):
+    def eval(x, *, axis):
         return [np.sum(x, axis)]
 
     @staticmethod
-    def jvp(primals, tangents, *, axis, orig_shape):
+    def jvp(primals, tangents, *, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_sum(x, axis)
         jvp_out = reduce_sum(x_dot, axis)
         return [eval_out], [jvp_out]
 
     @staticmethod
-    def T(cts, x, *, axis, orig_shape):
+    def T(cts, x, *, axis):
         (y_bar,) = cts
         y_bar = expand_dims(y_bar, axis)
-        breakpoint()
-        return [broadcast(y_bar, orig_shape)]
+        return [broadcast(y_bar, x.aval.shape)]
     
     # def reduce_sum_transpose_rule(cts, x, *, axis):
     #     y_bar, = cts
@@ -387,7 +369,6 @@ class Broadcast(ShapeOp):
         axis = tuple(axis)
         if len(axis) == 0:
             raise ValueError
-        breakpoint()
         return [reduce_sum(y_bar, axis)]
 
 
@@ -399,45 +380,45 @@ class Broadcast(ShapeOp):
 
 class Reshape(ShapeOp):
     @staticmethod
-    def eval(x, *, shape, orig_shape):
+    def eval(x, *, shape):
         return [np.reshape(x, shape)]
     
     @staticmethod
-    def jvp(primals, tangents, *, shape, orig_shape):
+    def jvp(primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
         return [reshape(x, shape)], [reshape(x_dot, shape)]
     
     @staticmethod
     def shape_eval(
-        x: ArrayShape, *, shape: Sequence[int], orig_shape
+        x: ArrayShape, *, shape: Sequence[int]
     ) -> List[ArrayShape]:
         return [ArrayShape(tuple(shape), x.dtype)]
 
     @staticmethod
-    def T(cts, x, *, shape, orig_shape):
+    def T(cts, x, *, shape):
         (y_bar,) = cts
-        return [reshape(y_bar, orig_shape)]
+        return [reshape(y_bar, x.aval.shape)]
 
 
 class Transpose(ShapeOp):
     @staticmethod
-    def eval(x, *, perm, orig_shape):
+    def eval(x, *, perm):
         return [x.transpose(perm)]
     
     @staticmethod
-    def jvp(primals, tangents, *, perm, orig_shape):
+    def jvp(primals, tangents, *, perm):
         (x,), (x_dot,) = primals, tangents
         return [transpose(x, perm)], [transpose(x_dot, perm)]
 
     @staticmethod
     def shape_eval(
-        x: ArrayShape, *, perm: Sequence[int], orig_shape
+        x: ArrayShape, *, perm: Sequence[int]
     ) -> List[ArrayShape]:
-        shape = [orig_shape[i] for i in perm]
+        shape = [x.shape[i] for i in perm]
         return [ArrayShape(shape, x.dtype)]
     
     @staticmethod
-    def T(cts, x, *, perm, orig_shape):
+    def T(cts, x, *, perm):
         (y_bar,) = cts
         return [transpose(y_bar, perm)]
 
@@ -460,24 +441,22 @@ def mul(x, y):
     return myad.RT.bind1(Mul, x, y)
 def div(x, y):
     return myad.RT.bind1(Div, x, y)
-def pow(x, y):
-    return myad.RT.bind1(Pow, x, y)
 
 # ReduceOps
 def reduce_sum(x, axis):
-    return myad.RT.bind1(ReduceSum, x, axis=axis, orig_shape=x.shape)
+    return myad.RT.bind1(ReduceSum, x, axis=axis)
 def reduce_max(x, axis):
-    return myad.RT.bind1(ReduceMax, x, axis=axis, orig_shape=x.shape)
+    return myad.RT.bind1(ReduceMax, x, axis=axis)
 
 # ShapeOps
 def broadcast(x, shape):
     return myad.RT.bind1(Broadcast, x, shape=shape, orig_shape=x.shape)
 
 def reshape(x, shape):
-    return myad.RT.bind1(Reshape, x, shape=shape, orig_shape=x.shape)
+    return myad.RT.bind1(Reshape, x, shape=shape)
 
 def transpose(x, perm):
-    return myad.RT.bind1(Transpose, x, perm=perm, orig_shape=x.shape)
+    return myad.RT.bind1(Transpose, x, perm=perm)
 
 
 def expand_dims(x, axis):
@@ -504,13 +483,13 @@ def dot(x, y):
     x = broadcast(x, br_shape)
     y = expand_dims(y, (-2,))
     y = broadcast(y, br_shape)
-    z = mul(x, y)
+    z = x * y
     z = reduce_sum(z, (-1,))
     z = T(z)
     return z
 
 def relu(x):
-    return max(x, np.zeros(x.shape, x.dtype))
+    return max(x, myad.core.zeros_like(x))
 
 def softmax(x, axis):
     m = x - reduce_max(x, axis)
@@ -521,4 +500,23 @@ def cross_entropy(x, y):
     return x * log(y)
 
 def mse(x, y):
-    return (x - y)**2
+    return pow((x - y), 2)
+
+def pow(x, y):
+    assert type(y) is int
+    if y == 0:
+        return myad.core.ones_like(x)
+    is_reciprocal = y < 0
+    if is_reciprocal:
+        y = -y
+    acc = None
+    while y > 0:
+        if y & 1:
+            acc = x if acc is None else acc * x
+        y >>= 1
+        if y > 0:
+            x = x * x
+    ret = acc
+    if is_reciprocal:
+        ret = (myad.core.ones_like(acc) / acc)
+    return ret

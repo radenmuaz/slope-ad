@@ -1,5 +1,5 @@
-import myad
-from myad import ops
+import slope
+from slope import ops
 from nn import datasets, layers, optimizers, initializers
 
 
@@ -89,7 +89,7 @@ if __name__ == "__main__":
 #     out = ops.reduce_sum(out, axis=(0,1))
 #     return out
 
-# out, grad_out = myad.grad(f)(x, y)
+# out, grad_out = slope.grad(f)(x, y)
 # print(x)
 # print(y)
 # print(out)
@@ -103,7 +103,7 @@ if __name__ == "__main__":
 #     return out
 
 # x_dot=y_dot=np.array([[1,1,1],[1,1,1]])
-# p, t= myad.jvp(f, (x,y), (x_dot,y_dot))
+# p, t= slope.jvp(f, (x,y), (x_dot,y_dot))
 # 
 # print(p)
 # print(t)

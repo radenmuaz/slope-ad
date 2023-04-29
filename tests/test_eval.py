@@ -1,6 +1,6 @@
 import unittest
 
-import myad
+import slope
 
 class TestOps(unittest.TestCase):
     def test_add(self):

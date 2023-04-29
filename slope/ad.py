@@ -37,9 +37,9 @@ import operator as op
 import string
 from functools import lru_cache
 
-import myad
-from myad.array_shape import ArrayShape, ValuedArrayShape
-from myad import ops
+import slope
+from slope.array_shape import ArrayShape, ValuedArrayShape
+from slope import ops
 
 
 def full_like(self, val, fill_val):
@@ -168,7 +168,7 @@ leaf = Leaf()
 
 def tree_flatten(x: Any) -> Any:
     def _tree_flatten(x: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
-        node_type = myad.RT.node_types.get(type(x))
+        node_type = slope.RT.node_types.get(type(x))
         if node_type:
             node_metadata, children = node_type.to_iterable(x)
             children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
@@ -252,7 +252,7 @@ class Tracer:
         return len(self.shape)
 
     def __neg__(self):
-        return myad.RT.bind1(ops.Neg, self)
+        return slope.RT.bind1(ops.Neg, self)
 
     def __add__(self, other):
         return ops.add(self, other)
@@ -288,7 +288,7 @@ class Tracer:
         return ops.pow(self, other)
 
     # def transpose(self, perm):
-    #     return myad.RT.bind1(ops.Transpose, self, perm)
+    #     return slope.RT.bind1(ops.Transpose, self, perm)
 
     def __bool__(self):
         return self.aval._bool(self)
@@ -386,7 +386,7 @@ class BatchTracer(Tracer):
 
     def full_lower(self):
         if self.batch_dim is None:
-            return myad.RT.full_lower(self.val)
+            return slope.RT.full_lower(self.val)
         else:
             return self
 
@@ -425,14 +425,14 @@ def move_batch_axis(axis_size, src, dst, x):
 
 def vmap_flat(f, in_axes, *args):
     (axis_size,) = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
-    with myad.RT.new_main(BatchTrace, axis_size) as main:
+    with slope.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
             BatchTracer(trace, x, ax) if ax is not None else x
             for x, ax in list_zip(args, in_axes)
         ]
         outs = f(*tracers_in)
-        tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
+        tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
     outs_transposed = [
         move_batch_axis(axis_size, bdim, 0, val_out)
@@ -487,11 +487,11 @@ class JVPTrace(Trace):
 
 
 def jvp_flat(f, primals, tangents):
-    with myad.RT.new_main(JVPTrace) as main:
+    with slope.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTracer(trace, x, t) for x, t in list_zip(primals, tangents)]
         outs = f(*tracers_in)
-        tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
+        tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
         primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
     return primals_out, tangents_out
 
@@ -628,7 +628,7 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
     list_map(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
         in_vals = list_map(read, eqn.inputs)
-        outs = myad.RT.bind(eqn.op, *in_vals, **eqn.params)
+        outs = slope.RT.bind(eqn.op, *in_vals, **eqn.params)
         list_map(write, eqn.out_binders, outs)
     return list_map(read, jaxpr.outs)
 
@@ -803,12 +803,12 @@ def make_jaxpr(
     f, out_tree = flatten_fun(f, in_tree)
 
     builder = JaxprBuilder()
-    with myad.RT.new_main(JaxprTrace, builder) as main:
-        with myad.RT.new_dynamic(main):
+    with slope.RT.new_main(JaxprTrace, builder) as main:
+        with slope.RT.new_dynamic(main):
             trace = JaxprTrace(main)
             tracers_in = [trace.new_arg(aval) for aval in avals_in]
             outs = f(*tracers_in)
-            tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
+            tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
             jaxpr, consts = builder.build(tracers_in, tracers_out)
     return jaxpr, consts, out_tree()
 
@@ -865,11 +865,11 @@ class PartialVal(NamedTuple):
 def partial_eval_flat(
     f: Callable, pvals_in: List[PartialVal]
 ) -> Tuple[Jaxpr, List[PartialVal], List[Any]]:
-    with myad.RT.new_main(PartialEvalTrace) as main:
+    with slope.RT.new_main(PartialEvalTrace) as main:
         trace = PartialEvalTrace(main)
         tracers_in = [trace.new_arg(pval) for pval in pvals_in]
         outs = f(*tracers_in)
-        tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
+        tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
         pvals_out = [t.pval for t in tracers_out]
         unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
         unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
@@ -910,7 +910,7 @@ class PartialEvalTracer(Tracer):
 
     def full_lower(self):
         if self.pval.is_known:
-            return myad.RT.full_lower(self.pval.const)
+            return slope.RT.full_lower(self.pval.const)
         return self
 
 
@@ -932,7 +932,7 @@ class PartialEvalTrace(Trace):
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return myad.RT.bind(op, *map(myad.RT.full_lower, tracers), **params)
+            return slope.RT.bind(op, *map(slope.RT.full_lower, tracers), **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = op.shape_eval(*avals_in, **params)

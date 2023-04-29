@@ -1,6 +1,6 @@
-import myad
+import slope 
 import numpy as np
-from myad import ad, ops
+from slope import ad, ops
 
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
@@ -51,7 +51,7 @@ print(grad_out)
 #     return out
 
 # x_dot=y_dot=np.array([[1,1,1],[1,1,1]])
-# p, t= myad.jvp(f, (x,y), (x_dot,y_dot))
+# p, t= slope.jvp(f, (x,y), (x_dot,y_dot))
 # 
 # print(p)
 # print(t)

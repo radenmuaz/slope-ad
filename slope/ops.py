@@ -1,6 +1,6 @@
-import myad
+import slope
 import numpy as np
-from myad.array_shape import ArrayShape
+from slope.array_shape import ArrayShape
 from typing import List, Tuple, Sequence, Any
 from abc import ABC, abstractmethod
 
@@ -41,7 +41,7 @@ class Op(ABC):
 #     def fn(self, *args):
 #         raise NotImplementedError
 #     def __call__(self, *args):
-#         if myad.RT.trace_stack.trace_type == myad.core.JVPTrace:
+#         if slope.RT.trace_stack.trace_type == slope.core.JVPTrace:
 
 
 #     eval = vmap = jvp = shape_eval = __call__
@@ -51,7 +51,7 @@ class UnaryOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, **params):
         (x,), (x_bdim,) = vals_in, dims_in
-        return [myad.RT.bind1(cls, x, **params)], [x_bdim]
+        return [slope.RT.bind1(cls, x, **params)], [x_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
@@ -64,11 +64,11 @@ class BinaryOp(Op):
         (x, y), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
-                x = myad.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                x = slope.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
                 x_bdim = y_bdim
             else:
-                y = myad.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-        return [myad.RT.bind1(cls, x, y, **params)], [x_bdim]
+                y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
+        return [slope.RT.bind1(cls, x, y, **params)], [x_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
@@ -85,7 +85,7 @@ class ReduceOp(Op):
         (x,), (x_bdim,) = vals_in, dims_in
         params["axis"] = tuple(ax + (x_bdim <= ax) for ax in params["axis"])
         out_bdim = x_bdim - sum(ax < x_bdim for ax in params["axis"])
-        return [myad.RT.bind1(cls, x, **params)], [out_bdim]
+        return [slope.RT.bind1(cls, x, **params)], [out_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
@@ -127,7 +127,7 @@ class Convert(UnaryOp):
     @staticmethod
     def T(cts, x, **params):
         (y_bar,) = cts
-        assert type(x) is myad.ad.UndefPrimal
+        assert type(x) is slope.ad.UndefPrimal
         return [convert(y_bar, x.dtype)]
 
 
@@ -219,9 +219,9 @@ class Mul(BinaryOp):
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
-        if type(x) is myad.ad.UndefPrimal:
+        if type(x) is slope.ad.UndefPrimal:
             return [(mul(z_bar, y)), None]
-        elif type(y) is myad.ad.UndefPrimal:
+        elif type(y) is slope.ad.UndefPrimal:
             return [None, x * z_bar]
 
 
@@ -427,23 +427,23 @@ class Transpose(ShapeOp):
 
 # UnaryOps
 def identity(x):
-    return myad.RT.bind1(Identity, x)
+    return slope.RT.bind1(Identity, x)
 
 
 def convert(x, dtype):
-    return myad.RT.bind1(Convert, x, dtype=dtype)
+    return slope.RT.bind1(Convert, x, dtype=dtype)
 
 
 def exp(x):
-    return myad.RT.bind1(Exp, x)
+    return slope.RT.bind1(Exp, x)
 
 
 def log(x):
-    return myad.RT.bind1(Log, x)
+    return slope.RT.bind1(Log, x)
 
 
 def neg(x):
-    return myad.RT.bind1(Neg, x)
+    return slope.RT.bind1(Neg, x)
 
 
 # BinaryOps
@@ -451,54 +451,54 @@ def neg(x):
 
 ## Arithmetic
 def add(x, y):
-    return myad.RT.bind1(Add, x, y)
+    return slope.RT.bind1(Add, x, y)
 
 
 def sub(x, y):
-    return myad.RT.bind1(Sub, x, y)
+    return slope.RT.bind1(Sub, x, y)
 
 
 def mul(x, y):
-    return myad.RT.bind1(Mul, x, y)
+    return slope.RT.bind1(Mul, x, y)
 
 
 def div(x, y):
-    return myad.RT.bind1(Div, x, y)
+    return slope.RT.bind1(Div, x, y)
 
 
 ## Logic
 def equal(x, y):
-    return myad.RT.bind1(Equal, x, y)
+    return slope.RT.bind1(Equal, x, y)
 
 
 def max(x, y):
-    return myad.RT.bind1(Max, x, y)
+    return slope.RT.bind1(Max, x, y)
 
 
 def min(x, y):
-    return -myad.RT.bind1(Max, -x, -y)
+    return -slope.RT.bind1(Max, -x, -y)
 
 
 # ReduceOps
 def reduce_sum(x, axis=None):
-    return myad.RT.bind1(ReduceSum, x, axis=axis)
+    return slope.RT.bind1(ReduceSum, x, axis=axis)
 
 
 def reduce_max(x, axis=None):
-    return myad.RT.bind1(ReduceMax, x, axis=axis)
+    return slope.RT.bind1(ReduceMax, x, axis=axis)
 
 
 # ShapeOps
 def broadcast(x, shape, axes=None):
-    return myad.RT.bind1(Broadcast, x, shape=shape, axes=axes)
+    return slope.RT.bind1(Broadcast, x, shape=shape, axes=axes)
 
 
 def reshape(x, shape):
-    return myad.RT.bind1(Reshape, x, shape=shape)
+    return slope.RT.bind1(Reshape, x, shape=shape)
 
 
 def transpose(x, perm):
-    return myad.RT.bind1(Transpose, x, perm=perm)
+    return slope.RT.bind1(Transpose, x, perm=perm)
 
 
 # def expand_dims(x, axis):
@@ -534,7 +534,7 @@ def dot(x, y):
 
 
 def relu(x):
-    return max(x, myad.ad.zeros_like(x))
+    return max(x, slope.ad.zeros_like(x))
 
 
 def softmax(x, axis):
@@ -559,7 +559,7 @@ def mse(x, y):
 def pow(x, y):
     assert type(y) is int
     if y == 0:
-        return myad.ad.ones_like(x)
+        return slope.ad.ones_like(x)
     is_reciprocal = y < 0
     if is_reciprocal:
         y = -y
@@ -572,5 +572,5 @@ def pow(x, y):
             x = x * x
     ret = acc
     if is_reciprocal:
-        ret = myad.ad.ones_like(acc) / acc
+        ret = slope.ad.ones_like(acc) / acc
     return ret

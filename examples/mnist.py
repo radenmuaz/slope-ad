@@ -1,6 +1,6 @@
 import slope
 from slope import ops
-from nn import datasets, layers, optimizers, initializers
+from slope.nn import datasets, layers, optimizers, initializers
 
 
 
@@ -26,13 +26,11 @@ def accuracy(params, batch):
   predicted_class = ops.argmax(predict(params, inputs), axis=1)
   return ops.mean(predicted_class == target_class)
 
-init_random_params, predict = stax.serial(
-    Dense(1024), Relu,
-    Dense(1024), Relu,
-    Dense(10), LogSoftmax)
+init_random_params, predict = layers.serial(
+    layers.Dense(784), layers.Relu,
+    layers.Dense(10), layers.LogSoftmax)
 
 if __name__ == "__main__":
-    rng = random.PRNGKey(0)
     train_images, train_labels, test_images, test_labels = datasets.mnist()
 
     step_size = 0.001
@@ -58,7 +56,7 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        return opt_update(i, grad(loss)(params, batch), opt_state)
+        return opt_update(i, slope.ad.grad(loss)(params, batch), opt_state)
 
     _, init_params = init_random_params(rng, (-1, 28 * 28))
     opt_state = opt_init(init_params)

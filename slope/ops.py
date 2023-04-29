@@ -4,6 +4,7 @@ from myad.array_shape import ArrayShape
 from typing import List, Tuple, Sequence, Any
 from abc import ABC, abstractmethod
 
+
 class Op(ABC):
     @staticmethod
     @abstractmethod
@@ -35,60 +36,60 @@ class Op(ABC):
     def mlir(cls):
         raise NotImplementedError
 
+
 # class FnOp(Op):
 #     def fn(self, *args):
 #         raise NotImplementedError
 #     def __call__(self, *args):
 #         if myad.RT.trace_stack.trace_type == myad.core.JVPTrace:
 
-    
+
 #     eval = vmap = jvp = shape_eval = __call__
 
 
 class UnaryOp(Op):
-    @staticmethod
-    def vmap(axis_size, vals_in, dims_in):
+    @classmethod
+    def vmap(cls, axis_size, vals_in, dims_in, **params):
         (x,), (x_bdim,) = vals_in, dims_in
-        return [myad.RT.bind1(x)], [x_bdim]
+        return [myad.RT.bind1(cls, x, **params)], [x_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
         return [ArrayShape(x.shape, x.dtype)]
 
+
 class BinaryOp(Op):
-    
-    @staticmethod
-    def vmap(axis_size, vals_in, dims_in):
+    @classmethod
+    def vmap(cls, axis_size, vals_in, dims_in, **params):
         (x, y), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
-                x = myad.core.move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                x = myad.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
                 x_bdim = y_bdim
             else:
-                y = myad.core.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-        return [myad.RT.bind1(x, y)], [x_bdim]
+                y = myad.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
+        return [myad.RT.bind1(cls, x, y, **params)], [x_bdim]
 
     @staticmethod
-    def shape_eval(x: ArrayShape, y: ArrayShape) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
-            
             raise TypeError
         return [ArrayShape(x.shape, x.dtype)]
 
 
 class ReduceOp(Op):
-    @staticmethod
-    def vmap(axis_size, vals_in, dims_in, axis):
+    @classmethod
+    def vmap(cls, axis_size, vals_in, dims_in, **params):
         (x,), (x_bdim,) = vals_in, dims_in
-        new_axis = tuple(ax + (x_bdim <= ax) for ax in axis)
-        out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
-        return [myad.RT.bind1(x, axis=new_axis)], [out_bdim]
+        params["axis"] = tuple(ax + (x_bdim <= ax) for ax in params["axis"])
+        out_bdim = x_bdim - sum(ax < x_bdim for ax in params["axis"])
+        return [myad.RT.bind1(cls, x, **params)], [out_bdim]
 
     @staticmethod
-    def shape_eval(x: ArrayShape, axis: Tuple[int, ...]) -> List[ArrayShape]:
-        axis_ = set(axis)
+    def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
+        axis_ = set(params["axis"])
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
 
@@ -106,7 +107,7 @@ class Identity(UnaryOp):
     @staticmethod
     def eval(x):
         return [x]
-    
+
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
@@ -117,17 +118,18 @@ class Convert(UnaryOp):
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
-    
+
     @staticmethod
     def jvp(primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
         return [convert(x, dtype)], [convert(x_dot, dtype)]
-    
+
     @staticmethod
     def T(cts, x, **params):
         (y_bar,) = cts
-        assert type(x) is myad.core.UndefPrimal
+        assert type(x) is myad.ad.UndefPrimal
         return [convert(y_bar, x.dtype)]
+
 
 class Exp(UnaryOp):
     @staticmethod
@@ -160,7 +162,7 @@ class Neg(UnaryOp):
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
         return [-x], [-x_dot]
-    
+
     @staticmethod
     def T(t, x):
         (z,) = t
@@ -188,7 +190,6 @@ class Add(BinaryOp):
         return [z_bar, z_bar]
 
 
-
 class Sub(BinaryOp):
     @staticmethod
     def eval(x, y):
@@ -204,6 +205,7 @@ class Sub(BinaryOp):
         (z_bar,) = cts
         return [z_bar, -z_bar]
 
+
 class Mul(BinaryOp):
     @staticmethod
     def eval(x, y):
@@ -212,14 +214,14 @@ class Mul(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x*y], [x_dot*y + x*y_dot]
+        return [x * y], [x_dot * y + x * y_dot]
 
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
-        if type(x) is myad.core.UndefPrimal:
-            return [(mul(z_bar, y)), None] 
-        elif type(y) is myad.core.UndefPrimal:
+        if type(x) is myad.ad.UndefPrimal:
+            return [(mul(z_bar, y)), None]
+        elif type(y) is myad.ad.UndefPrimal:
             return [None, x * z_bar]
 
 
@@ -231,12 +233,13 @@ class Div(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x / y], [(x_dot/y) + (-y_dot * x * (y**-2))]
-    
+        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
+
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
         return [z_bar / y, None]
+
 
 class Max(BinaryOp):
     @staticmethod
@@ -248,7 +251,7 @@ class Max(BinaryOp):
         (x, y), _ = primals, tangents
         out_primal = max(x, y)
         return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
-    
+
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
@@ -265,7 +268,7 @@ class Equal(BinaryOp):
         (x, y), _ = primals, tangents
         out_primal = equal(x, y)
         return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
-    
+
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
@@ -312,21 +315,20 @@ class ReduceMax(ReduceOp):
         locs = convert(locs, x_dot.dtype)
         counts = reduce_sum(locs, axis)
         jvp_out = reduce_sum(x_dot * locs, axis)
-        
+
         jvp_out = jvp_out / counts
-        
+
         return [eval_out], [jvp_out]
-    
+
     @staticmethod
     def T(cts, x, *, axis):
         (y_bar,) = cts
         return [broadcast(y_bar, x.aval.shape, ())]
 
+
 class ReduceSum(ReduceOp):
     @staticmethod
     def eval(x, *, axis):
-        if len(axis) == 0:
-            axis = None # empty tuple does not do sum
         return [np.sum(x, axis)]
 
     @staticmethod
@@ -340,31 +342,33 @@ class ReduceSum(ReduceOp):
     def T(cts, x, *, axis):
         (y_bar,) = cts
         return [broadcast(y_bar, x.aval.shape, axis)]
-    
+
+
 # -----------------------
 # ShapeOps
 # -----------------------
 
+
 class Broadcast(ShapeOp):
     @staticmethod
     def eval(x, *, shape, axes):
-        for axis in sorted(axes):
-            x = np.expand_dims(x, axis)
+        if axes is not None:
+            for axis in sorted(axes):
+                x = np.expand_dims(x, axis)
         return [np.broadcast_to(x, shape)]
-
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
         (x,), (x_dot,) = primals, tangents
-        return ([broadcast(x, shape=shape, axes=axes)],
-                [broadcast(x_dot, shape=shape, axes=axes)])
+        return (
+            [broadcast(x, shape=shape, axes=axes)],
+            [broadcast(x_dot, shape=shape, axes=axes)],
+        )
 
     @staticmethod
-    def shape_eval(
-        x: ArrayShape, *, shape: Sequence[int], axes
-    ) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
         return [ArrayShape(tuple(shape), x.dtype)]
-    
+
     @staticmethod
     def T(cts, x, *, shape, axes):
         (y_bar,) = cts
@@ -384,16 +388,14 @@ class Reshape(ShapeOp):
     @staticmethod
     def eval(x, *, shape):
         return [np.reshape(x, shape)]
-    
+
     @staticmethod
     def jvp(primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
         return [reshape(x, shape)], [reshape(x_dot, shape)]
-    
+
     @staticmethod
-    def shape_eval(
-        x: ArrayShape, *, shape: Sequence[int]
-    ) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
         return [ArrayShape(tuple(shape), x.dtype)]
 
     @staticmethod
@@ -406,68 +408,94 @@ class Transpose(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
         return [x.transpose(perm)]
-    
+
     @staticmethod
     def jvp(primals, tangents, *, perm):
         (x,), (x_dot,) = primals, tangents
         return [transpose(x, perm)], [transpose(x_dot, perm)]
 
     @staticmethod
-    def shape_eval(
-        x: ArrayShape, *, perm: Sequence[int]
-    ) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, *, perm: Sequence[int]) -> List[ArrayShape]:
         shape = [x.shape[i] for i in perm]
         return [ArrayShape(shape, x.dtype)]
-    
+
     @staticmethod
     def T(cts, x, *, perm):
         (y_bar,) = cts
         return [transpose(y_bar, perm)]
 
+
 # UnaryOps
 def identity(x):
     return myad.RT.bind1(Identity, x)
+
+
 def convert(x, dtype):
     return myad.RT.bind1(Convert, x, dtype=dtype)
+
+
 def exp(x):
     return myad.RT.bind1(Exp, x)
+
+
 def log(x):
     return myad.RT.bind1(Log, x)
+
+
 def neg(x):
     return myad.RT.bind1(Neg, x)
 
+
 # BinaryOps
+
 
 ## Arithmetic
 def add(x, y):
     return myad.RT.bind1(Add, x, y)
+
+
 def sub(x, y):
     return myad.RT.bind1(Sub, x, y)
+
+
 def mul(x, y):
     return myad.RT.bind1(Mul, x, y)
+
+
 def div(x, y):
     return myad.RT.bind1(Div, x, y)
+
 
 ## Logic
 def equal(x, y):
     return myad.RT.bind1(Equal, x, y)
+
+
 def max(x, y):
     return myad.RT.bind1(Max, x, y)
+
+
 def min(x, y):
     return -myad.RT.bind1(Max, -x, -y)
 
 
 # ReduceOps
-def reduce_sum(x, axis):
+def reduce_sum(x, axis=None):
     return myad.RT.bind1(ReduceSum, x, axis=axis)
-def reduce_max(x, axis):
+
+
+def reduce_max(x, axis=None):
     return myad.RT.bind1(ReduceMax, x, axis=axis)
 
+
 # ShapeOps
-def broadcast(x, shape, axes):
+def broadcast(x, shape, axes=None):
     return myad.RT.bind1(Broadcast, x, shape=shape, axes=axes)
+
+
 def reshape(x, shape):
     return myad.RT.bind1(Reshape, x, shape=shape)
+
 
 def transpose(x, perm):
     return myad.RT.bind1(Transpose, x, perm=perm)
@@ -482,10 +510,12 @@ def transpose(x, perm):
 #     x = reshape(x, shape)
 #     return x
 
+
 def T(x):
     perm = list(range(len(x.shape)))
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return transpose(x, perm)
+
 
 def dot(x, y):
     a, b = x.shape[-2], x.shape[-1]
@@ -502,30 +532,34 @@ def dot(x, y):
     z = T(z)
     return z
 
+
 def relu(x):
-    return max(x, myad.core.zeros_like(x))
+    return max(x, myad.ad.zeros_like(x))
+
 
 def softmax(x, axis):
     x_max = reduce_max(x, axis)
-    x_max = broadcast(x_max, x.shape, ())
-    
+    x_max = broadcast(x_max, x.shape)
+
     e = exp(x - x_max)
     # e = exp(x)
     s_e = reduce_sum(e, axis)
-    s_e = broadcast(s_e, e.shape, ())
+    s_e = broadcast(s_e, e.shape)
     return e / s_e
 
-    
+
 def cross_entropy(x, y):
     return x * log(y)
+
 
 def mse(x, y):
     return pow((x - y), 2)
 
+
 def pow(x, y):
     assert type(y) is int
     if y == 0:
-        return myad.core.ones_like(x)
+        return myad.ad.ones_like(x)
     is_reciprocal = y < 0
     if is_reciprocal:
         y = -y
@@ -538,5 +572,5 @@ def pow(x, y):
             x = x * x
     ret = acc
     if is_reciprocal:
-        ret = (myad.core.ones_like(acc) / acc)
+        ret = myad.ad.ones_like(acc) / acc
     return ret

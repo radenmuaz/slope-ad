@@ -5,7 +5,7 @@ from contextlib import contextmanager
 
 import numpy as np
 import itertools
-
+import weakref
 from typing import (
     Sequence,
     Callable,
@@ -41,14 +41,18 @@ import myad
 from myad.array_shape import ArrayShape, ValuedArrayShape
 from myad import ops
 
+
 def full_like(self, val, fill_val):
     return np.full(val.shape, fill_val, val.dtype)
+
 
 def ones_like(self, val):
     return np.ones(val.shape, val.dtype)
 
+
 def zeros_like(self, val):
     return np.zeros(val.shape, val.dtype)
+
 
 def swap(f):
     return lambda x, y: f(y, x)
@@ -84,6 +88,7 @@ def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
     out = [next(l2) if b else next(l1) for b in which]
     assert next(l1, None) is next(l2, None) is None
     return out
+
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -254,7 +259,7 @@ class Tracer:
 
     def __radd__(self, other):
         return ops.add(other, self)
-    
+
     def __sub__(self, other):
         return ops.sub(self, other)
 
@@ -269,10 +274,10 @@ class Tracer:
 
     def __div__(self, other):
         return ops.div(self, other)
-    
+
     def __rdiv__(self, other):
         return ops.div(other, self)
-    
+
     def __truediv__(self, other):
         return ops.div(self, other)
 
@@ -299,7 +304,7 @@ class Tracer:
     #         return ValuedArrayShape(np.array(x))
     #     else:
     #         raise TypeError(x)
-    
+
     @staticmethod
     def get_aval(x):
         if isinstance(x, Tracer):
@@ -323,8 +328,9 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
     def run_op(self, op, tracers, params):
-        # 
+        #
         return op.eval(*tracers, **params)
+
 
 # class EvalTracer(Tracer):
 #     def __init__(self, trace, val):
@@ -397,6 +403,7 @@ class BatchTrace(Trace):
     def axis_size(self):
         return self.main.global_data
 
+
 def move_batch_axis(axis_size, src, dst, x):
     if src is None:
         target_shape = list(x.shape)
@@ -404,7 +411,7 @@ def move_batch_axis(axis_size, src, dst, x):
         out_ndim = len(target_shape)
         if type(dst) in (tuple, list):
             out_ndim += 1
-        reshape_shape = [1 if ax==dst else target_shape for ax in range(out_ndim)]
+        reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
         x = ops.Reshape.do(x, reshape_shape)
         x = ops.Broadcast.do(x, target_shape)
         return x
@@ -415,10 +422,9 @@ def move_batch_axis(axis_size, src, dst, x):
         perm.insert(dst, src)
         return ops.Transpose.do(x, perm)
 
+
 def vmap_flat(f, in_axes, *args):
-    (axis_size,) = {
-        x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None
-    }
+    (axis_size,) = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
     with myad.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
@@ -500,7 +506,6 @@ def jvp(f, primals, tangents):
     primals_out = tree_unflatten(out_tree(), primals_out_flat)
     tangents_out = tree_unflatten(out_tree(), tangents_out_flat)
     return primals_out, tangents_out
-
 
 
 def jacfwd(f, x):
@@ -764,10 +769,13 @@ class JaxprBuilder:
         jaxpr, constvals = self._inline_literals(jaxpr, constvals)
         return jaxpr, constvals
 
-
-    def _inline_literals(self, jaxpr: Jaxpr, consts: List[Any]) -> Tuple[Jaxpr, List[Any]]:
+    def _inline_literals(
+        self, jaxpr: Jaxpr, consts: List[Any]
+    ) -> Tuple[Jaxpr, List[Any]]:
         const_binders, other_binders = split_list(jaxpr.in_binders, len(consts))
-        scalars = [type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts]
+        scalars = [
+            type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts
+        ]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(zip(lit_binders, list_map(Lit, lit_vals)))
@@ -803,8 +811,6 @@ def make_jaxpr(
             tracers_out = [myad.RT.full_raise(trace, out) for out in outs]
             jaxpr, consts = builder.build(tracers_in, tracers_out)
     return jaxpr, consts, out_tree()
-
-
 
 
 def linearize_flat(f, *primals_in):
@@ -872,9 +878,6 @@ def partial_eval_flat(
     return jaxpr, pvals_out, consts
 
 
-from weakref import ref, ReferenceType
-
-
 class LambdaBindingRecipe(NamedTuple):
     pass
 
@@ -888,7 +891,7 @@ class JaxprEqnRecipe(NamedTuple):
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
-    tracer_refs_out: List["ReferenceType[PartialEvalTracer]"]
+    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracer"]]
 
 
 JaxprRecipe = Union[LambdaBindingRecipe, ConstRecipe, JaxprEqnRecipe]
@@ -937,12 +940,12 @@ class PartialEvalTrace(Trace):
             PartialEvalTracer(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
-        eqn = JaxprEqnRecipe(op, tracers_in, params, avals_out, map(ref, tracers_out))
+        eqn = JaxprEqnRecipe(
+            op, tracers_in, params, avals_out, map(weakref.ref, tracers_out)
+        )
         for t in tracers_out:
             t.recipe = eqn
         return tracers_out
-
-
 
 
 def tracers_to_jaxpr(
@@ -1112,6 +1115,7 @@ def eval_jaxpr_transposed(
     ]
     return ret
 
+
 def grad(f):
     def gradfun(x, *xs):
         y, f_vjp = vjp(f, x, *xs)
@@ -1124,7 +1128,6 @@ def grad(f):
 
 
 class Runtime:
-
     def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
@@ -1205,6 +1208,7 @@ class Runtime:
 
     def bind1(self, *args, **params):
         return self.bind(*args, **params)[0]
+
 
 # def partial_eval_jaxpr(
 #     jaxpr: Jaxpr,

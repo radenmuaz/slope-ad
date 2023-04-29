@@ -197,9 +197,7 @@ def vmap_jaxpr(
     return new_jaxpr, new_consts
 
 
-def unmapped_aval(
-    axis_size: int, batch_dim: BatchAxis, aval: ArrayShape
-) -> ArrayShape:
+def unmapped_aval(axis_size: int, batch_dim: BatchAxis, aval: ArrayShape) -> ArrayShape:
     if batch_dim is not_mapped:
         return aval
     else:

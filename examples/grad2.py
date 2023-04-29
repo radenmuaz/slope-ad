@@ -1,6 +1,6 @@
 import myad
 import numpy as np
-from myad import ops
+from myad import ad, ops
 
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
@@ -37,7 +37,7 @@ def f(x, y):
     out = ops.reduce_sum(out, axis=(0,1))
     return out
 
-out, grad_out = myad.grad(f)(x, y)
+out, grad_out = ad.grad(f)(x, y)
 print(x)
 print(y)
 print(out)

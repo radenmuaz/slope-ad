@@ -250,31 +250,37 @@ class Tracer:
         return myad.RT.bind1(ops.Neg, self)
 
     def __add__(self, other):
-        return myad.RT.bind1(ops.Add, self, other)
+        return ops.add(self, other)
 
     def __radd__(self, other):
-        return myad.RT.bind1(ops.Add, other, self)
+        return ops.add(other, self)
+    
+    def __sub__(self, other):
+        return ops.sub(self, other)
+
+    def __rsub__(self, other):
+        return ops.sub(other, self)
 
     def __mul__(self, other):
-        return myad.RT.bind1(ops.Mul, self, other)
+        return ops.mul(self, other)
 
     def __rmul__(self, other):
-        return myad.RT.bind1(ops.Mul, other, self)
+        return ops.mul(other, self)
 
     def __div__(self, other):
-        return myad.RT.bind1(ops.Div, self, other)
+        return ops.div(self, other)
+    
+    def __rdiv__(self, other):
+        return ops.div(other, self)
     
     def __truediv__(self, other):
-        return self.__div__(other)
+        return ops.div(self, other)
 
-    def __rdiv__(self, other):
-        return myad.RT.bind1(ops.Div, other, self)
+    def __rtruediv__(self, other):
+        return ops.div(other, self)
 
     def __pow__(self, other):
         return ops.pow(self, other)
-
-    # def expand(self, shape, axes):
-    #     return myad.RT.bind1(ops.Expand, self, shape, axes)
 
     # def transpose(self, perm):
     #     return myad.RT.bind1(ops.Transpose, self, perm)
@@ -317,7 +323,7 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
     def run_op(self, op, tracers, params):
-        # breakpoint()
+        # 
         return op.eval(*tracers, **params)
 
 # class EvalTracer(Tracer):
@@ -1094,6 +1100,7 @@ def eval_jaxpr_transposed(
     list_map(write_primal, jaxpr.in_binders, args)
     list_map(write_cotangent, jaxpr.outs, cotangents)
     for eqn in jaxpr.eqns[::-1]:
+        print(eqn)
         primals_in = list_map(read_primal, eqn.inputs)
         cts_in = list_map(read_cotangent, eqn.out_binders)
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)

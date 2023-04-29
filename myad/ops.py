@@ -55,7 +55,6 @@ class UnaryOp(Op):
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
         return [ArrayShape(x.shape, x.dtype)]
 
-
 class BinaryOp(Op):
     
     @staticmethod
@@ -74,7 +73,7 @@ class BinaryOp(Op):
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
-            breakpoint()
+            
             raise TypeError
         return [ArrayShape(x.shape, x.dtype)]
 
@@ -114,7 +113,7 @@ class Identity(UnaryOp):
         return [identity(x)], [identity(x_dot)]
 
 
-class Cast(UnaryOp):
+class Convert(UnaryOp):
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
@@ -122,7 +121,13 @@ class Cast(UnaryOp):
     @staticmethod
     def jvp(primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
-        return [cast(x, dtype)], [cast(x_dot, dtype)]
+        return [convert(x, dtype)], [convert(x_dot, dtype)]
+    
+    @staticmethod
+    def T(cts, x, **params):
+        (y_bar,) = cts
+        assert type(x) is myad.core.UndefPrimal
+        return [convert(y_bar, x.dtype)]
 
 class Exp(UnaryOp):
     @staticmethod
@@ -302,30 +307,26 @@ class ReduceMax(ReduceOp):
     def jvp(primals, tangents, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_max(x, axis)
-        eq_shape = [1 if i in axis else d 
-                    for i, d in enumerate(x.shape)]
-
-        # we do equal with implicit broadcasting
-        locs = equal(x, reshape(eval_out, eq_shape))
-        locs = cast(locs, x_dot.dtype)
+        eval_out = broadcast(eval_out, x.shape, ())
+        locs = equal(x, eval_out)
+        locs = convert(locs, x_dot.dtype)
         counts = reduce_sum(locs, axis)
         jvp_out = reduce_sum(x_dot * locs, axis)
-        breakpoint()
+        
         jvp_out = jvp_out / counts
         
         return [eval_out], [jvp_out]
     
     @staticmethod
-    def T(cts, x):
-        (y_bar, axis) = cts
-        reshape_shape = list(y_bar.shape)
-        reshape_shape.insert(axis, 1)
-        y_bar = reshape(x, reshape_shape)
-        return [broadcast(y_bar, x.aval.shape)]
+    def T(cts, x, *, axis):
+        (y_bar,) = cts
+        return [broadcast(y_bar, x.aval.shape, ())]
 
 class ReduceSum(ReduceOp):
     @staticmethod
     def eval(x, *, axis):
+        if len(axis) == 0:
+            axis = None # empty tuple does not do sum
         return [np.sum(x, axis)]
 
     @staticmethod
@@ -338,28 +339,13 @@ class ReduceSum(ReduceOp):
     @staticmethod
     def T(cts, x, *, axis):
         (y_bar,) = cts
-        # y_bar = expand_dims(y_bar, axis)
         return [broadcast(y_bar, x.aval.shape, axis)]
     
-    # def reduce_sum_transpose_rule(cts, x, *, axis):
-    #     y_bar, = cts
-    #     return [broadcast(y_bar, x.aval.shape, axis)]
-    
-
-# def _reduce_sum_transpose_rule(cotangent, operand, *, axes):
-#   assert ad.is_undefined_primal(operand)
-#   input_shape = operand.aval.shape
-#   broadcast_dimensions = tuple(np.delete(np.arange(len(input_shape)), axes))
-#   result = broadcast(cotangent, input_shape, broadcast_dimensions)
-#   assert result.shape == input_shape
-#   return [result]
-
-
 # -----------------------
 # ShapeOps
 # -----------------------
 
-class BroadcastInDim(ShapeOp):
+class Broadcast(ShapeOp):
     @staticmethod
     def eval(x, *, shape, axes):
         for axis in sorted(axes):
@@ -382,7 +368,10 @@ class BroadcastInDim(ShapeOp):
     @staticmethod
     def T(cts, x, *, shape, axes):
         (y_bar,) = cts
-        return [reduce_sum(y_bar, axes)]
+        out = y_bar
+        out = reduce_sum(y_bar, axes)
+        out = reshape(out, x.aval.shape)
+        return [out]
 
 
 # class Crop(ShapeOp):
@@ -438,8 +427,8 @@ class Transpose(ShapeOp):
 # UnaryOps
 def identity(x):
     return myad.RT.bind1(Identity, x)
-def cast(x, dtype):
-    return myad.RT.bind1(Cast, x, dtype=dtype)
+def convert(x, dtype):
+    return myad.RT.bind1(Convert, x, dtype=dtype)
 def exp(x):
     return myad.RT.bind1(Exp, x)
 def log(x):
@@ -476,7 +465,7 @@ def reduce_max(x, axis):
 
 # ShapeOps
 def broadcast(x, shape, axes):
-    return myad.RT.bind1(BroadcastInDim, x, shape=shape, axes=axes)
+    return myad.RT.bind1(Broadcast, x, shape=shape, axes=axes)
 def reshape(x, shape):
     return myad.RT.bind1(Reshape, x, shape=shape)
 
@@ -517,9 +506,15 @@ def relu(x):
     return max(x, myad.core.zeros_like(x))
 
 def softmax(x, axis):
-    m = x - reduce_max(x, axis)
-    e = exp(m)
+    x_max = reduce_max(x, axis)
+    x_max = broadcast(x_max, x.shape, ())
+    
+    e = exp(x - x_max)
+    # e = exp(x)
     s_e = reduce_sum(e, axis)
+    s_e = broadcast(s_e, e.shape, ())
+    return e / s_e
+
     
 def cross_entropy(x, y):
     return x * log(y)

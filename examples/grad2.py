@@ -31,10 +31,9 @@ x = np.random.randn(1,3)
 y = np.random.randn(2,3)
 
 def f(x, y):
-    out = ops.dot(x, ops.T(y))
-
-    # out = ops.softmax(out, axis=(1,))
-    # breakpoint()
+    out = x
+    out = ops.dot(out, ops.T(y))
+    out = ops.softmax(out, axis=(1,))
     out = ops.reduce_sum(out, axis=(0,1))
     return out
 
@@ -43,7 +42,7 @@ print(x)
 print(y)
 print(out)
 print(grad_out)
-breakpoint()
+
 
 
 # def f(x,y):
@@ -53,6 +52,6 @@ breakpoint()
 
 # x_dot=y_dot=np.array([[1,1,1],[1,1,1]])
 # p, t= myad.jvp(f, (x,y), (x_dot,y_dot))
-# breakpoint()
+# 
 # print(p)
 # print(t)

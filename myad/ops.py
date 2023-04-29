@@ -52,7 +52,7 @@ class UnaryOp(Op):
         return [myad.RT.bind1(x)], [x_bdim]
 
     @staticmethod
-    def shape_eval(x: ArrayShape) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
         return [ArrayShape(x.shape, x.dtype)]
 
 
@@ -74,6 +74,7 @@ class BinaryOp(Op):
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
+            breakpoint()
             raise TypeError
         return [ArrayShape(x.shape, x.dtype)]
 
@@ -111,6 +112,17 @@ class Identity(UnaryOp):
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
         return [identity(x)], [identity(x_dot)]
+
+
+class Cast(UnaryOp):
+    @staticmethod
+    def eval(x, *, dtype):
+        return [x.astype(dtype)]
+    
+    @staticmethod
+    def jvp(primals, tangents, *, dtype):
+        (x,), (x_dot,) = primals, tangents
+        return [cast(x, dtype)], [cast(x_dot, dtype)]
 
 class Exp(UnaryOp):
     @staticmethod
@@ -284,17 +296,22 @@ class Equal(BinaryOp):
 class ReduceMax(ReduceOp):
     @staticmethod
     def eval(x, axis):
-        return [x.sum(axis)]
+        return [x.max(axis)]
 
     @staticmethod
     def jvp(primals, tangents, axis):
-        eval_out = reduce_max(*primals)
+        (x,), (x_dot,) = primals, tangents
+        eval_out = reduce_max(x, axis)
         eq_shape = [1 if i in axis else d 
-                    for i, d in enumerate(primals.shape)]
+                    for i, d in enumerate(x.shape)]
+
         # we do equal with implicit broadcasting
-        locs = Equal.do(primals, Reshape.do(eval_out, eq_shape))
-        counts = ReduceSum.do(locs, axis)
-        jvp_out = ReduceSum.do(tangents * locs, axis) / counts
+        locs = equal(x, reshape(eval_out, eq_shape))
+        locs = cast(locs, x_dot.dtype)
+        counts = reduce_sum(locs, axis)
+        jvp_out = reduce_sum(x_dot * locs, axis)
+        breakpoint()
+        jvp_out = jvp_out / counts
         
         return [eval_out], [jvp_out]
     
@@ -321,8 +338,8 @@ class ReduceSum(ReduceOp):
     @staticmethod
     def T(cts, x, *, axis):
         (y_bar,) = cts
-        y_bar = expand_dims(y_bar, axis)
-        return [broadcast(y_bar, x.aval.shape)]
+        # y_bar = expand_dims(y_bar, axis)
+        return [broadcast(y_bar, x.aval.shape, axis)]
     
     # def reduce_sum_transpose_rule(cts, x, *, axis):
     #     y_bar, = cts
@@ -333,7 +350,7 @@ class ReduceSum(ReduceOp):
 #   assert ad.is_undefined_primal(operand)
 #   input_shape = operand.aval.shape
 #   broadcast_dimensions = tuple(np.delete(np.arange(len(input_shape)), axes))
-#   result = broadcast_in_dim(cotangent, input_shape, broadcast_dimensions)
+#   result = broadcast(cotangent, input_shape, broadcast_dimensions)
 #   assert result.shape == input_shape
 #   return [result]
 
@@ -342,34 +359,30 @@ class ReduceSum(ReduceOp):
 # ShapeOps
 # -----------------------
 
-
-class Broadcast(ShapeOp):
+class BroadcastInDim(ShapeOp):
     @staticmethod
-    def eval(x, *, shape, orig_shape):
+    def eval(x, *, shape, axes):
+        for axis in sorted(axes):
+            x = np.expand_dims(x, axis)
         return [np.broadcast_to(x, shape)]
 
+
     @staticmethod
-    def jvp(primals, tangents, *, shape, orig_shape):
+    def jvp(primals, tangents, *, shape, axes):
         (x,), (x_dot,) = primals, tangents
-        return [broadcast(x, shape=shape)], [broadcast(x_dot, shape=shape)]
+        return ([broadcast(x, shape=shape, axes=axes)],
+                [broadcast(x_dot, shape=shape, axes=axes)])
 
     @staticmethod
     def shape_eval(
-        x: ArrayShape, *, shape: Sequence[int], orig_shape
+        x: ArrayShape, *, shape: Sequence[int], axes
     ) -> List[ArrayShape]:
         return [ArrayShape(tuple(shape), x.dtype)]
     
     @staticmethod
-    def T(cts, x, *, shape, orig_shape):
+    def T(cts, x, *, shape, axes):
         (y_bar,) = cts
-        axis = []
-        for idx, (i, j) in enumerate(zip(shape, orig_shape)):
-            if j == 1 and i != 1:
-                axis += [idx]
-        axis = tuple(axis)
-        if len(axis) == 0:
-            raise ValueError
-        return [reduce_sum(y_bar, axis)]
+        return [reduce_sum(y_bar, axes)]
 
 
 # class Crop(ShapeOp):
@@ -425,6 +438,8 @@ class Transpose(ShapeOp):
 # UnaryOps
 def identity(x):
     return myad.RT.bind1(Identity, x)
+def cast(x, dtype):
+    return myad.RT.bind1(Cast, x, dtype=dtype)
 def exp(x):
     return myad.RT.bind1(Exp, x)
 def log(x):
@@ -433,6 +448,8 @@ def neg(x):
     return myad.RT.bind1(Neg, x)
 
 # BinaryOps
+
+## Arithmetic
 def add(x, y):
     return myad.RT.bind1(Add, x, y)
 def sub(x, y):
@@ -442,6 +459,15 @@ def mul(x, y):
 def div(x, y):
     return myad.RT.bind1(Div, x, y)
 
+## Logic
+def equal(x, y):
+    return myad.RT.bind1(Equal, x, y)
+def max(x, y):
+    return myad.RT.bind1(Max, x, y)
+def min(x, y):
+    return -myad.RT.bind1(Max, -x, -y)
+
+
 # ReduceOps
 def reduce_sum(x, axis):
     return myad.RT.bind1(ReduceSum, x, axis=axis)
@@ -449,9 +475,8 @@ def reduce_max(x, axis):
     return myad.RT.bind1(ReduceMax, x, axis=axis)
 
 # ShapeOps
-def broadcast(x, shape):
-    return myad.RT.bind1(Broadcast, x, shape=shape, orig_shape=x.shape)
-
+def broadcast(x, shape, axes):
+    return myad.RT.bind1(BroadcastInDim, x, shape=shape, axes=axes)
 def reshape(x, shape):
     return myad.RT.bind1(Reshape, x, shape=shape)
 
@@ -459,14 +484,14 @@ def transpose(x, perm):
     return myad.RT.bind1(Transpose, x, perm=perm)
 
 
-def expand_dims(x, axis):
-    shape = list(x.shape)
-    for a in axis:
-        if a < 0:
-            a = len(shape) + (a+1)
-        shape.insert(a, 1)
-    x = reshape(x, shape)
-    return x
+# def expand_dims(x, axis):
+#     shape = list(x.shape)
+#     for a in axis:
+#         if a < 0:
+#             a = len(shape) + (a+1)
+#         shape.insert(a, 1)
+#     x = reshape(x, shape)
+#     return x
 
 def T(x):
     perm = list(range(len(x.shape)))
@@ -479,10 +504,10 @@ def dot(x, y):
     assert b == c
     y = T(y)
     br_shape = (*x.shape[:-3], *(d, a, b))
-    x = expand_dims(x, (-3,))
-    x = broadcast(x, br_shape)
-    y = expand_dims(y, (-2,))
-    y = broadcast(y, br_shape)
+    # x = expand_dims(x, (-3,))
+    x = broadcast(x, br_shape, (-3,))
+    # y = expand_dims(y, (-2,))
+    y = broadcast(y, br_shape, (-2,))
     z = x * y
     z = reduce_sum(z, (-1,))
     z = T(z)

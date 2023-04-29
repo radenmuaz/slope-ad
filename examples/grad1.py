@@ -3,13 +3,13 @@ import myad
 import numpy as np
 from myad import ops
 
-def f(x):
-    y = x * x
-    return y
+# def f(x):
+#     y = x * x
+#     return y
 
-p, t = myad.jvp(f, (np.random.randn(1),), (np.ones(1),))
-print(p)
-print(t)
+# p, t = myad.jvp(f, (np.random.randn(1),), (np.ones(1),))
+# print(p)
+# print(t)
 # l = myad.grad(f)(2)
 # print(l)
     
@@ -39,18 +39,17 @@ print(t)
 
 
 
-# def f(x):
-#     y = x
-#     y = ops.broadcast(y, (3,))
-#     y = ops.reshape(y, (1,3))
-#     y = ops.reshape(y, (3,))
-#     y = ops.mul(y, y)
-#     y = ops.reduce_sum(y, (0,))
-#     return y
+def f(x):
+    y = x
+    y = ops.broadcast(y, (3,3), (0,))
+    y = ops.reduce_sum(y, (0, 1))
+    return y
 
-# g = myad.grad(f)
-# l = g(np.array([3.]))
-# print(l)
+x = np.ones([3])
+x_dot = np.ones([3])
+out = f(x)
+# l = myad.jvp(f, (x,), (x_dot))
+print(out)
 
 
 # def f(x):
@@ -58,8 +57,9 @@ print(t)
 #     # y = ops.ReduceSum.do(y, axis=(0,))
 #     return y
 
-# # g = myad.grad(f)
-# # l = g(np.ones((1)))
+g = myad.grad(f)
+l = g(np.ones((1)))
+print(l)
 # l = myad.jvp(f, (np.ones([1,]),), (np.ones([1,]),))
 # print(l)
 

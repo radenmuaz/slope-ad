@@ -36,8 +36,7 @@ class ArrayShape:
 
     def __eq__(self, other):
         return (
-            type(self) is type(other)
-            and self.shape == other.shape
+            tuple(self.shape) == tuple(other.shape)
             and self.dtype == other.dtype
         )
 

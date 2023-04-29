@@ -263,20 +263,21 @@ class Tracer:
 
     def __div__(self, other):
         return myad.RT.bind1(ops.Div, self, other)
+    
+    def __truediv__(self, other):
+        return self.__div__(other)
 
     def __rdiv__(self, other):
         return myad.RT.bind1(ops.Div, other, self)
 
     def __pow__(self, other):
-        return myad.RT.bind1(ops.Pow, self, other)
+        return ops.pow(self, other)
 
-    
+    # def expand(self, shape, axes):
+    #     return myad.RT.bind1(ops.Expand, self, shape, axes)
 
-    def expand(self, shape, axes):
-        return myad.RT.bind1(ops.Expand, self, shape, axes)
-
-    def transpose(self, perm):
-        return myad.RT.bind1(ops.Transpose, self, perm)
+    # def transpose(self, perm):
+    #     return myad.RT.bind1(ops.Transpose, self, perm)
 
     def __bool__(self):
         return self.aval._bool(self)

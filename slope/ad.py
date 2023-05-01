@@ -42,18 +42,6 @@ from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope import ops
 
 
-def full_like(self, val, fill_val):
-    return np.full(val.shape, fill_val, val.dtype)
-
-
-def ones_like(self, val):
-    return np.ones(val.shape, val.dtype)
-
-
-def zeros_like(self, val):
-    return np.zeros(val.shape, val.dtype)
-
-
 def swap(f):
     return lambda x, y: f(y, x)
 
@@ -358,10 +346,6 @@ class EvalTrace(Trace):
 #             for x in eval_outs
 #         ]
 
-
-from typing import Union
-
-
 def mapped_aval(batch_dim, aval):
     shape = list(aval.shape)
     del shape[batch_dim]
@@ -475,8 +459,7 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     def pure(self, val):
         aval = Tracer.get_aval(val)
-        zeros_like = np.zeros(aval.shape, aval.dtype)
-        return JVPTracer(self, val, zeros_like)
+        return JVPTracer(self, val, np.zeros(aval.shape, aval.dtype))
 
     lift = pure
 

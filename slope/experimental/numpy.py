@@ -1,4 +1,4 @@
-import array # python array
+import array  # python array
 
 """
 A lightweight, pure Python, numpy compliant Array class.
@@ -16,8 +16,6 @@ certain features may not be supported.
 # todo: logspace, meshgrid
 # todo: Fortran order?
 
-from __future__ import division
-from __future__ import absolute_import
 
 import sys
 import ctypes
@@ -29,25 +27,26 @@ import operator
 
 
 # Python 2/3 compat
-if sys.version_info >= (3, ):
+if sys.version_info >= (3,):
     xrange = range
 
 # Define version numer
-__version__ = '0.0.1dev'
+__version__ = "0.0.1dev"
 
 # Define dtypes: struct name, short name, numpy name, ctypes type
-_dtypes = [('B', 'b1', 'bool', ctypes.c_bool),
-           ('b', 'i1', 'int8', ctypes.c_int8),
-           ('B', 'u1', 'uint8', ctypes.c_uint8),
-           ('h', 'i2', 'int16', ctypes.c_int16),
-           ('H', 'u2', 'uint16', ctypes.c_uint16),
-           ('i', 'i4', 'int32', ctypes.c_int32),
-           ('I', 'u4', 'uint32', ctypes.c_uint32),
-           ('q', 'i8', 'int64', ctypes.c_int64),
-           ('Q', 'u8', 'uint64', ctypes.c_uint64),
-           ('f', 'f4', 'float32', ctypes.c_float),
-           ('d', 'f8', 'float64', ctypes.c_double),
-           ]
+_dtypes = [
+    ("B", "b1", "bool", ctypes.c_bool),
+    ("b", "i1", "int8", ctypes.c_int8),
+    ("B", "u1", "uint8", ctypes.c_uint8),
+    ("h", "i2", "int16", ctypes.c_int16),
+    ("H", "u2", "uint16", ctypes.c_uint16),
+    ("i", "i4", "int32", ctypes.c_int32),
+    ("I", "u4", "uint32", ctypes.c_uint32),
+    ("q", "i8", "int64", ctypes.c_int64),
+    ("Q", "u8", "uint64", ctypes.c_uint64),
+    ("f", "f4", "float32", ctypes.c_float),
+    ("d", "f8", "float64", ctypes.c_double),
+]
 
 # Inject common dtype names
 _known_dtypes = [d[2] for d in _dtypes]
@@ -56,16 +55,15 @@ for d in _known_dtypes:
 
 newaxis = None
 
-nan = float('nan')
+nan = float("nan")
 
 
-def _convert_dtype(dtype, to='numpy'):
-    """ Convert dtype, if could not find, pass as it was.
-    """
+def _convert_dtype(dtype, to="numpy"):
+    """Convert dtype, if could not find, pass as it was."""
     if dtype is None:
         return dtype
     dtype = str(dtype)
-    index = {'Array':0, 'short':1, 'numpy':2, 'ctypes':3}[to]
+    index = {"Array": 0, "short": 1, "numpy": 2, "ctypes": 3}[to]
     for dd in _dtypes:
         if dtype in dd:
             return dd[index]
@@ -77,7 +75,7 @@ def _ceildiv(a, b):
 
 
 def _get_step(view):
-    """ Return step to walk over np. If 1, the Array is fully
+    """Return step to walk over np. If 1, the Array is fully
     C-contiguous. If 0, the striding is such that one cannot
     step through the np.
     """
@@ -110,18 +108,18 @@ def _size_for_shape(shape):
 
 
 def squeeze_strides(s):
-    """ Pop strides for singular dimensions. """
-    return tuple([s[0]] + [s[i] for i in range(1, len(s)) if s[i] != s[i-1]])
+    """Pop strides for singular dimensions."""
+    return tuple([s[0]] + [s[i] for i in range(1, len(s)) if s[i] != s[i - 1]])
 
 
 def _shape_from_object(obj):
-
     shape = []
+
     # todo: make more efficient, use len() etc
     def _shape_from_object_r(index, element, axis):
         try:
             for i, e in enumerate(element):
-                _shape_from_object_r(i, e, axis+1)
+                _shape_from_object_r(i, e, axis + 1)
             while len(shape) <= axis:
                 shape.append(0)
             l = i + 1
@@ -137,6 +135,7 @@ def _shape_from_object(obj):
 
 def _assign_from_object(Array, obj):
     key = []
+
     # todo: make more efficient, especially the try-except
     def _assign_from_object_r(element):
         try:
@@ -181,8 +180,8 @@ def _zerositer(n):
 ## Public functions
 
 
-def np.array(obj, dtype=None, copy=True, order=None):
-    """ Array(obj, dtype=None, copy=True, order=None)
+def array(obj, dtype=None, copy=True, order=None):
+    """Array(obj, dtype=None, copy=True, order=None)
 
     Create a new np. If obj is an Array, and copy=False, a view
     of that Array is returned. For details see:
@@ -198,23 +197,24 @@ def np.array(obj, dtype=None, copy=True, order=None):
         elif copy:
             a = a.copy()
         return a
-    if hasattr(obj, '__Array_interface__'):
+    if hasattr(obj, "__Array_interface__"):
         # From something that looks like an Array, we can create
         # the ctypes Array for this and use that as a buffer
         D = obj.__Array_interface__
         # Get dtype
-        dtype_orig = _convert_dtype(D['typestr'][1:])
+        dtype_orig = _convert_dtype(D["typestr"][1:])
         # Create Array
-        if D['strides']:
-            itemsize = int(D['typestr'][-1])
-            bufsize = D['strides'][0] * D['shape'][0] // itemsize
+        if D["strides"]:
+            itemsize = int(D["typestr"][-1])
+            bufsize = D["strides"][0] * D["shape"][0] // itemsize
         else:
-            bufsize = _size_for_shape(D['shape'])
+            bufsize = _size_for_shape(D["shape"])
 
-        BufType = (_convert_dtype(dtype_orig, 'ctypes') * bufsize)
-        buffer = BufType.from_address(D['data'][0])
-        a = Array(D['shape'], dtype_orig,
-                    buffer=buffer, strides=D['strides'], order=order)
+        BufType = _convert_dtype(dtype_orig, "ctypes") * bufsize
+        buffer = BufType.from_address(D["data"][0])
+        a = Array(
+            D["shape"], dtype_orig, buffer=buffer, strides=D["strides"], order=order
+        )
         # Convert or copy?
         if dtype is not None and dtype != dtype_orig:
             a = a.astype(dtype)
@@ -230,7 +230,7 @@ def np.array(obj, dtype=None, copy=True, order=None):
             while isinstance(el, (tuple, list)) and el:
                 el = el[0]
             if isinstance(el, int):
-                dtype = 'int64'
+                dtype = "int64"
         # Create Array
         a = Array(shape, dtype, order=None)
         _assign_from_object(a, obj)
@@ -238,35 +238,30 @@ def np.array(obj, dtype=None, copy=True, order=None):
 
 
 def zeros_like(a, dtype=None, order=None):
-    """ Return an Array of zeros with the same shape and type as a given np.
-    """
+    """Return an Array of zeros with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return zeros(a.shape, dtype, order)
 
 
 def ones_like(a, dtype=None, order=None):
-    """ Return an Array of ones with the same shape and type as a given np.
-    """
+    """Return an Array of ones with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return ones(a.shape, dtype, order)
 
 
 def empty_like(a, dtype=None, order=None):
-    """ Return a new Array with the same shape and type as a given np.
-    """
+    """Return a new Array with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return empty(a.shape, dtype, order)
 
 
 def zeros(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, filled with zeros
-    """
+    """Return a new Array of given shape and type, filled with zeros"""
     return empty(shape, dtype, order)
 
 
 def ones(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, filled with ones
-    """
+    """Return a new Array of given shape and type, filled with ones"""
     a = empty(shape, dtype, order)
     a.fill(1)
     return a
@@ -276,20 +271,19 @@ def eye(size):
     """Return a new 2d Array with given dimensions, filled with ones on the
     diagonal and zeros elsewhere.
     """
-    a = zeros((size,size))
+    a = zeros((size, size))
     for i in xrange(size):
-        a[i,i] = 1
+        a[i, i] = 1
     return a
 
 
 def empty(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, without initializing entries
-    """
+    """Return a new Array of given shape and type, without initializing entries"""
     return Array(shape, dtype, order=order)
 
 
 def arange(*args, **kwargs):
-    """ arange([start,] stop[, step,], dtype=None)
+    """arange([start,] stop[, step,], dtype=None)
 
     Return evenly spaced values within a given interval.
 
@@ -303,10 +297,10 @@ def arange(*args, **kwargs):
     be consistent.  It is better to use ``linspace`` for these cases.
     """
     # Get dtype
-    dtype = kwargs.pop('dtype', None)
+    dtype = kwargs.pop("dtype", None)
     if kwargs:
         x = list(kwargs.keys())[0]
-        raise TypeError('arange() got an unexpected keyword argument %r' % x)
+        raise TypeError("arange() got an unexpected keyword argument %r" % x)
     # Parse start, stop, step
     if len(args) == 0:
         raise TypeError('Required argument "start" not found')
@@ -317,7 +311,7 @@ def arange(*args, **kwargs):
     elif len(args) == 3:
         start, stop, step = int(args[0]), int(args[1]), int(args[2])
     else:
-        raise TypeError('Too many input arguments')
+        raise TypeError("Too many input arguments")
     # Init
     iter = xrange(start, stop, step)
     a = empty((len(iter),), dtype=dtype)
@@ -326,7 +320,7 @@ def arange(*args, **kwargs):
 
 
 def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None):
-    """ linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None)
+    """linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None)
 
     Return evenly spaced numbers over a specified interval. Returns num
     evenly spaced samples, calculated over the interval [start, stop].
@@ -336,7 +330,7 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None):
     start, stop = float(start), float(stop)
     ra = stop - start
     if endpoint:
-        step = ra / (num-1)
+        step = ra / (num - 1)
     else:
         step = ra / num
     # Create
@@ -348,26 +342,30 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None):
     else:
         return a
 
+
 def add(Array_vec1, Array_vec2):
     c = []
     for a, b in zip(Array_vec1, Array_vec2):
-        c.append(a+b)
+        c.append(a + b)
     cRay = Array(c)
     return cRay
+
 
 def subtract(Array_vec1, Array_vec2):
     c = []
     for a, b in zip(Array_vec1, Array_vec2):
-        c.append(a-b)
+        c.append(a - b)
     cRay = Array(c)
     return cRay
+
 
 def multiply(Array_vec1, Array_vec2):
     c = []
     for a, b in zip(Array_vec1, Array_vec2):
-        c.append(a*b)
+        c.append(a * b)
     cRay = Array(c)
     return cRay
+
 
 def divide(Array_vec1, integer):
     c = []
@@ -376,22 +374,31 @@ def divide(Array_vec1, integer):
     cRay = Array(c)
     return cRay
 
+
 class LinAlgError(Exception):
     pass
 
+
 def det(A):
-    if len(A) == 3 and [len(vec)==3 for vec in A]:
+    if len(A) == 3 and [len(vec) == 3 for vec in A]:
         try:
             # http://mathworld.wolfram.com/Determinant.html
-            det_A = (A[0][0] * A[1][1] * A[2][2] + A[0][1] * A[1][2] *
-                     A[2][0] + A[0][2] * A[1][0] * A[2][1] - (A[0][2] *
-                     A[1][1] * A[2][0] + A[0][1] * A[1][0] * A[2][2] +
-                     A[0][0] * A[1][2] * A[2][1]))
+            det_A = (
+                A[0][0] * A[1][1] * A[2][2]
+                + A[0][1] * A[1][2] * A[2][0]
+                + A[0][2] * A[1][0] * A[2][1]
+                - (
+                    A[0][2] * A[1][1] * A[2][0]
+                    + A[0][1] * A[1][0] * A[2][2]
+                    + A[0][0] * A[1][2] * A[2][1]
+                )
+            )
         except LinAlgError as e:
             det_A = e
     else:
-        raise IndexError('Vector has invalid dimensions')
+        raise IndexError("Vector has invalid dimensions")
     return det_A
+
 
 def cross(u, v):
     """
@@ -406,19 +413,23 @@ def cross(u, v):
     # http://mathworld.wolfram.com/CrossProduct.html
     if uDim == vDim == 2:
         try:
-            uxv = [u[0]*v[1]-u[1]*v[0]]
+            uxv = [u[0] * v[1] - u[1] * v[0]]
         except LinAlgError as e:
             uxv = e
     elif uDim == vDim == 3:
         try:
             for i in range(uDim):
-                uxv = [u[1]*v[2]-u[2]*v[1], -(u[0]*v[2]-u[2]*v[0]),
-                       u[0]*v[1]-u[1]*v[0]]
+                uxv = [
+                    u[1] * v[2] - u[2] * v[1],
+                    -(u[0] * v[2] - u[2] * v[0]),
+                    u[0] * v[1] - u[1] * v[0],
+                ]
         except LinAlgError as e:
             uxv = e
     else:
-        raise IndexError('Vector has invalid dimensions')
+        raise IndexError("Vector has invalid dimensions")
     return uxv
+
 
 def dot(u, v):
     """
@@ -435,10 +446,11 @@ def dot(u, v):
         except LinAlgError as e:
             u_dot_v = e
     else:
-        raise IndexError('Vector has invalid dimensions')
+        raise IndexError("Vector has invalid dimensions")
     return u_dot_v
 
-def reshape(X,shape):
+
+def reshape(X, shape):
     """
     Returns the reshaped image of an Array
     """
@@ -446,10 +458,12 @@ def reshape(X,shape):
     assert isinstance(shape, tuple) or isinstance(shape, list)
     return X.reshape(shape)
 
+
 ## The class
 
+
 class Array(object):
-    """ Array(shape, dtype='float64', buffer=None, offset=0,
+    """Array(shape, dtype='float64', buffer=None, offset=0,
                 strides=None, order=None)
 
     Array class similar to numpy's Array, implemented in pure Python.
@@ -542,29 +556,37 @@ class Array(object):
 
     """
 
-    __slots__ = ['_dtype', '_shape', '_strides', '_itemsize',
-                 '_offset', '_base', '_data']
+    __slots__ = [
+        "_dtype",
+        "_shape",
+        "_strides",
+        "_itemsize",
+        "_offset",
+        "_base",
+        "_data",
+    ]
 
-    def __init__(self, shape, dtype='float64', buffer=None, offset=0,
-                 strides=None, order=None):
+    def __init__(
+        self, shape, dtype="float64", buffer=None, offset=0, strides=None, order=None
+    ):
         # Check order
         if order is not None:
-            raise RuntimeError('Array order parameter is not supported')
+            raise RuntimeError("Array order parameter is not supported")
         # Check and set shape
-        try :
+        try:
             assert isinstance(shape, Iterable)
             shape = tuple(shape)
         except Exception as e:
-            raise AssertionError('The shape must be tuple or list')
+            raise AssertionError("The shape must be tuple or list")
         assert all([isinstance(x, int) for x in shape])
         self._shape = shape
         # Check and set dtype
-        dtype = _convert_dtype(dtype) if (dtype is not None) else 'float64'
+        dtype = _convert_dtype(dtype) if (dtype is not None) else "float64"
         if dtype not in _known_dtypes:
-            raise TypeError('data type %r not understood' % dtype)
+            raise TypeError("data type %r not understood" % dtype)
         self._dtype = dtype
         # Itemsize is directly derived from dtype
-        self._itemsize = int(_convert_dtype(dtype, 'short')[-1])
+        self._itemsize = int(_convert_dtype(dtype, "short")[-1])
 
         if buffer is None:
             # New Array
@@ -598,7 +620,7 @@ class Array(object):
         # Define our buffer class
         buffersize = self._strides[0] * self._shape[0] // self._itemsize
         buffersize += self._offset
-        BufferClass = _convert_dtype(dtype, 'ctypes') * buffersize
+        BufferClass = _convert_dtype(dtype, "ctypes") * buffersize
         # Create buffer
         if buffer is None:
             self._data = BufferClass()
@@ -609,35 +631,36 @@ class Array(object):
 
     @property
     def __Array_interface__(self):
-        """ Allow converting to real numpy Array, or pass pointer to C library
+        """Allow converting to real numpy Array, or pass pointer to C library
         http://docs.scipy.org/doc/numpy/reference/Arrays.interface.html
         """
         readonly = False
         # typestr
-        typestr = '<' + _convert_dtype(self.dtype, 'short')
+        typestr = "<" + _convert_dtype(self.dtype, "short")
         # Pointer
         if isinstance(self._data, ctypes.Array):
             ptr = ctypes.addressof(self._data)
-        elif hasattr(self._data, '__Array_interface__'):
-            ptr, readonly = self._data.__Array_interface__['data']
-        elif hasattr(self._data, 'buffer_info'):  # Python's np.Array
+        elif hasattr(self._data, "__Array_interface__"):
+            ptr, readonly = self._data.__Array_interface__["data"]
+        elif hasattr(self._data, "buffer_info"):  # Python's np.Array
             ptr = self._data.buffer_info()[0]
         elif isinstance(self._data, bytes):
             ptr = ctypes.cast(self._data, ctypes.c_void_p).value
             readonly = True
         else:
-            raise TypeError('Cannot get address to underlying Array data')
+            raise TypeError("Cannot get address to underlying Array data")
         ptr += self._offset * self.itemsize
         #
-        return dict(version=3,
-                    shape=self.shape,
-                    typestr=typestr,
-                    descr=[('', typestr)],
-                    data=(ptr, readonly),
-                    strides=self.strides,
-                    #offset=self._offset,
-                    #mask=None,
-                    )
+        return dict(
+            version=3,
+            shape=self.shape,
+            typestr=typestr,
+            descr=[("", typestr)],
+            data=(ptr, readonly),
+            strides=self.strides,
+            # offset=self._offset,
+            # mask=None,
+        )
 
     def __len__(self):
         return self.shape[0]
@@ -649,11 +672,9 @@ class Array(object):
             return self._data[offset]
         else:
             # Return view
-            return Array(shape, self.dtype,
-                           offset=offset, strides=strides, buffer=self)
+            return Array(shape, self.dtype, offset=offset, strides=strides, buffer=self)
 
     def __setitem__(self, key, value):
-
         # Get info for view
         offset, shape, strides = self._index_helper(key)
 
@@ -663,8 +684,7 @@ class Array(object):
             return
 
         # Create view to set data to
-        view = Array(shape, self.dtype,
-                        offset=offset, strides=strides, buffer=self)
+        view = Array(shape, self.dtype, offset=offset, strides=strides, buffer=self)
 
         # Get data to set as a list (because getting slices from ctype
         # Arrays yield lists anyway). The list is our "contiguous Array"
@@ -679,8 +699,10 @@ class Array(object):
 
         # Check if size match
         if view.size != len(value_list):
-            raise ValueError('Number of elements in source does not match '
-                                'number of elements in target.')
+            raise ValueError(
+                "Number of elements in source does not match "
+                "number of elements in target."
+            )
 
         # Assign data in most efficient way that we can. This code
         # looks for the largest semi-contiguous block: the block that
@@ -692,10 +714,8 @@ class Array(object):
             subview = subviews.pop(0)
             step = _get_step(subview)
             if step:
-                block = value_list[value_index:value_index+subview.size]
-                s = slice(subview._offset,
-                            subview._offset + subview.size * step,
-                            step)
+                block = value_list[value_index : value_index + subview.size]
+                s = slice(subview._offset, subview._offset + subview.size * step, step)
                 view._data[s] = block
                 value_index += subview.size
                 count += 1
@@ -708,332 +728,385 @@ class Array(object):
         if self.size == 1:
             return float(self.data[self._offset])
         else:
-            raise TypeError('Only length-1 Arrays can be converted to scalar')
+            raise TypeError("Only length-1 Arrays can be converted to scalar")
 
     def __int__(self):
         if self.size == 1:
             return int(self.data[self._offset])
         else:
-            raise TypeError('Only length-1 Arrays can be converted to scalar')
+            raise TypeError("Only length-1 Arrays can be converted to scalar")
 
     def __repr__(self):
         # If more than 100 elements, show short repr
         if self.size > 100:
-            shapestr = 'x'.join([str(i) for i in self.shape])
-            return '<Array %s %s at 0x%x>' % (shapestr, self.dtype, id(self))
+            shapestr = "x".join([str(i) for i in self.shape])
+            return "<Array %s %s at 0x%x>" % (shapestr, self.dtype, id(self))
+
         # Otherwise, try to show in nice way
         def _repr_r(s, axis, offset):
             axisindent = min(2, max(0, (self.ndim - axis - 1)))
             if axis < len(self.shape):
-                s += '['
+                s += "["
                 for k_index, k in enumerate(xrange(self.shape[axis])):
                     if k_index > 0:
-                        s += ('\n       ' + ' ' * axis)  * axisindent
+                        s += ("\n       " + " " * axis) * axisindent
                     offset_ = offset + k * self._strides[axis] // self.itemsize
-                    s = _repr_r(s, axis+1, offset_)
+                    s = _repr_r(s, axis + 1, offset_)
                     if k_index < self.shape[axis] - 1:
-                        s += ', '
-                s += ']'
+                        s += ", "
+                s += "]"
             else:
                 r = repr(self.data[offset])
-                if '.' in r:
-                    r = ' ' + r
-                    if r.endswith('.0'):
+                if "." in r:
+                    r = " " + r
+                    if r.endswith(".0"):
                         r = r[:-1]
                 s += r
             return s
 
-        s = _repr_r('', 0, self._offset)
-        if self.dtype != 'float64' and self.dtype != 'int32':
+        s = _repr_r("", 0, self._offset)
+        if self.dtype != "float64" and self.dtype != "int32":
             return "Array(" + s + ", dtype='%s')" % self.dtype
         else:
             return "Array(" + s + ")"
 
     def __eq__(self, other):
-        if other.__module__.split('.')[0] == 'numpy':
+        if other.__module__.split(".")[0] == "numpy":
             return other == self
         else:
-            out = empty(self.shape, 'bool')
-            out[:] = [i1==i2 for (i1, i2) in zip(self.flat, other.flat)]
+            out = empty(self.shape, "bool")
+            out[:] = [i1 == i2 for (i1, i2) in zip(self.flat, other.flat)]
             return out
 
     def __add__(self, other):
-        '''classic addition
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """classic addition"""
+        if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
-            out[:] = [dat+other for dat in self._data]
+            out[:] = [dat + other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i+j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i + j for (i, j) in zip(self.flat, other.flat)]
                 return out
 
     def __radd__(self, other):
         return self.__add__(other)
 
     def __sub__(self, other):
-        if (isinstance(other, int) or isinstance(other, float)) :
+        if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
-            out[:] = [dat-other for dat in self._data]
+            out[:] = [dat - other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i-j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i - j for (i, j) in zip(self.flat, other.flat)]
                 return out
 
     def __rsub__(self, other):
         return self.__sub__(other)
 
     def __mul__(self, other):
-        '''multiply element-wise with Array or float/scalar'''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """multiply element-wise with Array or float/scalar"""
+        if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
-            out[:] = [dat*other for dat in self._data]
+            out[:] = [dat * other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i*j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i * j for (i, j) in zip(self.flat, other.flat)]
                 return out
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
     def __div__(self, other):
-        '''divide element-wise with Array or float/scalar'''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """divide element-wise with Array or float/scalar"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
-            out[:] = [dat/other for dat in self._data]
+            out[:] = [dat / other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i/j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __truediv__(self, other):
-        '''divide element-wise with Array or float/scalar'''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """divide element-wise with Array or float/scalar"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
-            out[:] = [dat/other for dat in self._data]
+            out[:] = [dat / other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i/j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __floordiv__(self, other):
-        '''divide element-wise with Array or float/scalar'''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """divide element-wise with Array or float/scalar"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
-            out[:] = [dat//other for dat in self._data]
+            out[:] = [dat // other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i//j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i // j for (i, j) in zip(self.flat, other.flat)]
                 return out
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __mod__(self, other):
-        '''divide element-wise with Array or float/scalar'''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """divide element-wise with Array or float/scalar"""
+        if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
-            out[:] = [dat%other for dat in self._data]
+            out[:] = [dat % other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i%j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i % j for (i, j) in zip(self.flat, other.flat)]
                 return out
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __pow__(self, other):
-        '''power of two Arrays element-wise (of just float power)'''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """power of two Arrays element-wise (of just float power)"""
+        if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
             out[:] = [dat**other for dat in self._data]
             return out
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
-                out[:] = [i**j for (i,j) in zip(self.flat, other.flat)]
+                out[:] = [i**j for (i, j) in zip(self.flat, other.flat)]
                 return out
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __iadd__(self, other):
-        '''Addition of other Array or float in place with += operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """Addition of other Array or float in place with += operator"""
+        if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
-                self._data[i]+=other
+                self._data[i] += other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]+=other._data[i]
+                    self._data[i] += other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __isub__(self, other):
-        '''Addition of other Array or float in place with += operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """Addition of other Array or float in place with += operator"""
+        if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
-                self._data[i]-=other
+                self._data[i] -= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]-=other._data[i]
+                    self._data[i] -= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __imul__(self, other):
-        '''multiplication woth other Array or float in place with *= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """multiplication woth other Array or float in place with *= operator"""
+        if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
-                self._data[i]*=other
+                self._data[i] *= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]*=other._data[i]
+                    self._data[i] *= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __idiv__(self, other):
-        '''Division of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """Division of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             for i in range(len(self._data)):
-                self._data[i]/=other
+                self._data[i] /= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]/=other._data[i]
+                    self._data[i] /= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __itruediv__(self, other):
-        '''Division of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """Division of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             for i in range(len(self._data)):
-                self._data[i]/=other
+                self._data[i] /= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]/=other._data[i]
+                    self._data[i] /= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __ifloordiv__(self, other):
-        '''Division of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """Division of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             for i in range(len(self._data)):
-                self._data[i]//=other
+                self._data[i] //= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]//=other._data[i]
+                    self._data[i] //= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __imod__(self, other):
-        '''mod of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """mod of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             for i in range(len(self._data)):
-                self._data[i]%=other
+                self._data[i] %= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]%=other._data[i]
+                    self._data[i] %= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __imod__(self, other):
-        '''mod of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
-            if other == 0 : raise ZeroDivisionError
+        """mod of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
+            if other == 0:
+                raise ZeroDivisionError
             for i in range(len(self._data)):
-                self._data[i]%=other
+                self._data[i] %= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]%=other._data[i]
+                    self._data[i] %= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     def __ipow__(self, other):
-        '''mod of other Array or float in place with /= operator
-        '''
-        if (isinstance(other, int) or isinstance(other, float)) :
+        """mod of other Array or float in place with /= operator"""
+        if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
-                self._data[i]**=other
+                self._data[i] **= other
             return self
-        if (isinstance(other, Array)):
-            if self.shape == other.shape :
+        if isinstance(other, Array):
+            if self.shape == other.shape:
                 for i in range(len(self._data)):
-                    self._data[i]**=other._data[i]
+                    self._data[i] **= other._data[i]
                 return self
-            else :
-                raise ValueError('Array sizes do not match. '+str(self.shape)\
-                                                  +' versus '+str(other.shape))
-
+            else:
+                raise ValueError(
+                    "Array sizes do not match. "
+                    + str(self.shape)
+                    + " versus "
+                    + str(other.shape)
+                )
 
     ## Private helper functions
 
     def _index_helper(self, key):
-
         # Indexing spec is located at:
         # http://docs.scipy.org/doc/numpy/reference/Arrays.indexing.html
 
@@ -1050,8 +1123,10 @@ class Array(object):
             axissize = self._shape[axis]
             if isinstance(k, int):
                 if k >= axissize:
-                    raise IndexError('index %i is out of bounds for axis %i '
-                                     'with size %s' % (k, axis, axissize))
+                    raise IndexError(
+                        "index %i is out of bounds for axis %i "
+                        "with size %s" % (k, axis, axissize)
+                    )
                 offset += k * self._strides[axis] // self.itemsize
                 axis += 1
             elif isinstance(k, slice):
@@ -1084,9 +1159,7 @@ class Array(object):
             subview = subviews.pop(0)
             step = _get_step(subview)
             if step:
-                s = slice(subview._offset,
-                          subview._offset + subview.size * step,
-                          step)
+                s = slice(subview._offset, subview._offset + subview.size * step, step)
                 value_list += self._data[s]
                 count += 1
             else:
@@ -1115,7 +1188,7 @@ class Array(object):
         if newshape == self.shape:
             return
         if self.size != _size_for_shape(newshape):
-            raise ValueError('Total size of new Array must be unchanged')
+            raise ValueError("Total size of new Array must be unchanged")
         if _get_step(self) == 1:
             # Contiguous, hooray!
             self._shape = tuple(newshape)
@@ -1131,10 +1204,9 @@ class Array(object):
         shape = [self.shape[i] for i in range(N) if self.shape[i] > 1]
         strides = [self.strides[i] for i in range(N) if self.shape[i] > 1]
         # Check if squeezed shapes match
-        newshape_ = [newshape[i] for i in range(len(newshape))
-                     if newshape[i] > 1]
+        newshape_ = [newshape[i] for i in range(len(newshape)) if newshape[i] > 1]
         if newshape_ != shape:
-            raise AttributeError('incompatible shape for non-contiguous Array')
+            raise AttributeError("incompatible shape for non-contiguous Array")
         # Modify to make this data work in loop
         strides.append(strides[-1])
         shape.append(1)
@@ -1150,7 +1222,7 @@ class Array(object):
                     newstrides.append(strides[i])
         except IndexError:
             # Fail
-            raise AttributeError('incompatible shape for non-contiguous Array')
+            raise AttributeError("incompatible shape for non-contiguous Array")
         else:
             # Success
             newstrides.reverse()
@@ -1187,9 +1259,7 @@ class Array(object):
             subview = subviews.pop(0)
             step = _get_step(subview)
             if step:
-                s = slice(subview._offset,
-                          subview._offset + subview.size * step,
-                          step)
+                s = slice(subview._offset, subview._offset + subview.size * step, step)
                 for i in self._data[s]:
                     yield i
             else:
@@ -1205,15 +1275,15 @@ class Array(object):
 
     @property
     def flags(self):
-
         c_cont = _get_step(self) == 1
-        return dict(C_CONTIGUOUS=c_cont,
-                    F_CONTIGUOUS=(c_cont and self.ndim < 2),
-                    OWNDATA=(self._base is None),
-                    WRITEABLE=True, # todo: fix this
-                    ALIGNED=c_cont,  # todo: different from contiguous?
-                    UPDATEIFCOPY=False,  # We don't support this feature
-               )
+        return dict(
+            C_CONTIGUOUS=c_cont,
+            F_CONTIGUOUS=(c_cont and self.ndim < 2),
+            OWNDATA=(self._base is None),
+            WRITEABLE=True,  # todo: fix this
+            ALIGNED=c_cont,  # todo: different from contiguous?
+            UPDATEIFCOPY=False,  # We don't support this feature
+        )
 
     ## Methods - managemenet
 
@@ -1240,14 +1310,14 @@ class Array(object):
         return out
 
     def ravel(self):
-        return self.reshape((self.size, ))
+        return self.reshape((self.size,))
 
     def repeat(self, repeats, axis=None):
         if axis:
             raise (TypeError, "axis argument is not supported")
         out = empty((self.size * repeats,), self.dtype)
         for i in range(repeats):
-            out[i*self.size:(i+1)*self.size] = self
+            out[i * self.size : (i + 1) * self.size] = self
         return out
 
     def reshape(self, newshape):
@@ -1276,7 +1346,7 @@ class Array(object):
                 for j in xrange(self.shape[1]):
                     out[:, j, i] = self[i, j, :]
         else:
-            raise ValueError('Tinynumpy supports transpose up to ndim=3')
+            raise ValueError("Tinynumpy supports transpose up to ndim=3")
         return out
 
     def astype(self, dtype):
@@ -1287,16 +1357,21 @@ class Array(object):
         if dtype is None:
             dtype = self.dtype
         if dtype == self.dtype:
-            return Array(self.shape, dtype, buffer=self,
-                           offset=self._offset, strides=self.strides)
+            return Array(
+                self.shape,
+                dtype,
+                buffer=self,
+                offset=self._offset,
+                strides=self.strides,
+            )
         elif self.ndim == 1:
-            itemsize = int(_convert_dtype(dtype, 'short')[-1])
+            itemsize = int(_convert_dtype(dtype, "short")[-1])
             size = self.nbytes // itemsize
             offsetinbytes = self._offset * self.itemsize
             offset = offsetinbytes // itemsize
-            return Array((size, ), dtype, buffer=self, offset=offset)
+            return Array((size,), dtype, buffer=self, offset=offset)
         else:
-            raise ValueError('new type not compatible with np.')
+            raise ValueError("new type not compatible with np.")
 
     ## Methods - statistics
 
@@ -1322,7 +1397,7 @@ class Array(object):
         if axis:
             raise (TypeError, "axis argument is not supported")
         return max(self.flat)
-        #return max(self._toflatlist())  # almost twice as fast
+        # return max(self._toflatlist())  # almost twice as fast
 
     def sum(self, axis=None):
         if axis:
@@ -1415,25 +1490,25 @@ class Array(object):
         return sqrt(self.var(axis))
 
     def argwhere(self, val):
-        #assumes that list has only values of same dtype
+        # assumes that list has only values of same dtype
 
-        idx  = [i for i, e in enumerate(self.flat) if e == val]
+        idx = [i for i, e in enumerate(self.flat) if e == val]
         keys = [list(_key_for_index(i, self.shape)) for i in idx]
         return keys
 
     def tolist(self):
-        '''
+        """
         Returns the Array as a comprehensive list
-        '''
-        shp    = list(self.shape).copy()
-        jump   = self.size//shp[-1]
-        n_comp = 0 #comprehension depth
-        comp   = list(self._data).copy()
-        while n_comp < len(self.shape)-1 :
-            comp = [comp[i*shp[-1]:i*shp[-1]+shp[-1]] for i in range(jump)]
+        """
+        shp = list(self.shape).copy()
+        jump = self.size // shp[-1]
+        n_comp = 0  # comprehension depth
+        comp = list(self._data).copy()
+        while n_comp < len(self.shape) - 1:
+            comp = [comp[i * shp[-1] : i * shp[-1] + shp[-1]] for i in range(jump)]
             shp.pop()
-            jump = len(comp)//shp[-1]
-            n_comp +=1
+            jump = len(comp) // shp[-1]
+            n_comp += 1
         return comp
 
 

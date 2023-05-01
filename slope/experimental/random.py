@@ -1,0 +1,411 @@
+import slope
+from slope import ops
+from slope.array_shape import ArrayShape
+import numpy as np
+
+from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple
+from abc import ABC, abstractmethod
+
+import numpy as np
+
+
+class RandomBitGenerator(ops.Op):
+    @staticmethod
+    def eval(key, *, shape, dtype, algorithm):
+        return []
+
+    def shape_eval(key, *, shape, dtype, algorithm):
+        return [key.shape, key.shape]
+
+
+def rng_bit_generator(key, shape, dtype=np.uint32, algorithm="default"):
+    if np.dtype(dtype) not in {
+        np.dtype("uint8"),
+        np.dtype("uint16"),
+        np.dtype("uint32"),
+        np.dtype("uint64"),
+    }:
+        raise TypeError(f"rng_bit_generator: unsupported dtype {dtype}")
+    return tuple(
+        slope.RT.bind1(
+            RandomBitGenerator, key, shape=shape, dtype=dtype, algorithm=algorithm
+        )
+    )
+
+
+class PRNGImpl(NamedTuple):
+    key_shape: tuple
+    seed: Callable
+    split: Callable
+    random_bits: Callable
+    fold_in: Callable
+    tag: str = "?"
+
+    def __hash__(self) -> int:
+        return hash(self.tag)
+
+    def __str__(self) -> str:
+        return self.tag
+
+
+#   def pprint(self):
+#     return (pp.text(f"{self.__class__.__name__} [{self.tag}]:") +
+#             pp.nest(2, pp.group(pp.brk() + pp.join(pp.brk(), [
+#               pp.text(f"{k} = {v}") for k, v in self._asdict().items()
+#             ]))))
+
+
+def _threefry_split_original(key, num):
+    counts = ops.iota(np.uint32, num * 2)
+    return ops.reshape(threefry_2x32(key, counts), (num, 2))
+
+
+def threefry_seed(seed):
+    """Create a single raw threefry PRNG key from an integer seed.
+
+    Args:
+      seed: a 64- or 32-bit integer used as the value of the key.
+
+    Returns:
+      The PRNG key contents, modeled as an array of shape (2,) and dtype
+      uint32. The key is constructed from a 64-bit seed by effectively
+      bit-casting to a pair of uint32 values (or from a 32-bit seed by
+      first padding out with zeros).
+    """
+    if seed.shape:
+        raise TypeError(f"PRNG key seed must be a scalar; got {seed!r}.")
+    if not np.issubdtype(seed.dtype, np.integer):
+        raise TypeError(f"PRNG key seed must be an integer; got {seed!r}")
+    convert = lambda k: ops.reshape(convert(k, np.uint32), [1])
+    k1 = convert(ops.shift_right_logical(seed, np.array(32, dtype=seed.dtype)))
+    k2 = convert(np.bitwise_and(seed, np.uint32(0xFFFFFFFF)))
+    return ops.concatenate([k1, k2], 0)
+
+
+def random_seed(seeds, impl):
+    seeds_arr = np.asarray(seeds)
+    return random_seed(seeds_arr, impl=impl)
+
+
+def PRNGKey(seed):
+    if np.ndim(seed):
+        raise TypeError(
+            "PRNGKey accepts a scalar seed, but was given an array of"
+            f"shape {np.shape(seed)} != (). Use jax.vmap for batching"
+        )
+    key = random_seed(seed, impl=rbg_prng_impl)
+    if not isinstance(key, PRNGKeyArrayImpl):
+        raise TypeError
+    return random_unwrap(keys)
+
+
+def _rbg_seed(seed: typing.Array) -> typing.Array:
+    assert not seed.shape
+    halfkey = threefry_seed(seed)
+    return jnp.concatenate([halfkey, halfkey])
+
+
+def _rbg_split(key, num: int):
+    _threefry_split = _threefry_split_original
+    return slope.ad.vmap(_threefry_split, (0, None), 1)(key.reshape(2, 2), num).reshape(
+        num, 4
+    )
+
+
+def _rbg_fold_in(key, data):
+    assert not data.shape
+    return slope.ad.vmap(_threefry_fold_in, (0, None), 0)(
+        key.reshape(2, 2), data
+    ).reshape(4)
+
+
+def _rbg_random_bits(key, bit_width: int, shape: Sequence[int]):
+    if not key.shape == (4,) and key.dtype == jnp.dtype("uint32"):
+        raise TypeError("_rbg_random_bits got invalid prng key.")
+    if bit_width not in (8, 16, 32, 64):
+        raise TypeError("requires 8-, 16-, 32- or 64-bit field width.")
+    _, bits = lax.rng_bit_generator(key, shape, dtype=UINT_DTYPES[bit_width])
+    return bits
+
+
+rbg_prng_impl = PRNGImpl(
+    key_shape=(4,),
+    seed=_rbg_seed,
+    split=_rbg_split,
+    random_bits=_rbg_random_bits,
+    fold_in=_rbg_fold_in,
+    tag="rbg",
+)
+
+
+def threefry_2x32(keypair, count):
+    """Apply the Threefry 2x32 hash.
+
+    Args:
+      keypair: a pair of 32bit unsigned integers used for the key.
+      count: an array of dtype uint32 used for the counts.
+
+    Returns:
+      An array of dtype uint32 with the same shape as `count`.
+    """
+    key1, key2 = keypair
+    if not dtype(key1) == dtype(key2) == dtype(count) == np.uint32:
+        msg = "threefry_2x32 requires uint32 arguments, got {}"
+        raise TypeError(msg.format([dtype(x) for x in [key1, key2, count]]))
+
+    assert count.size % 2
+
+    if odd_size:
+        x = list(jnp.split(jnp.concatenate([count.ravel(), np.uint32([0])]), 2))
+    else:
+        x = list(jnp.split(count.ravel(), 2))
+
+    x = threefry2x32(key1, key2, x[0], x[1])
+    out = concatenate(x)
+    assert out.dtype == np.uint32
+    return reshape(out[:-1] if odd_size else out, count.shape)
+
+
+def threefry_split(key, num: int):
+    counts = iota(np.uint32, num * 2)
+    return reshape(threefry_2x32(key, counts), (num, 2))
+
+
+def _threefry_split_foldlike(key, num):
+    k1, k2 = key
+    counts1, counts2 = iota_2x32_shape((num,))
+    bits1, bits2 = threefry2x32(k1, k2, counts1, counts2)
+    return stack([bits1, bits2], axis=1)
+
+
+def threefry_fold_in(key, data):
+    assert not data.shape
+    return _threefry_fold_in(key, np.uint32(data))
+
+
+def _threefry_fold_in(key, data):
+    return threefry_2x32(key, threefry_seed(data))
+
+
+#
+
+
+class PRNGKeyArrayImpl(PRNGKeyArray):
+    """An array of PRNG keys backed by an RNG implementation.
+
+    This class lifts the definition of a PRNG, provided in the form of a
+    ``PRNGImpl``, into an array-like pytree class. Instances of this
+    class behave like an array whose base elements are keys, hiding the
+    fact that keys are typically arrays (of ``uint32`` dtype) themselves.
+
+    PRNGKeyArrays are also restricted relative to JAX arrays in that
+    they do not expose arithmetic operations. They instead expose
+    wrapper methods around the PRNG implementation functions (``split``,
+    ``random_bits``, ``fold_in``).
+    """
+
+    impl: PRNGImpl
+    _base_array: typing.Array
+
+    def __init__(self, impl, key_data: Any):
+        assert not isinstance(key_data, core.Tracer)
+        _check_prng_key_data(impl, key_data)
+        self.impl = impl
+        self._base_array = key_data
+
+    # TODO(frostig): rename to unsafe_base_array, or just offer base_array attr?
+    def unsafe_raw_array(self):
+        """Access the raw numerical array that carries underlying key data.
+
+        Returns:
+          A uint32 JAX array whose leading dimensions are ``self.shape``.
+        """
+        return self._base_array
+
+    def block_until_ready(self):
+        _ = self._base_array.block_until_ready()
+        return self
+
+    @property
+    def shape(self):
+        return base_arr_shape_to_keys_shape(self.impl, self._base_array.shape)
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @property
+    def dtype(self):
+        return KeyTy(self.impl)
+
+    _device = property(op.attrgetter("_base_array._device"))
+    _committed = property(op.attrgetter("_base_array._committed"))
+
+    @property
+    def sharding(self):
+        aval = keys_shaped_array(self.impl, self.shape)
+        phys_sharding = self._base_array.sharding
+        return KeyTyRules.logical_op_sharding(aval, phys_sharding)
+
+    def _is_scalar(self):
+        base_ndim = len(self.impl.key_shape)
+        return self._base_array.ndim == base_ndim
+
+    def __len__(self):
+        if self._is_scalar():
+            raise TypeError("len() of unsized object")
+        return len(self._base_array)
+
+    def __iter__(self) -> Iterator[PRNGKeyArrayImpl]:
+        if self._is_scalar():
+            raise TypeError("iteration over a 0-d key array")
+        # TODO(frostig): we may want to avoid iteration by slicing because
+        # a very common use of iteration is `k1, k2 = split(key)`, and
+        # slicing/indexing may be trickier to track for linearity checking
+        # purposes. Maybe we can:
+        # * introduce an unpack primitive+traceable (also allow direct use)
+        # * unpack upfront into shape[0] many keyarray slices
+        # * return iter over these unpacked slices
+        # Whatever we do, we'll want to do it by overriding
+        # ShapedArray._iter when the element type is KeyTy...
+        return (PRNGKeyArrayImpl(self.impl, k) for k in iter(self._base_array))
+
+    # TODO(frostig): are all of the stackable methods below (reshape,
+    # concat, broadcast_to, expand_dims), and the stackable registration,
+    # still needed? If, with some work, none are needed, then do we want
+    # to remove stackables altogether? This may be the only application.
+
+    # TODO(frostig): Remove? Overwritten below in particular
+    def reshape(self, newshape, order=None) -> PRNGKeyArrayImpl:
+        reshaped_base = jnp.reshape(self._base_array, (*newshape, -1), order=order)
+        return PRNGKeyArrayImpl(self.impl, reshaped_base)
+
+    def concatenate(self, key_arrs, axis, dtype=None) -> PRNGKeyArrayImpl:
+        if dtype is not None:
+            raise ValueError(
+                "dtype argument not supported for concatenating PRNGKeyArray"
+            )
+        axis = canonicalize_axis(axis, self.ndim)
+        arrs = [self._base_array, *[k._base_array for k in key_arrs]]
+        return PRNGKeyArrayImpl(self.impl, jnp.concatenate(arrs, axis))
+
+    def broadcast_to(self, shape) -> PRNGKeyArrayImpl:
+        if jnp.ndim(shape) == 0:
+            shape = (shape,)
+        new_shape = (*shape, *self.impl.key_shape)
+        return PRNGKeyArrayImpl(
+            self.impl, jnp.broadcast_to(self._base_array, new_shape)
+        )
+
+    def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyArrayImpl:
+        # follows lax.expand_dims, not jnp.expand_dims, so dimensions is a sequence
+        ndim_out = self.ndim + len(set(dimensions))
+        dimensions = [canonicalize_axis(d, ndim_out) for d in dimensions]
+        return PRNGKeyArrayImpl(
+            self.impl, lax.expand_dims(self._base_array, dimensions)
+        )
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}[{self.impl.tag}]" f" {{ {self._base_array} }}"
+        )
+
+    def pprint(self):
+        pp_keys = pp.text("shape = ") + pp.text(str(self.shape))
+        pp_impl = pp.text("impl = ") + self.impl.pprint()
+        return str(
+            pp.group(
+                pp.text("PRNGKeyArray:")
+                + pp.nest(2, pp.brk() + pp_keys + pp.brk() + pp_impl)
+            )
+        )
+
+    # Overwritten immediately below
+    @property
+    def T(self) -> PRNGKeyArray:
+        assert False
+
+    def __getitem__(self, _) -> PRNGKeyArray:
+        assert False
+
+    def ravel(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+    def squeeze(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+    def swapaxes(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+    def take(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+    def transpose(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+    def flatten(self, *_, **__) -> PRNGKeyArray:
+        assert False
+
+
+_set_device_array_base_attributes(
+    PRNGKeyArrayImpl,
+    include=[
+        "__getitem__",
+        "ravel",
+        "squeeze",
+        "swapaxes",
+        "take",
+        "reshape",
+        "transpose",
+        "flatten",
+        "T",
+    ],
+)
+_register_stackable(PRNGKeyArrayImpl)
+basearray.Array.register(PRNGKeyArrayImpl)
+
+
+# TODO(frostig): remove, rerouting callers directly to random_seed
+def seed_with_impl(impl: PRNGImpl, seed: Union[int, Array]) -> PRNGKeyArrayImpl:
+    return random_seed(seed, impl=impl)
+
+
+def keys_shaped_array(impl, shape):
+    return core.ShapedArray(shape, KeyTy(impl))
+
+
+def keys_aval_to_base_arr_aval(keys_aval):
+    shape = (*keys_aval.shape, *keys_aval.dtype.impl.key_shape)
+    return core.ShapedArray(shape, np.dtype("uint32"))
+
+
+def base_arr_shape_to_keys_shape(impl, base_arr_shape):
+    base_ndim = len(impl.key_shape)
+    return base_arr_shape[:-base_ndim]
+
+
+def make_key_array_phys_sharding(aval, sharding, is_sharding_from_xla):
+    if dispatch.is_single_device_sharding(sharding):
+        return sharding
+    elif isinstance(sharding, PmapSharding):
+        key_shape = aval.dtype.impl.key_shape
+        trailing_sharding = [sharding_specs.NoSharding()] * len(key_shape)
+        phys_sharding_spec = sharding_specs.ShardingSpec(
+            sharding=(*sharding.sharding_spec.sharding, *trailing_sharding),
+            mesh_mapping=sharding.sharding_spec.mesh_mapping,
+        )
+        return PmapSharding(devices=sharding.devices, sharding_spec=phys_sharding_spec)
+    elif isinstance(sharding, NamedSharding):
+        key_shape = aval.dtype.impl.key_shape
+        trailing_spec = [None] * len(key_shape)
+        return NamedSharding(
+            sharding.mesh, PartitionSpec(*sharding.spec, *trailing_spec)
+        )
+    elif is_sharding_from_xla:
+        return sharding
+    else:
+        sharding_proto = sharding._to_xla_op_sharding(aval.ndim)
+        return GSPMDSharding(
+            sharding._device_assignment,
+            KeyTyRules.physical_op_sharding(aval, sharding_proto),
+        )

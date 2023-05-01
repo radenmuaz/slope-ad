@@ -1,24 +1,29 @@
 import slope
 import numpy as np
 from slope.array_shape import ArrayShape
-from typing import List, Tuple, Sequence, Any
+from typing import List, Tuple, Sequence, Any, Callable, NamedTuple
 from abc import ABC, abstractmethod
+import math
 
 
 class Op(ABC):
+    @classmethod
+    def do(cls, *args, **params):
+        slope.RT.bind1(cls, *args, **params)
+
     @staticmethod
     @abstractmethod
-    def eval(*args):
+    def eval(*args, **params):
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
-    def vmap(*args):
+    def vmap(*args, **params):
         raise NotImplementedError
 
     @staticmethod
     @abstractmethod
-    def jvp(*args):
+    def jvp(*args, **params):
         raise NotImplementedError
 
     @staticmethod
@@ -33,29 +38,36 @@ class Op(ABC):
 
     @staticmethod
     @abstractmethod
-    def mlir(cls):
+    def stablehlo(*args, **params):
         raise NotImplementedError
-
-
-# class FnOp(Op):
-#     def fn(self, *args):
-#         raise NotImplementedError
-#     def __call__(self, *args):
-#         if slope.RT.trace_stack.trace_type == slope.core.JVPTrace:
-
-
-#     eval = vmap = jvp = shape_eval = __call__
 
 
 class UnaryOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, **params):
         (x,), (x_bdim,) = vals_in, dims_in
-        return [slope.RT.bind1(cls, x, **params)], [x_bdim]
+        return [cls.do(x, **params)], [x_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
         return [ArrayShape(x.shape, x.dtype)]
+
+    @classmethod
+    def identity_jvp(cls, primals, tangents, **params):
+        (x,), (x_dot,) = primals, tangents
+        return [cls.do(x, **params)], [cls.do(x_dot, **params)]
+
+    @classmethod
+    def identity_T(cls, t, x):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [cls.do(z)]
+    
+    @classmethod
+    def zero_T(cls, t, x):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [zeros_like(z)]
 
 
 class BinaryOp(Op):
@@ -68,13 +80,14 @@ class BinaryOp(Op):
                 x_bdim = y_bdim
             else:
                 y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-        return [slope.RT.bind1(cls, x, y, **params)], [x_bdim]
+        return [cls.do(x, y, **params)], [x_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
+            breakpoint()
             raise TypeError
         return [ArrayShape(x.shape, x.dtype)]
 
@@ -85,7 +98,7 @@ class ReduceOp(Op):
         (x,), (x_bdim,) = vals_in, dims_in
         params["axis"] = tuple(ax + (x_bdim <= ax) for ax in params["axis"])
         out_bdim = x_bdim - sum(ax < x_bdim for ax in params["axis"])
-        return [slope.RT.bind1(cls, x, **params)], [out_bdim]
+        return [cls.do(x, **params)], [out_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
@@ -107,11 +120,51 @@ class Identity(UnaryOp):
     @staticmethod
     def eval(x):
         return [x]
+    
+    @staticmethod
+    def jvp(cls, primals, tangents, **params):
+        (x,), (x_dot,) = primals, tangents
+        return [identity(x, **params)], [identity(x_dot, **params)]
 
     @staticmethod
-    def jvp(primals, tangents):
+    def T(t, x):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [identity(z)]
+
+
+
+class FullLike(UnaryOp):
+    @staticmethod
+    def eval(x, *, fill_value):
+        return [np.full(x.shape, fill_value=fill_value, dtype=x.dtype)]
+
+    @staticmethod
+    def jvp(cls, primals, tangents, *, fill_value):
         (x,), (x_dot,) = primals, tangents
-        return [identity(x)], [identity(x_dot)]
+        return [full_like(x, fill_value)], [zeros_like(x_dot)]
+
+    @staticmethod
+    def T(t, x, *, fill_value):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [zeros_like(z)]
+
+class StopGradient(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [identity(x)]
+
+    @staticmethod
+    def jvp(primals, tangents, **params):
+        (x,), (x_dot,) = primals, tangents
+        return [identity(x, **params)], [zeros_like(x)]
+
+    def T(t, x):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [zeros_like(z)]
+
 
 
 class Convert(UnaryOp):
@@ -119,16 +172,8 @@ class Convert(UnaryOp):
     def eval(x, *, dtype):
         return [x.astype(dtype)]
 
-    @staticmethod
-    def jvp(primals, tangents, *, dtype):
-        (x,), (x_dot,) = primals, tangents
-        return [convert(x, dtype)], [convert(x_dot, dtype)]
-
-    @staticmethod
-    def T(cts, x, **params):
-        (y_bar,) = cts
-        assert type(x) is slope.ad.UndefPrimal
-        return [convert(y_bar, x.dtype)]
+    jvp = staticmethod(UnaryOp.identity_jvp)
+    T = staticmethod(UnaryOp.identity_T)
 
 
 class Exp(UnaryOp):
@@ -250,7 +295,7 @@ class Max(BinaryOp):
     def jvp(primals, tangents):
         (x, y), _ = primals, tangents
         out_primal = max(x, y)
-        return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
+        return [out_primal], [zeros_like(out_primal)]
 
     @staticmethod
     def T(cts, x, y):
@@ -322,8 +367,8 @@ class ReduceMax(ReduceOp):
 
     @staticmethod
     def T(cts, x, *, axis):
-        (y_bar,) = cts
-        return [broadcast(y_bar, x.aval.shape, ())]
+        (z,) = cts
+        return [broadcast(z, x.aval.shape, ())]
 
 
 class ReduceSum(ReduceOp):
@@ -340,8 +385,8 @@ class ReduceSum(ReduceOp):
 
     @staticmethod
     def T(cts, x, *, axis):
-        (y_bar,) = cts
-        return [broadcast(y_bar, x.aval.shape, axis)]
+        (z,) = cts
+        return [broadcast(z, x.aval.shape, axis)]
 
 
 # -----------------------
@@ -371,9 +416,9 @@ class Broadcast(ShapeOp):
 
     @staticmethod
     def T(cts, x, *, shape, axes):
-        (y_bar,) = cts
-        out = y_bar
-        out = reduce_sum(y_bar, axes)
+        (z,) = cts
+        out = z
+        out = reduce_sum(z, axes)
         out = reshape(out, x.aval.shape)
         return [out]
 
@@ -400,8 +445,8 @@ class Reshape(ShapeOp):
 
     @staticmethod
     def T(cts, x, *, shape):
-        (y_bar,) = cts
-        return [reshape(y_bar, x.aval.shape)]
+        (z,) = cts
+        return [reshape(z, x.aval.shape)]
 
 
 class Transpose(ShapeOp):
@@ -421,13 +466,25 @@ class Transpose(ShapeOp):
 
     @staticmethod
     def T(cts, x, *, perm):
-        (y_bar,) = cts
-        return [transpose(y_bar, perm)]
+        (z,) = cts
+        return [transpose(z, perm)]
 
 
 # UnaryOps
 def identity(x):
     return slope.RT.bind1(Identity, x)
+
+def full_like(x, fill_value):
+    return slope.RT.bind1(FullLike, x, fill_value=fill_value)
+
+def zeros_like(x):
+    return full_like(x, 0)
+
+def ones_like(x):
+    return full_like(x, 1)
+
+def stop_gradient(x):
+    return slope.RT.bind1(StopGradient, x)
 
 
 def convert(x, dtype):
@@ -510,6 +567,7 @@ def transpose(x, perm):
 #     x = reshape(x, shape)
 #     return x
 
+# NN
 
 def T(x):
     perm = list(range(len(x.shape)))
@@ -534,7 +592,7 @@ def dot(x, y):
 
 
 def relu(x):
-    return max(x, slope.ad.zeros_like(x))
+    return max(x, np.zeros(x.shape, x.dtype))
 
 
 def softmax(x, axis):
@@ -542,7 +600,6 @@ def softmax(x, axis):
     x_max = broadcast(x_max, x.shape)
 
     e = exp(x - x_max)
-    # e = exp(x)
     s_e = reduce_sum(e, axis)
     s_e = broadcast(s_e, e.shape)
     return e / s_e
@@ -572,5 +629,21 @@ def pow(x, y):
             x = x * x
     ret = acc
     if is_reciprocal:
-        ret = slope.ad.ones_like(acc) / acc
+        ret = ones_like(acc) / acc
     return ret
+
+
+def mean(x, axis=None):
+    x_sum = sum(x, axis)
+    if axis is None:
+        axis = list(range(len(x.shape)))
+    N = math.prod([x.shape[a] for a in axis])
+    return x_sum / N
+
+
+def log_softmax(x, axis = -1):
+
+  x_max = max(x, axis)
+  shifted = x - stop_gradient(x_max)
+  shifted_logsumexp = log(sum(exp(shifted), axis))
+  return shifted - shifted_logsumexp

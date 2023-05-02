@@ -14,7 +14,11 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
 
     def apply_fun(params, inputs, **kwargs):
         W, b = params
-        return ops.dot(inputs, W) + b
+        x = ops.reshape(inputs, [1]+list(inputs.shape))
+        out = ops.dot(x, W)
+        out = out + b
+        out = ops.reshape(out, out.shape[1:])
+        return out
 
     return init_fun, apply_fun
 
@@ -28,8 +32,8 @@ def act_fn(fun, **fun_kwargs):
 
 Relu = act_fn(ops.relu)
 Exp = act_fn(ops.exp)
-LogSoftmax = act_fn(ops.log_softmax, axis=-1)
-Softmax = act_fn(ops.softmax, axis=-1)
+LogSoftmax = act_fn(ops.log_softmax, axis=(-1,))
+Softmax = act_fn(ops.softmax, axis=(-1,))
 
 
 def Identity():

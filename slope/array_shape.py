@@ -12,7 +12,7 @@ class ArrayShape:
         return cls(aval.shape, aval.dtype)
 
     def __init__(self, shape, dtype):
-        self.shape = shape
+        self.shape = tuple(shape)
         self.dtype = dtype
 
     @property

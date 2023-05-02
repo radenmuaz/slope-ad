@@ -6,6 +6,7 @@ import time
 import itertools
 
 import numpy as np
+
 # Copyright 2018 The JAX Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -107,24 +108,25 @@ def mnist(permute_train=False):
 
 
 def loss(params, batch):
-  inputs, targets = batch
-  preds = predict(params, inputs)
-  return -ops.sum(preds * targets, axis=1)
+    inputs, targets = batch
+
+    preds = predict(params, inputs)
+    return -ops.reduce_sum(preds * targets, axis=(0,))
+
+
 #   return -ops.mean(ops.sum(preds * targets, axis=1))
 
+
 def accuracy(params, batch):
-  inputs, targets = batch
-  target_class = ops.argmax(targets, axis=1)
-  predicted_class = ops.argmax(predict(params, inputs), axis=1)
-  return ops.mean(predicted_class == target_class)
+    inputs, targets = batch
+    target_class = ops.argmax(targets, axis=1)
+    predicted_class = ops.argmax(predict(params, inputs), axis=1)
+    return ops.mean(predicted_class == target_class)
 
 
 if __name__ == "__main__":
-
-    init_random_params, predict = layers.serial(
-    layers.Dense(10), layers.LogSoftmax)
+    init_random_params, predict = layers.serial(layers.Dense(10), layers.LogSoftmax)
     _, init_params = init_random_params((-1, 28 * 28))
-
 
     step_size = 0.001
     num_epochs = 10
@@ -141,8 +143,10 @@ if __name__ == "__main__":
         while True:
             perm = rng.permutation(num_train)
             for i in range(num_batches):
-                batch_idx = perm[i * batch_size:(i + 1) * batch_size]
-                yield train_images[batch_idx], train_labels[batch_idx]
+                batch_idx = perm[i * batch_size : (i + 1) * batch_size]
+                yield train_images[batch_idx][0], train_labels[batch_idx][0]
+                # yield train_images[batch_idx], train_labels[batch_idx]
+
     batches = data_stream()
 
     opt_init, opt_update, get_params = optim.sgd(step_size)
@@ -152,7 +156,6 @@ if __name__ == "__main__":
         params = get_params(opt_state)
         return opt_update(i, slope.ad.grad(loss)(params, batch), opt_state)
 
-    
     itercount = itertools.count()
 
     print("\nStarting training...")
@@ -187,7 +190,6 @@ if __name__ == "__main__":
 # print(grad_out)
 
 
-
 # def f(x,y):
 #     out = ops.dot(x, ops.T(y))
 #     # out = ops.mul(x,y)
@@ -195,6 +197,6 @@ if __name__ == "__main__":
 
 # x_dot=y_dot=np.array([[1,1,1],[1,1,1]])
 # p, t= slope.jvp(f, (x,y), (x_dot,y_dot))
-# 
+#
 # print(p)
 # print(t)

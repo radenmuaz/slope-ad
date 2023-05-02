@@ -87,8 +87,7 @@ class BinaryOp(Op):
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
-            breakpoint()
-            raise TypeError
+            raise TypeError(f"{x} is not same as {y}")
         return [ArrayShape(x.shape, x.dtype)]
 
 
@@ -355,12 +354,12 @@ class ReduceMax(ReduceOp):
     def jvp(primals, tangents, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_max(x, axis)
-        eval_out = broadcast(eval_out, x.shape, ())
+        # eval_out = broadcast(eval_out, x.shape, (-1,))
         locs = equal(x, eval_out)
         locs = convert(locs, x_dot.dtype)
         counts = reduce_sum(locs, axis)
+        # counts = broadcast(counts, x.shape, (-1,))
         jvp_out = reduce_sum(x_dot * locs, axis)
-
         jvp_out = jvp_out / counts
 
         return [eval_out], [jvp_out]
@@ -374,6 +373,9 @@ class ReduceMax(ReduceOp):
 class ReduceSum(ReduceOp):
     @staticmethod
     def eval(x, *, axis):
+        if type(axis) is not tuple:
+            axis = tuple(axis)
+            breakpoint()
         return [np.sum(x, axis)]
 
     @staticmethod
@@ -400,7 +402,7 @@ class Broadcast(ShapeOp):
         if axes is not None:
             for axis in sorted(axes):
                 x = np.expand_dims(x, axis)
-        return [np.broadcast_to(x, shape)]
+        return [np.broadcast_to(x, shape) if shape is not None else x]
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
@@ -505,33 +507,57 @@ def neg(x):
 
 # BinaryOps
 
+def binaryop_broadcast(op):
+    def wrapped_op(x, y):
+        axis = None
+        diff = len(x.shape) - len(y.shape)
+        x_shape, y_shape = x.shape, y.shape
+        if diff > 0:
+            axis = list(range(diff))
+            y_shape = [1]*diff+list(y_shape)
+        elif diff < 0:
+            axis = list(range(-diff))
+            x_shape = [1]*(-diff)+list(x_shape)
+        for dim_x, dim_y in zip(x_shape[::-1], y_shape[::-1]):
+            if dim_x != dim_y and not (dim_x == 1 or dim_y == 1):
+                raise ValueError("Arrays could not be broadcast together.")
+        if x.shape != x_shape:
+            x = broadcast(x, y.shape, axis)
+        elif y.shape != y_shape:
+            y = broadcast(y, x.shape, axis)
+        return op(x, y)
+    return wrapped_op
 
 ## Arithmetic
+@binaryop_broadcast
 def add(x, y):
     return slope.RT.bind1(Add, x, y)
 
 
+@binaryop_broadcast
 def sub(x, y):
     return slope.RT.bind1(Sub, x, y)
 
-
+@binaryop_broadcast
 def mul(x, y):
     return slope.RT.bind1(Mul, x, y)
 
 
+@binaryop_broadcast
 def div(x, y):
     return slope.RT.bind1(Div, x, y)
 
 
 ## Logic
+@binaryop_broadcast
 def equal(x, y):
     return slope.RT.bind1(Equal, x, y)
 
-
+@binaryop_broadcast
 def max(x, y):
     return slope.RT.bind1(Max, x, y)
 
-
+@binaryop_broadcast
 def min(x, y):
     return -slope.RT.bind1(Max, -x, -y)
 
@@ -576,6 +602,13 @@ def T(x):
 
 
 def dot(x, y):
+    # x_is_vec, y_is_vec = False, False
+    # if len(x.shape) == 1:
+    #     x_is_vec = True
+    #     x = reshape(x, [1]+list(x.shape))
+    # if len(y.shape) == 1:
+    #     y_is_vec = True
+    #     y = reshape(y, list(y.shape)+[1])
     a, b = x.shape[-2], x.shape[-1]
     c, d = y.shape[-2], y.shape[-1]
     assert b == c
@@ -588,6 +621,10 @@ def dot(x, y):
     z = x * y
     z = reduce_sum(z, (-1,))
     z = T(z)
+    # if x_is_vec:
+    #     z = reshape(z,z.shape[1:])
+    # if x_is_vec:
+    #     z = reshape(z,z.shape[1:]) 
     return z
 
 
@@ -641,9 +678,9 @@ def mean(x, axis=None):
     return x_sum / N
 
 
-def log_softmax(x, axis = -1):
-
-  x_max = max(x, axis)
+def log_softmax(x, axis = (-1,)):
+  x_max = reduce_max(x, axis)
   shifted = x - stop_gradient(x_max)
-  shifted_logsumexp = log(sum(exp(shifted), axis))
+  sumexp = reduce_sum(exp(shifted), axis)
+  shifted_logsumexp = log(sumexp)
   return shifted - shifted_logsumexp

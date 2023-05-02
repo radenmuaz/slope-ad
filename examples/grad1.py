@@ -12,7 +12,7 @@ from slope import ops
 # print(t)
 # l = slope.grad(f)(2)
 # print(l)
-    
+
 # x, x_dot = np.array([3.0]), np.array([1.0])
 # y = f(x)
 # print('eval', y)
@@ -38,12 +38,12 @@ from slope import ops
 # print(y_dot)
 
 
-
 def f(x):
     y = x
-    y = ops.broadcast(y, (3,3), (0,))
+    y = ops.broadcast(y, (3, 3), (0,))
     y = ops.reduce_sum(y, (0, 1))
     return y
+
 
 x = np.ones([3])
 x_dot = np.ones([3])

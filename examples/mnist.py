@@ -111,7 +111,7 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    return -ops.reduce_sum(preds * targets, axis=(0,))
+    return -ops.reduce_sum(preds * targets, axis=(0, 1))
 
 
 #   return -ops.mean(ops.sum(preds * targets, axis=1))
@@ -119,10 +119,8 @@ def loss_fn(params, batch):
 
 def accuracy(params, batch):
     inputs, targets = batch
-    for (input, target) in zip(inputs, targets):
-        target_class = np.argmax(target, axis=0)
-        predicted_class = np.argmax(predict(params, input), axis=0)
-        breakpoint()
+    target_class = np.argmax(targets, axis=-1)
+    predicted_class = np.argmax(predict(params, inputs), axis=-1)
     return np.mean(predicted_class == target_class)
 
 
@@ -134,7 +132,7 @@ if __name__ == "__main__":
 
     step_size = 0.001
     num_epochs = 10
-    batch_size = 1
+    batch_size = 32
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()
@@ -148,8 +146,8 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield train_images[batch_idx][0], train_labels[batch_idx][0]
-                # yield train_images[batch_idx], train_labels[batch_idx]
+                # yield train_images[batch_idx][0], train_labels[batch_idx][0]
+                yield train_images[batch_idx], train_labels[batch_idx]
 
     batches = data_stream()
 
@@ -169,8 +167,8 @@ if __name__ == "__main__":
         start_time = time.time()
         for i in range(num_batches):
             loss, opt_state = update(next(itercount), opt_state, next(batches))
-            print(f'{i}, loss: {loss:.2f}')
-            if i == 32:
+            # print(f'{i}, loss: {loss:.2f}')
+            if i == 100:
                 break
         epoch_time = time.time() - start_time
 

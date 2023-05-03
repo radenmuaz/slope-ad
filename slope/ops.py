@@ -358,7 +358,8 @@ class ReduceMax(ReduceOp):
     def jvp(primals, tangents, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_max(x, axis)
-        locs = equal(x, eval_out)
+        locs = equal(x, broadcast(eval_out, x.shape, axis))
+        # locs = equal(x, eval_out)
         locs = convert(locs, x_dot.dtype)
         counts = reduce_sum(locs, axis)
         jvp_out = reduce_sum(x_dot * locs, axis)
@@ -381,10 +382,7 @@ class ReduceSum(ReduceOp):
     def jvp(primals, tangents, *, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_sum(x, axis)
-        jvp_out = reduce_sum(x_dot, axis)
-        if eval_out.shape != jvp_out.shape:
-            breakpoint()
-        
+        jvp_out = reduce_sum(x_dot, axis)        
         return [eval_out], [jvp_out]
 
     @staticmethod
@@ -424,20 +422,14 @@ class Broadcast(ShapeOp):
     def T(cts, x, *, shape, axes):
         (z,) = cts
         out = z
-        # print('z', z.shape)
-        # print('x',x.aval.shape)
-        # print('shape', shape)
-        # print('axes', axes)
         if axes is not None:
             out = reduce_sum(z, axes)
+        else:
             eshape = list(shape)
             for a in axes:
                 if a < 0:
                     a = len(shape) + (a+1)
                 eshape.insert(a, 1)
-            # print('eshape', eshape)
-            # print('out', out.shape)
-        else:
             breakpoint()
         return [out]
 
@@ -633,6 +625,7 @@ def dot(x, y):
     y = T(y)
     br_shape = (*x.shape[:-3], *(d, a, b))
     # x = expand_dims(x, (-3,))
+    # breakpoint()
     x = broadcast(x, br_shape, (-3,))
     # y = expand_dims(y, (-2,))
     y = broadcast(y, br_shape, (-2,))

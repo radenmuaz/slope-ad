@@ -14,10 +14,11 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
 
     def apply_fun(params, inputs, **kwargs):
         W, b = params
-        x = ops.reshape(inputs, [1]+list(inputs.shape))
+        x = inputs
+        # x = ops.reshape(inputs, [1]+list(inputs.shape))
         out = ops.dot(x, W)
-        # out = out + b
-        out = ops.reshape(out, out.shape[1:])
+        out = out + ops.broadcast(b, out.shape, (0,))
+        # out = ops.reshape(out, out.shape[1:])
         return out
 
     return init_fun, apply_fun

@@ -87,7 +87,7 @@ class BinaryOp(Op):
         if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
-            raise TypeError(f"{x} is not same as {y}")
+            raise TypeError(f"{x} != {y}")
         return [ArrayShape(x.shape, x.dtype)]
 
 
@@ -101,7 +101,9 @@ class ReduceOp(Op):
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
-        axis_ = set(params["axis"])
+        axis = params["axis"]
+        axis = [a+len(x.shape) if a < 0 else a for a in axis]
+        axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
 
@@ -194,6 +196,7 @@ class Log(UnaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
+        # breakpoint()
         return [log(x)], [x_dot / x]
 
 
@@ -263,8 +266,9 @@ class Mul(BinaryOp):
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
+        # breakpoint()
         if type(x) is slope.ad.UndefPrimal:
-            return [(mul(z_bar, y)), None]
+            return [z_bar * y, None]
         elif type(y) is slope.ad.UndefPrimal:
             return [None, x * z_bar]
 
@@ -354,13 +358,11 @@ class ReduceMax(ReduceOp):
     def jvp(primals, tangents, axis):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_max(x, axis)
-        # eval_out = broadcast(eval_out, x.shape, (-1,))
         locs = equal(x, eval_out)
         locs = convert(locs, x_dot.dtype)
         counts = reduce_sum(locs, axis)
-        # counts = broadcast(counts, x.shape, (-1,))
         jvp_out = reduce_sum(x_dot * locs, axis)
-        jvp_out = jvp_out / counts
+        jvp_out = jvp_out / broadcast(counts, jvp_out.shape)
 
         return [eval_out], [jvp_out]
 
@@ -373,9 +375,6 @@ class ReduceMax(ReduceOp):
 class ReduceSum(ReduceOp):
     @staticmethod
     def eval(x, *, axis):
-        if type(axis) is not tuple:
-            axis = tuple(axis)
-            breakpoint()
         return [np.sum(x, axis)]
 
     @staticmethod
@@ -383,12 +382,17 @@ class ReduceSum(ReduceOp):
         (x,), (x_dot,) = primals, tangents
         eval_out = reduce_sum(x, axis)
         jvp_out = reduce_sum(x_dot, axis)
+        if eval_out.shape != jvp_out.shape:
+            breakpoint()
+        
         return [eval_out], [jvp_out]
 
     @staticmethod
     def T(cts, x, *, axis):
         (z,) = cts
-        return [broadcast(z, x.aval.shape, axis)]
+        out = z
+        out = broadcast(z, x.aval.shape, axis)
+        return [out]
 
 
 # -----------------------
@@ -402,7 +406,7 @@ class Broadcast(ShapeOp):
         if axes is not None:
             for axis in sorted(axes):
                 x = np.expand_dims(x, axis)
-        return [np.broadcast_to(x, shape) if shape is not None else x]
+        return [np.broadcast_to(x, shape)]
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
@@ -420,8 +424,21 @@ class Broadcast(ShapeOp):
     def T(cts, x, *, shape, axes):
         (z,) = cts
         out = z
-        out = reduce_sum(z, axes)
-        out = reshape(out, x.aval.shape)
+        # print('z', z.shape)
+        # print('x',x.aval.shape)
+        # print('shape', shape)
+        # print('axes', axes)
+        if axes is not None:
+            out = reduce_sum(z, axes)
+            eshape = list(shape)
+            for a in axes:
+                if a < 0:
+                    a = len(shape) + (a+1)
+                eshape.insert(a, 1)
+            # print('eshape', eshape)
+            # print('out', out.shape)
+        else:
+            breakpoint()
         return [out]
 
 
@@ -513,10 +530,10 @@ def binaryop_broadcast(op):
         diff = len(x.shape) - len(y.shape)
         x_shape, y_shape = x.shape, y.shape
         if diff > 0:
-            axis = list(range(diff))
+            axis = tuple(range(diff))
             y_shape = [1]*diff+list(y_shape)
         elif diff < 0:
-            axis = list(range(-diff))
+            axis = tuple(range(-diff))
             x_shape = [1]*(-diff)+list(x_shape)
         for dim_x, dim_y in zip(x_shape[::-1], y_shape[::-1]):
             if dim_x != dim_y and not (dim_x == 1 or dim_y == 1):
@@ -526,7 +543,8 @@ def binaryop_broadcast(op):
         elif y.shape != y_shape:
             y = broadcast(y, x.shape, axis)
         return op(x, y)
-    return wrapped_op
+    # return wrapped_op
+    return op
 
 ## Arithmetic
 @binaryop_broadcast
@@ -584,14 +602,14 @@ def transpose(x, perm):
     return slope.RT.bind1(Transpose, x, perm=perm)
 
 
-# def expand_dims(x, axis):
-#     shape = list(x.shape)
-#     for a in axis:
-#         if a < 0:
-#             a = len(shape) + (a+1)
-#         shape.insert(a, 1)
-#     x = reshape(x, shape)
-#     return x
+def expand_dims(x, axis):
+    shape = list(x.shape)
+    for a in axis:
+        if a < 0:
+            a = len(shape) + (a+1)
+        shape.insert(a, 1)
+    x = reshape(x, shape)
+    return x
 
 # NN
 
@@ -679,8 +697,11 @@ def mean(x, axis=None):
 
 
 def log_softmax(x, axis = (-1,)):
-  x_max = reduce_max(x, axis)
-  shifted = x - stop_gradient(x_max)
-  sumexp = reduce_sum(exp(shifted), axis)
-  shifted_logsumexp = log(sumexp)
-  return shifted - shifted_logsumexp
+    x_max = reduce_max(x, axis)
+    x_max = broadcast(x_max, x.shape, (-1,))
+    # x_s = x - stop_gradient(x_max)
+    x_s = x - x_max
+    x_s_se = reduce_sum(exp(x_s), axis)
+    x_s_se = broadcast(x_s_se, x.shape, (-1,))
+    x_s_lse = log(x_s_se)
+    return x_s - x_s_lse

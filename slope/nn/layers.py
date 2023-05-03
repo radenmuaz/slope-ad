@@ -16,7 +16,7 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
         W, b = params
         x = ops.reshape(inputs, [1]+list(inputs.shape))
         out = ops.dot(x, W)
-        out = out + b
+        # out = out + b
         out = ops.reshape(out, out.shape[1:])
         return out
 

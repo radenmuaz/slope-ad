@@ -107,7 +107,7 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-def loss(params, batch):
+def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
@@ -119,12 +119,16 @@ def loss(params, batch):
 
 def accuracy(params, batch):
     inputs, targets = batch
-    target_class = ops.argmax(targets, axis=1)
-    predicted_class = ops.argmax(predict(params, inputs), axis=1)
-    return ops.mean(predicted_class == target_class)
+    for (input, target) in zip(inputs, targets):
+        target_class = np.argmax(target, axis=0)
+        predicted_class = np.argmax(predict(params, input), axis=0)
+        breakpoint()
+    return np.mean(predicted_class == target_class)
 
 
 if __name__ == "__main__":
+    # init_random_params, predict = layers.serial(layers.Dense(10), layers.Softmax)
+    init_random_params, predict = layers.serial(layers.Dense(10))
     init_random_params, predict = layers.serial(layers.Dense(10), layers.LogSoftmax)
     _, init_params = init_random_params((-1, 28 * 28))
 
@@ -154,22 +158,27 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        return opt_update(i, slope.ad.grad(loss)(params, batch), opt_state)
+        loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
+        # breakpoint()
+        return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()
 
     print("\nStarting training...")
     for epoch in range(num_epochs):
         start_time = time.time()
-        for _ in range(num_batches):
-            opt_state = update(next(itercount), opt_state, next(batches))
+        for i in range(num_batches):
+            loss, opt_state = update(next(itercount), opt_state, next(batches))
+            print(f'{i}, loss: {loss:.2f}')
+            if i == 32:
+                break
         epoch_time = time.time() - start_time
 
         params = get_params(opt_state)
-        train_acc = accuracy(params, (train_images, train_labels))
+        # train_acc = accuracy(params, (train_images, train_labels))
         test_acc = accuracy(params, (test_images, test_labels))
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
-        print(f"Training set accuracy {train_acc}")
+        # print(f"Training set accuracy {train_acc}")
         print(f"Test set accuracy {test_acc}")
 
 # dot product

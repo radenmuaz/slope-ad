@@ -874,7 +874,8 @@ class JaxprEqnRecipe(NamedTuple):
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
-    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracer"]]
+    # tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracer"]]
+    tracer_refs_out: List
 
 
 JaxprRecipe = Union[LambdaBindingRecipe, ConstRecipe, JaxprEqnRecipe]
@@ -1085,11 +1086,14 @@ def eval_jaxpr_transposed(
 
     list_map(write_primal, jaxpr.in_binders, args)
     list_map(write_cotangent, jaxpr.outs, cotangents)
-    for eqn in jaxpr.eqns[::-1]:
-        print(eqn)
+    for i, eqn in enumerate(jaxpr.eqns[::-1]):
+        print(i, eqn)
+        
         primals_in = list_map(read_primal, eqn.inputs)
         cts_in = list_map(read_cotangent, eqn.out_binders)
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
+        # if i == 13:
+            # breakpoint()
         list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [
         read_cotangent(v)

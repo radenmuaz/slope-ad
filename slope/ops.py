@@ -9,7 +9,7 @@ import math
 class Op(ABC):
     @classmethod
     def do(cls, *args, **params):
-        slope.RT.bind1(cls, *args, **params)
+        return slope.RT.bind1(cls, *args, **params)
 
     @staticmethod
     @abstractmethod
@@ -94,10 +94,18 @@ class BinaryOp(Op):
 class ReduceOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, **params):
+        a = list(params["axis"])
         (x,), (x_bdim,) = vals_in, dims_in
-        params["axis"] = tuple(ax + (x_bdim <= ax) for ax in params["axis"])
-        out_bdim = x_bdim - sum(ax < x_bdim for ax in params["axis"])
+        axis_ = list(params["axis"])
+        x_bdim_ = int(x_bdim)
+        axis = list(params["axis"])
+        x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
+        # axis = [a+len(x1s) if a < 0 else a for a in axis]
+        axis = tuple(ax + (x_bdim <= ax) for ax in axis)
+        out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
+        params["axis"] = tuple(axis)
         return [cls.do(x, **params)], [out_bdim]
+        # return [cls.do(x, **params)], dims_in
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
@@ -161,6 +169,7 @@ class StopGradient(UnaryOp):
         (x,), (x_dot,) = primals, tangents
         return [identity(x, **params)], [zeros_like(x)]
 
+    @staticmethod
     def T(t, x):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
@@ -172,9 +181,18 @@ class Convert(UnaryOp):
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
+    
+    @staticmethod
+    def jvp(primals, tangents, *, dtype):
+        (x,), (x_dot,) = primals, tangents
+        return [convert(x, dtype)], [convert(x_dot, dtype)]
 
-    jvp = staticmethod(UnaryOp.identity_jvp)
-    T = staticmethod(UnaryOp.identity_T)
+    @staticmethod
+    def T(t, x):
+        (z,) = t
+        assert type(x) is slope.ad.UndefPrimal
+        return [convert(z, x.dtype)]
+
 
 
 class Exp(UnaryOp):
@@ -195,8 +213,7 @@ class Log(UnaryOp):
 
     @staticmethod
     def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        # breakpoint()
+        (x,), (x_dot,) = primals, tangents        
         return [log(x)], [x_dot / x]
 
 
@@ -281,7 +298,7 @@ class Div(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
+        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))] # bug: power returns float64
 
     @staticmethod
     def T(cts, x, y):
@@ -292,7 +309,7 @@ class Div(BinaryOp):
 class Max(BinaryOp):
     @staticmethod
     def eval(x, y):
-        return [np.greater(x, y)]
+        return [np.maximum(x, y)]
 
     @staticmethod
     def jvp(primals, tangents):
@@ -405,6 +422,24 @@ class Broadcast(ShapeOp):
             for axis in sorted(axes):
                 x = np.expand_dims(x, axis)
         return [np.broadcast_to(x, shape)]
+    
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, shape, axes):
+        (x,), (x_bdim,) = vals_in, dims_in
+        # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
+        shape_ = list(shape)
+        axes_ = list(axes)
+        shape = list(shape)
+        axes = [a + int(a>=(x_bdim)) for a in axes]
+        if all([a<x_bdim for a in axes]):
+            x_bdim += 1
+
+        shape = shape[:x_bdim] + [axis_size]+ shape[x_bdim:]
+        # if sum(int(a<x_bdim) for a in axes) != 0:
+        #     breakpoint()
+        breakpoint()
+    
+        return [broadcast(x, shape, axes)], [x_bdim]
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
@@ -464,6 +499,21 @@ class Transpose(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
         return [x.transpose(perm)]
+    
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, perm):
+        (x,), (x_bdim,) = vals_in, dims_in
+        perm_ = list(perm)
+        x_bdim_ = int(x_bdim)
+        assert x_bdim >= 0
+        # perm = [d - int(i >= x_bdim) for i, d in enumerate(perm)]
+        perm = perm[:x_bdim] + [x_bdim] + perm[x_bdim:]
+        perm = [d+int(d>=x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
+        breakpoint()
+        assert len(set(perm)) == len(perm)
+        # perm[:x_bdim] = perm[:x_bdim][::-1]
+        # breakpoint()
+        return [transpose(x, perm)], [x_bdim]
 
     @staticmethod
     def jvp(primals, tangents, *, perm):
@@ -576,6 +626,11 @@ def min(x, y):
 def reduce_sum(x, axis=None):
     return slope.RT.bind1(ReduceSum, x, axis=axis)
 
+def reduce_mean(x, axis=None):
+    if axis is None:
+        axis = tuple(range(len(x.shape)))
+    N = math.prod([x.shape[a] for a in axis])
+    return reduce_sum(x, axis) / np.float32(N)
 
 def reduce_max(x, axis=None):
     return slope.RT.bind1(ReduceMax, x, axis=axis)
@@ -610,34 +665,58 @@ def T(x):
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return transpose(x, perm)
 
+def vv(x, y):
+    z = x * y
+    z = reduce_sum(z, (-1,))
+    return z
 
-def dot(x, y):
-    # x_is_vec, y_is_vec = False, False
-    # if len(x.shape) == 1:
-    #     x_is_vec = True
-    #     x = reshape(x, [1]+list(x.shape))
-    # if len(y.shape) == 1:
-    #     y_is_vec = True
-    #     y = reshape(y, list(y.shape)+[1])
-    a, b = x.shape[-2], x.shape[-1]
-    c, d = y.shape[-2], y.shape[-1]
-    assert b == c
+def mm(x, y):
+    return slope.ad.vmap(vv, (1, 2))(x, y)
+
+
+# def mm_old(x, y):
+#     x1, x2 = x.shape[-2], x.shape[-1]
+#     y1, y2 = y.shape[-2], y.shape[-1]
+#     assert x2 == y1
+#     y = T(y)
+#     # br_shape = (*x.shape[:-3], *(d, a, b))
+#     br_shape = (y2, x1, x2)
+#     x = broadcast(x, br_shape, (-3,))
+#     y = broadcast(y, br_shape, (-2,))
+#     z = x * y
+#     z = reduce_sum(z, (-1,))
+#     breakpoint()
+#     z = T(z)
+#     return z
+
+
+def mm_old(x, y):
+    x1, x2 = x.shape[0], x.shape[1]
+    y1, y2 = y.shape[0], y.shape[1]
+    assert x2 == y1
     y = T(y)
+    # br_shape = (*x.shape[:-3], *(d, a, b))
+    br_shape = (y2, x1, x2)
+    x = broadcast(x, br_shape, (0,))
+    y = broadcast(y, br_shape, (1,))
+    z = x * y
+    z = reduce_sum(z, (2,))
+    breakpoint()
+    z = T(z)
+    return z
+
+dot = mm_old
+
+def mm_noT(x, y):
+    a, b = x.shape[-2], x.shape[-1]
+    d, c = y.shape[-2], y.shape[-1]
     br_shape = (*x.shape[:-3], *(d, a, b))
-    # x = expand_dims(x, (-3,))
     # breakpoint()
     x = broadcast(x, br_shape, (-3,))
-    # y = expand_dims(y, (-2,))
     y = broadcast(y, br_shape, (-2,))
     z = x * y
     z = reduce_sum(z, (-1,))
-    z = T(z)
-    # if x_is_vec:
-    #     z = reshape(z,z.shape[1:])
-    # if x_is_vec:
-    #     z = reshape(z,z.shape[1:]) 
     return z
-
 
 def relu(x):
     return max(x, np.zeros(x.shape, x.dtype))

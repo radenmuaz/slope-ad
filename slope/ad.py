@@ -2,7 +2,7 @@ from contextlib import contextmanager
 import operator
 
 from contextlib import contextmanager
-
+from slope import utils
 import numpy as np
 import itertools
 import weakref
@@ -42,41 +42,6 @@ from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope import ops
 
 
-def swap(f):
-    return lambda x, y: f(y, x)
-
-
-def unzip2(pairs):
-    lst1, lst2 = [], []
-    for x1, x2 in pairs:
-        lst1.append(x1)
-        lst2.append(x2)
-    return lst1, lst2
-
-
-def list_map(f: Any, *xs: Any) -> Any:
-    return list(map(f, *xs))
-
-
-def list_zip(*args: Any) -> Any:
-    fst, *rest = args = list_map(list, args)
-    n = len(fst)
-    for arg in rest:
-        assert len(arg) == n
-    return list(zip(*args))
-
-
-def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert not len(lst) % 2
-    return split_list(lst, len(lst) // 2)
-
-
-def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
-    l1, l2 = iter(l1), iter(l2)
-    out = [next(l2) if b else next(l1) for b in which]
-    assert next(l1, None) is next(l2, None) is None
-    return out
-
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -108,13 +73,13 @@ class PPrint:
     def __repr__(self):
         return str(self)
 
+    @classmethod
+    def pp(cls, s: Any):
+        return cls([(0, line) for line in str(s).splitlines()])
 
-def pp(s: Any) -> PPrint:
-    return PPrint([(0, line) for line in str(s).splitlines()])
-
-
-def vcat(ps: List[PPrint]) -> PPrint:
-    return sum(ps, pp(""))
+    @classmethod
+    def vcat(cls, ps: List["PPrint"]):
+        return sum(ps, cls.pp(""))
 
 
 class Empty:
@@ -157,15 +122,17 @@ leaf = Leaf()
 def tree_flatten(x: Any) -> Any:
     def _tree_flatten(x: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
         node_type = slope.RT.node_types.get(type(x))
+
         if node_type:
             node_metadata, children = node_type.to_iterable(x)
-            children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
+            children_flat, child_trees = utils.unzip2(utils.list_map(_tree_flatten, children))
             flattened = itertools.chain.from_iterable(children_flat)
             return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
         else:
             return [x], leaf
 
     children_iter, treedef = _tree_flatten(x)
+
     return list(children_iter), treedef
 
 
@@ -298,6 +265,10 @@ class Tracer:
         if isinstance(x, Tracer):
             return x.aval
         elif type(x) in Tracer.TYPES:
+            # v = np.array(x)
+            # if type(v) is np.float64:
+            #     v = v.astype(np.float32)
+            # return v
             return ValuedArrayShape(np.array(x))
         else:
             raise TypeError(x)
@@ -316,7 +287,6 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x  # no boxing in Tracers needed
 
     def run_op(self, op, tracers, params):
-        #
         return op.eval(*tracers, **params)
 
 
@@ -379,9 +349,9 @@ class BatchTrace(Trace):
     pure = lift = lambda self, val: BatchTracer(self, val, None)
 
     def run_op(self, op, tracers, params):
-        vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
+        vals_in, bdims_in = utils.unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
-        return [BatchTracer(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
+        return [BatchTracer(self, x, bd) for x, bd in utils.list_zip(val_outs, bdim_outs)]
 
     @property
     def axis_size(self):
@@ -389,6 +359,7 @@ class BatchTrace(Trace):
 
 
 def move_batch_axis(axis_size, src, dst, x):
+
     if src is None:
         target_shape = list(x.shape)
         target_shape.insert(dst, axis_size)
@@ -396,31 +367,33 @@ def move_batch_axis(axis_size, src, dst, x):
         if type(dst) in (tuple, list):
             out_ndim += 1
         reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
-        x = ops.Reshape.do(x, reshape_shape)
-        x = ops.Broadcast.do(x, target_shape)
+        x = ops.reshape(x, reshape_shape)
+        x = ops.broadcast(x, target_shape)
         return x
     elif src == dst:
         return x
     else:
-        perm = [i for i in range(np.ndim(x)) if i != src]
+        perm = [i for i in range(len(x.shape)) if i != src]
         perm.insert(dst, src)
-        return ops.Transpose.do(x, perm)
+        return ops.transpose(x, perm)
 
 
 def vmap_flat(f, in_axes, *args):
-    (axis_size,) = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
+    axis_set = {x.shape[ax] for x, ax in utils.list_zip(args, in_axes) if ax is not None}
+    assert len(axis_set) == 1
+    axis_size, = axis_set
     with slope.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
             BatchTracer(trace, x, ax) if ax is not None else x
-            for x, ax in list_zip(args, in_axes)
+            for x, ax in utils.list_zip(args, in_axes)
         ]
         outs = f(*tracers_in)
         tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
-        vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
+        vals_out, bdims_out = utils.unzip2((t.val, t.batch_dim) for t in tracers_out)
     outs_transposed = [
         move_batch_axis(axis_size, bdim, 0, val_out)
-        for val_out, bdim in list_zip(vals_out, bdims_out)
+        for val_out, bdim in utils.list_zip(vals_out, bdims_out)
     ]
     return outs_transposed
 
@@ -430,7 +403,7 @@ def vmap(f, in_axes):
         args_flat, in_tree = tree_flatten(args)
         in_axes_flat, in_tree2 = tree_flatten(in_axes)
         if in_tree != in_tree2:
-            raise TypeError
+            raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
         f_flat, out_tree = flatten_fun(f, in_tree)
         outs_flat = vmap_flat(f_flat, in_axes_flat, *args_flat)
         return tree_unflatten(out_tree(), outs_flat)
@@ -464,18 +437,18 @@ class JVPTrace(Trace):
     lift = pure
 
     def run_op(self, op, tracers, params):
-        primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
-        return [JVPTracer(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)]
+        return [JVPTracer(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)]
 
 
 def jvp_flat(f, primals, tangents):
     with slope.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in list_zip(primals, tangents)]
+        tracers_in = [JVPTracer(trace, x, t) for x, t in utils.list_zip(primals, tangents)]
         outs = f(*tracers_in)
         tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
-        primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
+        primals_out, tangents_out = utils.unzip2((t.primal, t.tangent) for t in tracers_out)
     return primals_out, tangents_out
 
 
@@ -542,15 +515,44 @@ class Jaxpr(NamedTuple):
             for s in itertools.permutations(string.ascii_lowercase, r)
         )
         names = defaultdict(lambda: next(namegen))
-        in_binders = ", ".join(var_str(names, x) for x in self.in_binders)
-        eqns = vcat([pp_eqn(names, e) for e in self.eqns])
+        in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
+        eqns = PPrint.vcat([self.pp_eqn(names, e) for e in self.eqns])
         outs = ", ".join(
             names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
         )
         return str(
-            pp(f"{{ lambda {in_binders} .")
-            + ((pp("let ") >> eqns) + pp(f"in ( {outs} ) }}")).indent(2)
+            PPrint.pp(f"{{ lambda {in_binders} .")
+            + ((PPrint.pp("let ") >> eqns) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
         )
+
+    def pp_eqn(self, names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
+        # rule = eqn.op.pprint
+        # if rule() is not None:
+        #     return rule(names, eqn)
+        # else:
+        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in eqn.out_binders))
+        rhs = (
+            PPrint.pp(repr(eqn.op.__class__))
+            >> self.pp_params(eqn.params)
+            >> PPrint.pp(
+                " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
+            )
+        )
+        return lhs >> PPrint.pp(" = ") >> rhs
+
+
+    def pp_params(self, params: Dict[str, Any]) -> PPrint:
+        items = sorted(params.items())
+        if items:
+            return PPrint.pp(" [ ") >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items]) >> PPrint.pp(" ] ")
+        else:
+            return PPrint.pp(" ")
+        
+    
+
+    def var_str(self, names: DefaultDict[Var, str], v) -> str:
+        return f"{names[v]}:{v.aval.str_short()}"
+
 
 
 class JaxprType(NamedTuple):
@@ -574,7 +576,7 @@ def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
-        for out_binder, out_type in list_zip(eqn.out_binders, out_types):
+        for out_binder, out_type in utils.list_zip(eqn.out_binders, out_types):
             if not out_type == out_binder.aval:
                 raise TypeError
         for out_binder in eqn.out_binders:
@@ -608,60 +610,17 @@ def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
         assert v not in env  # single-assignment
         env[v] = val
 
-    list_map(write, jaxpr.in_binders, args)
+    utils.list_map(write, jaxpr.in_binders, args)
     for eqn in jaxpr.eqns:
-        in_vals = list_map(read, eqn.inputs)
+        in_vals = utils.list_map(read, eqn.inputs)
         outs = slope.RT.bind(eqn.op, *in_vals, **eqn.params)
-        list_map(write, eqn.out_binders, outs)
-    return list_map(read, jaxpr.outs)
+        utils.list_map(write, eqn.out_binders, outs)
+    return utils.list_map(read, jaxpr.outs)
 
 
 def jaxpr_as_fun(jaxpr: Jaxpr):
     return lambda *args: eval_jaxpr(jaxpr, args)
 
-
-def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
-    assert 0 <= n <= len(lst)
-    return lst[:n], lst[n:]
-
-
-def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert len(bs) == len(l)
-    lst1: List[Any] = []
-    lst2: List[Any] = []
-    lists = lst1, lst2
-    # lists = lst1: List[Any], lst2: List[Any] = list(), list()
-    for b, x in list_zip(bs, l):
-        lists[b].append(x)
-    return lst1, lst2
-
-
-def var_str(names: DefaultDict[Var, str], v) -> str:
-    return f"{names[v]}:{v.aval.str_short()}"
-
-
-def pp_eqn(names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
-    rule = eqn.op.pprint
-    # if rule() is not None:
-    #     return rule(names, eqn)
-    # else:
-    lhs = pp(" ".join(var_str(names, v) for v in eqn.out_binders))
-    rhs = (
-        pp(repr(eqn.op.__class__))
-        >> pp_params(eqn.params)
-        >> pp(
-            " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
-        )
-    )
-    return lhs >> pp(" = ") >> rhs
-
-
-def pp_params(params: Dict[str, Any]) -> PPrint:
-    items = sorted(params.items())
-    if items:
-        return pp(" [ ") >> vcat([pp(f"{k}={v}") for k, v in items]) >> pp(" ] ")
-    else:
-        return pp(" ")
 
 
 class JaxprTracer(Tracer):
@@ -743,7 +702,7 @@ class JaxprBuilder:
         return var
 
     def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Jaxpr, List[Any]]:
-        constvars, constvals = unzip2(self.constvals.items())
+        constvars, constvals = utils.unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
@@ -755,13 +714,13 @@ class JaxprBuilder:
     def _inline_literals(
         self, jaxpr: Jaxpr, consts: List[Any]
     ) -> Tuple[Jaxpr, List[Any]]:
-        const_binders, other_binders = split_list(jaxpr.in_binders, len(consts))
+        const_binders, other_binders = utils.split_list(jaxpr.in_binders, len(consts))
         scalars = [
             type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts
         ]
-        new_const_binders, lit_binders = partition_list(scalars, const_binders)
-        new_consts, lit_vals = partition_list(scalars, consts)
-        literals = dict(zip(lit_binders, list_map(Lit, lit_vals)))
+        new_const_binders, lit_binders = utils.partition_list(scalars, const_binders)
+        new_consts, lit_vals = utils.partition_list(scalars, consts)
+        literals = dict(zip(lit_binders, utils.list_map(Lit, lit_vals)))
         new_eqns = [
             JaxprEqn(
                 eqn.op,
@@ -802,11 +761,11 @@ def linearize_flat(f, *primals_in):
     ]
 
     def f_jvp(*primals_tangents_in):
-        primals_out, tangents_out = jvp(f, *split_half(primals_tangents_in))
+        primals_out, tangents_out = jvp(f, *utils.split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
     jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)
-    primal_pvals, _ = split_half(pvals_out)
+    primal_pvals, _ = utils.split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     f_lin = lambda *tangents: eval_jaxpr(jaxpr, [*consts, *tangents])
@@ -944,7 +903,7 @@ def tracers_to_jaxpr(
     eqns: List[JaxprEqn] = []
     for t in toposort(tracers_out, tracer_parents):
         if isinstance(t.recipe, LambdaBindingRecipe):
-            assert id(t) in set(list_map(id, tracers_in))
+            assert id(t) in set(utils.list_map(id, tracers_in))
         elif isinstance(t.recipe, ConstRecipe):
             val = t.recipe.val
             var = constid_to_var.get(id(val))
@@ -960,7 +919,7 @@ def tracers_to_jaxpr(
         else:
             raise TypeError(t.recipe)
 
-    constvars, constvals = unzip2(constvar_to_val.items())
+    constvars, constvals = utils.unzip2(constvar_to_val.items())
     in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
     jaxpr = Jaxpr(in_binders, eqns, out_vars)
@@ -1030,14 +989,14 @@ def vjp_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [
         PartialVal.unknown(ArrayShape.like(Tracer.get_aval(x))) for x in primals_in
     ]
-    primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
+    primal_pvals_in, tangent_pvals_in = utils.split_half(pvals_in)
 
     def f_jvp(*primals_tangents_in):
-        primals_out, tangents_out = jvp(f, *split_half(primals_tangents_in))
+        primals_out, tangents_out = jvp(f, *utils.split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
     jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
-    primal_pvals, _ = split_half(pvals_out)
+    primal_pvals, _ = utils.split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
@@ -1084,15 +1043,15 @@ def eval_jaxpr_transposed(
         if type(x) is Var and val is not None:
             ct_env[x] = ct_env[x] + val if x in ct_env else val
 
-    list_map(write_primal, jaxpr.in_binders, args)
-    list_map(write_cotangent, jaxpr.outs, cotangents)
+    utils.list_map(write_primal, jaxpr.in_binders, args)
+    utils.list_map(write_cotangent, jaxpr.outs, cotangents)
     # for i, eqn in enumerate(jaxpr.eqns[::-1]):
         # print(i, eqn)
     for eqn in jaxpr.eqns[::-1]:
-        primals_in = list_map(read_primal, eqn.inputs)
-        cts_in = list_map(read_cotangent, eqn.out_binders)
+        primals_in = utils.list_map(read_primal, eqn.inputs)
+        cts_in = utils.list_map(read_cotangent, eqn.out_binders)
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
-        list_map(write_cotangent, eqn.inputs, cts_out)
+        utils.list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [
         read_cotangent(v)
         for v, x in zip(jaxpr.in_binders, args)
@@ -1107,6 +1066,7 @@ def grad(f):
         if np.shape(y) != ():
             raise TypeError
         out = f_vjp(np.ones(np.shape(y), np.result_type(y)))
+        # out = f_vjp(np.ones(np.shape(y), dtype=y.dtype))
         return y, out
 
     return gradfun
@@ -1116,25 +1076,18 @@ class Runtime:
     def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
-        self.node_types = dict()
         self.trace_stack += [root_trace]
-
-        self.node_types[tuple] = NodeType(
-            str(tuple), lambda x: (None, x), lambda _, xs: tuple(xs)
-        )
-        self.node_types[list] = NodeType(
-            str(list), lambda x: (None, x), lambda _, xs: list(xs)
-        )
-        self.node_types[dict] = NodeType(
-            str(dict),
-            lambda d: list_map(tuple, unzip2(sorted(d.items()))),
+        self.node_types = dict()        
+        self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
+        self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
+        self.register_pytree_node(
+            dict,
+            lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
-        self.node_types[UndefPrimal] = NodeType(
-            str(UndefPrimal),
-            lambda u: (u.aval, ()),
-            lambda aval, _: UndefPrimal(aval),
-        )
+
+    def register_pytree_node(self, ty: Type, to_iter: Callable, from_iter: Callable) -> None:
+        self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):

@@ -88,8 +88,8 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    return -ops.reduce_sum(preds * targets, axis=(0, 1))
-    # return -ops.reduce_mean(preds * targets, axis=(0, 1))
+    # return -ops.reduce_sum(preds * targets, axis=(0, 1))
+    return -ops.reduce_mean(preds * targets, axis=(0, 1))
 
 def accuracy(params, batch):
     inputs, targets = batch
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         layers.Fn(lambda x: ops.log_softmax(x, axis=(-1,))))
     _, init_params = init_random_params((-1, 28 * 28))
 
-    step_size = 0.001
+    step_size = 0.01
     num_epochs = 30
     batch_size = 64
     momentum_mass = 0.9
@@ -130,13 +130,12 @@ if __name__ == "__main__":
     batches = data_stream()
 
     opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
-    # opt_init, opt_update, get_params = optim.adam(step_size)
-
     opt_state = opt_init(init_params)
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
         loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
+        # breakpoint()
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()

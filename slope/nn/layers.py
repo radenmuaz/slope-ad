@@ -15,26 +15,24 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
     def apply_fun(params, inputs, **kwargs):
         W, b = params
         x = inputs
-        # x = ops.reshape(inputs, [1]+list(inputs.shape))
         out = ops.dot(x, W)
         out = out + ops.broadcast(b, out.shape, (0,))
-        # out = ops.reshape(out, out.shape[1:])
         return out
 
     return init_fun, apply_fun
 
 
-def act_fn(fun, **fun_kwargs):
+def Fn(fun, **fun_kwargs):
     """Layer that applies a scalar function act on its inputs."""
     init_fun = lambda input_shape: (input_shape, ())
     apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
     return init_fun, apply_fun
 
 
-Relu = act_fn(ops.relu)
-Exp = act_fn(ops.exp)
-LogSoftmax = act_fn(ops.log_softmax, axis=(-1,))
-Softmax = act_fn(ops.softmax, axis=(-1,))
+Relu = Fn(ops.relu)
+Exp = Fn(ops.exp)
+LogSoftmax = Fn(ops.log_softmax, axis=(-1,))
+Softmax = Fn(ops.softmax, axis=(-1,))
 
 
 def Identity():

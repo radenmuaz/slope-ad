@@ -1,12 +1,16 @@
-from autodidax import linearize_flat
 import slope
 import numpy as np
 from slope import ops
+from slope.array import Array
 
-# def f(x):
-#     y = x * x
-#     return y
-
+x, x_dot = Array([3.0]), Array([1.0])
+def f(x):
+    y = x * x
+    return y
+out = f(x)
+print(out)
+out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
+print(out_dot)
 # p, t = slope.jvp(f, (np.random.randn(1),), (np.ones(1),))
 # print(p)
 # print(t)
@@ -38,28 +42,28 @@ from slope import ops
 # print(y_dot)
 
 
-def f(x):
-    y = x
-    y = ops.broadcast(y, (3, 3), (0,))
-    y = ops.reduce_sum(y, (0, 1))
-    return y
+# def f(x):
+#     y = x
+#     y = ops.broadcast(y, (3, 3), (0,))
+#     y = ops.reduce_sum(y, (0, 1))
+#     return y
 
 
-x = np.ones([3])
-x_dot = np.ones([3])
-out = f(x)
-# l = slope.jvp(f, (x,), (x_dot))
-print(out)
+# x = np.ones([3])
+# x_dot = np.ones([3])
+# out = f(x)
+# # l = slope.jvp(f, (x,), (x_dot))
+# print(out)
 
 
 # def f(x):
 #     y = ops.Broadcast.do(x, shape=(3,))
 #     # y = ops.ReduceSum.do(y, axis=(0,))
-#     return y
+# #     return y
 
-g = slope.grad(f)
-l = g(np.ones((1)))
-print(l)
+# g = slope.grad(f)
+# l = g(np.ones((1)))
+# print(l)
 # l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))
 # print(l)
 

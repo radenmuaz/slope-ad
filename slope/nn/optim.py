@@ -54,7 +54,9 @@ def optimizer(
         def tree_init(x0_tree):
             x0_flat, tree = ad.tree_flatten(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = utils.unzip2(utils.list_map(ad.tree_flatten, initial_states))
+            states_flat, subtrees = utils.unzip2(
+                utils.list_map(ad.tree_flatten, initial_states)
+            )
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)
@@ -70,7 +72,9 @@ def optimizer(
                 raise TypeError(msg.format(tree, tree2))
             states = utils.list_map(ad.tree_unflatten, subtrees, states_flat)
             new_states = utils.list_map(partial(update, i), grad_flat, states)
-            new_states_flat, subtrees2 = utils.unzip2(utils.list_map(ad.tree_flatten, new_states))
+            new_states_flat, subtrees2 = utils.unzip2(
+                utils.list_map(ad.tree_flatten, new_states)
+            )
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
                     msg = (
@@ -161,6 +165,7 @@ def nesterov(step_size: Schedule, mass: float):
 
     return init, update, get_params
 
+
 @optimizer
 def adam(step_size, b1=0.9, b2=0.999, eps=1e-8):
     """Construct optimizer triple for Adam.
@@ -199,6 +204,7 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-8):
         return x
 
     return init, update, get_params
+
 
 ### learning rate schedules
 

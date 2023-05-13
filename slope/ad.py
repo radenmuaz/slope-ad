@@ -348,6 +348,7 @@ class JVPTrace(Trace):
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
+        
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
             JVPTracer(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)
@@ -415,7 +416,7 @@ class Instruction(NamedTuple):
 
 class Program(NamedTuple):
     in_binders: Any
-    instruction: List[Instruction]
+    instructions: List[Instruction]
     outs: Any
 
     def __hash__(self):
@@ -491,7 +492,7 @@ def typecheck_program(Program: Program) -> ProgramType:
             raise TypeError
         env.add(v)
 
-    for eqn in Program.instruction:
+    for eqn in Program.instructions:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
         for out_binder, out_type in utils.list_zip(eqn.out_binders, out_types):
@@ -839,9 +840,9 @@ def tracers_to_program(
     constvars, constvals = utils.unzip2(constvar_to_val.items())
     in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-    Program = Program(in_binders, instruction, out_vars)
-    typecheck_program(Program)
-    return Program, constvals
+    program = Program(in_binders, instruction, out_vars)
+    typecheck_program(program)
+    return program, constvals
 
 
 def proto_to_eqn(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
@@ -960,9 +961,10 @@ def eval_program_transposed(
 
     utils.list_map(write_primal, Program.in_binders, args)
     utils.list_map(write_cotangent, Program.outs, cotangents)
-    for eqn in Program.instruction[::-1]:
+    for eqn in Program.instructions[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
+        
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [
@@ -978,7 +980,7 @@ def grad(f):
         y, f_vjp = vjp(f, x, *xs)
         if np.shape(y) != ():
             raise TypeError
-        out = f_vjp(np.ones(np.shape(y), np.result_type(y)))
+        out = f_vjp(Array.ones(y.shape, y.dtype))
         return y, out
 
     return gradfun

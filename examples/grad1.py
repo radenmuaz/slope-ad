@@ -3,14 +3,31 @@ import numpy as np
 from slope import ops
 from slope.array import Array
 
-x, x_dot = Array([3.0]), Array([1.0])
+# ## test eval and jvp
+# x, x_dot = Array([3.0]), Array([1.0])
+# def f(x):
+#     y = x * x
+#     return y
+# out = f(x)
+# print(out)
+# out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
+# print(out_dot)
+
+
+
+## test grad
 def f(x):
-    y = x * x
+    y = x
+    y = y.broadcast(shape=(3,))
+    y = y.sum(axes=(0,))
     return y
-out = f(x)
-print(out)
-out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
-print(out_dot)
+
+g = slope.ad.grad(f)
+l = g(Array.ones(shape=()))
+print(l)
+
+
+
 # p, t = slope.jvp(f, (np.random.randn(1),), (np.ones(1),))
 # print(p)
 # print(t)
@@ -54,18 +71,6 @@ print(out_dot)
 # out = f(x)
 # # l = slope.jvp(f, (x,), (x_dot))
 # print(out)
-
-
-# def f(x):
-#     y = ops.Broadcast.do(x, shape=(3,))
-#     # y = ops.ReduceSum.do(y, axis=(0,))
-# #     return y
-
-# g = slope.grad(f)
-# l = g(np.ones((1)))
-# print(l)
-# l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))
-# print(l)
 
 # print('jvp', y, y_dot)
 

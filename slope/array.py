@@ -39,19 +39,19 @@ def binaryop_decor(op_fn):
 
 
 def reduceop_decor(op_fn):
-    def wrapped_fn(x, axis, keepdim):
-        if axis is None:
-            axis = tuple(range(len(x.shape)))
-        elif isinstance(axis, int):
-            axis = (axis,)
-        axis = tuple(a if a >= 0 else a + len(x.shape) for a in axis)
-        ret = op_fn(x, axis)
+    def wrapped_fn(x, axes, keepdim=False):
+        if axes is None:
+            axes = tuple(range(x.ndim))
+        elif isinstance(axes, int):
+            axes = (axes,)
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+        ret = op_fn(x, axes)
 
         if keepdim:
             if len(ret.shape) == 0:
                 shape = (1,)
             else:
-                shape = tuple(1 if i in axis else d for i, d in enumerate(x.shape))
+                shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
             ret = ret.reshape(shape)
         return ret
 
@@ -106,13 +106,18 @@ class Array:
     def __str__(self):
         return str(self.val)
 
+    # TODO: implement subset of numpy
     @classmethod
-    def zeros(cls, *shape, **kwargs):
-        return cls([0], **kwargs).reshape([1] * len(shape)).expand(shape).contiguous()
+    def full(cls, shape, fill_value, dtype=np.float32, **kwargs):
+        return cls(np.full(shape, fill_value=fill_value, dtype=dtype, **kwargs))
 
     @classmethod
-    def ones(cls, *shape, **kwargs):
-        return cls([1], **kwargs).reshape([1] * len(shape)).expand(shape).contiguous()
+    def zeros(cls, shape, dtype=np.float32, **kwargs):
+        return cls.full(shape, 0., dtype, **kwargs)
+
+    @classmethod
+    def ones(cls, shape, dtype=np.float32, **kwargs):
+        return cls.full(shape, 1., dtype, **kwargs)
 
     @classmethod
     def zeros_like(cls, **kwargs):
@@ -317,22 +322,27 @@ class Array:
         return self.equal(x)
 
     @reduceop_decor
-    def sum(self, axis=None, keepdim=False):
-        return slope.RT.bind1(ops.Sum, self, axis=axis)
+    def sum(self, axes=None, keepdim=False):
+        return slope.RT.bind1(ops.Sum, self, axes=axes)
 
     @reduceop_decor
-    def max(self, axis=None, keepdim=False):
-        return slope.RT.bind1(ops.Sum, self, axis=axis)
+    def max(self, axes=None, keepdim=False):
+        return slope.RT.bind1(ops.Sum, self, axes=axes)
     
-    def mean(self, axis=None, keepdim=False):
-        out = self.sum(axis=axis, keepdim=keepdim)
+    def mean(self, axes=None, keepdim=False):
+        out = self.sum(axes=axes, keepdim=keepdim)
         return out * (math.prod(out.shape) / math.prod(self.shape))
 
-    def min(self, axis=None, keepdim=False):
-        return -((-self).max(self, axis, keepdim))
+    def min(self, axes=None, keepdim=False):
+        return -((-self).max(self, axes, keepdim))
 
     # Shape
     def broadcast(self, shape, axes=None):
+        if axes is None:
+            axes = tuple(range(self.ndim))
+        elif isinstance(axes, int):
+            axes = (axes,)
+        axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
         return ops.Broadcast.do(self, shape=shape, axes=axes)
 
     def reshape(self, shape):

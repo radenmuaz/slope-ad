@@ -94,22 +94,16 @@ class BinaryOp(Op):
 class ReduceOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, **params):
-        a = list(params["axis"])
         (x,), (x_bdim,) = vals_in, dims_in
-        axis_ = list(params["axis"])
-        x_bdim_ = int(x_bdim)
-        axis = list(params["axis"])
-        x1s = [d for i, d in enumerate(x.shape) if i != x_bdim]
-        # axis = [a+len(x1s) if a < 0 else a for a in axis]
-        axis = tuple(ax + (x_bdim <= ax) for ax in axis)
-        out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
-        params["axis"] = tuple(axis)
+        axes = list(params["axes"])
+        axes = tuple(a + (x_bdim <= a) for a in axes)
+        out_bdim = x_bdim - sum(ax < x_bdim for a in  axes)
+        params["axes"] = tuple(axes)
         return [cls.do(x, **params)], [out_bdim]
-        # return [cls.do(x, **params)], dims_in
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
-        axis = params["axis"]
+        axis = params["axes"]
         axis = [a + len(x.shape) if a < 0 else a for a in axis]
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
@@ -406,16 +400,16 @@ class Sum(ReduceOp):
         return [np.sum(x, axis)]
 
     @staticmethod
-    def jvp(primals, tangents, *, axis):
+    def jvp(primals, tangents, *, axes):
         (x,), (x_dot,) = primals, tangents
-        ans, ans_jvp = x.sum(axis), x_dot.sum(axis)
+        ans, ans_jvp = x.sum(axes), x_dot.sum(axes)
         return [ans], [ans_jvp]
 
     @staticmethod
-    def T(cts, x, *, axis):
+    def T(cts, x, *, axes):
         (z,) = cts
         out = z
-        out = z.broadcast(x.aval.shape, axis)
+        out = z.broadcast(x.aval.shape, axes)
         return [out]
 
 
@@ -458,15 +452,7 @@ class Broadcast(ShapeOp):
     def T(cts, x, *, shape, axes):
         (z,) = cts
         out = z
-        if axes is not None:
-            out = z.sum(axes)
-        else:
-            eshape = list(shape)
-            for a in axes:
-                if a < 0:
-                    a = len(shape) + (a + 1)
-                eshape.insert(a, 1)
-            breakpoint()
+        out = z.sum(axes)
         return [out]
 
 class Reshape(ShapeOp):

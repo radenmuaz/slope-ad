@@ -57,7 +57,7 @@ print(out)
 #     # y = ops.ReduceSum.do(y, axis=(0,))
 #     return y
 
-g = slope.grad(f)
+g = slope.ad.grad(f)
 l = g(np.ones((1)))
 print(l)
 # l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))

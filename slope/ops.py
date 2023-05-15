@@ -57,17 +57,17 @@ class UnaryOp(Op):
         (x,), (x_dot,) = primals, tangents
         return [cls.do(x, **params)], [cls.do(x_dot, **params)]
 
-    @classmethod
-    def identity_T(cls, t, x):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [cls.do(z)]
-    
-    @classmethod
-    def zero_T(cls, t, x):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [zeros_like(z)]
+    # @classmethod
+    # def identity_T(cls, t, x):
+    #     (z,) = t
+    #     assert type(x) is slope.ad.UndefPrimal
+    #     return [cls.do(z)]
+
+    # @classmethod
+    # def zero_T(cls, t, x):
+    #     (z,) = t
+    #     assert type(x) is slope.ad.UndefPrimal
+    #     return [z.zeros_like()]
 
 
 class BinaryOp(Op):
@@ -94,23 +94,17 @@ class BinaryOp(Op):
 class ReduceOp(Op):
     @classmethod
     def vmap(cls, axis_size, vals_in, dims_in, **params):
-        a = list(params["axis"])
         (x,), (x_bdim,) = vals_in, dims_in
-        axis_ = list(params["axis"])
-        x_bdim_ = int(x_bdim)
-        axis = list(params["axis"])
-        x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
-        # axis = [a+len(x1s) if a < 0 else a for a in axis]
-        axis = tuple(ax + (x_bdim <= ax) for ax in axis)
-        out_bdim = x_bdim - sum(ax < x_bdim for ax in axis)
-        params["axis"] = tuple(axis)
+        axes = list(params["axes"])
+        axes = tuple(a + (x_bdim <= a) for a in axes)
+        out_bdim = x_bdim - sum(ax < x_bdim for a in  axes)
+        params["axes"] = tuple(axes)
         return [cls.do(x, **params)], [out_bdim]
-        # return [cls.do(x, **params)], dims_in
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
-        axis = params["axis"]
-        axis = [a+len(x.shape) if a < 0 else a for a in axis]
+        axis = params["axes"]
+        axis = [a + len(x.shape) if a < 0 else a for a in axis]
         axis_ = set(axis)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axis_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
@@ -129,18 +123,17 @@ class Identity(UnaryOp):
     @staticmethod
     def eval(x):
         return [x]
-    
+
     @staticmethod
     def jvp(cls, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
-        return [identity(x, **params)], [identity(x_dot, **params)]
+        return [x], [x_dot]
 
     @staticmethod
     def T(t, x):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
-        return [identity(z)]
-
+        return [z]
 
 
 class FullLike(UnaryOp):
@@ -151,23 +144,24 @@ class FullLike(UnaryOp):
     @staticmethod
     def jvp(cls, primals, tangents, *, fill_value):
         (x,), (x_dot,) = primals, tangents
-        return [full_like(x, fill_value)], [zeros_like(x_dot)]
+        return [x.full_like(fill_value)], [x_dot.zeros_like()]
 
     @staticmethod
     def T(t, x, *, fill_value):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
-        return [zeros_like(z)]
+        return [z.zeros_like()]
+
 
 class StopGradient(UnaryOp):
     @staticmethod
     def eval(x):
-        return [identity(x)]
+        return [x]
 
     @staticmethod
     def jvp(primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
-        return [identity(x, **params)], [zeros_like(x)]
+        return [x], [x.zeros_like()]
 
     @staticmethod
     def T(t, x):
@@ -176,16 +170,15 @@ class StopGradient(UnaryOp):
         return [zeros_like(z)]
 
 
-
 class Convert(UnaryOp):
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
-    
+
     @staticmethod
     def jvp(primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
-        return [convert(x, dtype)], [convert(x_dot, dtype)]
+        return [x.convert(dtype)], [x_dot.convert(dtype)]
 
     @staticmethod
     def T(t, x):
@@ -203,7 +196,8 @@ class Exp(UnaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [exp(x)], [x_dot * exp(x)]
+        return [x.exp()], [x_dot * x.exp()]
+        
 
 
 class Log(UnaryOp):
@@ -213,8 +207,8 @@ class Log(UnaryOp):
 
     @staticmethod
     def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents        
-        return [log(x)], [x_dot / x]
+        (x,), (x_dot,) = primals, tangents
+        return [x.log()], [x_dot / x]
 
 
 class Neg(UnaryOp):
@@ -233,6 +227,15 @@ class Neg(UnaryOp):
         return [-z]
 
 
+class ReLU(UnaryOp):
+    @staticmethod
+    def eval(x):
+        return [np.max(x, 0)]
+
+    @staticmethod
+    def jvp(primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        return [x.relu()], [(x>0)*g]
 # -----------------------
 # BinaryOps
 # -----------------------
@@ -298,7 +301,9 @@ class Div(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))] # bug: power returns float64
+        return [x / y], [
+            (x_dot / y) + (-y_dot * x * (y**-2))
+        ]  # bug: power returns float64
 
     @staticmethod
     def T(cts, x, y):
@@ -306,16 +311,18 @@ class Div(BinaryOp):
         return [z_bar / y, None]
 
 
-class Max(BinaryOp):
+class Maximum(BinaryOp):
     @staticmethod
     def eval(x, y):
         return [np.maximum(x, y)]
 
     @staticmethod
     def jvp(primals, tangents):
-        (x, y), _ = primals, tangents
-        out_primal = max(x, y)
-        return [out_primal], [zeros_like(out_primal)]
+        (x, y), x_dot, y_dot = primals, tangents
+        ans = x.maximum(y)
+        x_jvp = x_dot * (x == ans) / ((y == ans) + 1)
+        y_jvp = y_dot * (y == ans) / ((x == ans) + 1)
+        return [ans], [x_jvp + y_jvp]
 
     @staticmethod
     def T(cts, x, y):
@@ -331,8 +338,8 @@ class Equal(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), _ = primals, tangents
-        out_primal = equal(x, y)
-        return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
+        ans = x == y
+        return [ans], [ans.zeros_like()]
 
     @staticmethod
     def T(cts, x, y):
@@ -366,7 +373,7 @@ class Equal(BinaryOp):
 # -----------------------
 
 
-class ReduceMax(ReduceOp):
+class Max(ReduceOp):
     @staticmethod
     def eval(x, axis):
         return [x.max(axis)]
@@ -374,39 +381,36 @@ class ReduceMax(ReduceOp):
     @staticmethod
     def jvp(primals, tangents, axis):
         (x,), (x_dot,) = primals, tangents
-        eval_out = reduce_max(x, axis)
-        locs = equal(x, broadcast(eval_out, x.shape, axis))
-        # locs = equal(x, eval_out)
-        locs = convert(locs, x_dot.dtype)
-        counts = reduce_sum(locs, axis)
-        jvp_out = reduce_sum(x_dot * locs, axis)
-        jvp_out = jvp_out / broadcast(counts, jvp_out.shape)
+        ans = x.max(axis)
+        matches = (x == ans).convert(x_dot.dtype)
+        counts = matches.sum(axis)
+        ans_jvp = (x_dot * matches).sum(axis)
+        ans_jvp = ans_jvp / counts
 
-        return [eval_out], [jvp_out]
+        return [ans], [ans_jvp]
 
     @staticmethod
     def T(cts, x, *, axis):
         (z,) = cts
-        return [broadcast(z, x.aval.shape, ())]
+        return [z.broadcast(x.aval.shape, ())]
 
 
-class ReduceSum(ReduceOp):
+class Sum(ReduceOp):
     @staticmethod
     def eval(x, *, axis):
         return [np.sum(x, axis)]
 
     @staticmethod
-    def jvp(primals, tangents, *, axis):
+    def jvp(primals, tangents, *, axes):
         (x,), (x_dot,) = primals, tangents
-        eval_out = reduce_sum(x, axis)
-        jvp_out = reduce_sum(x_dot, axis)        
-        return [eval_out], [jvp_out]
+        ans, ans_jvp = x.sum(axes), x_dot.sum(axes)
+        return [ans], [ans_jvp]
 
     @staticmethod
-    def T(cts, x, *, axis):
+    def T(cts, x, *, axes):
         (z,) = cts
         out = z
-        out = broadcast(z, x.aval.shape, axis)
+        out = z.broadcast(x.aval.shape, axes)
         return [out]
 
 
@@ -422,31 +426,23 @@ class Broadcast(ShapeOp):
             for axis in sorted(axes):
                 x = np.expand_dims(x, axis)
         return [np.broadcast_to(x, shape)]
-    
+
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, shape, axes):
         (x,), (x_bdim,) = vals_in, dims_in
-        # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
-        shape_ = list(shape)
-        axes_ = list(axes)
         shape = list(shape)
-        axes = [a + int(a>=(x_bdim)) for a in axes]
-        if all([a<x_bdim for a in axes]):
+        axes = [a + int(a >= (x_bdim)) for a in axes]
+        if all([a < x_bdim for a in axes]):
             x_bdim += 1
-
-        shape = shape[:x_bdim] + [axis_size]+ shape[x_bdim:]
-        # if sum(int(a<x_bdim) for a in axes) != 0:
-        #     breakpoint()
-        breakpoint()
-    
-        return [broadcast(x, shape, axes)], [x_bdim]
+        shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
+        return [x.broadcast(shape, axes)], [x_bdim]
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
         (x,), (x_dot,) = primals, tangents
         return (
-            [broadcast(x, shape=shape, axes=axes)],
-            [broadcast(x_dot, shape=shape, axes=axes)],
+            [x.broadcast(shape, axes)],
+            [x_dot.broadcast(shape, axes)],
         )
 
     @staticmethod
@@ -457,23 +453,8 @@ class Broadcast(ShapeOp):
     def T(cts, x, *, shape, axes):
         (z,) = cts
         out = z
-        if axes is not None:
-            out = reduce_sum(z, axes)
-        else:
-            eshape = list(shape)
-            for a in axes:
-                if a < 0:
-                    a = len(shape) + (a+1)
-                eshape.insert(a, 1)
-            breakpoint()
+        out = z.sum(axes)
         return [out]
-
-
-# class Crop(ShapeOp):
-#     @staticmethod
-#     def eval(x, slice):
-#         return [x[slice]]
-
 
 class Reshape(ShapeOp):
     @staticmethod
@@ -481,9 +462,16 @@ class Reshape(ShapeOp):
         return [np.reshape(x, shape)]
 
     @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, shape):
+        (x,), (x_bdim,) = vals_in, dims_in
+        shape = list(shape)
+        shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
+        return [x.reshape(shape)], [x_bdim]
+
+    @staticmethod
     def jvp(primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
-        return [reshape(x, shape)], [reshape(x_dot, shape)]
+        return [x.reshape(shape)], [x_dot.reshape(shape)]
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
@@ -492,33 +480,27 @@ class Reshape(ShapeOp):
     @staticmethod
     def T(cts, x, *, shape):
         (z,) = cts
-        return [reshape(z, x.aval.shape)]
+        return [z.reshape(x.aval.shape)]
 
 
 class Transpose(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
         return [x.transpose(perm)]
-    
+
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, perm):
         (x,), (x_bdim,) = vals_in, dims_in
-        perm_ = list(perm)
-        x_bdim_ = int(x_bdim)
         assert x_bdim >= 0
-        # perm = [d - int(i >= x_bdim) for i, d in enumerate(perm)]
         perm = perm[:x_bdim] + [x_bdim] + perm[x_bdim:]
-        perm = [d+int(d>=x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
-        breakpoint()
+        perm = [d + int(d >= x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
         assert len(set(perm)) == len(perm)
-        # perm[:x_bdim] = perm[:x_bdim][::-1]
-        # breakpoint()
-        return [transpose(x, perm)], [x_bdim]
+        return [x.transpose(perm)], [x_bdim]
 
     @staticmethod
     def jvp(primals, tangents, *, perm):
         (x,), (x_dot,) = primals, tangents
-        return [transpose(x, perm)], [transpose(x_dot, perm)]
+        return [x.transpose(perm)], [x_dot.ranspose(perm)]
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, perm: Sequence[int]) -> List[ArrayShape]:

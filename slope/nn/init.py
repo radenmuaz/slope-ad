@@ -7,6 +7,7 @@ from typing import (
 )
 import math
 
+
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
     if isinstance(in_axis, int):
         in_size = shape[in_axis]

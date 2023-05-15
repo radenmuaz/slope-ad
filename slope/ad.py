@@ -209,29 +209,57 @@ class Tracer:
             return ValuedArrayShape(np.asarray(x))
         else:
             raise TypeError(x)
-
+    
+    def full_lower(self):
+        return self  # default implementation
     @property
     def aval(self):
         assert False  # must override
 
-    def full_lower(self):
-        return self  # default implementation
-
     def __neg__(self):
-        return self.aval._neg(self)
+        return slope.RT.bind1(ops.Neg, self)
 
     def __add__(self, other):
-        return slope.RT.bind1(ops.Add, self, other)
+        return ops.add(self, other)
 
     def __radd__(self, other):
-        return slope.RT.bind1(ops.Add, other, self)
+        return ops.add(other, self)
+
+    def __sub__(self, other):
+        return ops.sub(self, other)
+
+    def __rsub__(self, other):
+        return ops.sub(other, self)
 
     def __mul__(self, other):
-        return slope.RT.bind1(ops.Mul, self, other)
+        return ops.mul(self, other)
 
     def __rmul__(self, other):
-        return slope.RT.bind1(ops.Mul, other, self)
+        return ops.mul(other, self)
 
+    def __div__(self, other):
+        return ops.div(self, other)
+
+    def __rdiv__(self, other):
+        return ops.div(other, self)
+
+    def __truediv__(self, other):
+        return ops.div(self, other)
+
+    def __rtruediv__(self, other):
+        return ops.div(other, self)
+
+    def __pow__(self, other):
+        return ops.pow(self, other)
+
+    # def transpose(self, perm):
+    #     return slope.RT.bind1(ops.Transpose, self, perm)
+
+    def __bool__(self):
+        return self.aval._bool(self)
+
+    def __nonzero__(self):
+        return self.aval._nonzero(self)
     def __getattr__(self, name):
         try:
             return getattr(self.aval, name)
@@ -1024,7 +1052,7 @@ def grad(f):
         y, f_vjp = vjp(f, x, *xs)
         if np.shape(y) != ():
             raise TypeError
-        out = f_vjp(Array.ones(y.shape, y.dtype))
+        out = f_vjp(np.ones(y.shape, y.dtype))
         return y, out
 
     return gradfun

@@ -46,7 +46,6 @@ from slope import ad, ops
 # print(grad_out)
 
 
-
 # dot product
 x = np.random.randn(1, 3)
 y = np.random.randn(2, 3)

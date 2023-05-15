@@ -30,9 +30,11 @@ def download(url, filename):
         urllib.request.urlretrieve(url, out_file)
         print(f"downloaded {url} to {_DATA}")
 
+
 def one_hot(x, k, dtype=np.float32):
     """Create a one-hot encoding of x of size k."""
     return np.array(x[:, None] == np.arange(k), dtype)
+
 
 def mnist_raw():
     """Download and parse the raw MNIST dataset."""
@@ -91,6 +93,7 @@ def loss_fn(params, batch):
     # return -ops.reduce_sum(preds * targets, axis=(0, 1))
     return -ops.reduce_mean(preds * targets, axis=(0, 1))
 
+
 def accuracy(params, batch):
     inputs, targets = batch
     target_class = np.argmax(targets, axis=-1)
@@ -104,7 +107,8 @@ if __name__ == "__main__":
         layers.Dense(200),
         layers.Fn(ops.relu),
         layers.Dense(10),
-        layers.Fn(lambda x: ops.log_softmax(x, axis=(-1,))))
+        layers.Fn(lambda x: ops.log_softmax(x, axis=(-1,))),
+    )
     _, init_params = init_random_params((-1, 28 * 28))
 
     step_size = 0.01
@@ -146,7 +150,7 @@ if __name__ == "__main__":
         for i in tqdm(range(num_batches)):
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
-                print(f'loss: {loss:.2f}')
+                print(f"loss: {loss:.2f}")
         epoch_time = time.time() - start_time
 
         params = get_params(opt_state)

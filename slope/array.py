@@ -327,7 +327,7 @@ class Array:
 
     @reduceop_decor
     def max(self, axes=None, keepdim=False):
-        return slope.RT.bind1(ops.Sum, self, axes=axes)
+        return slope.RT.bind1(ops.Max, self, axes=axes)
     
     def mean(self, axes=None, keepdim=False):
         out = self.sum(axes=axes, keepdim=keepdim)

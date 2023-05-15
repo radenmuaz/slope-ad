@@ -675,8 +675,13 @@ def T(x):
 def mm(x, y):
     x1, x2 = x.shape[0], x.shape[1]
     y1, y2 = y.shape[0], y.shape[1]
+<<<<<<< HEAD
     # breakpoint()
     # assert x2 == y1
+=======
+    breakpoint()
+    assert x2 == y1
+>>>>>>> 979a53bd387949700eb6c9db811f789ab17a5ada
     y = T(y)
     # br_shape = (*x.shape[:-3], *(d, a, b))
     br_shape = (y2, x1, x2)

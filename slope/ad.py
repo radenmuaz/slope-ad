@@ -34,9 +34,9 @@ import string
 from functools import lru_cache, reduce
 
 import slope
-from slope.array_shape import ArrayShape
+from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope import ops
-from slope.array import Array
+# from slope.array import Array
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -179,22 +179,66 @@ class Trace:
         raise NotImplementedError
 
 class EvalTrace(Trace):
-    pure = lambda self, x: x.val if isinstance(x, Array) else x
-    lift = lambda self, x: x
+    pure = lift = lambda self, x: x
 
     def run_op(self, op, tracers, params):
         return op.eval(*tracers, **params)
 
 
-class Tracer(Array):
+class Tracer:
+    TYPES = {
+        bool,
+        int,
+        float,
+        np.bool_,
+        np.int32,
+        np.int64,
+        np.float32,
+        np.float64,
+        np.ndarray,
+    }
+    _trace: Trace
+
+    __array_priority__ = 1000
+
+    @staticmethod
+    def get_aval(x):
+        if isinstance(x, Tracer):
+            return x.aval
+        elif type(x) in Tracer.TYPES:
+            return ValuedArrayShape(np.asarray(x))
+        else:
+            raise TypeError(x)
+
     @property
     def aval(self):
-        raise NotImplementedError
+        assert False  # must override
 
-    def __init__(self):
-        raise NotImplementedError
-    # TODO: no numpy, pure python numpy-like class
-    
+    def full_lower(self):
+        return self  # default implementation
+
+    def __neg__(self):
+        return self.aval._neg(self)
+
+    def __add__(self, other):
+        return slope.RT.bind1(ops.Add, self, other)
+
+    def __radd__(self, other):
+        return slope.RT.bind1(ops.Add, other, self)
+
+    def __mul__(self, other):
+        return slope.RT.bind1(ops.Mul, self, other)
+
+    def __rmul__(self, other):
+        return slope.RT.bind1(ops.Mul, other, self)
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.aval, name)
+        except AttributeError:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+
+
 
 # class EvalTracer(Tracer):
 #     def __init__(self, trace, val):
@@ -1062,7 +1106,7 @@ class Runtime:
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
     def full_lower(self, val: Any):
-        if isinstance(val, Tracer) or isinstance(val, Array):
+        if isinstance(val, Tracer):
             return val.full_lower()
         else:
             return val

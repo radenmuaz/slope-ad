@@ -53,7 +53,7 @@ y = np.random.randn(2, 3)
 
 def f(x, y):
     out = x
-    out = ops.dot(out, ops.T(y))
+    out = ops.mm(out, ops.T(y))
     out = ops.log_softmax(out, axis=(1,))
     out = ops.reduce_sum(out, axis=(0, 1))
     return out

@@ -38,3 +38,21 @@ class ArrayShape:
 
     def __repr__(self):
         return f"ArrayShape(shape={self.shape}, dtype={self.dtype})"
+
+
+class ValuedArrayShape(ArrayShape):
+    array_abstraction_level = 2
+    val: np.ndarray
+
+    def __init__(self, val):
+        self.val = val
+        self.shape = val.shape
+        self.dtype = val.dtype
+
+    @staticmethod
+    def _bool(tracer):
+        return bool(tracer.aval.val)
+
+    @staticmethod
+    def _nonzero(tracer):
+        return bool(tracer.aval.val)

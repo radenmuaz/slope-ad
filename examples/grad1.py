@@ -28,7 +28,7 @@ from slope.array import Array
 
 ## test grad
 def f(x):
-    y = x
+    y = x*x
     y = y.broadcast(shape=(3,))
     y = y.sum(axes=(0,))
     return y

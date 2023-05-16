@@ -29,19 +29,7 @@ from slope.array_shape import ValuedArrayShape
 
 
 class Array:
-    TYPES = {
-        bool,
-        int,
-        float,
-        np.bool_,
-        np.int32,
-        np.int64,
-        np.float32,
-        np.float64,
-        # np.ndarray,
-    }
     __array_priority__ = 1000
-
     default_dtype = np.float32
 
     def __init__(
@@ -104,7 +92,7 @@ class Array:
         return cls(
             np.array(
                 cls._rng.random(
-                    size=shape, dtype=kwargs.get("dtype", cls.default_type)
+                    size=shape, dtype=kwargs.get("dtype", cls.default_dtype)
                 ),
             ),
             **kwargs,
@@ -115,7 +103,7 @@ class Array:
         return cls(
             np.array(
                 cls._rng.standard_normal(
-                    size=shape, dtype=kwargs.get("dtype", cls.default_type)
+                    size=shape, dtype=kwargs.get("dtype", cls.default_dtype)
                 ),
             ),
             **kwargs,
@@ -140,7 +128,7 @@ class Array:
 
     def __array__(self, dtype=None):
         return self.val
-        
+
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
         assert method == "__call__"
         assert ufunc in [
@@ -160,6 +148,7 @@ class Array:
         return self.__class__(ret)
 
     convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
+    astype = convert
     neg = lambda self: np.negative(self)
     exp = lambda self: np.exp(self)
     log = lambda self: np.log(self)
@@ -214,7 +203,7 @@ class Array:
         if axes is not None:
             for a in sorted(axes):
                 self = self.expand_dims(self, a)
-        return self.broadcast_to(self, shape)
+        return self.broadcast_to(shape)
 
     # TODO:
 

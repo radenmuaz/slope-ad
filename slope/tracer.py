@@ -74,7 +74,6 @@ class Tracer:
         np.int64,
         np.float32,
         np.float64,
-        np.ndarray,
         Array
     }
     __array_priority__ = 1000
@@ -110,15 +109,6 @@ class Tracer:
 
     def identity(x):
         return ops.Identity.do(x)
-
-    # def full_like(x, fill_value):
-    #     return ops.FullLike.do(x, fill_value=fill_value)
-
-    # def zeros_like(self):
-    #     return self.full_like(0.0)
-
-    # def ones_like(self):
-    #     return self.full_like(1)
 
     def stop_gradient(x):
         return ops.StopGradient.do(x)

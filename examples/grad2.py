@@ -1,7 +1,7 @@
 import slope
 import numpy as np
 from slope import ad, ops
-
+from slope.array import Array
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
 
@@ -47,15 +47,15 @@ from slope import ad, ops
 
 
 # dot product
-x = np.random.randn(1, 3)
-y = np.random.randn(2, 3)
+x = Array.randn(1, 3)
+y = Array.randn(2, 3)
 
 
 def f(x, y):
     out = x
     out = ops.mm(out, ops.T(y))
     out = ops.log_softmax(out, axes=(1,))
-    out = ops.reduce_sum(out, axes=(0, 1))
+    out = ops.sum(out, axes=(0, 1))
     return out
 
 

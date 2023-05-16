@@ -607,7 +607,7 @@ class ProgramBuilder:
             for eqn in program.instruction
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = program(
+        new_program = Program(
             new_const_binders + other_binders, new_instruction, new_outs
         )
         typecheck_program(new_program)
@@ -693,9 +693,9 @@ def partial_eval_flat(
         pvals_out = [t.pval for t in tracers_out]
         unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
         unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
-        Program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
+        program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
 
-    return Program, pvals_out, consts
+    return program, pvals_out, consts
 
 
 class LambdaBindingProto(NamedTuple):
@@ -901,7 +901,7 @@ class UndefPrimal(NamedTuple):
 
 
 def eval_program_transposed(
-    Program: Program, args: List[Any], cotangents: List[Any]
+    program: Program, args: List[Any], cotangents: List[Any]
 ) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
@@ -920,9 +920,9 @@ def eval_program_transposed(
         if type(x) is Var and val is not None:
             ct_env[x] = ct_env[x] + val if x in ct_env else val
 
-    utils.list_map(write_primal, Program.in_binders, args)
-    utils.list_map(write_cotangent, Program.outs, cotangents)
-    for eqn in Program.instructions[::-1]:
+    utils.list_map(write_primal, program.in_binders, args)
+    utils.list_map(write_cotangent, program.outs, cotangents)
+    for eqn in program.instructions[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
 
@@ -930,7 +930,7 @@ def eval_program_transposed(
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [
         read_cotangent(v)
-        for v, x in zip(Program.in_binders, args)
+        for v, x in zip(program.in_binders, args)
         if type(x) is UndefPrimal
     ]
 

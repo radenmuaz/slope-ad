@@ -275,7 +275,7 @@ class Mul(BinaryOp):
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
-        # breakpoint()
+        assert (type(x) is slope.ad.UndefPrimal) ^ (type(y) is slope.ad.UndefPrimal)
         if type(x) is slope.ad.UndefPrimal:
             return [z_bar * y, None]
         elif type(y) is slope.ad.UndefPrimal:
@@ -363,7 +363,7 @@ class Equal(BinaryOp):
 class Max(ReduceOp):
     @staticmethod
     def eval(x, axes):
-        return [np.max(x, axes)]
+        return [x.max(axes)]
 
     @staticmethod
     def jvp(primals, tangents, axes):
@@ -387,7 +387,6 @@ class Max(ReduceOp):
 class Sum(ReduceOp):
     @staticmethod
     def eval(x, *, axes):
-        breakpoint()
         return [x.sum(axes)]
 
     @staticmethod

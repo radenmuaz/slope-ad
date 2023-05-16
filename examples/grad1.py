@@ -1,4 +1,3 @@
-from autodidax import linearize_flat
 import slope
 import numpy as np
 from slope import ops
@@ -39,7 +38,7 @@ from slope import ops
 
 
 def f(x):
-    y = x
+    y = x*x
     y = ops.broadcast(y, (3, 3), (0,))
     y = ops.reduce_sum(y, (0, 1))
     return y
@@ -57,7 +56,7 @@ print(out)
 #     # y = ops.ReduceSum.do(y, axis=(0,))
 #     return y
 
-g = slope.grad(f)
+g = slope.ad.grad(f)
 l = g(np.ones((1)))
 print(l)
 # l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))

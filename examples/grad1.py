@@ -3,14 +3,13 @@ import numpy as np
 from slope import ops
 from slope.array import Array
 
-a = Array([1])
-b = Array([2])
-c = np.add(a, b)
-breakpoint()
+# a = Array([1])
+# b = Array([2])
+# c = np.add(a, b)
 # print(a+b)
 
-# ## test eval and jvp
-# x, x_dot = np.array(3.0), np.array(1.0)
+## test eval and jvp
+# x, x_dot = Array(3.0), Array(1.0)
 # def f(x):
 #     y = x
 #     y = y * y
@@ -18,8 +17,8 @@ breakpoint()
 #     return y
 # # out = f(x)
 # # print(out)
-# # out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
-# # print(out_dot)
+# out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
+# print(out_dot)
 
 # g = slope.ad.grad(f)
 # l = g(x)
@@ -27,16 +26,17 @@ breakpoint()
 
 
 
-# ## test grad
-# def f(x):
-#     y = x
-#     y = y.broadcast(shape=(3,))
-#     y = y.sum(axes=(0,))
-#     return y
+## test grad
+def f(x):
+    y = x
+    y = y.broadcast(shape=(3,))
+    y = y.sum(axes=(0,))
+    return y
 
-# g = slope.ad.grad(f)
-# l = g(np.ones(shape=()))
-# print(l)
+g = slope.ad.grad(f)
+l = g(Array.ones(shape=None))
+print(l)
+breakpoint()
 
 
 

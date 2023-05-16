@@ -25,12 +25,15 @@ from functools import lru_cache, reduce
 import slope
 from slope import ops
 from slope.array_shape import ValuedArrayShape
+from slope.array import Array
 
 # patch numpy
 
 
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
+        x = Array(x) if type(x) in (int, float, bool) else x
+        y = Array(y) if type(y) in (int, float, bool) else x
         bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
         by = list(range((max(x.ndim, y.ndim) - y.ndim)))
         shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
@@ -72,6 +75,7 @@ class Tracer:
         np.float32,
         np.float64,
         np.ndarray,
+        Array
     }
     __array_priority__ = 1000
 
@@ -107,14 +111,14 @@ class Tracer:
     def identity(x):
         return ops.Identity.do(x)
 
-    def full_like(x, fill_value):
-        return ops.FullLike.do(x, fill_value=fill_value)
+    # def full_like(x, fill_value):
+    #     return ops.FullLike.do(x, fill_value=fill_value)
 
-    def zeros_like(self):
-        return self.full_like(0.0)
+    # def zeros_like(self):
+    #     return self.full_like(0.0)
 
-    def ones_like(self):
-        return self.full_like(1)
+    # def ones_like(self):
+    #     return self.full_like(1)
 
     def stop_gradient(x):
         return ops.StopGradient.do(x)
@@ -282,7 +286,7 @@ class Tracer:
         return self.reshape(shape)
 
     # TODO:
-    
+
     def flip(self, axis, *args):
         return ops.Flip.do(
             self,

@@ -32,7 +32,7 @@ import numpy as np
 import operator as op
 import string
 from functools import lru_cache, reduce
-
+import math
 import slope
 from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope.array import Array
@@ -298,7 +298,7 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     def pure(self, val):
         aval = Tracer.get_aval(val)
-        return JVPTracer(self, val, np.zeros(aval.shape, aval.dtype))
+        return JVPTracer(self, val, Array.zeros(aval.shape, aval.dtype))
 
     lift = pure
 
@@ -339,7 +339,7 @@ def jvp(f, primals, tangents):
 
 def jacfwd(f, x):
     pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-    vecs_in = np.eye(np.size(x)).reshape(np.shape(x) * 2)
+    vecs_in = Array.eye(math.prod(x.shape)).reshape(x.shape * 2)
     return vmap(pushfwd, (0,))(vecs_in)
 
 
@@ -357,7 +357,7 @@ class Lit:
 
     def __init__(self, val):
         self.aval = aval = ArrayShape.like(Tracer.get_aval(val))
-        self.val = np.array(val, aval.dtype)
+        self.val = Array(val, aval.dtype)
 
 
 Atom = Union[Var, Lit]
@@ -914,7 +914,7 @@ def eval_program_transposed(
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, np.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, Array.zeros(v.aval.shape, v.aval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -933,15 +933,16 @@ def eval_program_transposed(
         for v, x in zip(Program.in_binders, args)
         if type(x) is UndefPrimal
     ]
+
     return ret
 
 
 def grad(f):
     def gradfun(x, *xs):
         y, f_vjp = vjp(f, x, *xs)
-        if np.shape(y) != ():
+        if y.shape != ():
             raise TypeError
-        out = f_vjp(np.ones(y.shape, y.dtype))
+        out = f_vjp(Array.ones(y.shape, y.dtype))
         return y, out
 
     return gradfun

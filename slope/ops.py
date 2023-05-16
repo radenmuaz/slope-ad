@@ -136,21 +136,21 @@ class Identity(UnaryOp):
         return [identity(z)]
 
 
-class FullLike(UnaryOp):
-    @staticmethod
-    def eval(x, *, fill_value):
-        return [np.full(x.shape, fill_value=fill_value, dtype=x.dtype)]
+# class FullLike(UnaryOp):
+#     @staticmethod
+#     def eval(x, *, fill_value):
+#         return [np.full(x.shape, fill_value=fill_value, dtype=x.dtype)]
 
-    @staticmethod
-    def jvp(cls, primals, tangents, *, fill_value):
-        (x,), (x_dot,) = primals, tangents
-        return [full_like(x, fill_value)], [zeros_like(x_dot)]
+#     @staticmethod
+#     def jvp(cls, primals, tangents, *, fill_value):
+#         (x,), (x_dot,) = primals, tangents
+#         return [full_like(x, fill_value)], [zeros_like(x_dot)]
 
-    @staticmethod
-    def T(t, x, *, fill_value):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [zeros_like(z)]
+#     @staticmethod
+#     def T(t, x, *, fill_value):
+#         (z,) = t
+#         assert type(x) is slope.ad.UndefPrimal
+        # return [zeros_like(z)]
 
 
 class StopGradient(UnaryOp):
@@ -387,7 +387,8 @@ class Max(ReduceOp):
 class Sum(ReduceOp):
     @staticmethod
     def eval(x, *, axes):
-        return [np.sum(x, axes)]
+        breakpoint()
+        return [x.sum(axes)]
 
     @staticmethod
     def jvp(primals, tangents, *, axes):
@@ -414,8 +415,9 @@ class Broadcast(ShapeOp):
     def eval(x, *, shape, axes):
         if axes is not None:
             for a in sorted(axes):
-                x = np.expand_dims(x, a)
-        return [np.broadcast_to(x, shape)]
+                x = x.expand_dims(a)
+        out = x.broadcast_to(shape)
+        return [out]
 
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, shape, axes):
@@ -471,7 +473,7 @@ class Broadcast(ShapeOp):
 class Reshape(ShapeOp):
     @staticmethod
     def eval(x, *, shape):
-        return [np.reshape(x, shape)]
+        return [x.reshape(shape)]
 
     @staticmethod
     def jvp(primals, tangents, *, shape):
@@ -607,7 +609,7 @@ def mean(x, axes=None):
 
 
 def max(x, axes=None):
-    return slope.RT.bind1(ReduceMax, x, axes=axes)
+    return slope.RT.bind1(Max, x, axes=axes)
 
 
 # ShapeOps

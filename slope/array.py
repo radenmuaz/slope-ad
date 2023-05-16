@@ -23,7 +23,6 @@ import numpy as np
 from functools import lru_cache, reduce
 
 import slope
-from slope import ops
 from slope.array_shape import ValuedArrayShape
 
 # patch numpy
@@ -48,29 +47,102 @@ class Array:
     def __init__(
         self, val: Union[list, tuple, np.ndarray], dtype: Optional[Any] = None
     ):
-        self.val = np.asarray(val)
-        # if type(val) in (*(tuple, list), *self.TYPES):
-        #     dtype = dtype or self.default_dtype
-        #     self.val = np.array(val, dtype)
-        # elif type(val) is np.ndarray:
-        #     self.val = val.astype(dtype) if dtype else val
-        # else:
-        #     raise NotImplementedError
+        self.val = np.asarray(val, dtype)
 
-    # dtype = property(lambda self: self.val.dtype)
-    # shape = property(lambda self: self.val.shape)
-    # ndim = property(lambda self: self.val.ndim)
+    dtype = property(lambda self: self.val.dtype)
+    shape = property(lambda self: self.val.shape)
+    ndim = property(lambda self: self.val.ndim)
 
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)}"
 
     def __str__(self):
         return repr(self)
+    
+    @classmethod
+    def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
+        return cls(np.full(shape, fill_value=fill_value, dtype=dtype, **kwargs))
+
+    @classmethod
+    def zeros(cls, shape, dtype=default_dtype, **kwargs):
+        return cls.full(shape, 0., dtype, **kwargs)
+
+    @classmethod
+    def ones(cls, shape, dtype=default_dtype, **kwargs):
+        return cls.full(shape, 1., dtype, **kwargs)
+
+    @classmethod
+    def zeros_like(cls, **kwargs):
+        return cls.zeros(*cls.shape, **kwargs)
+
+    @classmethod
+    def empty(cls, *shape, **kwargs):
+        return cls.zeros(*shape, **kwargs)
+
+    @classmethod
+    def eye(cls, dim, **kwargs):
+        return (
+            cls(np.eye(dim), **kwargs)
+        )
+
+    @classmethod
+    def arange(cls, stop, start=0, step=1, **kwargs):
+        return cls(
+            np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs
+        )
+
+    # TODO: distill RNG code from jax
+
+    _rng: np.random.Generator = np.random.default_rng()
+
+    @classmethod
+    def manual_seed(cls, seed=None):
+        cls._rng = np.random.default_rng(seed=seed)
+
+    @classmethod
+    def rand(cls, *shape, **kwargs):
+        return cls(
+            np.array(
+                cls._rng.random(
+                    size=shape, dtype=kwargs.get("dtype", cls.default_type)
+                ),
+            ),
+            **kwargs,
+        )
+
+    @classmethod
+    def randn(cls, *shape, **kwargs):
+        return cls(
+            np.array(
+                cls._rng.standard_normal(
+                    size=shape, dtype=kwargs.get("dtype", cls.default_type)
+                ),
+            ),
+            **kwargs,
+        )
+
+    @classmethod
+    def uniform(cls, *shape, **kwargs):
+        return cls.rand(*shape, **kwargs) * 2 - 1
+
+    @classmethod
+    def scaled_uniform(cls, *shape, **kwargs):
+        return cls.uniform(*shape, **kwargs).mul(math.prod(shape) ** -0.5)
+
+    @classmethod
+    def glorot_uniform(cls, *shape, **kwargs):
+        return cls.uniform(*shape, **kwargs).mul(
+            (6 / (shape[0] + math.prod(shape[1:]))) ** 0.5
+        )
+
+    def stop_gradient(self):
+        return self.zeros_like(self)
 
     def __array__(self, dtype=None):
-        return self.val  # .astype(dtype) if dtype else self.val
-
+        return self.val
+        
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
+        assert method == "__call__"
         assert ufunc in [
             np.negative,
             np.add,
@@ -79,30 +151,13 @@ class Array:
             np.divide,
             np.exp,
             np.log,
-            np.reshape,
-            np.broadcast_to,
-            np.swapaxes,
-            np.expand_dims,
             np.equal,
             np.maximum,
             np.minimum,
         ]
-        assert method == "__call__"
         inputs = [i.val if type(i) is self.__class__ else i for i in inputs]
         ret = ufunc(*inputs, **kwargs)
         return self.__class__(ret)
-
-    def full_like(self, fill_value, dtype=default_dtype):
-        return self.__class__(val=np.full(fill_value=fill_value, dtype=dtype))
-
-    def zeros_like(self):
-        return self.full_like(0.0)
-
-    def ones_like(self):
-        return self.full_like(1)
-
-    def stop_gradient(self):
-        return self.zeros_like(self)
 
     convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
     neg = lambda self: np.negative(self)
@@ -132,33 +187,34 @@ class Array:
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
 
-    def max(self, axes=None, keepdim=False):
-        return np.max(self, axis=axes, keepdim=keepdim)
+    def max(self, axes=None, keepdims=False):
+        return self.__class__(np.max(self.val, axis=axes, keepdims=keepdims))
 
-    def sum(self, axes=None, keepdim=False):
-        return np.sum(self, axis=axes, keepdim=keepdim)
+    def sum(self, axes=None, keepdims=False):
+        return self.__class__(np.sum(self.val, axis=axes, keepdims=keepdims))
 
-    def mean(self, axes=None, keepdim=False):
-        out = self.sum(axes=axes, keepdim=keepdim)
+    def mean(self, axes=None, keepdims=False):
+        out = self.sum(axes=axes, keepdim=keepdims)
         return out * (math.prod(out.shape) / math.prod(self.shape))
 
-    def min(self, axes=None, keepdim=False):
-        return -((-self).max(self, axes, keepdim))
+    def min(self, axes=None, keepdims=False):
+        return -((-self).max(self, axes, keepdims))
 
     # Shape
-    reshape = lambda self, shape: np.reshape(self, shape)
-    transpose = lambda self, perm: np.transpose(self, perm)
-    expand_dims = lambda self, axes: np.expand_dims(self, axes)
-    swapaxes = lambda self, a1, a2: np.swapaxes(self, a1, a2)
-    
+    reshape = lambda self, shape: self.__class__(np.reshape(self.val, shape))
+    transpose = lambda self, perm: self.__class__(np.transpose(self.val, perm))
+    expand_dims = lambda self, axes: self.__class__(np.expand_dims(self.val, axes))
+    swapaxes = lambda self, a1, a2: self.__class__(np.swapaxes(self.val, a1, a2))
+    broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
+
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
     def broadcast(self, shape, axes=None):
         if axes is not None:
             for a in sorted(axes):
-                self = np.expand_dims(self, a)
-        return np.broadcast_to(self, shape)
+                self = self.expand_dims(self, a)
+        return self.broadcast_to(self, shape)
 
     # TODO:
 
@@ -309,8 +365,8 @@ class Array:
 
     # # ***** activation functions (unary) *****
 
-    def relu(self):
-        return ops.ReLU.do(self)
+    # def relu(self):
+    #     return ops.ReLU.do(self)
 
     def sigmoid(self):
         return (1.0 + (-self).exp()).reciprocal()

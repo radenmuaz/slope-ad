@@ -133,7 +133,7 @@ class Tracer:
     def sub(self, other):
         return slope.RT.bind1(ops.Sub, self, other)
 
-    @binaryop_decor
+    # @binaryop_decor
     def mul(self, other):
         return slope.RT.bind1(ops.Mul, self, other)
 

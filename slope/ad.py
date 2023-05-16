@@ -182,127 +182,13 @@ class Trace:
 
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
-
     def run_op(self, op, tracers, params):
         return op.eval(*tracers, **params)
 
-
-# class Tracer:
-#     TYPES = {
-#         bool,
-#         int,
-#         float,
-#         np.bool_,
-#         np.int32,
-#         np.int64,
-#         np.float32,
-#         np.float64,
-#         np.ndarray,
-#     }
-#     _trace: Trace
-
-#     __array_priority__ = 1000
-
-#     @staticmethod
-#     def get_aval(x):
-#         if isinstance(x, Tracer):
-#             return x.aval
-#         elif type(x) in Tracer.TYPES:
-#             return ValuedArrayShape(np.asarray(x))
-#         else:
-#             raise TypeError(x)
-
-#     def full_lower(self):
-#         return self  # default implementation
-
-#     @property
-#     def aval(self):
-#         assert False  # must override
-
-#     def __neg__(self):
-#         return slope.RT.bind1(ops.Neg, self)
-
-#     def __add__(self, other):
-#         return ops.add(self, other)
-
-#     def __radd__(self, other):
-#         return ops.add(other, self)
-
-#     def __sub__(self, other):
-#         return ops.sub(self, other)
-
-#     def __rsub__(self, other):
-#         return ops.sub(other, self)
-
-#     def __mul__(self, other):
-#         return ops.mul(self, other)
-
-#     def __rmul__(self, other):
-#         return ops.mul(other, self)
-
-#     def __div__(self, other):
-#         return ops.div(self, other)
-
-#     def __rdiv__(self, other):
-#         return ops.div(other, self)
-
-#     def __truediv__(self, other):
-#         return ops.div(self, other)
-
-#     def __rtruediv__(self, other):
-#         return ops.div(other, self)
-
-#     def __pow__(self, other):
-#         return ops.pow(self, other)
-
-#     # def transpose(self, perm):
-#     #     return slope.RT.bind1(ops.Transpose, self, perm)
-
-#     def __bool__(self):
-#         return self.aval._bool(self)
-
-#     def __nonzero__(self):
-#         return self.aval._nonzero(self)
-
-#     def __getattr__(self, name):
-#         try:
-#             return getattr(self.aval, name)
-#         except AttributeError:
-#             raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
-
-
-# class EvalTracer(Tracer):
-#     def __init__(self, trace, val):
-#         self._trace = trace
-#         self.val = val
-
-#     def full_lower(self):
-#         return self.val
-
-
-# class EvalTrace(Trace):
-#     def pure(self, val):
-#         return EvalTracer(self, val)
-
-#     lift = pure
-
-#     def run_op(self, op, tracers, params):
-#         val_ins = [t.val for t in tracers]
-#         eval_outs = op.eval(*val_ins, **params)
-#         return [
-#             EvalTracer(
-#                 self,
-#                 x,
-#             )
-#             for x in eval_outs
-#         ]
-
-
-def mapped_aval(batch_dim, aval):
-    shape = list(aval.shape)
-    del shape[batch_dim]
-    return ArrayShape(tuple(shape), aval.dtype)
-
+# def mapped_aval(batch_dim, aval):
+#     shape = list(aval.shape)
+#     del shape[batch_dim]
+#     return ArrayShape(tuple(shape), aval.dtype)
 
 BatchAxis = Union[None, int]
 
@@ -315,10 +201,13 @@ class BatchTracer(Tracer):
 
     @property
     def aval(self):
+        aval = self.get_aval(self.val)
         if self.batch_dim is None:
-            return self.get_aval(self.val)
+            return aval
         else:
-            return mapped_aval(self.batch_dim, self.get_aval(self.val))
+            shape = list(aval.shape)
+            del shape[self.batch_dim]
+            return ArrayShape(tuple(shape), aval.dtype)
 
     def full_lower(self):
         if self.batch_dim is None:
@@ -394,14 +283,6 @@ def vmap(f, in_axes):
         return tree_unflatten(out_tree(), outs_flat)
 
     return batched_f
-
-
-# class EvalTrace(Trace):
-#     pure = lift = lambda self, x: x
-
-#     def run_op(self, op, tracers, params):
-#         return op.eval(*tracers, **params)
-
 
 class JVPTracer(Tracer):
     def __init__(self, trace, primal, tangent):
@@ -561,15 +442,15 @@ class ProgramType(NamedTuple):
         return f"({in_types}) -> ({out_types})"
 
 
-def typecheck_program(Program: Program) -> ProgramType:
+def typecheck_program(program: Program) -> ProgramType:
     env: Set[Var] = set()
 
-    for v in Program.in_binders:
+    for v in program.in_binders:
         if v in env:
             raise TypeError
         env.add(v)
 
-    for eqn in Program.instructions:
+    for eqn in program.instructions:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
         for out_binder, out_type in utils.list_zip(eqn.out_binders, out_types):
@@ -580,8 +461,8 @@ def typecheck_program(Program: Program) -> ProgramType:
                 raise TypeError
             env.add(out_binder)
 
-    in_types = [v.aval for v in Program.in_binders]
-    out_types = [typecheck_atom(env, x) for x in Program.outs]
+    in_types = [v.aval for v in program.in_binders]
+    out_types = [typecheck_atom(env, x) for x in program.outs]
     return ProgramType(in_types, out_types)
 
 
@@ -596,7 +477,7 @@ def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
         assert False
 
 
-def eval_program(Program: Program, args: List[Any]) -> List[Any]:
+def eval_program(program: Program, args: List[Any]) -> List[Any]:
     env: Dict[Var, Any] = {}
 
     def read(x: Atom) -> Any:
@@ -607,14 +488,14 @@ def eval_program(Program: Program, args: List[Any]) -> List[Any]:
         env[v] = val
 
     utils.list_map(write, Program.in_binders, args)
-    for eqn in Program.instruction:
+    for eqn in program.instructions:
         in_vals = utils.list_map(read, eqn.inputs)
         outs = slope.RT.bind(eqn.op, *in_vals, **eqn.params)
         utils.list_map(write, eqn.out_binders, outs)
     return utils.list_map(read, Program.outs)
 
 
-def Program_as_fun(Program: Program):
+def program_as_fun(Program: Program):
     return lambda *args: eval_program(Program, args)
 
 
@@ -701,10 +582,10 @@ class ProgramBuilder:
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
-        Program = Program(in_binders, self.instruction, out_vars)
+        program = Program(in_binders, self.instruction, out_vars)
         typecheck_program(Program)
-        Program, constvals = self._inline_literals(Program, constvals)
-        return Program, constvals
+        program, constvals = self._inline_literals(program, constvals)
+        return program, constvals
 
     def _inline_literals(
         self, program: Program, consts: List[Any]

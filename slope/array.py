@@ -81,6 +81,8 @@ class Array:
             np.log,
             np.reshape,
             np.broadcast_to,
+            np.swapaxes,
+            np.expand_dims,
             np.equal,
             np.maximum,
             np.minimum,
@@ -146,28 +148,17 @@ class Array:
     # Shape
     reshape = lambda self, shape: np.reshape(self, shape)
     transpose = lambda self, perm: np.transpose(self, perm)
-
-    def swapaxes(self, ax1=1, ax2=0):
-        order = list(range(self.ndim))
-        order[ax1], order[ax2] = order[ax2], order[ax1]
-        return self.transpose(order)
-
+    expand_dims = lambda self, axes: np.expand_dims(self, axes)
+    swapaxes = lambda self, a1, a2: np.swapaxes(self, a1, a2)
+    
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
-
-    def expand_dims(self, axis):
-        shape = list(self.shape)
-        for a in axis:
-            if a < 0:
-                a = len(shape) + (a + 1)
-            shape.insert(a, 1)
-        return self.reshape(shape)
 
     def broadcast(self, shape, axes=None):
         if axes is not None:
             for a in sorted(axes):
                 self = np.expand_dims(self, a)
-        return [np.broadcast_to(self, shape)]
+        return np.broadcast_to(self, shape)
 
     # TODO:
 

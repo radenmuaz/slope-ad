@@ -29,7 +29,7 @@ from slope.array_shape import ValuedArrayShape
 
 
 class Array:
-    __array_priority__ = 1000
+    __array_priority__ = 2000
     default_dtype = np.float32
 
     def __init__(
@@ -141,7 +141,6 @@ class Array:
             np.log,
             np.equal,
             np.maximum,
-            np.minimum,
         ]
         inputs = [i.val if type(i) is self.__class__ else i for i in inputs]
         ret = ufunc(*inputs, **kwargs)
@@ -161,7 +160,8 @@ class Array:
     maximum = lambda self, other: np.maximum(self, other)
     minimum = lambda self, other: -self.maximum(-self, -other)
     __neg__ = neg
-    __add__ = __radd__ = add
+    __add__ = add
+    __radd__ = lambda self, other: self.__class__.add(other, self)
     __sub__ = sub
     __rsub__ = lambda self, other: self.__class__.sub(other, self)
     __mul__ = __rmul__ = mul

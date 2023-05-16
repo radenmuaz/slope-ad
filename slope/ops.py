@@ -1,6 +1,7 @@
 import slope
 import numpy as np
 from slope.array_shape import ArrayShape
+from slope.array import Array
 from typing import List, Tuple, Sequence, Any, Callable, NamedTuple
 from abc import ABC, abstractmethod
 import math
@@ -270,8 +271,11 @@ class Mul(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x * y], [x_dot * y + x * y_dot]
-
+        eval_out = x * y
+        jvp_out = (x_dot * y) + (y_dot * x)
+        # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
+        # check about __array_priority
+        return [eval_out], [jvp_out]
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
@@ -459,7 +463,6 @@ class Broadcast(ShapeOp):
                 if a < 0:
                     a = len(shape) + (a + 1)
                 eshape.insert(a, 1)
-            breakpoint()
         return [out]
 
 

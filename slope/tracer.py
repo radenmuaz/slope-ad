@@ -32,8 +32,8 @@ from slope.array import Array
 
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
-        x = Array(x) if type(x) in (int, float, bool) else x
-        y = Array(y) if type(y) in (int, float, bool) else x
+        # x = Array(x) if type(x) in (int, float, bool) else x
+        # y = Array(y) if type(y) in (int, float, bool) else x
         bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
         by = list(range((max(x.ndim, y.ndim) - y.ndim)))
         shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
@@ -133,9 +133,9 @@ class Tracer:
     def sub(self, other):
         return slope.RT.bind1(ops.Sub, self, other)
 
-    # @binaryop_decor
+    @binaryop_decor
     def mul(self, other):
-        return slope.RT.bind1(ops.Mul, self, other)
+        return ops.Mul.do(self, other)
 
     @binaryop_decor
     def div(self, other):

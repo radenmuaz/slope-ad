@@ -749,7 +749,6 @@ class PartialEvalTrace(Trace):
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
             return slope.RT.bind(op, *map(slope.RT.full_lower, tracers), **params)
-        print(op, tracers)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = op.shape_eval(*avals_in, **params)

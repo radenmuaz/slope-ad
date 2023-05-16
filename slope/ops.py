@@ -97,14 +97,14 @@ class ReduceOp(Op):
         (x,), (x_bdim,) = vals_in, dims_in
         axes = list(params["axes"])
         axes = tuple(a + (x_bdim <= a) for a in axes)
-        out_bdim = x_bdim - sum(a < x_bdim for a in  axes)
+        out_bdim = x_bdim - sum(a < x_bdim for a in axes)
         params["axes"] = tuple(axes)
         return [cls.do(x, **params)], [out_bdim]
 
     @staticmethod
     def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
         axes = params["axes"]
-        axes = [a+len(x.shape) if a < 0 else a for a in axes]
+        axes = [a + len(x.shape) if a < 0 else a for a in axes]
         axes_ = set(axes)
         new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
         return [ArrayShape(tuple(new_shape), x.dtype)]
@@ -123,7 +123,7 @@ class Identity(UnaryOp):
     @staticmethod
     def eval(x):
         return [x]
-    
+
     @staticmethod
     def jvp(cls, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -134,7 +134,6 @@ class Identity(UnaryOp):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
         return [identity(z)]
-
 
 
 class FullLike(UnaryOp):
@@ -153,6 +152,7 @@ class FullLike(UnaryOp):
         assert type(x) is slope.ad.UndefPrimal
         return [zeros_like(z)]
 
+
 class StopGradient(UnaryOp):
     @staticmethod
     def eval(x):
@@ -170,12 +170,11 @@ class StopGradient(UnaryOp):
         return [zeros_like(z)]
 
 
-
 class Convert(UnaryOp):
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
-    
+
     @staticmethod
     def jvp(primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
@@ -186,7 +185,6 @@ class Convert(UnaryOp):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
         return [convert(z, x.dtype)]
-
 
 
 class Exp(UnaryOp):
@@ -207,7 +205,7 @@ class Log(UnaryOp):
 
     @staticmethod
     def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents        
+        (x,), (x_dot,) = primals, tangents
         return [log(x)], [x_dot / x]
 
 
@@ -292,7 +290,9 @@ class Div(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x, y), (x_dot, y_dot) = primals, tangents
-        return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))] # bug: power returns float64
+        return [x / y], [
+            (x_dot / y) + (-y_dot * x * (y**-2))
+        ]  # bug: power returns float64
 
     @staticmethod
     def T(cts, x, y):
@@ -300,7 +300,7 @@ class Div(BinaryOp):
         return [z_bar / y, None]
 
 
-class Max(BinaryOp):
+class Maximum(BinaryOp):
     @staticmethod
     def eval(x, y):
         return [np.maximum(x, y)]
@@ -360,20 +360,20 @@ class Equal(BinaryOp):
 # -----------------------
 
 
-class ReduceMax(ReduceOp):
+class Max(ReduceOp):
     @staticmethod
     def eval(x, axes):
-        return [x.max(axes)]
+        return [np.max(x, axes)]
 
     @staticmethod
     def jvp(primals, tangents, axes):
         (x,), (x_dot,) = primals, tangents
-        eval_out = reduce_max(x, axes)
+        eval_out = max(x, axes)
         locs = equal(x, broadcast(eval_out, x.shape, axes))
         # locs = equal(x, eval_out)
         locs = convert(locs, x_dot.dtype)
-        counts = reduce_sum(locs, axes)
-        jvp_out = reduce_sum(x_dot * locs, axes)
+        counts = sum(locs, axes)
+        jvp_out = sum(x_dot * locs, axes)
         jvp_out = jvp_out / broadcast(counts, jvp_out.shape)
 
         return [eval_out], [jvp_out]
@@ -384,7 +384,7 @@ class ReduceMax(ReduceOp):
         return [broadcast(z, x.aval.shape, ())]
 
 
-class ReduceSum(ReduceOp):
+class Sum(ReduceOp):
     @staticmethod
     def eval(x, *, axes):
         return [np.sum(x, axes)]
@@ -392,8 +392,8 @@ class ReduceSum(ReduceOp):
     @staticmethod
     def jvp(primals, tangents, *, axes):
         (x,), (x_dot,) = primals, tangents
-        eval_out = reduce_sum(x, axes)
-        jvp_out = reduce_sum(x_dot, axes)        
+        eval_out = sum(x, axes)
+        jvp_out = sum(x_dot, axes)
         return [eval_out], [jvp_out]
 
     @staticmethod
@@ -416,7 +416,7 @@ class Broadcast(ShapeOp):
             for a in sorted(axes):
                 x = np.expand_dims(x, a)
         return [np.broadcast_to(x, shape)]
-    
+
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, shape, axes):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -424,14 +424,14 @@ class Broadcast(ShapeOp):
         shape_ = list(shape)
         axes_ = list(axes)
         shape = list(shape)
-        axes = [a + int(a>=(x_bdim)) for a in axes]
-        if all([a<x_bdim for a in axes]):
+        axes = [a + int(a >= (x_bdim)) for a in axes]
+        if all([a < x_bdim for a in axes]):
             x_bdim += 1
 
-        shape = shape[:x_bdim] + [axis_size]+ shape[x_bdim:]
+        shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
         # if sum(int(a<x_bdim) for a in axes) != 0:
         #     breakpoint()
-    
+
         return [broadcast(x, shape, axes)], [x_bdim]
 
     @staticmethod
@@ -451,12 +451,12 @@ class Broadcast(ShapeOp):
         (z,) = cts
         out = z
         if axes is not None:
-            out = reduce_sum(z, axes)
+            out = sum(z, axes)
         else:
             eshape = list(shape)
             for a in axes:
                 if a < 0:
-                    a = len(shape) + (a+1)
+                    a = len(shape) + (a + 1)
                 eshape.insert(a, 1)
             breakpoint()
         return [out]
@@ -491,8 +491,8 @@ class Reshape(ShapeOp):
 class Transpose(ShapeOp):
     @staticmethod
     def eval(x, *, perm):
-        return [x.transpose(perm)]
-    
+        return [np.transpose(x, perm)]
+
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, perm):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -501,7 +501,7 @@ class Transpose(ShapeOp):
         assert x_bdim >= 0
         # perm = [d - int(i >= x_bdim) for i, d in enumerate(perm)]
         perm = perm[:x_bdim] + [x_bdim] + perm[x_bdim:]
-        perm = [d+int(d>=x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
+        perm = [d + int(d >= x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
         assert len(set(perm)) == len(perm)
         # perm[:x_bdim] = perm[:x_bdim][::-1]
         # breakpoint()
@@ -527,14 +527,18 @@ class Transpose(ShapeOp):
 def identity(x):
     return slope.RT.bind1(Identity, x)
 
+
 def full_like(x, fill_value):
     return slope.RT.bind1(FullLike, x, fill_value=fill_value)
+
 
 def zeros_like(x):
     return full_like(x, 0)
 
+
 def ones_like(x):
     return full_like(x, 1)
+
 
 def stop_gradient(x):
     return slope.RT.bind1(StopGradient, x)
@@ -558,9 +562,9 @@ def neg(x):
 
 ## Arithmetic
 
+
 def add(x, y):
     return slope.RT.bind1(Add, x, y)
-
 
 
 def sub(x, y):
@@ -571,12 +575,12 @@ def mul(x, y):
     return slope.RT.bind1(Mul, x, y)
 
 
-
 def div(x, y):
     return slope.RT.bind1(Div, x, y)
 
 
 ## Logic
+
 
 def equal(x, y):
     return slope.RT.bind1(Equal, x, y)
@@ -591,16 +595,18 @@ def min(x, y):
 
 
 # ReduceOps
-def reduce_sum(x, axes=None):
-    return slope.RT.bind1(ReduceSum, x, axes=axes)
+def sum(x, axes=None):
+    return slope.RT.bind1(Sum, x, axes=axes)
 
-def reduce_mean(x, axes=None):
+
+def mean(x, axes=None):
     if axes is None:
         axes = tuple(range(len(x.shape)))
     N = math.prod([x.shape[a] for a in axes])
-    return reduce_sum(x, axes) / np.float32(N)
+    return sum(x, axes) / np.float32(N)
 
-def reduce_max(x, axes=None):
+
+def max(x, axes=None):
     return slope.RT.bind1(ReduceMax, x, axes=axes)
 
 
@@ -621,17 +627,20 @@ def expand_dims(x, axes):
     shape = list(x.shape)
     for a in axes:
         if a < 0:
-            a = len(shape) + (a+1)
+            a = len(shape) + (a + 1)
         shape.insert(a, 1)
     x = reshape(x, shape)
     return x
 
+
 # NN
+
 
 def T(x):
     perm = list(range(len(x.shape)))
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return transpose(x, perm)
+
 
 # def mm_old(x, y):
 #     x1, x2 = x.shape[-2], x.shape[-1]
@@ -643,7 +652,7 @@ def T(x):
 #     x = broadcast(x, br_shape, (-3,))
 #     y = broadcast(y, br_shape, (-2,))
 #     z = x * y
-#     z = reduce_sum(z, (-1,))
+#     z = sum(z, (-1,))
 #     breakpoint()
 #     z = T(z)
 #     return z
@@ -659,9 +668,10 @@ def mm(x, y):
     x = broadcast(x, br_shape, (0,))
     y = broadcast(y, br_shape, (1,))
     z = x * y
-    z = reduce_sum(z, (2,))
+    z = sum(z, (2,))
     z = T(z)
     return z
+
 
 def mm_noT(x, y):
     a, b = x.shape[-2], x.shape[-1]
@@ -671,19 +681,20 @@ def mm_noT(x, y):
     x = broadcast(x, br_shape, (-3,))
     y = broadcast(y, br_shape, (-2,))
     z = x * y
-    z = reduce_sum(z, (-1,))
+    z = sum(z, (-1,))
     return z
+
 
 def relu(x):
     return max(x, np.zeros(x.shape, x.dtype))
 
 
 def softmax(x, axes):
-    x_max = reduce_max(x, axes)
+    x_max = max(x, axes)
     x_max = broadcast(x_max, x.shape)
 
     e = exp(x - x_max)
-    s_e = reduce_sum(e, axes)
+    s_e = sum(e, axes)
     s_e = broadcast(s_e, e.shape)
     return e / s_e
 
@@ -724,12 +735,12 @@ def mean(x, axes=None):
     return x_sum / N
 
 
-def log_softmax(x, axes = (-1,)):
-    x_max = reduce_max(x, axes)
+def log_softmax(x, axes=(-1,)):
+    x_max = max(x, axes)
     x_max = broadcast(x_max, x.shape, (-1,))
     # x_s = x - stop_gradient(x_max)
     x_s = x - x_max
-    x_s_se = reduce_sum(exp(x_s), axes)
+    x_s_se = sum(exp(x_s), axes)
     x_s_se = broadcast(x_s_se, x.shape, (-1,))
     x_s_lse = log(x_s_se)
     return x_s - x_s_lse

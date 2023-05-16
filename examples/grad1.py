@@ -3,28 +3,40 @@ import numpy as np
 from slope import ops
 from slope.array import Array
 
+a = Array([1])
+b = Array([2])
+c = np.add(a, b)
+breakpoint()
+# print(a+b)
+
 # ## test eval and jvp
-# x, x_dot = Array([3.0]), Array([1.0])
+# x, x_dot = np.array(3.0), np.array(1.0)
 # def f(x):
-#     y = x * x
+#     y = x
+#     y = y * y
+#     y = y + 1.
 #     return y
-# out = f(x)
-# print(out)
-# out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
-# print(out_dot)
+# # out = f(x)
+# # print(out)
+# # out, out_dot = slope.ad.jvp(f, (x,), (x_dot,))
+# # print(out_dot)
+
+# g = slope.ad.grad(f)
+# l = g(x)
+# print(l)
 
 
 
-## test grad
-def f(x):
-    y = x
-    y = y.broadcast(shape=(3,))
-    y = y.sum(axes=(0,))
-    return y
+# ## test grad
+# def f(x):
+#     y = x
+#     y = y.broadcast(shape=(3,))
+#     y = y.sum(axes=(0,))
+#     return y
 
-g = slope.ad.grad(f)
-l = g(Array.ones(shape=()))
-print(l)
+# g = slope.ad.grad(f)
+# l = g(np.ones(shape=()))
+# print(l)
 
 
 
@@ -65,9 +77,9 @@ print(l)
 #     y = ops.reduce_sum(y, (0, 1))
 #     return y
 
-g = slope.grad(f)
-l = g(np.ones((1)))
-print(l)
+# g = slope.grad(f)
+# l = g(np.ones((1)))
+# print(l)
 # l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))
 # print(l)
 

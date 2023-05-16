@@ -35,8 +35,9 @@ from functools import lru_cache, reduce
 
 import slope
 from slope.array_shape import ArrayShape, ValuedArrayShape
+from slope.array import Array
+from slope.tracer import Tracer
 from slope import ops
-# from slope.array import Array
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -178,6 +179,7 @@ class Trace:
     def run_op(self, op, tracers, params):
         raise NotImplementedError
 
+
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
@@ -185,87 +187,88 @@ class EvalTrace(Trace):
         return op.eval(*tracers, **params)
 
 
-class Tracer:
-    TYPES = {
-        bool,
-        int,
-        float,
-        np.bool_,
-        np.int32,
-        np.int64,
-        np.float32,
-        np.float64,
-        np.ndarray,
-    }
-    _trace: Trace
+# class Tracer:
+#     TYPES = {
+#         bool,
+#         int,
+#         float,
+#         np.bool_,
+#         np.int32,
+#         np.int64,
+#         np.float32,
+#         np.float64,
+#         np.ndarray,
+#     }
+#     _trace: Trace
 
-    __array_priority__ = 1000
+#     __array_priority__ = 1000
 
-    @staticmethod
-    def get_aval(x):
-        if isinstance(x, Tracer):
-            return x.aval
-        elif type(x) in Tracer.TYPES:
-            return ValuedArrayShape(np.asarray(x))
-        else:
-            raise TypeError(x)
-    
-    def full_lower(self):
-        return self  # default implementation
-    @property
-    def aval(self):
-        assert False  # must override
+#     @staticmethod
+#     def get_aval(x):
+#         if isinstance(x, Tracer):
+#             return x.aval
+#         elif type(x) in Tracer.TYPES:
+#             return ValuedArrayShape(np.asarray(x))
+#         else:
+#             raise TypeError(x)
 
-    def __neg__(self):
-        return slope.RT.bind1(ops.Neg, self)
+#     def full_lower(self):
+#         return self  # default implementation
 
-    def __add__(self, other):
-        return ops.add(self, other)
+#     @property
+#     def aval(self):
+#         assert False  # must override
 
-    def __radd__(self, other):
-        return ops.add(other, self)
+#     def __neg__(self):
+#         return slope.RT.bind1(ops.Neg, self)
 
-    def __sub__(self, other):
-        return ops.sub(self, other)
+#     def __add__(self, other):
+#         return ops.add(self, other)
 
-    def __rsub__(self, other):
-        return ops.sub(other, self)
+#     def __radd__(self, other):
+#         return ops.add(other, self)
 
-    def __mul__(self, other):
-        return ops.mul(self, other)
+#     def __sub__(self, other):
+#         return ops.sub(self, other)
 
-    def __rmul__(self, other):
-        return ops.mul(other, self)
+#     def __rsub__(self, other):
+#         return ops.sub(other, self)
 
-    def __div__(self, other):
-        return ops.div(self, other)
+#     def __mul__(self, other):
+#         return ops.mul(self, other)
 
-    def __rdiv__(self, other):
-        return ops.div(other, self)
+#     def __rmul__(self, other):
+#         return ops.mul(other, self)
 
-    def __truediv__(self, other):
-        return ops.div(self, other)
+#     def __div__(self, other):
+#         return ops.div(self, other)
 
-    def __rtruediv__(self, other):
-        return ops.div(other, self)
+#     def __rdiv__(self, other):
+#         return ops.div(other, self)
 
-    def __pow__(self, other):
-        return ops.pow(self, other)
+#     def __truediv__(self, other):
+#         return ops.div(self, other)
 
-    # def transpose(self, perm):
-    #     return slope.RT.bind1(ops.Transpose, self, perm)
+#     def __rtruediv__(self, other):
+#         return ops.div(other, self)
 
-    def __bool__(self):
-        return self.aval._bool(self)
+#     def __pow__(self, other):
+#         return ops.pow(self, other)
 
-    def __nonzero__(self):
-        return self.aval._nonzero(self)
-    def __getattr__(self, name):
-        try:
-            return getattr(self.aval, name)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+#     # def transpose(self, perm):
+#     #     return slope.RT.bind1(ops.Transpose, self, perm)
 
+#     def __bool__(self):
+#         return self.aval._bool(self)
+
+#     def __nonzero__(self):
+#         return self.aval._nonzero(self)
+
+#     def __getattr__(self, name):
+#         try:
+#             return getattr(self.aval, name)
+#         except AttributeError:
+#             raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
 
 
 # class EvalTracer(Tracer):
@@ -420,7 +423,7 @@ class JVPTrace(Trace):
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
-        
+
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
             JVPTracer(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)
@@ -511,7 +514,9 @@ class Program(NamedTuple):
         )
         return str(
             PPrint.pp(f"{{ lambda {in_binders} .")
-            + ((PPrint.pp("let ") >> instruction) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
+            + (
+                (PPrint.pp("let ") >> instruction) + PPrint.pp(f"in ( {outs} ) }}")
+            ).indent(2)
         )
 
     def pp_eqn(self, names: DefaultDict[Var, str], eqn: Instruction) -> PPrint:
@@ -721,7 +726,9 @@ class ProgramBuilder:
             for eqn in program.instruction
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = program(new_const_binders + other_binders, new_instruction, new_outs)
+        new_program = program(
+            new_const_binders + other_binders, new_instruction, new_outs
+        )
         typecheck_program(new_program)
         return new_program, new_consts
 
@@ -985,12 +992,12 @@ def vjp_flat(f, *primals_in):
         primals_out, tangents_out = jvp(f, *utils.split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
-    Program, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
+    program, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
     primal_pvals, _ = utils.split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
-    f_vjp = lambda *cts: eval_program_transposed(Program, transpose_inputs, cts)
+    f_vjp = lambda *cts: eval_program_transposed(program, transpose_inputs, cts)
     return primals_out, f_vjp
 
 
@@ -1010,6 +1017,7 @@ def vjp(f, *primals_in):
 
 class UndefPrimal(NamedTuple):
     aval: ArrayShape
+
 
 def eval_program_transposed(
     Program: Program, args: List[Any], cotangents: List[Any]
@@ -1036,7 +1044,7 @@ def eval_program_transposed(
     for eqn in Program.instructions[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
-        
+
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [
@@ -1108,11 +1116,7 @@ class Runtime:
 
     def find_top_trace(self, xs) -> Trace:
         top_main = max(
-            (
-                x._trace.main
-                for x in xs
-                if isinstance(x, Tracer)
-            ),
+            (x._trace.main for x in xs if isinstance(x, Tracer)),
             default=self.trace_stack[0],
             key=op.attrgetter("level"),
         )

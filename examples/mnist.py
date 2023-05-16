@@ -90,7 +90,7 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    return -ops.reduce_sum(preds * targets, axis=(0, 1))
+    return -ops.reduce_sum(preds * targets, axes=(0, 1))
     # return -ops.reduce_mean(preds * targets, axis=(0, 1))
 
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         layers.Dense(200),
         layers.Fn(ops.relu),
         layers.Dense(10),
-        layers.Fn(lambda x: ops.log_softmax(x, axis=(-1,))),
+        layers.Fn(lambda x: ops.log_softmax(x, axes=(-1,))),
     )
     _, init_params = init_random_params((-1, 28 * 28))
 

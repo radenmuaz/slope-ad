@@ -29,7 +29,39 @@ from slope.array_shape import ValuedArrayShape
 # patch numpy
 
 
-class Array:
+def binaryop_decor(op_fn):
+    def wrapped_fn(x, y):
+        bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
+        by = list(range((max(x.ndim, y.ndim) - y.ndim)))
+        shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
+        x = x.broadcast(shape_ret, bx)
+        y = y.broadcast(shape_ret, by)
+        return op_fn(x, y)
+
+    return wrapped_fn
+
+
+def reduceop_decor(op_fn):
+    def wrapped_fn(x, axes, keepdim=False):
+        if axes is None:
+            axes = tuple(range(x.ndim))
+        elif isinstance(axes, int):
+            axes = (axes,)
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+        ret = op_fn(x, axes)
+
+        if keepdim:
+            if len(ret.shape) == 0:
+                shape = (1,)
+            else:
+                shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
+            ret = ret.reshape(shape)
+        return ret
+
+    return wrapped_fn
+
+
+class Tracer:
     TYPES = {
         bool,
         int,
@@ -39,27 +71,26 @@ class Array:
         np.int64,
         np.float32,
         np.float64,
-        # np.ndarray,
+        np.ndarray,
     }
     __array_priority__ = 1000
 
     default_dtype = np.float32
+    _trace: "Trace"
 
-    def __init__(
-        self, val: Union[list, tuple, np.ndarray], dtype: Optional[Any] = None
-    ):
-        self.val = np.asarray(val)
-        # if type(val) in (*(tuple, list), *self.TYPES):
-        #     dtype = dtype or self.default_dtype
-        #     self.val = np.array(val, dtype)
-        # elif type(val) is np.ndarray:
-        #     self.val = val.astype(dtype) if dtype else val
-        # else:
-        #     raise NotImplementedError
+    def __init__(self):
+        raise NotImplementedError
 
-    # dtype = property(lambda self: self.val.dtype)
-    # shape = property(lambda self: self.val.shape)
-    # ndim = property(lambda self: self.val.ndim)
+    @property
+    def aval(self):
+        return self.get_aval(self.val)
+
+    dtype = property(lambda self: self.val.dtype)
+    shape = property(lambda self: self.val.shape)
+    ndim = property(lambda self: self.val.ndim)
+
+    def full_lower(self):
+        return self.val
 
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)}"
@@ -67,31 +98,17 @@ class Array:
     def __str__(self):
         return repr(self)
 
-    def __array__(self, dtype=None):
-        return self.val  # .astype(dtype) if dtype else self.val
+    @property
+    def ndim(self):
+        return len(self.shape)
 
-    def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        assert ufunc in [
-            np.negative,
-            np.add,
-            np.subtract,
-            np.multiply,
-            np.divide,
-            np.exp,
-            np.log,
-            np.reshape,
-            np.broadcast_to,
-            np.equal,
-            np.maximum,
-            np.minimum,
-        ]
-        assert method == "__call__"
-        inputs = [i.val if type(i) is self.__class__ else i for i in inputs]
-        ret = ufunc(*inputs, **kwargs)
-        return self.__class__(ret)
+    # UnaryOps
 
-    def full_like(self, fill_value, dtype=default_dtype):
-        return self.__class__(val=np.full(fill_value=fill_value, dtype=dtype))
+    def identity(x):
+        return ops.Identity.do(x)
+
+    def full_like(x, fill_value):
+        return ops.FullLike.do(x, fill_value=fill_value)
 
     def zeros_like(self):
         return self.full_like(0.0)
@@ -99,42 +116,132 @@ class Array:
     def ones_like(self):
         return self.full_like(1)
 
-    def stop_gradient(self):
-        return self.zeros_like(self)
+    def stop_gradient(x):
+        return ops.StopGradient.do(x)
 
-    convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
-    neg = lambda self: np.negative(self)
-    exp = lambda self: np.exp(self)
-    log = lambda self: np.log(self)
-    add = lambda self, other: np.add(self, other)
-    sub = lambda self, other: np.subtract(self, other)
-    mul = lambda self, other: np.multiply(self, other)
-    div = lambda self, other: np.divide(self, other)
-    pow = lambda self, other: np.power(self, other)
-    equal = lambda self, other: np.equal(self, other)
-    maximum = lambda self, other: np.maximum(self, other)
-    minimum = lambda self, other: -self.maximum(-self, -other)
-    __neg__ = neg
-    __add__ = __radd__ = add
-    __sub__ = sub
-    __rsub__ = lambda self, other: self.__class__.sub(other, self)
-    __mul__ = __rmul__ = mul
-    __div__ = div
-    __rdiv__ = lambda self, other: self.__class__.div(other, self)
-    __truediv__ = __div__
-    __truerdiv__ = __rdiv__
-    __pow__ = pow
-    __eq__ = lambda self, other: self.equal(other)
-    __ge__ = lambda self, other: self.maximum(other).equal(self)
-    __le__ = lambda self, other: self.minimum(other).equal(self)
-    __gt__ = lambda self, other: 1.0 - (self <= other)
-    __lt__ = lambda self, other: 1.0 - (self >= other)
+    def convert(x, dtype):
+        return ops.Convert.do(x, dtype=dtype)
 
-    def max(self, axes=None, keepdim=False):
-        return np.max(self, axis=axes, keepdim=keepdim)
+    def exp(x):
+        return ops.Exp.do(x)
 
+    def log(x):
+        return ops.Log.do(x)
+
+    def neg(x):
+        return ops.Neg.do(x)
+
+    @binaryop_decor
+    def add(self, other):
+        return slope.RT.bind1(ops.Add, self, other)
+
+    @binaryop_decor
+    def sub(self, other):
+        return slope.RT.bind1(ops.Sub, self, other)
+
+    @binaryop_decor
+    def mul(self, other):
+        return slope.RT.bind1(ops.Mul, self, other)
+
+    @binaryop_decor
+    def div(self, other):
+        return slope.RT.bind1(ops.Div, self, other)
+
+    def pow(self, y):
+        assert type(y) is int
+        if y == 0:
+            return self.ones_like(x)
+        is_reciprocal = y < 0
+        if is_reciprocal:
+            y = -y
+        acc = None
+        while y > 0:
+            if y & 1:
+                acc = x if acc is None else acc * x
+            y >>= 1
+            if y > 0:
+                x = x * x
+        ret = acc
+        if is_reciprocal:
+            ret = self.ones_like(acc) / acc
+        return ret
+
+    @binaryop_decor
+    def equal(self, other):
+        return ops.Equal.do(self, other)
+
+    @binaryop_decor
+    def maximum(self, other):
+        return ops.Maximum.do(self, other)
+
+    @binaryop_decor
+    def mininum(self, other):
+        return -(-self.maximum(-other))
+
+    def __neg__(self):
+        return self.neg()
+
+    def __add__(self, other):
+        return self.add(other)
+
+    def __radd__(self, other):
+        return self.__class__.add(other, self)
+
+    def __sub__(self, other):
+        return self.sub(other)
+
+    def __rsub__(self, other):
+        return self.__class__.sub(other, self)
+
+    def __mul__(self, other):
+        return self.mul(other)
+
+    def __rmul__(self, other):
+        return self.__class__.mul(other, self)
+
+    def __div__(self, other):
+        return self.div(other)
+
+    def __rdiv__(self, other):
+        return self.__class__.div(other, self)
+
+    def __truediv__(self, other):
+        return self.div(other)
+
+    def __rtruediv__(self, other):
+        return self.__class__.div(other, self)
+
+    def __pow__(self, other):
+        return self.pow(other)
+
+    def __bool__(self):
+        return self.aval._bool(self)
+
+    def __nonzero__(self):
+        return self.aval._nonzero(self)
+
+    def __ge__(self, x):
+        return self.maximum(x).equal(self)
+
+    def __le__(self, x):
+        return self.maximum(x).equal(x)
+
+    def __lt__(self, x):
+        return 1.0 - (self >= x)
+
+    def __gt__(self, x):
+        return 1.0 - (self <= x)
+
+    def __eq__(self, x):
+        return self.equal(x)
+
+    @reduceop_decor
     def sum(self, axes=None, keepdim=False):
-        return np.sum(self, axis=axes, keepdim=keepdim)
+        return slope.RT.bind1(ops.Sum, self, axes=axes)
+
+    @reduceop_decor
+    def max(self, axes=None, keepdim=False):
+        return slope.RT.bind1(ops.Max, self, axes=axes)
 
     def mean(self, axes=None, keepdim=False):
         out = self.sum(axes=axes, keepdim=keepdim)
@@ -144,8 +251,19 @@ class Array:
         return -((-self).max(self, axes, keepdim))
 
     # Shape
-    reshape = lambda self, shape: np.reshape(self, shape)
-    transpose = lambda self, perm: np.transpose(self, perm)
+    def broadcast(self, shape, axes=None):
+        if axes is None:
+            axes = tuple(range(self.ndim))
+        elif isinstance(axes, int):
+            axes = (axes,)
+        axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
+        return ops.Broadcast.do(self, shape=shape, axes=axes)
+
+    def reshape(self, shape):
+        return ops.Reshape.do(self, shape=shape)
+
+    def transpose(self, perm):
+        return ops.Transpose.do(self, perm=perm)
 
     def swapaxes(self, ax1=1, ax2=0):
         order = list(range(self.ndim))
@@ -163,29 +281,25 @@ class Array:
             shape.insert(a, 1)
         return self.reshape(shape)
 
-    def broadcast(self, shape, axes=None):
-        if axes is not None:
-            for a in sorted(axes):
-                self = np.expand_dims(self, a)
-        return [np.broadcast_to(self, shape)]
-
     # TODO:
-
+    
     def flip(self, axis, *args):
-        return self.__class__(
-            np.flip(
-                self,
-                axis=[x if x >= 0 else x + len(self.shape) for x in (axis, *args)],
-            )
+        return ops.Flip.do(
+            self,
+            axis=[
+                x if x >= 0 else x + len(self.shape) for x in utils.argfix(axis, *args)
+            ],
         )
 
     def pad(self, arg: Tuple[Tuple[int, int], ...]):
-        return self.__class__(
-            np.pad(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-        )
+        return ops.Pad.do(self, arg=arg) if any(x != (0, 0) for x in arg) else self
 
     def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-        return self.__class__(self.val[arg])
+        return (
+            ops.Shrink.do(self, arg=arg)
+            if any(x != (0, s) for x, s in zip(arg, self.shape))
+            else self
+        )
 
     # NOTE: using slice is discouraged and things should migrate to pad and shrink
     def slice(self, arg: Sequence[Optional[Tuple[int, int]]]):
@@ -397,3 +511,21 @@ class Array:
             invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd
         )
         return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
+
+    @staticmethod
+    def get_aval(x):
+        if isinstance(x, Tracer):
+            return x.aval
+        elif type(x) in Tracer.TYPES:
+            return ValuedArrayShape(np.asarray(x))
+        else:
+            raise TypeError(x)
+
+    def full_lower(self):
+        return self
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.aval, name)
+        except AttributeError:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")

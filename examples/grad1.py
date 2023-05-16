@@ -80,15 +80,29 @@ breakpoint()
 # print(y_dot)
 
 
+def f(x):
+    y = x*x
+    y = ops.broadcast(y, (3, 3), (0,))
+    y = ops.reduce_sum(y, (0, 1))
+    return y
+
+
+x = np.ones([3])
+x_dot = np.ones([3])
+out = f(x)
+# l = slope.jvp(f, (x,), (x_dot))
+print(out)
+
+
 # def f(x):
 #     y = x
 #     y = ops.broadcast(y, (3, 3), (0,))
 #     y = ops.reduce_sum(y, (0, 1))
 #     return y
 
-# g = slope.grad(f)
-# l = g(np.ones((1)))
-# print(l)
+g = slope.ad.grad(f)
+l = g(np.ones((1)))
+print(l)
 # l = slope.jvp(f, (np.ones([1,]),), (np.ones([1,]),))
 # print(l)
 

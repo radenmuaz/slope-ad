@@ -357,22 +357,22 @@ class Lit:
 
     def __init__(self, val):
         self.aval = aval = ArrayShape.like(Tracer.get_aval(val))
-        self.val = Array(val, aval.dtype)
+        self.val = np.array(val, aval.dtype)
 
 
 Atom = Union[Var, Lit]
 
 
-class Instruction(NamedTuple):
+class JaxprEqn(NamedTuple):
     op: ops.Op
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Atom]
 
 
-class Program(NamedTuple):
+class Jaxpr(NamedTuple):
     in_binders: Any
-    instructions: List[Instruction]
+    eqns: List[JaxprEqn]
     outs: Any
 
     def __hash__(self):
@@ -389,19 +389,17 @@ class Program(NamedTuple):
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instructions = PPrint.vcat([self.pp_eqn(names, e) for e in self.instructions])
+        eqns = PPrint.vcat([self.pp_eqn(names, e) for e in self.eqns])
         outs = ", ".join(
             names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
         )
         return str(
             PPrint.pp(f"{{ lambda {in_binders} .")
-            + (
-                (PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")
-            ).indent(2)
+            + ((PPrint.pp("let ") >> eqns) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
         )
 
-    def pp_eqn(self, names: DefaultDict[Var, str], eqn: Instruction) -> PPrint:
-        # rule = eqn.op.pprintc
+    def pp_eqn(self, names: DefaultDict[Var, str], eqn: JaxprEqn) -> PPrint:
+        # rule = eqn.op.pprint
         # if rule() is not None:
         #     return rule(names, eqn)
         # else:
@@ -410,29 +408,27 @@ class Program(NamedTuple):
             PPrint.pp(repr(eqn.op.__class__))
             >> self.pp_params(eqn.params)
             >> PPrint.pp(
-                " ".join(
-                    names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs
-                )
+                " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in eqn.inputs)
             )
         )
         return lhs >> PPrint.pp(" = ") >> rhs
 
+
     def pp_params(self, params: Dict[str, Any]) -> PPrint:
         items = sorted(params.items())
         if items:
-            return (
-                PPrint.pp(" [ ")
-                >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items])
-                >> PPrint.pp(" ] ")
-            )
+            return PPrint.pp(" [ ") >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items]) >> PPrint.pp(" ] ")
         else:
             return PPrint.pp(" ")
+        
+    
 
     def var_str(self, names: DefaultDict[Var, str], v) -> str:
         return f"{names[v]}:{v.aval.str_short()}"
 
 
-class ProgramType(NamedTuple):
+
+class JaxprType(NamedTuple):
     in_types: List[ArrayShape]
     out_types: List[ArrayShape]
 
@@ -442,15 +438,15 @@ class ProgramType(NamedTuple):
         return f"({in_types}) -> ({out_types})"
 
 
-def typecheck_program(program: Program) -> ProgramType:
+def typecheck_jaxpr(jaxpr: Jaxpr) -> JaxprType:
     env: Set[Var] = set()
 
-    for v in program.in_binders:
+    for v in jaxpr.in_binders:
         if v in env:
             raise TypeError
         env.add(v)
 
-    for eqn in program.instructions:
+    for eqn in jaxpr.eqns:
         in_types = [typecheck_atom(env, x) for x in eqn.inputs]
         out_types = eqn.op.shape_eval(*in_types, **eqn.params)
         for out_binder, out_type in utils.list_zip(eqn.out_binders, out_types):
@@ -461,9 +457,9 @@ def typecheck_program(program: Program) -> ProgramType:
                 raise TypeError
             env.add(out_binder)
 
-    in_types = [v.aval for v in program.in_binders]
-    out_types = [typecheck_atom(env, x) for x in program.outs]
-    return ProgramType(in_types, out_types)
+    in_types = [v.aval for v in jaxpr.in_binders]
+    out_types = [typecheck_atom(env, x) for x in jaxpr.outs]
+    return JaxprType(in_types, out_types)
 
 
 def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
@@ -477,7 +473,7 @@ def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
         assert False
 
 
-def eval_program(program: Program, args: List[Any]) -> List[Any]:
+def eval_jaxpr(jaxpr: Jaxpr, args: List[Any]) -> List[Any]:
     env: Dict[Var, Any] = {}
 
     def read(x: Atom) -> Any:
@@ -487,19 +483,20 @@ def eval_program(program: Program, args: List[Any]) -> List[Any]:
         assert v not in env  # single-assignment
         env[v] = val
 
-    utils.list_map(write, program.in_binders, args)
-    for eqn in program.instructions:
+    utils.list_map(write, jaxpr.in_binders, args)
+    for eqn in jaxpr.eqns:
         in_vals = utils.list_map(read, eqn.inputs)
         outs = slope.RT.bind(eqn.op, *in_vals, **eqn.params)
         utils.list_map(write, eqn.out_binders, outs)
-    return utils.list_map(read, program.outs)
+    return utils.list_map(read, jaxpr.outs)
 
 
-def program_as_fun(Program: Program):
-    return lambda *args: eval_program(Program, args)
+def jaxpr_as_fun(jaxpr: Jaxpr):
+    return lambda *args: eval_jaxpr(jaxpr, args)
 
 
-class ProgramTracer(Tracer):
+
+class JaxprTracer(Tracer):
     __slots__ = ["aval"]
     aval: ArrayShape
 
@@ -508,15 +505,15 @@ class ProgramTracer(Tracer):
         self.aval = aval
 
 
-class ProgramTrace(Trace):
-    def new_arg(self, aval) -> ProgramTracer:
+class JaxprTrace(Trace):
+    def new_arg(self, aval) -> JaxprTracer:
         aval = ArrayShape.like(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
 
         return tracer
 
-    def get_or_make_const_tracer(self, val: Any) -> ProgramTracer:
+    def get_or_make_const_tracer(self, val: Any) -> JaxprTracer:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
             tracer = self.builder.new_tracer(self, Tracer.get_aval(val))
@@ -531,7 +528,7 @@ class ProgramTrace(Trace):
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_eqn(Instruction(op, inputs, params, outvars))
+        self.builder.add_eqn(JaxprEqn(op, inputs, params, outvars))
         return out_tracers
 
     @property
@@ -539,98 +536,96 @@ class ProgramTrace(Trace):
         return self.main.global_data
 
 
-class ProgramBuilder:
-    instruction: List[Instruction]
+class JaxprBuilder:
+    eqns: List[JaxprEqn]
     tracer_to_var: Dict[int, Var]
     const_tracers: Dict[int, Tracer]
     constvals: Dict[Var, Any]
-    tracers: List[ProgramTracer]
+    tracers: List[JaxprTracer]
 
     def __init__(self):
-        self.instruction = []
+        self.eqns = []
         self.tracer_to_var = {}
         self.const_tracers = {}
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgramTrace, aval: ArrayShape) -> ProgramTracer:
-        tracer = ProgramTracer(trace, aval)
+    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracer:
+        tracer = JaxprTracer(trace, aval)
         self.tracers.append(tracer)
         return tracer
 
-    def add_eqn(self, eqn: Instruction) -> None:
-        self.instruction.append(eqn)
+    def add_eqn(self, eqn: JaxprEqn) -> None:
+        self.eqns.append(eqn)
 
-    def add_var(self, tracer: ProgramTracer) -> Var:
+    def add_var(self, tracer: JaxprTracer) -> Var:
         assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
         return var
 
-    def getvar(self, tracer: ProgramTracer) -> Var:
+    def getvar(self, tracer: JaxprTracer) -> Var:
         var = self.tracer_to_var.get(id(tracer))
         assert var is not None
         return var
 
-    def add_const(self, tracer: ProgramTracer, val: Any) -> Var:
+    def add_const(self, tracer: JaxprTracer, val: Any) -> Var:
         var = self.add_var(tracer)
         self.const_tracers[id(val)] = tracer
         self.constvals[var] = val
         return var
 
-    def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Program, List[Any]]:
+    def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Jaxpr, List[Any]]:
         constvars, constvals = utils.unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
-        program = Program(in_binders, self.instruction, out_vars)
-        typecheck_program(Program)
-        program, constvals = self._inline_literals(program, constvals)
-        return program, constvals
+        jaxpr = Jaxpr(in_binders, self.eqns, out_vars)
+        typecheck_jaxpr(jaxpr)
+        jaxpr, constvals = self._inline_literals(jaxpr, constvals)
+        return jaxpr, constvals
 
     def _inline_literals(
-        self, program: Program, consts: List[Any]
-    ) -> Tuple[Program, List[Any]]:
-        const_binders, other_binders = utils.split_list(program.in_binders, len(consts))
+        self, jaxpr: Jaxpr, consts: List[Any]
+    ) -> Tuple[Jaxpr, List[Any]]:
+        const_binders, other_binders = utils.split_list(jaxpr.in_binders, len(consts))
         scalars = [
             type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts
         ]
         new_const_binders, lit_binders = utils.partition_list(scalars, const_binders)
         new_consts, lit_vals = utils.partition_list(scalars, consts)
         literals = dict(zip(lit_binders, utils.list_map(Lit, lit_vals)))
-        new_instruction = [
-            Instruction(
+        new_eqns = [
+            JaxprEqn(
                 eqn.op,
                 [literals.get(x, x) for x in eqn.inputs],
                 eqn.params,
                 eqn.out_binders,
             )
-            for eqn in program.instruction
+            for eqn in jaxpr.eqns
         ]
-        new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = Program(
-            new_const_binders + other_binders, new_instruction, new_outs
-        )
-        typecheck_program(new_program)
-        return new_program, new_consts
+        new_outs = [literals.get(x, x) for x in jaxpr.outs]
+        new_jaxpr = Jaxpr(new_const_binders + other_binders, new_eqns, new_outs)
+        typecheck_jaxpr(new_jaxpr)
+        return new_jaxpr, new_consts
 
 
 @lru_cache()
-def make_program(
+def make_jaxpr(
     f: Callable,
     *avals_in: ArrayShape,
-) -> Tuple[Program, List[Any], PyTreeDef]:
+) -> Tuple[Jaxpr, List[Any], PyTreeDef]:
     avals_in, in_tree = tree_flatten(avals_in)
     f, out_tree = flatten_fun(f, in_tree)
 
-    builder = ProgramBuilder()
-    with slope.RT.new_main(ProgramTrace, builder) as main:
+    builder = JaxprBuilder()
+    with slope.RT.new_main(JaxprTrace, builder) as main:
         with slope.RT.new_dynamic(main):
-            trace = ProgramTrace(main)
+            trace = JaxprTrace(main)
             tracers_in = [trace.new_arg(aval) for aval in avals_in]
             outs = f(*tracers_in)
             tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
-            program, consts = builder.build(tracers_in, tracers_out)
-    return program, consts, out_tree()
+            jaxpr, consts = builder.build(tracers_in, tracers_out)
+    return jaxpr, consts, out_tree()
 
 
 def linearize_flat(f, *primals_in):
@@ -642,11 +637,11 @@ def linearize_flat(f, *primals_in):
         primals_out, tangents_out = jvp(f, *utils.split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
-    program, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)
+    jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)
     primal_pvals, _ = utils.split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
-    f_lin = lambda *tangents: eval_program(program, [*consts, *tangents])
+    f_lin = lambda *tangents: eval_jaxpr(jaxpr, [*consts, *tangents])
     return primals_out, f_lin
 
 
@@ -684,7 +679,7 @@ class PartialVal(NamedTuple):
 
 def partial_eval_flat(
     f: Callable, pvals_in: List[PartialVal]
-) -> Tuple[Program, List[PartialVal], List[Any]]:
+) -> Tuple[Jaxpr, List[PartialVal], List[Any]]:
     with slope.RT.new_main(PartialEvalTrace) as main:
         trace = PartialEvalTrace(main)
         tracers_in = [trace.new_arg(pval) for pval in pvals_in]
@@ -693,20 +688,20 @@ def partial_eval_flat(
         pvals_out = [t.pval for t in tracers_out]
         unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
         unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
-        program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
+        jaxpr, consts = tracers_to_jaxpr(unk_tracers_in, unk_tracers_out)
 
-    return program, pvals_out, consts
+    return jaxpr, pvals_out, consts
 
 
-class LambdaBindingProto(NamedTuple):
+class LambdaBindingRecipe(NamedTuple):
     pass
 
 
-class ConstProto(NamedTuple):
+class ConstRecipe(NamedTuple):
     val: Any
 
 
-class InstructionProto(NamedTuple):
+class JaxprEqnRecipe(NamedTuple):
     prim: ops.Op
     tracers_in: List["PartialEvalTracer"]
     params: Dict[str, Any]
@@ -715,17 +710,17 @@ class InstructionProto(NamedTuple):
     tracer_refs_out: List
 
 
-ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
+JaxprRecipe = Union[LambdaBindingRecipe, ConstRecipe, JaxprEqnRecipe]
 
 
 class PartialEvalTracer(Tracer):
     pval: PartialVal
-    proto: Optional[ProgramProto]
+    recipe: Optional[JaxprRecipe]
 
-    def __init__(self, trace, pval, proto):
+    def __init__(self, trace, pval, recipe):
         self._trace = trace
         self.pval = pval
-        self.proto = proto
+        self.recipe = recipe
 
     aval = property(lambda self: self.pval.aval)
 
@@ -737,7 +732,7 @@ class PartialEvalTracer(Tracer):
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracer(self, pval, LambdaBindingProto())
+        return PartialEvalTracer(self, pval, LambdaBindingRecipe())
 
     def lift(self, val: Any) -> PartialEvalTracer:
         return PartialEvalTracer(self, PartialVal.known(val), None)
@@ -749,7 +744,7 @@ class PartialEvalTrace(Trace):
             return tracer
         else:
             pval = PartialVal.unknown(ArrayShape.like(tracer.aval))
-            return PartialEvalTracer(self, pval, ConstProto(tracer.pval.const))
+            return PartialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
@@ -761,15 +756,15 @@ class PartialEvalTrace(Trace):
             PartialEvalTracer(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
-        eqn = InstructionProto(
+        eqn = JaxprEqnRecipe(
             op, tracers_in, params, avals_out, map(weakref.ref, tracers_out)
         )
         for t in tracers_out:
-            t.proto = eqn
+            t.recipe = eqn
         return tracers_out
 
 
-def tracers_to_program(
+def tracers_to_jaxpr(
     tracers_in: List[PartialEvalTracer], tracers_out: List[PartialEvalTracer]
 ):
     tracer_to_var: Dict[int, Var] = {
@@ -777,45 +772,45 @@ def tracers_to_program(
     }
     constvar_to_val: Dict[int, Any] = {}
     constid_to_var: Dict[int, Var] = {}
-    processed_instructions: Set[int] = set()
-    instructions: List[Instruction] = []
+    processed_eqns: Set[int] = set()
+    eqns: List[JaxprEqn] = []
     for t in toposort(tracers_out, tracer_parents):
-        if isinstance(t.proto, LambdaBindingProto):
+        if isinstance(t.recipe, LambdaBindingRecipe):
             assert id(t) in set(utils.list_map(id, tracers_in))
-        elif isinstance(t.proto, ConstProto):
-            val = t.proto.val
+        elif isinstance(t.recipe, ConstRecipe):
+            val = t.recipe.val
             var = constid_to_var.get(id(val))
             if var is None:
                 aval = ArrayShape.like(Tracer.get_aval(val))
                 var = constid_to_var[id(val)] = Var(aval)
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
-        elif isinstance(t.proto, InstructionProto):
-            if id(t.proto) not in processed_instructions:
-                instructions.append(proto_to_eqn(tracer_to_var, t.proto))
-                processed_instructions.add(id(t.proto))
+        elif isinstance(t.recipe, JaxprEqnRecipe):
+            if id(t.recipe) not in processed_eqns:
+                eqns.append(recipe_to_eqn(tracer_to_var, t.recipe))
+                processed_eqns.add(id(t.recipe))
         else:
-            raise TypeError(t.proto)
+            raise TypeError(t.recipe)
 
     constvars, constvals = utils.unzip2(constvar_to_val.items())
     in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-    program = Program(in_binders, instructions, out_vars)
-    typecheck_program(program)
-    return program, constvals
+    jaxpr = Jaxpr(in_binders, eqns, out_vars)
+    typecheck_jaxpr(jaxpr)
+    return jaxpr, constvals
 
 
-def proto_to_eqn(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
-    inputs = [tracer_to_var[id(t)] for t in proto.tracers_in]
-    out_binders = [Var(aval) for aval in proto.avals_out]
-    for t_ref, var in zip(proto.tracer_refs_out, out_binders):
+def recipe_to_eqn(tracer_to_var: Dict[int, Var], recipe: JaxprEqnRecipe) -> JaxprEqn:
+    inputs = [tracer_to_var[id(t)] for t in recipe.tracers_in]
+    out_binders = [Var(aval) for aval in recipe.avals_out]
+    for t_ref, var in zip(recipe.tracer_refs_out, out_binders):
         if t_ref() is not None:
             tracer_to_var[id(t_ref())] = var
-    return Instruction(proto.prim, inputs, proto.params, out_binders)
+    return JaxprEqn(recipe.prim, inputs, recipe.params, out_binders)
 
 
 def tracer_parents(t: PartialEvalTracer) -> List[PartialEvalTracer]:
-    return t.proto.tracers_in if isinstance(t.proto, InstructionProto) else []
+    return t.recipe.tracers_in if isinstance(t.recipe, JaxprEqnRecipe) else []
 
 
 def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -873,12 +868,12 @@ def vjp_flat(f, *primals_in):
         primals_out, tangents_out = jvp(f, *utils.split_half(primals_tangents_in))
         return [*primals_out, *tangents_out]
 
-    program, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
+    jaxpr, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
     primal_pvals, _ = utils.split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
-    f_vjp = lambda *cts: eval_program_transposed(program, transpose_inputs, cts)
+    f_vjp = lambda *cts: eval_jaxpr_transposed(jaxpr, transpose_inputs, cts)
     return primals_out, f_vjp
 
 
@@ -900,8 +895,9 @@ class UndefPrimal(NamedTuple):
     aval: ArrayShape
 
 
-def eval_program_transposed(
-    program: Program, args: List[Any], cotangents: List[Any]
+# NB: the analogous function in JAX is called 'backward_pass'
+def eval_jaxpr_transposed(
+    jaxpr: Jaxpr, args: List[Any], cotangents: List[Any]
 ) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
@@ -914,40 +910,38 @@ def eval_program_transposed(
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, Array.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, np.zeros(v.aval.shape, v.aval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
             ct_env[x] = ct_env[x] + val if x in ct_env else val
 
-    utils.list_map(write_primal, program.in_binders, args)
-    utils.list_map(write_cotangent, program.outs, cotangents)
-    for eqn in program.instructions[::-1]:
+    utils.list_map(write_primal, jaxpr.in_binders, args)
+    utils.list_map(write_cotangent, jaxpr.outs, cotangents)
+    # for i, eqn in enumerate(jaxpr.eqns[::-1]):
+        # print(i, eqn)
+    for eqn in jaxpr.eqns[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
-        print('in', cts_in, primals_in)
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
-        print('out',cts_out, ct_env)
     ret = [
         read_cotangent(v)
-        for v, x in zip(program.in_binders, args)
+        for v, x in zip(jaxpr.in_binders, args)
         if type(x) is UndefPrimal
     ]
-
     return ret
 
 
 def grad(f):
     def gradfun(x, *xs):
         y, f_vjp = vjp(f, x, *xs)
-        if y.shape != ():
+        if np.shape(y) != ():
             raise TypeError
-        out = f_vjp(Array.ones(y.shape, y.dtype))
+        out = f_vjp(Array.ones(np.shape(y), np.result_type(y)))
         return y, out
 
     return gradfun
-
 
 class Runtime:
     def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):

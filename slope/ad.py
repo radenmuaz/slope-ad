@@ -389,19 +389,19 @@ class Program(NamedTuple):
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instruction = PPrint.vcat([self.pp_eqn(names, e) for e in self.instruction])
+        instructions = PPrint.vcat([self.pp_eqn(names, e) for e in self.instructions])
         outs = ", ".join(
             names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
         )
         return str(
             PPrint.pp(f"{{ lambda {in_binders} .")
             + (
-                (PPrint.pp("let ") >> instruction) + PPrint.pp(f"in ( {outs} ) }}")
+                (PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")
             ).indent(2)
         )
 
     def pp_eqn(self, names: DefaultDict[Var, str], eqn: Instruction) -> PPrint:
-        # rule = eqn.op.pprint
+        # rule = eqn.op.pprintc
         # if rule() is not None:
         #     return rule(names, eqn)
         # else:
@@ -487,12 +487,12 @@ def eval_program(program: Program, args: List[Any]) -> List[Any]:
         assert v not in env  # single-assignment
         env[v] = val
 
-    utils.list_map(write, Program.in_binders, args)
+    utils.list_map(write, program.in_binders, args)
     for eqn in program.instructions:
         in_vals = utils.list_map(read, eqn.inputs)
         outs = slope.RT.bind(eqn.op, *in_vals, **eqn.params)
         utils.list_map(write, eqn.out_binders, outs)
-    return utils.list_map(read, Program.outs)
+    return utils.list_map(read, program.outs)
 
 
 def program_as_fun(Program: Program):
@@ -694,6 +694,7 @@ def partial_eval_flat(
         unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
         unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
         program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
+    breakpoint()
 
     return program, pvals_out, consts
 
@@ -777,8 +778,8 @@ def tracers_to_program(
     }
     constvar_to_val: Dict[int, Any] = {}
     constid_to_var: Dict[int, Var] = {}
-    processed_instruction: Set[int] = set()
-    instruction: List[Instruction] = []
+    processed_instructions: Set[int] = set()
+    instructions: List[Instruction] = []
     for t in toposort(tracers_out, tracer_parents):
         if isinstance(t.proto, LambdaBindingProto):
             assert id(t) in set(utils.list_map(id, tracers_in))
@@ -791,17 +792,18 @@ def tracers_to_program(
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
         elif isinstance(t.proto, InstructionProto):
-            if id(t.proto) not in processed_instruction:
-                instruction.append(proto_to_eqn(tracer_to_var, t.proto))
-                processed_instruction.add(id(t.proto))
+            if id(t.proto) not in processed_instructions:
+                instructions.append(proto_to_eqn(tracer_to_var, t.proto))
+                processed_instructions.add(id(t.proto))
         else:
             raise TypeError(t.proto)
 
     constvars, constvals = utils.unzip2(constvar_to_val.items())
     in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-    program = Program(in_binders, instruction, out_vars)
+    program = Program(in_binders, instructions, out_vars)
     typecheck_program(program)
+    breakpoint()
     return program, constvals
 
 
@@ -878,6 +880,7 @@ def vjp_flat(f, *primals_in):
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
+    
     f_vjp = lambda *cts: eval_program_transposed(program, transpose_inputs, cts)
     return primals_out, f_vjp
 
@@ -925,7 +928,6 @@ def eval_program_transposed(
     for eqn in program.instructions[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
-
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
     ret = [

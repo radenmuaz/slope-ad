@@ -33,8 +33,17 @@ def f(x):
     y = y.sum(axes=(0,))
     return y
 
+
+# x, x_dot = Array(3), Array(1.)
+# y, f_lin = slope.ad.linearize(f, x)
+# print(y)
+# y_dot = f_lin(x_dot)
+# print(y_dot)
+# breakpoint()
+
+
 g = slope.ad.grad(f)
-l = g(Array.ones(shape=None))
+l = g(Array(1.))
 print(l)
 breakpoint()
 

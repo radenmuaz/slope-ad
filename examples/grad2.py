@@ -52,9 +52,9 @@ y = Array.randn(2, 3)
 
 
 def f(x, y):
-    out = x
-    out = ops.mm(out, ops.T(y))
-    out = ops.log_softmax(out, axes=(1,))
+    out = x*x
+    # out = ops.mm(out, ops.T(y))
+    # out = ops.log_softmax(out, axes=(1,))
     out = ops.sum(out, axes=(0, 1))
     return out
 

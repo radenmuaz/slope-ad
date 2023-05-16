@@ -694,7 +694,6 @@ def partial_eval_flat(
         unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
         unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
         program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
-    breakpoint()
 
     return program, pvals_out, consts
 
@@ -803,7 +802,6 @@ def tracers_to_program(
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
     program = Program(in_binders, instructions, out_vars)
     typecheck_program(program)
-    breakpoint()
     return program, constvals
 
 
@@ -880,7 +878,6 @@ def vjp_flat(f, *primals_in):
     assert all(pval.is_known for pval in primal_pvals)
     primals_out = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
-    
     f_vjp = lambda *cts: eval_program_transposed(program, transpose_inputs, cts)
     return primals_out, f_vjp
 
@@ -928,8 +925,10 @@ def eval_program_transposed(
     for eqn in program.instructions[::-1]:
         primals_in = utils.list_map(read_primal, eqn.inputs)
         cts_in = utils.list_map(read_cotangent, eqn.out_binders)
+        print('in', cts_in, primals_in)
         cts_out = eqn.op.T(cts_in, *primals_in, **eqn.params)
         utils.list_map(write_cotangent, eqn.inputs, cts_out)
+        print('out',cts_out, ct_env)
     ret = [
         read_cotangent(v)
         for v, x in zip(program.in_binders, args)

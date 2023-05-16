@@ -938,7 +938,7 @@ def grad(f):
         y, f_vjp = vjp(f, x, *xs)
         if np.shape(y) != ():
             raise TypeError
-        out = f_vjp(Array.ones(np.shape(y), np.result_type(y)))
+        out = f_vjp(Array.ones(np.shape(y)))
         return y, out
 
     return gradfun

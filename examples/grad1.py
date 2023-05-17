@@ -28,23 +28,24 @@ from slope.array import Array
 
 ## test grad
 def f(x):
-    y = x*x
+    # y = x*x
+    y = x+1
     y = y.broadcast(shape=(3,))
     y = y.sum(axes=(0,))
     return y
 
 
-# x, x_dot = Array(3), Array(1.)
-# y, f_lin = slope.ad.linearize(f, x)
-# print(y)
-# y_dot = f_lin(x_dot)
-# print(y_dot)
-# breakpoint()
+x, x_dot = Array(3), Array(1.)
+y, f_lin = slope.ad.linearize(f, x)
+print(y)
+y_dot = f_lin(x_dot)
+print(y_dot)
+breakpoint()
 
 
-g = slope.ad.grad(f)
-l = g(Array(1.))
-print(l)
+# g = slope.ad.grad(f)
+# l = g(Array(1.))
+# print(l)
 
 
 

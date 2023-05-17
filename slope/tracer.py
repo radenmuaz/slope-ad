@@ -32,8 +32,10 @@ from slope.array import Array
 
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
-        # x = Array(x) if type(x) in (int, float, bool) else x
-        # y = Array(y) if type(y) in (int, float, bool) else x
+        if type(x) in [int, float]: # TODO: more elegant way handling python numbers
+            x = y._trace.pure(x)
+        elif type(y) in [int, float]:
+            y = x._trace.pure(y)
         bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
         by = list(range((max(x.ndim, y.ndim) - y.ndim)))
         shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
@@ -511,7 +513,8 @@ class Tracer:
         if isinstance(x, Tracer):
             return x.aval
         elif type(x) in Tracer.TYPES:
-            return ValuedArrayShape(np.asarray(x))
+            # return ValuedArrayShape(np.asarray(x))
+            return Array(np.asarray(x))
         else:
             raise TypeError(x)
 

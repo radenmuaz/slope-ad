@@ -298,6 +298,8 @@ class JVPTracer(Tracer):
 class JVPTrace(Trace):
     def pure(self, val):
         aval = Tracer.get_aval(val)
+        val = aval if not isinstance(aval, Tracer) else val
+
         return JVPTracer(self, val, Array.zeros(aval.shape, aval.dtype))
 
     lift = pure
@@ -735,6 +737,7 @@ class PartialEvalTrace(Trace):
         return PartialEvalTracer(self, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracer:
+        val = Array(val)
         return PartialEvalTracer(self, PartialVal.known(val), None)
 
     pure = lift
@@ -910,7 +913,7 @@ def eval_prog_transposed(
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, np.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, Array.zeros(v.aval.shape, v.aval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:

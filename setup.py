@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='slop',
+    name='slope',
     version='0.1.0',
     url='https://github.com/radenmuaz/slope.git',
     author='Raden Muaz',

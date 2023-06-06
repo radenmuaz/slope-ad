@@ -372,36 +372,35 @@ class Max(ReduceOp):
     @staticmethod
     def jvp(primals, tangents, axes):
         (x,), (x_dot,) = primals, tangents
-        eval_out = max(x, axes)
-        locs = equal(x, broadcast(eval_out, x.shape, axes))
-        # locs = equal(x, eval_out)
-        locs = convert(locs, x_dot.dtype)
-        counts = sum(locs, axes)
-        jvp_out = sum(x_dot * locs, axes)
-        jvp_out = jvp_out / broadcast(counts, jvp_out.shape)
+        eval_out = x.max(axes)
+        locs = x.equal(eval_out.broadcast(x.shape, axes))
+        locs = locs.convert(x_dot.dtype)
+        counts = locs.sum(axes)
+        jvp_out = (x_dot * locs).sum(axes)
+        jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
 
         return [eval_out], [jvp_out]
 
     @staticmethod
     def T(cts, x, *, axes):
         (z,) = cts
-        return [broadcast(z, x.aval.shape, ())]
+        return [z.broadcast(x.aval.shape, ())]
 
 
 class Sum(ReduceOp):
     @staticmethod
-    def eval(x, *, axes):
-        return [x.sum(axes)]
+    def eval(x, *, axes, keepdims):
+        return [x.sum(axes, keepdims)]
 
     @staticmethod
-    def jvp(primals, tangents, *, axes):
+    def jvp(primals, tangents, *, axes, keepdims):
         (x,), (x_dot,) = primals, tangents
-        eval_out = sum(x, axes)
-        jvp_out = sum(x_dot, axes)
+        eval_out = x.sum(axes, keepdims)
+        jvp_out = x_dot.sum(axes, keepdims)
         return [eval_out], [jvp_out]
 
     @staticmethod
-    def T(cts, x, *, axes):
+    def T(cts, x, *, axes, keepdims):
         (z,) = cts
         out = z
         out = broadcast(z, x.aval.shape, axes)
@@ -437,14 +436,14 @@ class Broadcast(ShapeOp):
         # if sum(int(a<x_bdim) for a in axes) != 0:
         #     breakpoint()
 
-        return [broadcast(x, shape, axes)], [x_bdim]
+        return [x.broadcast(shape, axes)], [x_bdim]
 
     @staticmethod
     def jvp(primals, tangents, *, shape, axes):
         (x,), (x_dot,) = primals, tangents
         return (
-            [broadcast(x, shape=shape, axes=axes)],
-            [broadcast(x_dot, shape=shape, axes=axes)],
+            [x.broadcast(shape=shape, axes=axes)],
+            [x_dot.broadcast(shape=shape, axes=axes)],
         )
 
     @staticmethod
@@ -455,14 +454,12 @@ class Broadcast(ShapeOp):
     def T(cts, x, *, shape, axes):
         (z,) = cts
         out = z
-        if axes is not None:
-            out = sum(z, axes)
-        else:
-            eshape = list(shape)
-            for a in axes:
-                if a < 0:
-                    a = len(shape) + (a + 1)
-                eshape.insert(a, 1)
+        axes = list(axes)
+        for i, (dx, dz) in enumerate(zip(x.aval.shape, z.shape)):
+            if dz > dx and i not in axes:
+                axes += [i]
+        axes = tuple(axes)
+        out = z.sum(axes=axes)
         return [out]
 
 
@@ -480,7 +477,7 @@ class Reshape(ShapeOp):
     @staticmethod
     def jvp(primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
-        return [reshape(x, shape)], [reshape(x_dot, shape)]
+        return [x.reshape(shape)], [x_dot.reshape(shape)]
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
@@ -489,7 +486,7 @@ class Reshape(ShapeOp):
     @staticmethod
     def T(cts, x, *, shape):
         (z,) = cts
-        return [reshape(z, x.aval.shape)]
+        return [z.reshape(x.aval.shape)]
 
 
 class Transpose(ShapeOp):
@@ -598,9 +595,9 @@ def min(x, y):
     return -slope.RT.bind1(Max, -x, -y)
 
 
-# ReduceOps
-def sum(x, axes=None):
-    return slope.RT.bind1(Sum, x, axes=axes)
+# # ReduceOps
+# def sum(x, axes=None, keepdims=None):
+#     return slope.RT.bind1(Sum, x, axes=axes, keepdims=keepdims)
 
 
 def mean(x, axes=None):
@@ -739,12 +736,12 @@ def mean(x, axes=None):
     return x_sum / N
 
 
-def log_softmax(x, axes=(-1,)):
-    x_max = max(x, axes)
-    x_max = broadcast(x_max, x.shape, (-1,))
-    # x_s = x - stop_gradient(x_max)
-    x_s = x - x_max
-    x_s_se = sum(exp(x_s), axes)
-    x_s_se = broadcast(x_s_se, x.shape, (-1,))
-    x_s_lse = log(x_s_se)
-    return x_s - x_s_lse
+# def log_softmax(x, axes=(-1,)):
+#     x_max = max(x, axes)
+#     x_max = broadcast(x_max, x.shape, (-1,))
+#     # x_s = x - stop_gradient(x_max)
+#     x_s = x - x_max
+#     x_s_se = sum(exp(x_s), axes)
+#     x_s_se = broadcast(x_s_se, x.shape, (-1,))
+#     x_s_lse = log(x_s_se)
+#     return x_s - x_s_lse

@@ -15,13 +15,15 @@ y = ad.Array(np.random.randn(2, 3))
 
 def f(x, y):
     out = x
-    out = out + ad.Array(np.random.randn(1, 3))
-    out = ops.dot(out, ops.T(y))
-    out = ops.log_softmax(out, axis=(1,))
-    out = ops.reduce_sum(out, axis=(0, 1))
+    # out = out + ad.Array(np.random.randn(1, 3))
+    # out = out.T
+    out = out.dot(y.T)
+    # out = out.log_softmax(1)
+    # out = out.sum(axes=(0, 1))
+    out = out.sum()
     return out
 
-
+# print(f(x,y))
 out, grad_out = ad.grad(f)(x, y)
 print(x)
 print(y)

@@ -194,7 +194,9 @@ class Array:
     transpose = lambda self, perm: self.__class__(np.transpose(self.val, perm))
     expand_dims = lambda self, axes: self.__class__(np.expand_dims(self.val, axes))
     swapaxes = lambda self, a1, a2: self.__class__(np.swapaxes(self.val, a1, a2))
-    broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
+    def broadcast_to(self, shape):
+        return self.__class__(np.broadcast_to(self.val, shape))
+    # broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
 
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
@@ -202,7 +204,7 @@ class Array:
     def broadcast(self, shape, axes=None):
         if axes is not None:
             for a in sorted(axes):
-                self = self.expand_dims(self, a)
+                self = self.expand_dims(a)
         return self.broadcast_to(shape)
 
     # TODO:
@@ -327,9 +329,9 @@ class Array:
         return m - ss.log()
 
     def dot(self, w):
-        x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-        w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).T
-        return (x * w).sum(-1).reshape(*x.shape[0:-2], -1)
+        x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
+        w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
+        return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
     def sqrt(self):
         return self.pow(0.5)

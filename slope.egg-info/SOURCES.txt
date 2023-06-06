@@ -1,0 +1,15 @@
+README.md
+setup.py
+slope/__init__.py
+slope/ad.py
+slope/array.py
+slope/array_shape.py
+slope/ops.py
+slope/tracer.py
+slope/utils.py
+slope/xla.py
+slope.egg-info/PKG-INFO
+slope.egg-info/SOURCES.txt
+slope.egg-info/dependency_links.txt
+slope.egg-info/requires.txt
+slope.egg-info/top_level.txt

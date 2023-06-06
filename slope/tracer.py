@@ -47,7 +47,7 @@ def binaryop_decor(op_fn):
 
 
 def reduceop_decor(op_fn):
-    def wrapped_fn(x, axes, keepdim=False):
+    def wrapped_fn(x, axes=None, keepdims=False):
         if axes is None:
             axes = tuple(range(x.ndim))
         elif isinstance(axes, int):
@@ -55,7 +55,7 @@ def reduceop_decor(op_fn):
         axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
         ret = op_fn(x, axes)
 
-        if keepdim:
+        if keepdims:
             if len(ret.shape) == 0:
                 shape = (1,)
             else:
@@ -232,8 +232,8 @@ class Tracer:
         return self.equal(x)
 
     @reduceop_decor
-    def sum(self, axes=None, keepdim=False):
-        return slope.RT.bind1(ops.Sum, self, axes=axes)
+    def sum(self, axes=None, keepdims=False):
+        return slope.RT.bind1(ops.Sum, self, axes=axes, keepdims=keepdims)
 
     @reduceop_decor
     def max(self, axes=None, keepdim=False):
@@ -256,6 +256,11 @@ class Tracer:
         return ops.Broadcast.do(self, shape=shape, axes=axes)
 
     def reshape(self, shape):
+        if -1 in shape:
+            shape_ = shape
+            others = math.prod([d for d in shape if d != -1])
+            numel = math.prod(self.shape)
+            shape = tuple(d if d != -1 else (numel // others) for d in shape)
         return ops.Reshape.do(self, shape=shape)
 
     def transpose(self, perm):
@@ -388,9 +393,9 @@ class Tracer:
         return self.transpose(perm)
 
     def _softmax(self, axis):
-        m = self - self.max(axis=axis, keepdim=True)
+        m = self - self.max(axes=axis, keepdims=True)
         e = m.exp()
-        return m, e, e.sum(axis=axis, keepdim=True)
+        return m, e, e.sum(axes=axis, keepdims=True)
 
     def softmax(self, axis=-1):
         _, e, ss = self._softmax(axis)
@@ -401,9 +406,9 @@ class Tracer:
         return m - ss.log()
 
     def dot(self, w):
-        x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-        w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).T
-        return (x * w).sum(-1).reshape(*x.shape[0:-2], -1)
+        x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
+        w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
+        return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
     def sqrt(self):
         return self.pow(0.5)

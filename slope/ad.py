@@ -921,8 +921,9 @@ def eval_prog_transposed(
 
     utils.list_map(write_primal, prog.in_binders, args)
     utils.list_map(write_cotangent, prog.outs, cotangents)
+    # print(len(prog.instrs))
     # for i, instr in enumerate(prog.instrs[::-1]):
-        # print(i, instr)
+    #     print(i, instr)
     for instr in prog.instrs[::-1]:
         primals_in = utils.list_map(read_primal, instr.inputs)
         cts_in = utils.list_map(read_cotangent, instr.out_binders)
@@ -941,7 +942,8 @@ def grad(f):
         y, f_vjp = vjp(f, x, *xs)
         if np.shape(y) != ():
             raise TypeError
-        out = f_vjp(Array.ones(np.shape(y)))
+        # out = f_vjp(Array.ones(np.shape(y)))
+        out = f_vjp(Array.ones(shape=()))
         return y, out
 
     return gradfun

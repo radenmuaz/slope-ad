@@ -18,7 +18,7 @@ def f(x, y):
     # out = out + ad.Array(np.random.randn(1, 3))
     # out = out.T
     out = out.dot(y.T)
-    # out = out.log_softmax(1)
+    out = out.log_softmax(1)
     # out = out.sum(axes=(0, 1))
     out = out.sum()
     return out

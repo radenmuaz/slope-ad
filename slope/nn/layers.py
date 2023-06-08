@@ -28,19 +28,11 @@ def Fn(fun, **fun_kwargs):
     apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
     return init_fun, apply_fun
 
-
-Relu = Fn(ops.relu)
-Exp = Fn(ops.exp)
-LogSoftmax = Fn(ops.log_softmax, axis=(-1,))
-Softmax = Fn(ops.softmax, axis=(-1,))
-
-
 def Identity():
     """Layer construction function for an identity layer."""
     init_fun = lambda input_shape: (input_shape, ())
     apply_fun = lambda params, inputs, **kwargs: inputs
     return init_fun, apply_fun
-
 
 def serial(*layers):
     init_funs, apply_funs = zip(*layers)

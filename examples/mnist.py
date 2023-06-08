@@ -9,6 +9,7 @@ import numpy as np
 from tqdm import tqdm
 
 import array
+from slope.array import Array
 import gzip
 import os
 from os import path
@@ -18,7 +19,7 @@ import urllib.request
 import numpy as np
 
 
-_DATA = "/tmp/jax_example_data/"
+_DATA = "/tmp/slope_data/"
 
 
 def download(url, filename):
@@ -103,11 +104,11 @@ def accuracy(params, batch):
 
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
-        layers.Fn(lambda x: ops.reshape(x, shape=(x.shape[0], math.prod(x.shape[1:])))),
+        layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         layers.Dense(200),
         layers.Fn(ops.relu),
         layers.Dense(10),
-        layers.Fn(lambda x: ops.log_softmax(x, axes=(-1,))),
+        layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
     _, init_params = init_random_params((-1, 28 * 28))
 
@@ -129,17 +130,18 @@ if __name__ == "__main__":
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
                 # yield train_images[batch_idx][0], train_labels[batch_idx][0]
-                yield train_images[batch_idx], train_labels[batch_idx]
+                yield Array(train_images[batch_idx]), Array(train_labels[batch_idx])
 
     batches = data_stream()
 
     opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
     # opt_init, opt_update, get_params = optim.adam(step_size)
-
     opt_state = opt_init(init_params)
 
     def update(i, opt_state, batch):
+
         params = get_params(opt_state)
+        breakpoint()
         loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
@@ -156,36 +158,7 @@ if __name__ == "__main__":
 
         params = get_params(opt_state)
         # train_acc = accuracy(params, (train_images, train_labels))
-        test_acc = accuracy(params, (test_images, test_labels))
+        test_acc = accuracy(params, (Array(test_images), Array(test_labels)))
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         # print(f"Training set accuracy {train_acc}")
         print(f"Test set accuracy {test_acc}")
-
-# dot product
-# x = np.random.randn(1,3)
-# y = np.random.randn(2,3)
-
-# def f(x, y):
-#     out = x
-#     out = ops.dot(out, ops.T(y))
-#     out = ops.softmax(out, axis=(1,))
-#     out = ops.reduce_sum(out, axis=(0,1))
-#     return out
-
-# out, grad_out = slope.grad(f)(x, y)
-# print(x)
-# print(y)
-# print(out)
-# print(grad_out)
-
-
-# def f(x,y):
-#     out = ops.dot(x, ops.T(y))
-#     # out = ops.mul(x,y)
-#     return out
-
-# x_dot=y_dot=np.array([[1,1,1],[1,1,1]])
-# p, t= slope.jvp(f, (x,y), (x_dot,y_dot))
-#
-# print(p)
-# print(t)

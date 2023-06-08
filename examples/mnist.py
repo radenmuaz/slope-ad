@@ -91,14 +91,12 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    return -ops.reduce_sum(preds * targets, axes=(0, 1))
-    # return -ops.reduce_mean(preds * targets, axis=(0, 1))
-
+    return -(preds * targets).sum(axes=(0, 1))
 
 def accuracy(params, batch):
     inputs, targets = batch
     target_class = np.argmax(targets, axis=-1)
-    predicted_class = np.argmax(predict(params, inputs), axis=-1)
+    predicted_class = np.argmax(predict(params, inputs).val, axis=-1)
     return np.mean(predicted_class == target_class)
 
 
@@ -106,7 +104,7 @@ if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         layers.Dense(200),
-        layers.Fn(ops.relu),
+        # layers.Fn(lambda x: x.maximum(Array.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
@@ -141,7 +139,6 @@ if __name__ == "__main__":
     def update(i, opt_state, batch):
 
         params = get_params(opt_state)
-        breakpoint()
         loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
@@ -153,7 +150,7 @@ if __name__ == "__main__":
         for i in tqdm(range(num_batches)):
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
-                print(f"loss: {loss:.2f}")
+                print(f"loss: {loss.val:.2f}")
         epoch_time = time.time() - start_time
 
         params = get_params(opt_state)

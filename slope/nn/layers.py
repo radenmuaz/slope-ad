@@ -15,9 +15,11 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
     def apply_fun(params, inputs, **kwargs):
         W, b = params
         x = inputs
-        out = ops.mm(x, W)
-        out = out + ops.broadcast(b, out.shape, (0,))
-        return out
+        x = x.dot(W)
+        x = x + b.broadcast((1, *b.shape), (0,))
+        # out = ops.mm(x, W)
+        # out = out + ops.broadcast(b, out.shape, (0,))
+        return x
 
     return init_fun, apply_fun
 

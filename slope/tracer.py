@@ -26,6 +26,7 @@ import slope
 from slope import ops
 from slope.array_shape import ValuedArrayShape
 from slope.array import Array
+from slope.compound_ops import CompoundOpsMixin
 
 # patch numpy
 
@@ -66,7 +67,7 @@ def reduceop_decor(op_fn):
     return wrapped_fn
 
 
-class Tracer(ops.CompoundOpsMixin):
+class Tracer(CompoundOpsMixin):
     TYPES = {
         bool,
         int,

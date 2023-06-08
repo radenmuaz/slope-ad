@@ -23,11 +23,11 @@ import numpy as np
 import functools
 import slope
 from slope.array_shape import ValuedArrayShape
-from slope import ops
+from slope.compound_ops import CompoundOpsMixin
 # patch numpy
 
 
-class Array(ops.CompoundOpsMixin):
+class Array(CompoundOpsMixin):
     __array_priority__ = 2000
     default_dtype = np.float32
 
@@ -41,7 +41,7 @@ class Array(ops.CompoundOpsMixin):
     ndim = property(lambda self: self.val.ndim)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.val)}"
+        return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
 
     def __str__(self):
         return repr(self)
@@ -59,8 +59,8 @@ class Array(ops.CompoundOpsMixin):
         return cls.full(shape, 1., dtype, **kwargs)
 
     @classmethod
-    def zeros_like(cls, **kwargs):
-        return cls.zeros(*cls.shape, **kwargs)
+    def zeros_like(cls, other, **kwargs):
+        return cls.zeros(other.shape, dtype=other.dtype, **kwargs)
 
     @classmethod
     def empty(cls, *shape, **kwargs):

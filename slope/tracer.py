@@ -144,24 +144,7 @@ class Tracer(CompoundOpsMixin):
     def div(self, other):
         return slope.RT.bind1(ops.Div, self, other)
 
-    def pow(self, y):
-        assert type(y) is int
-        if y == 0:
-            return self.ones_like(x)
-        is_reciprocal = y < 0
-        if is_reciprocal:
-            y = -y
-        acc = None
-        while y > 0:
-            if y & 1:
-                acc = x if acc is None else acc * x
-            y >>= 1
-            if y > 0:
-                x = x * x
-        ret = acc
-        if is_reciprocal:
-            ret = self.ones_like(acc) / acc
-        return ret
+   
 
     @binaryop_decor
     def equal(self, other):
@@ -170,10 +153,6 @@ class Tracer(CompoundOpsMixin):
     @binaryop_decor
     def maximum(self, other):
         return ops.Maximum.do(self, other)
-
-    @binaryop_decor
-    def mininum(self, other):
-        return -(-self.maximum(-other))
 
     def __neg__(self):
         return self.neg()
@@ -234,11 +213,11 @@ class Tracer(CompoundOpsMixin):
 
     @reduceop_decor
     def sum(self, axes=None, keepdims=False):
-        return slope.RT.bind1(ops.Sum, self, axes=axes, keepdims=keepdims)
+        return ops.Sum.do(self, axes=axes, keepdims=keepdims)
 
     @reduceop_decor
     def max(self, axes=None, keepdim=False):
-        return slope.RT.bind1(ops.Max, self, axes=axes)
+        return ops.Max.do(self, axes=axes)
 
     # Shape
     def broadcast(self, shape, axes=None):

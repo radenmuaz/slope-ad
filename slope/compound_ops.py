@@ -7,6 +7,25 @@ import math
 import functools
 import itertools
 class CompoundOpsMixin:
+    def pow(self, y):
+        assert type(y) is int
+        if y == 0:
+            return self.ones_like(x)
+        is_reciprocal = y < 0
+        if is_reciprocal:
+            y = -y
+        acc = None
+        while y > 0:
+            if y & 1:
+                acc = x if acc is None else acc * x
+            y >>= 1
+            if y > 0:
+                x = x * x
+        ret = acc
+        if is_reciprocal:
+            ret = self.ones_like(acc) / acc
+        return ret
+     
     def mean(self, axes=None, keepdims=False):
         out = self.sum(axes=axes, keepdim=keepdims)
         return out * (math.prod(out.shape) / math.prod(self.shape))

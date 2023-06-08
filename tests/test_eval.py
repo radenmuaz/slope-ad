@@ -2,7 +2,7 @@ import unittest
 
 import slope
 
-class TestOps(unittest.TestCase):
+class TestEval(unittest.TestCase):
     def test_add(self):
         data = [1, 2, 3]
         result = sum(data)

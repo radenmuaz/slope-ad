@@ -180,7 +180,7 @@ class Exp(UnaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [exp(x)], [x_dot * exp(x)]
+        return [x.exp()], [x_dot * x.exp()]
 
 
 class Log(UnaryOp):
@@ -191,7 +191,7 @@ class Log(UnaryOp):
     @staticmethod
     def jvp(primals, tangents):
         (x,), (x_dot,) = primals, tangents
-        return [log(x)], [x_dot / x]
+        return [x.log()], [x_dot / x]
 
 
 class Neg(UnaryOp):
@@ -297,12 +297,15 @@ class Maximum(BinaryOp):
     @staticmethod
     def jvp(primals, tangents):
         def _balanced_eq(x, z, y):
-          return (((x == z).where(Array.ones_like(z), Array.zeros_like(z))) / 
-                     ((y == z).where(Array.full_like(z, 2), Array.ones_like(z))))
+            return ((x == z).where(Array.ones_like(z), Array.zeros_like(z))) / (
+                (y == z).where(Array.full_like(z, 2), Array.ones_like(z))
+            )
+
         (x, y), (x_dot, y_dot) = primals, tangents
         eval_out = x.maximum(y)
-        jvp_out = (x_dot * _balanced_eq(x, eval_out, y) +
-                   y_dot * _balanced_eq(y, eval_out, x))
+        jvp_out = x_dot * _balanced_eq(x, eval_out, y) + y_dot * _balanced_eq(
+            y, eval_out, x
+        )
 
         return [eval_out], [jvp_out]
 
@@ -311,11 +314,13 @@ class Maximum(BinaryOp):
         (z_bar,) = cts
         return [z_bar, None]
 
+
 # max_p: core.Primitive = standard_naryop([_any, _any], 'max')
 # ad.defjvp2(max_p,
 #            lambda g, ans, x, y: mul(g, _balanced_eq(x, ans, y)),
 #            lambda g, ans, x, y: mul(g, _balanced_eq(y, ans, x)))
 # mlir.register_lowering(max_p, partial(_nary_lower_hlo, mlir.max_hlo))
+
 
 class Equal(BinaryOp):
     @staticmethod
@@ -378,7 +383,7 @@ class Sum(ReduceOp):
     def T(cts, x, *, axes, keepdims):
         (z,) = cts
         out = z
-        out = broadcast(z, x.aval.shape, axes)
+        out = z.broadcast(x.aval.shape, axes)
         return [out]
 
 

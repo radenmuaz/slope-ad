@@ -28,9 +28,14 @@ from slope.array_shape import ValuedArrayShape
 from slope.array import Array
 from slope.compound_ops import CompoundOpsMixin
 
+
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
-        if type(x) in [bool, int, float]:  # TODO: more elegant way handling python types
+        if type(x) in [
+            bool,
+            int,
+            float,
+        ]:  # TODO: more elegant way handling python types
             x = y._trace.pure(x)
         elif type(y) in [bool, int, float]:
             y = x._trace.pure(y)
@@ -122,7 +127,7 @@ class Tracer(CompoundOpsMixin):
     full_like = Array.full_like
     zeros_like = Array.zeros_like
     ones_like = Array.ones_like
-    
+
     @property
     def ndim(self):
         return len(self.shape)
@@ -135,6 +140,7 @@ class Tracer(CompoundOpsMixin):
 
     def convert(x, dtype):
         return ops.Convert.do(x, dtype=dtype)
+    astype = convert
 
     def exp(x):
         return ops.Exp.do(x)
@@ -225,7 +231,7 @@ class Tracer(CompoundOpsMixin):
 
     def __eq__(self, x):
         return self.equal(x)
-    
+
     def __ne__(self, x):
         return 1.0 - self.equal(x)
 

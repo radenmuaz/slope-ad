@@ -44,8 +44,7 @@ class Array(CompoundOpsMixin):
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
 
-    def __str__(self):
-        return repr(self)
+    __str__ = __repr__
 
     @classmethod
     def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
@@ -166,7 +165,6 @@ class Array(CompoundOpsMixin):
     equal = lambda self, other: np.equal(self, other)
     not_equal = lambda self, other: np.not_equal(self, other)
     maximum = lambda self, other: np.maximum(self, other)
-    minimum = lambda self, other: -self.maximum(-self, -other)
     __neg__ = neg
     __add__ = add
     __radd__ = lambda self, other: self.__class__.add(other, self)

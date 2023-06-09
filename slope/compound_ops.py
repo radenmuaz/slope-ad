@@ -9,10 +9,11 @@ import itertools
 
 
 class CompoundOpsMixin:
-    def where(self, input_, other):
-        cond = (self != 0.0)
-        return cond * input_ + (1.0 - cond) * other
-    
+    def where(self, trueval, falseval):
+        cond = self != 0.0
+        cond = cond.convert(trueval.dtype) # TODO: type promotion logic
+        return cond * trueval + (1.0 - cond) * falseval
+
     def pow(self, y):
         assert type(y) is int
         if y == 0:
@@ -41,6 +42,9 @@ class CompoundOpsMixin:
     def mean(self, axes=None, keepdims=False):
         out = self.sum(axes=axes, keepdim=keepdims)
         return out * (math.prod(out.shape) / math.prod(self.shape))
+    
+    def minimum(self, other):
+        return -self.maximum(-self, -other)
 
     def min(self, axes=None, keepdims=False):
         return -((-self).max(self, axes, keepdims))

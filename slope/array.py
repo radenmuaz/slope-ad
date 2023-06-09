@@ -24,6 +24,7 @@ import functools
 import slope
 from slope.array_shape import ValuedArrayShape
 from slope.compound_ops import CompoundOpsMixin
+
 # patch numpy
 
 
@@ -45,22 +46,30 @@ class Array(CompoundOpsMixin):
 
     def __str__(self):
         return repr(self)
-    
+
     @classmethod
     def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
         return cls(np.full(shape, fill_value=fill_value, dtype=dtype, **kwargs))
 
     @classmethod
     def zeros(cls, shape, dtype=default_dtype, **kwargs):
-        return cls.full(shape, 0., dtype, **kwargs)
+        return cls.full(shape, 0.0, dtype, **kwargs)
 
     @classmethod
     def ones(cls, shape, dtype=default_dtype, **kwargs):
-        return cls.full(shape, 1., dtype, **kwargs)
+        return cls.full(shape, 1.0, dtype, **kwargs)
+    
+    @classmethod
+    def full_like(cls, other, fill_value, **kwargs):
+        return cls.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
 
     @classmethod
     def zeros_like(cls, other, **kwargs):
         return cls.zeros(other.shape, dtype=other.dtype, **kwargs)
+
+    @classmethod
+    def ones_like(cls, other, **kwargs):
+        return cls.ones(other.shape, dtype=other.dtype, **kwargs)
 
     @classmethod
     def empty(cls, *shape, **kwargs):
@@ -68,9 +77,7 @@ class Array(CompoundOpsMixin):
 
     @classmethod
     def eye(cls, dim, **kwargs):
-        return (
-            cls(np.eye(dim), **kwargs)
-        )
+        return cls(np.eye(dim), **kwargs)
 
     @classmethod
     def arange(cls, stop, start=0, step=1, **kwargs):
@@ -139,6 +146,7 @@ class Array(CompoundOpsMixin):
             np.exp,
             np.log,
             np.equal,
+            np.not_equal,
             np.maximum,
         ]
         inputs = [i.val if type(i) is self.__class__ else i for i in inputs]
@@ -156,6 +164,7 @@ class Array(CompoundOpsMixin):
     div = lambda self, other: np.divide(self, other)
     pow = lambda self, other: np.power(self, other)
     equal = lambda self, other: np.equal(self, other)
+    not_equal = lambda self, other: np.not_equal(self, other)
     maximum = lambda self, other: np.maximum(self, other)
     minimum = lambda self, other: -self.maximum(-self, -other)
     __neg__ = neg
@@ -170,6 +179,7 @@ class Array(CompoundOpsMixin):
     __truerdiv__ = __rdiv__
     __pow__ = pow
     __eq__ = lambda self, other: self.equal(other)
+    __ne__ = lambda self, other: self.not_equal(other)
     __ge__ = lambda self, other: self.maximum(other).equal(self)
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
@@ -180,8 +190,6 @@ class Array(CompoundOpsMixin):
 
     def sum(self, axes=None, keepdims=False):
         return self.__class__(np.sum(self.val, axis=axes, keepdims=keepdims))
-
-    
 
     # Shape
     reshape = lambda self, shape: self.__class__(np.reshape(self.val, shape))

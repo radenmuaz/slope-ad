@@ -28,14 +28,11 @@ from slope.array_shape import ValuedArrayShape
 from slope.array import Array
 from slope.compound_ops import CompoundOpsMixin
 
-# patch numpy
-
-
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
-        if type(x) in [int, float]: # TODO: more elegant way handling python numbers
+        if type(x) in [bool, int, float]:  # TODO: more elegant way handling python types
             x = y._trace.pure(x)
-        elif type(y) in [int, float]:
+        elif type(y) in [bool, int, float]:
             y = x._trace.pure(y)
         bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
         by = list(range((max(x.ndim, y.ndim) - y.ndim)))
@@ -72,12 +69,7 @@ class Tracer(CompoundOpsMixin):
         bool,
         int,
         float,
-        # np.bool_,
-        # np.int32,
-        # np.int64,
-        # np.float32,
-        # np.float64,
-        Array
+        Array,
     }
     __array_priority__ = 1000
 
@@ -98,17 +90,42 @@ class Tracer(CompoundOpsMixin):
     def full_lower(self):
         return self.val
 
-    # def __repr__(self):
-    #     return f"{self.__class__.__name__}: {repr(self.val)}"
+    def __repr__(self):
+        return f"{self.__class__.__name__}: {repr(self.val)}"
 
-    # def __str__(self):
-    #     return repr(self)
+    def __str__(self):
+        return repr(self)
 
+    @staticmethod
+    def get_aval(x):
+        if isinstance(x, Tracer):
+            return x.aval
+        elif type(x) in Tracer.TYPES:
+            return Array(np.asarray(x))
+        else:
+            breakpoint()
+            raise TypeError(x)
+
+    def full_lower(self):
+        return self
+
+    def __getattr__(self, name):
+        try:
+            return getattr(self.aval, name)
+        except AttributeError:
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+
+    # Array creation:
+    full = Array.full
+    zeros = Array.zeros
+    ones = Array.ones
+    full_like = Array.full_like
+    zeros_like = Array.zeros_like
+    ones_like = Array.ones_like
+    
     @property
     def ndim(self):
         return len(self.shape)
-
-    # UnaryOps
 
     def identity(x):
         return ops.Identity.do(x)
@@ -130,11 +147,11 @@ class Tracer(CompoundOpsMixin):
 
     @binaryop_decor
     def add(self, other):
-        return slope.RT.bind1(ops.Add, self, other)
+        return ops.Add.do(self, other)
 
     @binaryop_decor
     def sub(self, other):
-        return slope.RT.bind1(ops.Sub, self, other)
+        return ops.Sub.do(self, other)
 
     @binaryop_decor
     def mul(self, other):
@@ -142,9 +159,7 @@ class Tracer(CompoundOpsMixin):
 
     @binaryop_decor
     def div(self, other):
-        return slope.RT.bind1(ops.Div, self, other)
-
-   
+        return ops.Div.do(self, other)
 
     @binaryop_decor
     def equal(self, other):
@@ -210,6 +225,9 @@ class Tracer(CompoundOpsMixin):
 
     def __eq__(self, x):
         return self.equal(x)
+    
+    def __ne__(self, x):
+        return 1.0 - self.equal(x)
 
     @reduceop_decor
     def sum(self, axes=None, keepdims=False):
@@ -230,7 +248,6 @@ class Tracer(CompoundOpsMixin):
 
     def reshape(self, shape):
         if -1 in shape:
-            shape_ = shape
             others = math.prod([d for d in shape if d != -1])
             numel = math.prod(self.shape)
             shape = tuple(d if d != -1 else (numel // others) for d in shape)
@@ -238,22 +255,3 @@ class Tracer(CompoundOpsMixin):
 
     def transpose(self, perm):
         return ops.Transpose.do(self, perm=perm)
-    @staticmethod
-    def get_aval(x):
-        if isinstance(x, Tracer):
-            return x.aval
-        elif type(x) in Tracer.TYPES:
-            # return ValuedArrayShape(np.asarray(x))
-            return Array(np.asarray(x))
-        else:
-            breakpoint()
-            raise TypeError(x)
-
-    def full_lower(self):
-        return self
-
-    def __getattr__(self, name):
-        try:
-            return getattr(self.aval, name)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")

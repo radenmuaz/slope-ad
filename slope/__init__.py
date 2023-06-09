@@ -5,6 +5,7 @@ RT = ad.Runtime()
 
 # patch numpy
 import numpy as np
+
 # from slope import tracer
 
 # np.ndarray.broadcast = tracer.Tracer.broadcast

@@ -39,6 +39,7 @@ from slope.array import Array
 from slope.tracer import Tracer
 from slope import ops
 
+
 class PPrint:
     lines: List[Tuple[int, str]]
 
@@ -182,8 +183,10 @@ class Trace:
 
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
+
     def run_op(self, op, tracers, params):
         return op.eval(*tracers, **params)
+
 
 # def mapped_aval(batch_dim, aval):
 #     shape = list(aval.shape)
@@ -283,6 +286,7 @@ def vmap(f, in_axes):
         return tree_unflatten(out_tree(), outs_flat)
 
     return batched_f
+
 
 class JVPTracer(Tracer):
     def __init__(self, trace, primal, tangent):
@@ -409,24 +413,26 @@ class Prog(NamedTuple):
             PPrint.pp(repr(instr.op.__class__))
             >> self.pp_params(instr.params)
             >> PPrint.pp(
-                " ".join(names[x] if isinstance(x, Var) else str(x.val) for x in instr.inputs)
+                " ".join(
+                    names[x] if isinstance(x, Var) else str(x.val) for x in instr.inputs
+                )
             )
         )
         return lhs >> PPrint.pp(" = ") >> rhs
 
-
     def pp_params(self, params: Dict[str, Any]) -> PPrint:
         items = sorted(params.items())
         if items:
-            return PPrint.pp(" [ ") >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items]) >> PPrint.pp(" ] ")
+            return (
+                PPrint.pp(" [ ")
+                >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items])
+                >> PPrint.pp(" ] ")
+            )
         else:
             return PPrint.pp(" ")
-        
-    
 
     def var_str(self, names: DefaultDict[Var, str], v) -> str:
         return f"{names[v]}:{v.aval.str_short()}"
-
 
 
 class ProgType(NamedTuple):
@@ -494,7 +500,6 @@ def eval_prog(prog: Prog, args: List[Any]) -> List[Any]:
 
 def prog_as_fun(prog: Prog):
     return lambda *args: eval_prog(prog, args)
-
 
 
 class ProgTracer(Tracer):
@@ -585,9 +590,7 @@ class ProgBuilder:
         prog, constvals = self._inline_literals(prog, constvals)
         return prog, constvals
 
-    def _inline_literals(
-        self, prog: Prog, consts: List[Any]
-    ) -> Tuple[Prog, List[Any]]:
+    def _inline_literals(self, prog: Prog, consts: List[Any]) -> Tuple[Prog, List[Any]]:
         const_binders, other_binders = utils.split_list(prog.in_binders, len(consts))
         scalars = [
             type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts
@@ -722,7 +725,6 @@ class PartialEvalTracer(Tracer):
         self._trace = trace
         self.pval = pval
         self.proto = proto
-
 
     aval = property(lambda self: self.pval.aval)
 
@@ -923,7 +925,7 @@ def eval_prog_transposed(
     utils.list_map(write_cotangent, prog.outs, cotangents)
     # print(len(prog.instrs))
     # for i, instr in enumerate(prog.instrs[::-1]):
-        # print(i, instr)
+    # print(i, instr)
     for instr in prog.instrs[::-1]:
         primals_in = utils.list_map(read_primal, instr.inputs)
         cts_in = utils.list_map(read_cotangent, instr.out_binders)
@@ -947,6 +949,7 @@ def grad(f):
         return y, out
 
     return gradfun
+
 
 class Runtime:
     def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):

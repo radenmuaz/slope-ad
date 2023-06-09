@@ -8,6 +8,7 @@ from typing import (
 import math
 from slope.array import Array
 
+
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
     if isinstance(in_axis, int):
         in_size = shape[in_axis]
@@ -57,7 +58,9 @@ def variance_scaling(
         if distribution == "normal":
             return Array(np.random.normal(size=shape).astype(dtype) * np.sqrt(variance))
         elif distribution == "uniform":
-            return Array(np.random.uniform(size=shape.astype(dtype)) * np.sqrt(3 * variance))
+            return Array(
+                np.random.uniform(size=shape.astype(dtype)) * np.sqrt(3 * variance)
+            )
         else:
             raise ValueError(
                 f"invalid distribution for variance scaling initializer: {distribution}"

@@ -6,7 +6,13 @@ from abc import ABC, abstractmethod
 import math
 import functools
 import itertools
+
+
 class CompoundOpsMixin:
+    def where(self, input_, other):
+        cond = (self != 0.0)
+        return cond * input_ + (1.0 - cond) * other
+    
     def pow(self, y):
         assert type(y) is int
         if y == 0:
@@ -25,13 +31,20 @@ class CompoundOpsMixin:
         if is_reciprocal:
             ret = self.ones_like(acc) / acc
         return ret
-     
+
+    def cross_entropy(x, y):
+        return x * y.log()
+
+    def mse(x, y):
+        return pow((x - y), 2)
+
     def mean(self, axes=None, keepdims=False):
         out = self.sum(axes=axes, keepdim=keepdims)
         return out * (math.prod(out.shape) / math.prod(self.shape))
 
     def min(self, axes=None, keepdims=False):
         return -((-self).max(self, axes, keepdims))
+
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 

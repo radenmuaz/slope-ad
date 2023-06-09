@@ -7,6 +7,7 @@ import math
 import functools
 from slope.array import Array
 
+
 class Op(ABC):
     @classmethod
     def do(cls, *args, **params):
@@ -137,23 +138,6 @@ class Identity(UnaryOp):
         return [identity(z)]
 
 
-# class FullLike(UnaryOp):
-#     @staticmethod
-#     def eval(x, *, fill_value):
-#         return [np.full(x.shape, fill_value=fill_value, dtype=x.dtype)]
-
-#     @staticmethod
-#     def jvp(cls, primals, tangents, *, fill_value):
-#         (x,), (x_dot,) = primals, tangents
-#         return [full_like(x, fill_value)], [zeros_like(x_dot)]
-
-#     @staticmethod
-#     def T(t, x, *, fill_value):
-#         (z,) = t
-#         assert type(x) is slope.ad.UndefPrimal
-        # return [zeros_like(z)]
-
-
 class StopGradient(UnaryOp):
     @staticmethod
     def eval(x):
@@ -276,6 +260,7 @@ class Mul(BinaryOp):
         # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
         # check about __array_priority
         return [eval_out], [jvp_out]
+
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
@@ -311,25 +296,36 @@ class Maximum(BinaryOp):
 
     @staticmethod
     def jvp(primals, tangents):
-        (x, y), _ = primals, tangents
-        out_primal = x.maximum(y)
-        return [out_primal], [Array.zeros_like(x)]
+        def _balanced_eq(x, z, y):
+          return (((x == z).where(Array.ones_like(z), Array.zeros_like(z))) / 
+                     ((y == z).where(Array.full_like(z, 2), Array.ones_like(z))))
+        (x, y), (x_dot, y_dot) = primals, tangents
+        eval_out = x.maximum(y)
+        jvp_out = (x_dot * _balanced_eq(x, eval_out, y) +
+                   y_dot * _balanced_eq(y, eval_out, x))
+
+        return [eval_out], [jvp_out]
 
     @staticmethod
     def T(cts, x, y):
         (z_bar,) = cts
         return [z_bar, None]
 
+# max_p: core.Primitive = standard_naryop([_any, _any], 'max')
+# ad.defjvp2(max_p,
+#            lambda g, ans, x, y: mul(g, _balanced_eq(x, ans, y)),
+#            lambda g, ans, x, y: mul(g, _balanced_eq(y, ans, x)))
+# mlir.register_lowering(max_p, partial(_nary_lower_hlo, mlir.max_hlo))
 
 class Equal(BinaryOp):
     @staticmethod
     def eval(x, y):
-        return [np.equal(x, y)]
+        return [x.equal(y)]
 
     @staticmethod
     def jvp(primals, tangents):
         (x, y), _ = primals, tangents
-        out_primal = equal(x, y)
+        out_primal = x.equal(y)
         return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
 
     @staticmethod
@@ -338,27 +334,6 @@ class Equal(BinaryOp):
         return [z_bar, None]
 
 
-# max_p: core.Primitive = standard_naryop([_any, _any], 'max')
-# ad.defjvp2(max_p,
-#            lambda g, ans, x, y: mul(g, _balanced_eq(x, ans, y)),
-#            lambda g, ans, x, y: mul(g, _balanced_eq(y, ans, x)))
-# mlir.register_lowering(max_p, partial(_nary_lower_hlo, mlir.max_hlo))
-
-
-# def _balanced_eq(x, z, y):
-#   return div(select(_eq_meet(x, z), _ones(z), _zeros(z)),
-#              select(_eq_meet(y, z), _twos(z), _ones(z)))
-
-
-# def _eq_meet(a, b):
-#   a_dtype, b_dtype = _dtype(a), _dtype(b)
-#   if a_dtype != b_dtype:
-#     higher_dtype = dtypes.promote_types(a_dtype, b_dtype)
-#     if higher_dtype == a_dtype:
-#       a = convert_element_type(a, b_dtype)
-#     else:
-#       b = convert_element_type(b, a_dtype)
-#   return eq(a, b)
 # -----------------------
 # ReduceOps
 # -----------------------
@@ -461,7 +436,8 @@ class Broadcast(ShapeOp):
                 more_axes += [i]
         out = out.sum(axes=tuple(more_axes), keepdims=True)
         # print(axes, z.shape, x.aval.shape, more_axes, out.shape)
-        if out.shape != x.aval.shape: breakpoint()
+        if out.shape != x.aval.shape:
+            breakpoint()
         return [out]
 
 
@@ -524,221 +500,3 @@ class Transpose(ShapeOp):
     def T(cts, x, *, perm):
         (z,) = cts
         return [z.transpose(perm)]
-
-
-# UnaryOps
-def identity(x):
-    return slope.RT.bind1(Identity, x)
-
-
-def full_like(x, fill_value):
-    return slope.RT.bind1(FullLike, x, fill_value=fill_value)
-
-
-def zeros_like(x):
-    return full_like(x, 0)
-
-
-def ones_like(x):
-    return full_like(x, 1)
-
-
-def stop_gradient(x):
-    return slope.RT.bind1(StopGradient, x)
-
-
-def convert(x, dtype):
-    return slope.RT.bind1(Convert, x, dtype=dtype)
-
-
-def exp(x):
-    return slope.RT.bind1(Exp, x)
-
-
-def log(x):
-    return slope.RT.bind1(Log, x)
-
-
-def neg(x):
-    return slope.RT.bind1(Neg, x)
-
-
-## Arithmetic
-
-
-def add(x, y):
-    return slope.RT.bind1(Add, x, y)
-
-
-def sub(x, y):
-    return slope.RT.bind1(Sub, x, y)
-
-
-def mul(x, y):
-    return slope.RT.bind1(Mul, x, y)
-
-
-def div(x, y):
-    return slope.RT.bind1(Div, x, y)
-
-
-## Logic
-
-
-def equal(x, y):
-    return slope.RT.bind1(Equal, x, y)
-
-
-def max(x, y):
-    return slope.RT.bind1(Max, x, y)
-
-
-def min(x, y):
-    return -slope.RT.bind1(Max, -x, -y)
-
-
-# # ReduceOps
-# def sum(x, axes=None, keepdims=None):
-#     return slope.RT.bind1(Sum, x, axes=axes, keepdims=keepdims)
-
-
-def mean(x, axes=None):
-    if axes is None:
-        axes = tuple(range(len(x.shape)))
-    N = math.prod([x.shape[a] for a in axes])
-    return sum(x, axes) / np.float32(N)
-
-
-def max(x, axes=None):
-    return slope.RT.bind1(Max, x, axes=axes)
-
-
-# ShapeOps
-def broadcast(x, shape, axes=None):
-    return slope.RT.bind1(Broadcast, x, shape=shape, axes=axes)
-
-
-def reshape(x, shape):
-    return slope.RT.bind1(Reshape, x, shape=shape)
-
-
-def transpose(x, perm):
-    return slope.RT.bind1(Transpose, x, perm=perm)
-
-
-def expand_dims(x, axes):
-    shape = list(x.shape)
-    for a in axes:
-        if a < 0:
-            a = len(shape) + (a + 1)
-        shape.insert(a, 1)
-    x = reshape(x, shape)
-    return x
-
-
-# NN
-
-
-def T(x):
-    perm = list(range(len(x.shape)))
-    perm[-2], perm[-1] = perm[-1], perm[-2]
-    return transpose(x, perm)
-
-
-# def mm_old(x, y):
-#     x1, x2 = x.shape[-2], x.shape[-1]
-#     y1, y2 = y.shape[-2], y.shape[-1]
-#     assert x2 == y1
-#     y = T(y)
-#     # br_shape = (*x.shape[:-3], *(d, a, b))
-#     br_shape = (y2, x1, x2)
-#     x = broadcast(x, br_shape, (-3,))
-#     y = broadcast(y, br_shape, (-2,))
-#     z = x * y
-#     z = sum(z, (-1,))
-#     breakpoint()
-#     z = T(z)
-#     return z
-
-
-def mm(x, y):
-    x1, x2 = x.shape[0], x.shape[1]
-    y1, y2 = y.shape[0], y.shape[1]
-    assert x2 == y1
-    y = T(y)
-    # br_shape = (*x.shape[:-3], *(d, a, b))
-    br_shape = (y2, x1, x2)
-    x = broadcast(x, br_shape, (0,))
-    y = broadcast(y, br_shape, (1,))
-    z = x * y
-    z = sum(z, (2,))
-    z = T(z)
-    return z
-
-
-def mm_noT(x, y):
-    a, b = x.shape[-2], x.shape[-1]
-    d, c = y.shape[-2], y.shape[-1]
-    br_shape = (*x.shape[:-3], *(d, a, b))
-    # breakpoint()
-    x = broadcast(x, br_shape, (-3,))
-    y = broadcast(y, br_shape, (-2,))
-    z = x * y
-    z = sum(z, (-1,))
-    return z
-
-def softmax(x, axes):
-    x_max = max(x, axes)
-    x_max = broadcast(x_max, x.shape)
-
-    e = exp(x - x_max)
-    s_e = sum(e, axes)
-    s_e = broadcast(s_e, e.shape)
-    return e / s_e
-
-
-def cross_entropy(x, y):
-    return x * log(y)
-
-
-def mse(x, y):
-    return pow((x - y), 2)
-
-
-def pow(x, y):
-    assert type(y) is int
-    if y == 0:
-        return slope.ad.ones_like(x)
-    is_reciprocal = y < 0
-    if is_reciprocal:
-        y = -y
-    acc = None
-    while y > 0:
-        if y & 1:
-            acc = x if acc is None else acc * x
-        y >>= 1
-        if y > 0:
-            x = x * x
-    ret = acc
-    if is_reciprocal:
-        ret = ones_like(acc) / acc
-    return ret
-
-
-def mean(x, axes=None):
-    x_sum = sum(x, axes)
-    if axes is None:
-        axes = list(range(len(x.shape)))
-    N = math.prod([x.shape[a] for a in axes])
-    return x_sum / N
-
-
-# def log_softmax(x, axes=(-1,)):
-#     x_max = max(x, axes)
-#     x_max = broadcast(x_max, x.shape, (-1,))
-#     # x_s = x - stop_gradient(x_max)
-#     x_s = x - x_max
-#     x_s_se = sum(exp(x_s), axes)
-#     x_s_se = broadcast(x_s_se, x.shape, (-1,))
-#     x_s_lse = log(x_s_se)
-#     return x_s - x_s_lse

@@ -30,11 +30,13 @@ def Fn(fun, **fun_kwargs):
     apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
     return init_fun, apply_fun
 
+
 def Identity():
     """Layer construction function for an identity layer."""
     init_fun = lambda input_shape: (input_shape, ())
     apply_fun = lambda params, inputs, **kwargs: inputs
     return init_fun, apply_fun
+
 
 def serial(*layers):
     init_funs, apply_funs = zip(*layers)

@@ -9,11 +9,13 @@ class TestGrad(unittest.TestCase):
             z = Array.zeros_like(x)
             out = x.maximum(z)
             return out
-        x = Array([1,0.5,-0.4])
-        x_dot = Array([1,1,1])
+        x = Array([1,0.5,-0.4, 0, -200])
+        x_dot = Array.ones_like(x)
         y, y_dot = ad.jvp(f, (x,), (x_dot,))
+        print(x)
         print(y)
         print(y_dot)
+    
         # y, f_lin = ad.linearize(f, x)
         # y_dot = f_lin(x_dot)
     # def test_grad1(self):

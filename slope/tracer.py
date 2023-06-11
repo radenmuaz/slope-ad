@@ -7,6 +7,7 @@ from typing import (
     Sequence,
     Callable,
     Tuple,
+    NamedTuple,
     List,
     Any,
     List,
@@ -140,6 +141,7 @@ class Tracer(CompoundOpsMixin):
 
     def convert(x, dtype):
         return ops.Convert.do(x, dtype=dtype)
+
     astype = convert
 
     def exp(x):
@@ -261,3 +263,17 @@ class Tracer(CompoundOpsMixin):
 
     def transpose(self, perm):
         return ops.Transpose.do(self, perm=perm)
+
+    def __getitem__(self, idx):
+        raise NotImplementedError
+
+    def __setitem__(self, idx, val):
+        raise NotImplementedError
+
+    def gather(
+        self,
+        gather_indices,
+        dnums,
+        gather_slice_shape,
+    ):
+        return ops.Gather.do(self, gather_indices, dnums, gather_slice_shape)

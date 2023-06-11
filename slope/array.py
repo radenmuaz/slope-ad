@@ -57,7 +57,7 @@ class Array(CompoundOpsMixin):
     @classmethod
     def ones(cls, shape, dtype=default_dtype, **kwargs):
         return cls.full(shape, 1.0, dtype, **kwargs)
-    
+
     @classmethod
     def full_like(cls, other, fill_value, **kwargs):
         return cls.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
@@ -195,5 +195,24 @@ class Array(CompoundOpsMixin):
     expand_dims = lambda self, axes: self.__class__(np.expand_dims(self.val, axes))
     swapaxes = lambda self, a1, a2: self.__class__(np.swapaxes(self.val, a1, a2))
     broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
+    __getitem__ = lambda self, idx: self.__class__(self.val.__getitem__(idx))
+    __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
+    gather = lambda self, idx, axis: self.__class__(
+        np.take_along_axis(self.val, idx, axis)
+    )
+    choose = select = lambda self, *vals, idx: self.__class__(np.choose(idx, *vals))
+
+    def scatter(operand, indices, updates, shape):
+        target = np.zeros(shape, dtype=updates.dtype)
+        indices = tuple(indices.reshape(-1, indices.shape[-1]).T)
+        updates = updates.ravel()
+        np.add.at(target, indices, updates)
+        return target
+
+    where = lambda self, condval, trueval, falseval: self.__class__(
+        np.where(condval, trueval, falseval)
+    )
+
+    # slice = lambda self, start, end, step: self.__class__(self.val.__getitem__(slice(start, end, step)))
     # def broadcast_to(self, shape):
     #     return self.__class__(np.broadcast_to(self.val, shape))

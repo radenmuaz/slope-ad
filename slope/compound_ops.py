@@ -11,7 +11,7 @@ import itertools
 class CompoundOpsMixin:
     def where(self, trueval, falseval):
         cond = self != 0.0
-        cond = cond.convert(trueval.dtype) # TODO: type promotion logic
+        cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
         return cond * trueval + (1.0 - cond) * falseval
 
     def pow(self, y):
@@ -42,7 +42,7 @@ class CompoundOpsMixin:
     def mean(self, axes=None, keepdims=False):
         out = self.sum(axes=axes, keepdim=keepdims)
         return out * (math.prod(out.shape) / math.prod(self.shape))
-    
+
     def minimum(self, other):
         return -self.maximum(-self, -other)
 

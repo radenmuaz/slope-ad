@@ -576,6 +576,56 @@ class Pad(ShapeOp):
         return [z.gather(padding)]
 
 
+class Crop(ShapeOp):
+    @staticmethod
+    def eval(x, *, padding):
+        return [x.crop(padding)]
+
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, perm):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(primals, tangents, *, padding):
+        (x,), (x_dot, _) = primals, tangents
+        return [x.pad(padding)], [x_dot.pad(padding)]
+
+    @staticmethod
+    def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
+        shape = [x.shape[i] for i in padding]
+        return [ArrayShape(shape, x.dtype)]
+
+    @staticmethod
+    def T(cts, *, padding):
+        (z,) = cts
+        return [z.crop(padding)]
+
+
+class Flip(ShapeOp):
+    @staticmethod
+    def eval(x, *, padding):
+        return [x.crop(padding)]
+
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, perm):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(primals, tangents, *, padding):
+        (x,), (x_dot, _) = primals, tangents
+        return [x.pad(padding)], [x_dot.pad(padding)]
+
+    @staticmethod
+    def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
+        shape = [x.shape[i] for i in padding]
+        return [ArrayShape(shape, x.dtype)]
+
+    @staticmethod
+    def T(cts, *, padding):
+        (z,) = cts
+        return [z.crop(padding)]
+
+
 class Concatenate(ShapeOp):
     @staticmethod
     def eval(xs: Sequence[Any], *, axis):

@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import math
 import functools
 import itertools
+from slope import utils
 
 
 class CompoundOpsMixin:
@@ -51,30 +52,6 @@ class CompoundOpsMixin:
 
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
-
-    def broadcast(self, shape, axes=None):
-        if axes is not None:
-            for a in sorted(axes):
-                self = self.expand_dims(a)
-        return self.broadcast_to(shape)
-
-    # TODO:
-
-    def flip(self, axis, *args):
-        return self.__class__(
-            np.flip(
-                self,
-                axis=[x if x >= 0 else x + len(self.shape) for x in (axis, *args)],
-            )
-        )
-
-    def pad(self, arg: Tuple[Tuple[int, int], ...]):
-        return self.__class__(
-            np.pad(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-        )
-
-    def shrink(self, arg: Tuple[Tuple[int, int], ...]):
-        return self.__class__(self.val[arg])
 
     # NOTE: using slice is discouraged and things should migrate to pad and shrink
     def slice(self, arg: Sequence[Optional[Tuple[int, int]]]):
@@ -159,6 +136,34 @@ class CompoundOpsMixin:
                 (-padding[0], self.shape[3] + padding[1]),
             )
         )
+
+    @staticmethod
+    def stack(tensors, dim=0):
+        first = tensors[0].unsqueeze(dim)
+        unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
+        # checks for shapes and number of dimensions delegated to cat
+        return first.cat(*unsqueezed_tensors, dim=dim)
+
+    def repeat(self, repeats):
+        base_shape = self.shape
+        if len(repeats) > self.ndim:
+            base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
+        new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
+        expand_shape = [x for r, s in zip(repeats, base_shape) for x in [r, s]]
+        final_shape = [r * s for r, s in zip(repeats, base_shape)]
+        return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+
+    # TODO: make this nicer with syntactic sugar in slice
+    def chunk(self, num, dim):
+        slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+        for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
+            slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
+        return [self.slice(p) for p in slice_params]
+
+    def unsqueeze(self, dim):
+        if dim < 0:
+            dim = len(self.shape) + dim + 1
+        return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
     @property
     def T(self):
@@ -286,3 +291,224 @@ class CompoundOpsMixin:
             invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd
         )
         return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
+
+    #
+    def _pool(
+        self,
+        k_: Tuple[int, ...],
+        stride: Union[Tuple[int, ...], int] = 1,
+        dilation: Union[Tuple[int, ...], int] = 1,
+        _insert_dims=tuple(),
+    ):
+        assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
+        s_, d_ = utils.make_pair(stride, len(k_)), utils.make_pair(dilation, len(k_))
+        assert len(k_) == len(s_) and len(k_) == len(
+            d_
+        ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
+        slc_prefix, prefix, i_ = (
+            [(0, x) for x in self.shape[0 : -len(k_)]],
+            self.shape[0 : -len(k_)],
+            self.shape[-len(k_) :],
+        )
+        if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
+            o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
+            e_ = [
+                math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
+            ]  # expands such that we don't need padding
+            xup = (
+                self.reshape(
+                    *prefix,
+                    *([1] * len(_insert_dims)),
+                    *utils.flatten((1, i) for i in i_),
+                )
+                .expand(
+                    *prefix,
+                    *_insert_dims,
+                    *utils.flatten((e, i) for e, i in zip(e_, i_)),
+                )
+                .reshape(*prefix, *_insert_dims, *[e * i for e, i in zip(e_, i_)])
+            )
+            # NOTE: _insert_dims is required because reduces can't be merged (yet)
+            prefix += _insert_dims
+            slc_prefix += [(0, x) for x in _insert_dims]
+            # slide by dilation
+            xup = xup.slice(
+                slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)]
+            )
+            xup = xup.reshape(
+                *prefix, *utils.flatten((k, i + d) for k, i, d in zip(k_, i_, d_))
+            )
+            xup = xup.slice(
+                slc_prefix
+                + utils.flatten(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
+            )
+            # handle stride, and permute to move reduce to the end
+            xup = xup.reshape(
+                *prefix, *utils.flatten((k, o, s) for k, o, s in zip(k_, o_, s_))
+            )
+            xup = xup.slice(
+                slc_prefix + utils.flatten(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
+            )
+            xup = xup.reshape(*prefix, *utils.flatten((k, o) for k, o in zip(k_, o_)))
+            return xup.transpose(
+                *range(len(prefix)),
+                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+                *[len(prefix) + i * 2 for i in range(len(k_))],
+            )
+        else:
+            # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
+            o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
+            xup = self.slice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
+            xup = xup.reshape(
+                *prefix,
+                *([1] * len(_insert_dims)),
+                *utils.flatten(((o, s) for o, s in zip(o_, s_))),
+            )
+            if len(_insert_dims):
+                xup = xup.expand(
+                    *prefix,
+                    *_insert_dims,
+                    *utils.flatten(((o, s) for o, s in zip(o_, s_))),
+                )
+                prefix += _insert_dims
+                slc_prefix += [(0, x) for x in _insert_dims]
+            xup = xup.slice(
+                slc_prefix + utils.flatten(((0, o), (0, k)) for o, k in zip(o_, k_))
+            )
+            return xup.transpose(
+                *range(len(prefix)),
+                *[len(prefix) + i * 2 for i in range(len(k_))],
+                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+            )
+
+    # NOTE: these work for more than 2D
+    def avg_pool2d(self, kernel_size=(2, 2), stride=None):
+        return self._pool(
+            utils.make_pair(kernel_size), stride if stride is not None else kernel_size
+        ).mean(axis=tuple(range(0 - len(utils.make_pair(kernel_size)), 0)))
+
+    def max_pool2d(self, kernel_size=(2, 2), stride=None, dilation=1):
+        return self._pool(
+            utils.make_pair(kernel_size),
+            stride if stride is not None else kernel_size,
+            dilation,
+        ).max(axis=tuple(range(0 - len(utils.make_pair(kernel_size)), 0)))
+
+    def conv_transpose2d(
+        self,
+        weight,
+        bias: Optional[Any] = None,
+        groups=1,
+        stride=1,
+        dilation=1,
+        padding=0,
+        output_padding=0,
+    ):
+        HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
+        x, w = self, weight.reshape(
+            groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]
+        ).transpose(0, 2, 1, *trailing).flip(trailing)
+        stride = utils.make_pair(stride, len(HW))
+        if any(s > 1 for s in stride):
+            x = x.reshape(*x.shape[:2], *utils.flatten((k, 1) for k in x.shape[2:]))
+            x = x.pad(
+                ((0, 0), (0, 0), *utils.flatten(((0, 0), (0, s - 1)) for s in stride))
+            )
+            x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
+            x = x.shrink(
+                (
+                    (0, x.shape[0]),
+                    (0, x.shape[1]),
+                    *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
+                )
+            )
+        padding = utils.flatten(
+            (
+                ((k - 1) * d - p, (k - 1) * d - p + op)
+                for k, d, p, op in reversed(
+                    list(
+                        zip(
+                            HW,
+                            utils.make_pair(dilation, len(HW)),
+                            utils.make_pair(padding, len(HW)),
+                            utils.make_pair(output_padding, len(HW)),
+                        )
+                    )
+                )
+            )
+        )
+        return x.conv2d(
+            w.reshape(w.shape[0] * w.shape[1], *w.shape[2:]),
+            groups=groups,
+            bias=bias,
+            dilation=dilation,
+            padding=padding,
+        )
+
+    def conv2d(
+        self,
+        weight,
+        bias: Optional[Any] = None,
+        groups=1,
+        stride=1,
+        dilation=1,
+        padding=0,
+    ):
+        (bs, cin_), (cout, cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+        assert groups * cin == cin_ and len(self.shape) == len(
+            weight.shape
+        ), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+        if isinstance(padding, (tuple, list)):
+            assert len(padding) == 2 * len(HW) or len(padding) == len(
+                HW
+            ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
+        padding_ = (
+            [padding] * 2 * len(HW)
+            if isinstance(padding, int)
+            else (
+                padding
+                if len(padding) == 2 * len(HW)
+                else [p for p in padding for _ in range(2)][::-1]
+            )
+        )
+
+        # conv2d is a pooling op (with padding)
+        x = self.pad2d(padding_)._pool(
+            HW, stride, dilation
+        )  # (bs, groups*cin, oy, ox, H, W)
+        rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
+        x = (
+            x.reshape(bs, groups, cin, 1, *oyx, *HW)
+            .expand(bs, groups, cin, rcout, *oyx, *HW)
+            .transpose(
+                0,
+                1,
+                3,
+                *[4 + i for i in range(len(oyx))],
+                2,
+                *[4 + len(oyx) + i for i in range(len(HW))],
+            )
+        )
+
+        # expand the channels with the pool
+        # TODO: this reduces the number of kernels, but it's slower!
+        # x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
+        # rcout, oy, ox = x.shape[2:5]
+        # x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
+
+        # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+        ret = (
+            (
+                x
+                * weight.reshape(
+                    1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW
+                )
+            )
+            .sum([-1 - i for i in range(1 + len(oyx))], keepdim=True)
+            .reshape(bs, cout, *oyx)
+        )
+        return (
+            ret
+            if bias is None
+            else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
+        )

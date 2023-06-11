@@ -1,4 +1,3 @@
-
 def take(self, idx):
     treedef, static_idx, dynamic_idx = _split_index_for_jit(idx, self.shape)
     return _gather(self, treedef, static_idx, dynamic_idx)
@@ -117,7 +116,7 @@ def _normalize_index(index, axis_size):
 def broadcast_arrays(*args) -> List[Array]:
     """Like Numpy's broadcast_arrays but doesn't return views."""
     shapes = [np.shape(arg) for arg in args]
-    if not shapes or all(shapes[0] ==  s for s in shapes):
+    if not shapes or all(shapes[0] == s for s in shapes):
         return Array(arg)
     result_shape = _broadcast_shapes_uncached(*shapes)
     return [_broadcast_to(arg, result_shape) for arg in args]
@@ -140,6 +139,7 @@ def _broadcast_to(arr, shape) -> Array:
         new_dims = tuple(range(nlead)) + tuple(nlead + diff)
         kept_dims = tuple(np.delete(np.arange(len(shape)), new_dims))
         return arr.squeeze(tuple(diff)).broadcast(shape, kept_dims)
+
 
 def _broadcast_shapes_uncached(*shapes):
     def _broadcast_ranks(s1, s2):

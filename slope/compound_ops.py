@@ -9,7 +9,15 @@ import itertools
 from slope import utils
 
 
-class CompoundOpsMixin:
+class CompoundOps:
+    @staticmethod
+    def promote_types(a, b):
+        # Note: we deliberately avoid `if a in _weak_types` here because we want to check
+        # object identity, not object equality, due to the behavior of np.dtype.__eq__
+        a_tp = cast(JAXType, a if any(a is t for t in _weak_types) else np.dtype(a))
+        b_tp = cast(JAXType, b if any(b is t for t in _weak_types) else np.dtype(b))
+        return np.dtype(_least_upper_bound(config.jax_numpy_dtype_promotion, a_tp, b_tp))
+
     def where(self, trueval, falseval):
         cond = self != 0.0
         cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
@@ -53,117 +61,117 @@ class CompoundOpsMixin:
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
-    # NOTE: using slice is discouraged and things should migrate to pad and shrink
-    def slice(self, arg: Sequence[Optional[Tuple[int, int]]]):
-        arg_ = tuple(a if a is not None else (0, s) for s, a in zip(self.shape, arg))
-        padding = tuple(
-            (max(0, -p[0]), max(0, p[1] - self.shape[i])) for i, p in enumerate(arg_)
-        )
-        return self.pad(padding).shrink(
-            tuple(
-                (p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)
-            )
-        )
+    # # NOTE: using slice is discouraged and things should migrate to pad and shrink
+    # def slice(self, arg: Sequence[Optional[Tuple[int, int]]]):
+    #     arg_ = tuple(a if a is not None else (0, s) for s, a in zip(self.shape, arg))
+    #     padding = tuple(
+    #         (max(0, -p[0]), max(0, p[1] - self.shape[i])) for i, p in enumerate(arg_)
+    #     )
+    #     return self.pad(padding).shrink(
+    #         tuple(
+    #             (p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)
+    #         )
+    #     )
 
-    def __getitem__(self, val):
-        def slcfix(i, sz, default):
-            return (
-                default if i is None else max(0, min(sz, sz + i if i < 0 else i))
-            )  # Fix negative idxs, clamp to [0,N]
+    # def __getitem__(self, val):
+    #     def slcfix(i, sz, default):
+    #         return (
+    #             default if i is None else max(0, min(sz, sz + i if i < 0 else i))
+    #         )  # Fix negative idxs, clamp to [0,N]
 
-        new_slice, new_shape = [], []
-        val = [val] if not isinstance(val, (list, tuple)) else val
-        assert sum(s is not None for s in val) <= len(self.shape)
-        assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
-        for i, (sz, s) in enumerate(
-            zip(self.shape, [v for v in val if v is not None])
-        ):  # Slicing only depends on ints + slices
-            if isinstance(s, int) and not (-sz <= s < sz):
-                raise IndexError(
-                    f"index {s} is out of bounds for dimension {i} with size {sz}"
-                )
-        new_slice.append(
-            (s % sz, s % sz + 1)
-            if isinstance(s, int)
-            else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz))
-        )
-        for s, sz in zip(
-            val,
-            [
-                self.shape[i - 1]
-                for i in itertools.accumulate([int(s is not None) for s in val])
-            ],
-        ):  # Shape depends on slices + positions of Nones
-            if not isinstance(s, int):
-                new_shape.append(
-                    1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0)
-                )
-        new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
-        new_slice += [
-            (0, self.shape[i]) for i in range(len(new_slice), len(self.shape))
-        ]
-        return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
+    #     new_slice, new_shape = [], []
+    #     val = [val] if not isinstance(val, (list, tuple)) else val
+    #     assert sum(s is not None for s in val) <= len(self.shape)
+    #     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
+    #     for i, (sz, s) in enumerate(
+    #         zip(self.shape, [v for v in val if v is not None])
+    #     ):  # Slicing only depends on ints + slices
+    #         if isinstance(s, int) and not (-sz <= s < sz):
+    #             raise IndexError(
+    #                 f"index {s} is out of bounds for dimension {i} with size {sz}"
+    #             )
+    #     new_slice.append(
+    #         (s % sz, s % sz + 1)
+    #         if isinstance(s, int)
+    #         else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz))
+    #     )
+    #     for s, sz in zip(
+    #         val,
+    #         [
+    #             self.shape[i - 1]
+    #             for i in itertools.accumulate([int(s is not None) for s in val])
+    #         ],
+    #     ):  # Shape depends on slices + positions of Nones
+    #         if not isinstance(s, int):
+    #             new_shape.append(
+    #                 1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0)
+    #             )
+    #     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
+    #     new_slice += [
+    #         (0, self.shape[i]) for i in range(len(new_slice), len(self.shape))
+    #     ]
+    #     return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
 
-    def concatenate(self, *args, dim=0):
-        dim = (dim + len(self.shape)) if dim < 0 else dim
-        for y in args:
-            assert len(y.shape) == len(self.shape) and all(
-                y.shape[i] == s for i, s in enumerate(self.shape) if i != dim
-            )
-        catargs = [self] + list(args)
-        shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
-        slc = [[(0, s) for s in self.shape] for _ in catargs]
-        for s, k in zip(slc, shape_cumsum):
-            s[dim] = (-k, shape_cumsum[-1] - k)
-        return functools.reduce(
-            self.__class__.__add__, [arg.slice(s) for arg, s in zip(catargs, slc)]
-        )
+    # def concatenate(self, *args, dim=0):
+    #     dim = (dim + len(self.shape)) if dim < 0 else dim
+    #     for y in args:
+    #         assert len(y.shape) == len(self.shape) and all(
+    #             y.shape[i] == s for i, s in enumerate(self.shape) if i != dim
+    #         )
+    #     catargs = [self] + list(args)
+    #     shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
+    #     slc = [[(0, s) for s in self.shape] for _ in catargs]
+    #     for s, k in zip(slc, shape_cumsum):
+    #         s[dim] = (-k, shape_cumsum[-1] - k)
+    #     return functools.reduce(
+    #         self.__class__.__add__, [arg.slice(s) for arg, s in zip(catargs, slc)]
+    #     )
 
-    # TODO: make this nicer with syntactic sugar in slice
-    def split(self, num, dim):
-        slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
-        for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
-            slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
-        return [self.slice(p) for p in slice_params]
+    # # TODO: make this nicer with syntactic sugar in slice
+    # def split(self, num, dim):
+    #     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+    #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
+    #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
+    #     return [self.slice(p) for p in slice_params]
 
-    # (padding_left, padding_right, padding_top, padding_bottom)
-    def pad2d(self, padding: Union[List[int], Tuple[int, ...]]):
-        return self.slice(
-            (
-                (0, self.shape[0]),
-                (0, self.shape[1]),
-                (-padding[2], self.shape[2] + padding[3]),
-                (-padding[0], self.shape[3] + padding[1]),
-            )
-        )
+    # # (padding_left, padding_right, padding_top, padding_bottom)
+    # def pad2d(self, padding: Union[List[int], Tuple[int, ...]]):
+    #     return self.slice(
+    #         (
+    #             (0, self.shape[0]),
+    #             (0, self.shape[1]),
+    #             (-padding[2], self.shape[2] + padding[3]),
+    #             (-padding[0], self.shape[3] + padding[1]),
+    #         )
+    #     )
 
-    @staticmethod
-    def stack(tensors, dim=0):
-        first = tensors[0].unsqueeze(dim)
-        unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
-        # checks for shapes and number of dimensions delegated to cat
-        return first.cat(*unsqueezed_tensors, dim=dim)
+    # @staticmethod
+    # def stack(tensors, dim=0):
+    #     first = tensors[0].unsqueeze(dim)
+    #     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
+    #     # checks for shapes and number of dimensions delegated to cat
+    #     return first.cat(*unsqueezed_tensors, dim=dim)
 
-    def repeat(self, repeats):
-        base_shape = self.shape
-        if len(repeats) > self.ndim:
-            base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
-        new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
-        expand_shape = [x for r, s in zip(repeats, base_shape) for x in [r, s]]
-        final_shape = [r * s for r, s in zip(repeats, base_shape)]
-        return self.reshape(new_shape).expand(expand_shape).reshape(final_shape)
+    # def repeat(self, repeats):
+    #     base_shape = self.shape
+    #     if len(repeats) > self.ndim:
+    #         base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
+    #     new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
+    #     expand_shape = [x for r, s in zip(repeats, base_shape) for x in [r, s]]
+    #     final_shape = [r * s for r, s in zip(repeats, base_shape)]
+    #     return self.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
 
-    # TODO: make this nicer with syntactic sugar in slice
-    def chunk(self, num, dim):
-        slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
-        for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
-            slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
-        return [self.slice(p) for p in slice_params]
+    # # TODO: make this nicer with syntactic sugar in slice
+    # def chunk(self, num, dim):
+    #     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
+    #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
+    #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
+    #     return [self.slice(p) for p in slice_params]
 
-    def unsqueeze(self, dim):
-        if dim < 0:
-            dim = len(self.shape) + dim + 1
-        return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
+    # def unsqueeze(self, dim):
+    #     if dim < 0:
+    #         dim = len(self.shape) + dim + 1
+    #     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
     @property
     def T(self):
@@ -212,8 +220,8 @@ class CompoundOpsMixin:
 
     # # ***** activation functions (unary) *****
 
-    # def relu(self):
-    #     return ops.ReLU.do(self)
+    def relu(self):
+        return ops.ReLU.do(self)
 
     def sigmoid(self):
         return (1.0 + (-self).exp()).reciprocal()
@@ -321,7 +329,7 @@ class CompoundOpsMixin:
                     *([1] * len(_insert_dims)),
                     *utils.flatten((1, i) for i in i_),
                 )
-                .expand(
+                .broadcast(
                     *prefix,
                     *_insert_dims,
                     *utils.flatten((e, i) for e, i in zip(e_, i_)),
@@ -365,7 +373,7 @@ class CompoundOpsMixin:
                 *utils.flatten(((o, s) for o, s in zip(o_, s_))),
             )
             if len(_insert_dims):
-                xup = xup.expand(
+                xup = xup.broadcast(
                     *prefix,
                     *_insert_dims,
                     *utils.flatten(((o, s) for o, s in zip(o_, s_))),
@@ -479,7 +487,7 @@ class CompoundOpsMixin:
         rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
         x = (
             x.reshape(bs, groups, cin, 1, *oyx, *HW)
-            .expand(bs, groups, cin, rcout, *oyx, *HW)
+            .broadcast(bs, groups, cin, rcout, *oyx, *HW)
             .transpose(
                 0,
                 1,

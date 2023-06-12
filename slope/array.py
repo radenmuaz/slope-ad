@@ -23,12 +23,12 @@ import numpy as np
 import functools
 import slope
 from slope.array_shape import ValuedArrayShape
-from slope.compound_ops import CompoundOpsMixin
+from slope.compound_ops import CompoundOps
 
 # patch numpy
 
 
-class Array(CompoundOpsMixin):
+class Array(CompoundOps):
     __array_priority__ = 2000
     default_dtype = np.float32
 

@@ -576,10 +576,10 @@ class Pad(ShapeOp):
         return [z.gather(padding)]
 
 
-class Crop(ShapeOp):
+class Slice(ShapeOp):
     @staticmethod
     def eval(x, *, padding):
-        return [x.crop(padding)]
+        return [x.slice(padding)]
 
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, perm):
@@ -588,7 +588,7 @@ class Crop(ShapeOp):
     @staticmethod
     def jvp(primals, tangents, *, padding):
         (x,), (x_dot, _) = primals, tangents
-        return [x.pad(padding)], [x_dot.pad(padding)]
+        return [x.slice(padding)], [x_dot.slice(padding)]
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
@@ -598,7 +598,7 @@ class Crop(ShapeOp):
     @staticmethod
     def T(cts, *, padding):
         (z,) = cts
-        return [z.crop(padding)]
+        return [z.pad(padding)]
 
 
 class Flip(ShapeOp):

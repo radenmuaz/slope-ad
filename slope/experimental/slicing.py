@@ -1,3 +1,24 @@
+from slope.array import Array
+from slope.tracer import Tracer
+import slope
+from typing import (
+    Sequence,
+    Callable,
+    NamedTuple,
+    Tuple,
+    List,
+    Any,
+    List,
+    Tuple,
+    Optional,
+    Any,
+    Union,
+    Dict,
+    Set,
+    DefaultDict,
+    Callable,
+)
+import numpy as np
 def take(self, idx):
     treedef, static_idx, dynamic_idx = _split_index_for_jit(idx, self.shape)
     return _gather(self, treedef, static_idx, dynamic_idx)
@@ -391,13 +412,13 @@ def _index_to_gather(
                         "arrays within JIT compiled functions)."
                     )
                     raise IndexError(msg)
-                if not core.is_constant_dim(x_shape[x_axis]):
-                    msg = (
-                        "Cannot use NumPy slice indexing on an array dimension whose "
-                        f"size is not statically known ({x_shape[x_axis]}). "
-                        "Try using lax.dynamic_slice/dynamic_update_slice"
-                    )
-                    raise IndexError(msg)
+                # if not core.is_constant_dim(x_shape[x_axis]):
+                #     msg = (
+                #         "Cannot use NumPy slice indexing on an array dimension whose "
+                #         f"size is not statically known ({x_shape[x_axis]}). "
+                #         "Try using lax.dynamic_slice/dynamic_update_slice"
+                #     )
+                #     raise IndexError(msg)
                 start, limit, stride, needs_rev = _static_idx(
                     slice(start, stop, step), x_shape[x_axis]
                 )

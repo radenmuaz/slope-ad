@@ -8,5 +8,5 @@ import numpy as np
 
 # from slope import tracer
 
-# np.ndarray.broadcast = tracer.Tracer.broadcast
-# np.ndarray.exp = tracer.Tracer.exp
+# np.ndarray.broadcast = tracer.TracerArray.broadcast
+# np.ndarray.exp = tracer.TracerArray.exp

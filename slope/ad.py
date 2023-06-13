@@ -36,7 +36,7 @@ import math
 import slope
 from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope.array import Array
-from slope.tracer import Tracer
+from slope.tracer_array import TracerArray
 from slope import ops
 
 
@@ -196,7 +196,7 @@ class EvalTrace(Trace):
 BatchAxis = Union[None, int]
 
 
-class BatchTracer(Tracer):
+class BatchTracerArray(TracerArray):
     def __init__(self, trace, val, batch_dim: BatchAxis):
         self._trace = trace
         self.val = val
@@ -220,13 +220,13 @@ class BatchTracer(Tracer):
 
 
 class BatchTrace(Trace):
-    pure = lift = lambda self, val: BatchTracer(self, val, None)
+    pure = lift = lambda self, val: BatchTracerArray(self, val, None)
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = utils.unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
         return [
-            BatchTracer(self, x, bd) for x, bd in utils.list_zip(val_outs, bdim_outs)
+            BatchTracerArray(self, x, bd) for x, bd in utils.list_zip(val_outs, bdim_outs)
         ]
 
     @property
@@ -262,7 +262,7 @@ def vmap_flat(f, in_axes, *args):
     with slope.RT.new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
-            BatchTracer(trace, x, ax) if ax is not None else x
+            BatchTracerArray(trace, x, ax) if ax is not None else x
             for x, ax in utils.list_zip(args, in_axes)
         ]
         outs = f(*tracers_in)
@@ -288,7 +288,7 @@ def vmap(f, in_axes):
     return batched_f
 
 
-class JVPTracer(Tracer):
+class JVPTracerArray(TracerArray):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -301,10 +301,10 @@ class JVPTracer(Tracer):
 
 class JVPTrace(Trace):
     def pure(self, val):
-        aval = Tracer.get_aval(val)
-        val = aval if not isinstance(aval, Tracer) else val
+        aval = TracerArray.get_aval(val)
+        val = aval if not isinstance(aval, TracerArray) else val
 
-        return JVPTracer(self, val, Array.zeros(aval.shape, aval.dtype))
+        return JVPTracerArray(self, val, Array.zeros(aval.shape, aval.dtype))
 
     lift = pure
 
@@ -312,7 +312,7 @@ class JVPTrace(Trace):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracer(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)
         ]
 
 
@@ -320,7 +320,7 @@ def jvp_flat(f, primals, tangents):
     with slope.RT.new_main(JVPTrace) as main:
         trace = JVPTrace(main)
         tracers_in = [
-            JVPTracer(trace, x, t) for x, t in utils.list_zip(primals, tangents)
+            JVPTracerArray(trace, x, t) for x, t in utils.list_zip(primals, tangents)
         ]
         outs = f(*tracers_in)
         tracers_out = [slope.RT.full_raise(trace, out) for out in outs]
@@ -361,7 +361,7 @@ class Lit:
     aval: ArrayShape
 
     def __init__(self, val):
-        self.aval = aval = ArrayShape.like(Tracer.get_aval(val))
+        self.aval = aval = ArrayShape.like(TracerArray.get_aval(val))
         self.val = np.array(val, aval.dtype)
 
 
@@ -475,7 +475,7 @@ def typecheck_atom(env: Set[Var], x: Atom) -> ArrayShape:
             raise TypeError("unbound variable")
         return x.aval
     elif isinstance(x, Lit):
-        return Tracer.get_aval(x.val)
+        return TracerArray.get_aval(x.val)
     else:
         assert False
 
@@ -502,7 +502,7 @@ def prog_as_fun(prog: Prog):
     return lambda *args: eval_prog(prog, args)
 
 
-class ProgTracer(Tracer):
+class ProgTracerArray(TracerArray):
     __slots__ = ["aval"]
     aval: ArrayShape
 
@@ -512,17 +512,17 @@ class ProgTracer(Tracer):
 
 
 class ProgTrace(Trace):
-    def new_arg(self, aval) -> ProgTracer:
+    def new_arg(self, aval) -> ProgTracerArray:
         aval = ArrayShape.like(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
 
         return tracer
 
-    def get_or_make_const_tracer(self, val: Any) -> ProgTracer:
+    def get_or_make_const_tracer(self, val: Any) -> ProgTracerArray:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, Tracer.get_aval(val))
+            tracer = self.builder.new_tracer(self, TracerArray.get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
@@ -545,9 +545,9 @@ class ProgTrace(Trace):
 class ProgBuilder:
     instrs: List[ProgEqn]
     tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, Tracer]
+    const_tracers: Dict[int, TracerArray]
     constvals: Dict[Var, Any]
-    tracers: List[ProgTracer]
+    tracers: List[ProgTracerArray]
 
     def __init__(self):
         self.instrs = []
@@ -556,25 +556,25 @@ class ProgBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgTrace, aval: ArrayShape) -> ProgTracer:
-        tracer = ProgTracer(trace, aval)
+    def new_tracer(self, trace: ProgTrace, aval: ArrayShape) -> ProgTracerArray:
+        tracer = ProgTracerArray(trace, aval)
         self.tracers.append(tracer)
         return tracer
 
     def add_instr(self, instr: ProgEqn) -> None:
         self.instrs.append(instr)
 
-    def add_var(self, tracer: ProgTracer) -> Var:
+    def add_var(self, tracer: ProgTracerArray) -> Var:
         assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
         return var
 
-    def getvar(self, tracer: ProgTracer) -> Var:
+    def getvar(self, tracer: ProgTracerArray) -> Var:
         var = self.tracer_to_var.get(id(tracer))
         assert var is not None
         return var
 
-    def add_const(self, tracer: ProgTracer, val: Any) -> Var:
+    def add_const(self, tracer: ProgTracerArray, val: Any) -> Var:
         var = self.add_var(tracer)
         self.const_tracers[id(val)] = tracer
         self.constvals[var] = val
@@ -593,7 +593,7 @@ class ProgBuilder:
     def _inline_literals(self, prog: Prog, consts: List[Any]) -> Tuple[Prog, List[Any]]:
         const_binders, other_binders = utils.split_list(prog.in_binders, len(consts))
         scalars = [
-            type(x) in Tracer.TYPES and not Tracer.get_aval(x).shape for x in consts
+            type(x) in TracerArray.TYPES and not TracerArray.get_aval(x).shape for x in consts
         ]
         new_const_binders, lit_binders = utils.partition_list(scalars, const_binders)
         new_consts, lit_vals = utils.partition_list(scalars, consts)
@@ -634,7 +634,7 @@ def make_prog(
 
 def linearize_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(ArrayShape.like(Tracer.get_aval(x))) for x in primals_in
+        PartialVal.unknown(ArrayShape.like(TracerArray.get_aval(x))) for x in primals_in
     ]
 
     def f_jvp(*primals_tangents_in):
@@ -671,7 +671,7 @@ class PartialVal(NamedTuple):
 
     @classmethod
     def known(cls, val: Any):
-        return PartialVal(Tracer.get_aval(val), val)
+        return PartialVal(TracerArray.get_aval(val), val)
 
     @classmethod
     def unknown(cls, aval: ArrayShape):
@@ -707,17 +707,17 @@ class ConstProto(NamedTuple):
 
 class ProgEqnProto(NamedTuple):
     prim: ops.Op
-    tracers_in: List["PartialEvalTracer"]
+    tracers_in: List["PartialEvalTracerArray"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
-    # tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracer"]]
+    # tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
     tracer_refs_out: List
 
 
 ProgProto = Union[LambdaBindingProto, ConstProto, ProgEqnProto]
 
 
-class PartialEvalTracer(Tracer):
+class PartialEvalTracerArray(TracerArray):
     pval: PartialVal
     proto: Optional[ProgProto]
 
@@ -736,20 +736,20 @@ class PartialEvalTracer(Tracer):
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracer(self, pval, LambdaBindingProto())
+        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
 
-    def lift(self, val: Any) -> PartialEvalTracer:
+    def lift(self, val: Any) -> PartialEvalTracerArray:
         val = Array(val)
-        return PartialEvalTracer(self, PartialVal.known(val), None)
+        return PartialEvalTracerArray(self, PartialVal.known(val), None)
 
     pure = lift
 
-    def instantiate_const(self, tracer: PartialEvalTracer) -> PartialEvalTracer:
+    def instantiate_const(self, tracer: PartialEvalTracerArray) -> PartialEvalTracerArray:
         if tracer.pval.is_unknown:
             return tracer
         else:
             pval = PartialVal.unknown(ArrayShape.like(tracer.aval))
-            return PartialEvalTracer(self, pval, ConstProto(tracer.pval.const))
+            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
@@ -758,7 +758,7 @@ class PartialEvalTrace(Trace):
         avals_in = [t.aval for t in tracers_in]
         avals_out = op.shape_eval(*avals_in, **params)
         tracers_out = [
-            PartialEvalTracer(self, PartialVal.unknown(aval), None)
+            PartialEvalTracerArray(self, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
         instr = ProgEqnProto(
@@ -770,7 +770,7 @@ class PartialEvalTrace(Trace):
 
 
 def tracers_to_prog(
-    tracers_in: List[PartialEvalTracer], tracers_out: List[PartialEvalTracer]
+    tracers_in: List[PartialEvalTracerArray], tracers_out: List[PartialEvalTracerArray]
 ):
     tracer_to_var: Dict[int, Var] = {
         id(t): Var(ArrayShape.like(t.aval)) for t in tracers_in
@@ -786,7 +786,7 @@ def tracers_to_prog(
             val = t.proto.val
             var = constid_to_var.get(id(val))
             if var is None:
-                aval = ArrayShape.like(Tracer.get_aval(val))
+                aval = ArrayShape.like(TracerArray.get_aval(val))
                 var = constid_to_var[id(val)] = Var(aval)
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
@@ -814,7 +814,7 @@ def proto_to_instr(tracer_to_var: Dict[int, Var], proto: ProgEqnProto) -> ProgEq
     return ProgEqn(proto.prim, inputs, proto.params, out_binders)
 
 
-def tracer_parents(t: PartialEvalTracer) -> List[PartialEvalTracer]:
+def tracer_parents(t: PartialEvalTracerArray) -> List[PartialEvalTracerArray]:
     return t.proto.tracers_in if isinstance(t.proto, ProgEqnProto) else []
 
 
@@ -865,7 +865,7 @@ def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
 
 def vjp_flat(f, *primals_in):
     pvals_in = [PartialVal.known(x) for x in primals_in] + [
-        PartialVal.unknown(ArrayShape.like(Tracer.get_aval(x))) for x in primals_in
+        PartialVal.unknown(ArrayShape.like(TracerArray.get_aval(x))) for x in primals_in
     ]
     primal_pvals_in, tangent_pvals_in = utils.split_half(pvals_in)
 
@@ -1001,7 +1001,7 @@ class Runtime:
 
     def find_top_trace(self, xs) -> Trace:
         top_main = max(
-            (x._trace.main for x in xs if isinstance(x, Tracer)),
+            (x._trace.main for x in xs if isinstance(x, TracerArray)),
             default=self.trace_stack[0],
             key=op.attrgetter("level"),
         )
@@ -1009,8 +1009,8 @@ class Runtime:
             top_main = self.dynamic_trace
         return top_main.trace_type(top_main)
 
-    def full_raise(self, trace: Trace, val: Any) -> Tracer:
-        if not isinstance(val, Tracer):
+    def full_raise(self, trace: Trace, val: Any) -> TracerArray:
+        if not isinstance(val, TracerArray):
             return trace.pure(val)
         level = trace.main.level
         if val._trace.main is trace.main:
@@ -1023,7 +1023,7 @@ class Runtime:
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
     def full_lower(self, val: Any):
-        if isinstance(val, Tracer):
+        if isinstance(val, TracerArray):
             return val.full_lower()
         else:
             return val

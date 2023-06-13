@@ -1,13 +1,11 @@
 import math
 from contextlib import contextmanager
-from slope import utils
 import numpy as np
 import itertools
 from typing import (
     Sequence,
     Callable,
     Tuple,
-    NamedTuple,
     List,
     Any,
     List,
@@ -21,13 +19,16 @@ from typing import (
     Callable,
 )
 import numpy as np
-from functools import lru_cache, reduce
-
+import functools
 import slope
-from slope import ops
+from slope import utils
 from slope.array_shape import ValuedArrayShape
+from slope import ops
+
+import numpy as np
+from slope.base_array import BaseArray
 from slope.array import Array
-from slope.compound_ops import CompoundOps
+
 
 
 def binaryop_decor(op_fn):
@@ -70,7 +71,8 @@ def reduceop_decor(op_fn):
     return wrapped_fn
 
 
-class Tracer(CompoundOps):
+
+class TracerArray(BaseArray):
     TYPES = {
         bool,
         int,
@@ -104,9 +106,9 @@ class Tracer(CompoundOps):
 
     @staticmethod
     def get_aval(x):
-        if isinstance(x, Tracer):
+        if isinstance(x, TracerArray):
             return x.aval
-        elif type(x) in Tracer.TYPES:
+        elif type(x) in TracerArray.TYPES:
             return Array(np.asarray(x))
         else:
             breakpoint()
@@ -322,7 +324,7 @@ class Tracer(CompoundOps):
         start_indices: Sequence[ArrayLike] = []
         slice_sizes: Sequence[int] = []
 
-        for ind, size in safe_zip(idx, arr.shape):
+        for ind, size in utils.zip(idx, arr.shape):
             if isinstance(ind, slice):
                 start, stop, step = ind.indices(size)
                 assert step == 1  # checked above
@@ -334,36 +336,11 @@ class Tracer(CompoundOps):
             start_indices.append(ind)
             slice_sizes.append(1)
         if len(start_indices) > 1:
-            start_indices = util.promote_dtypes(*start_indices)
+            start_indices = utils.promote_dtypes(*start_indices)
         arr = arr.slice(start_indices=start_indices, slice_sizes=slice_sizes)
         if int_indices:
             arr = arr.squeeze(tuple(int_indices))
         return arr
-
-
-def _rewriting_take(arr, idx, indices_are_sorted=False, unique_indices=False,
-                    mode=None, fill_value=None):
-  # Computes arr[idx].
-  # All supported cases of indexing can be implemented as an XLA gather,
-  # followed by an optional reverse and broadcast_in_dim.
-
-  # For simplicity of generated primitives, we call lax.dynamic_slice in the
-  # simplest cases: i.e. non-dynamic arrays indexed with integers and slices.
-
-  if (result := _attempt_rewriting_take_via_slice(arr, idx, mode)) is not None:
-    return result
-
-  # TODO(mattjj,dougalm): expand dynamic shape indexing support
-  if jax.config.jax_dynamic_shapes and arr.ndim > 0:
-    try: aval = core.get_aval(idx)
-    except: pass
-    else:
-      if (isinstance(aval, core.DShapedArray) and aval.shape == () and
-          dtypes.issubdtype(aval.dtype, np.integer) and
-          not dtypes.issubdtype(aval.dtype, dtypes.bool_) and
-          isinstance(arr.shape[0], int)):
-        return lax.dynamic_index_in_dim(arr, idx, keepdims=False)
-
 
     def __setitem__(self, idx, val):
         raise NotImplementedError

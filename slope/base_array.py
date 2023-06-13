@@ -1,23 +1,22 @@
-import slope
-import numpy as np
-from slope.array_shape import ArrayShape
-from typing import List, Tuple, Sequence, Any, Callable, Optional, Union
-from abc import ABC, abstractmethod
 import math
+from contextlib import contextmanager
+from typing import (
+    Callable,
+    Tuple,
+    List,
+    Any,
+    List,
+    Tuple,
+    Optional,
+    Any,
+    Union,
+    Callable,
+)
 import functools
-import itertools
 from slope import utils
 
-
-class CompoundOps:
-    @staticmethod
-    def promote_types(a, b):
-        # Note: we deliberately avoid `if a in _weak_types` here because we want to check
-        # object identity, not object equality, due to the behavior of np.dtype.__eq__
-        a_tp = cast(JAXType, a if any(a is t for t in _weak_types) else np.dtype(a))
-        b_tp = cast(JAXType, b if any(b is t for t in _weak_types) else np.dtype(b))
-        return np.dtype(_least_upper_bound(config.jax_numpy_dtype_promotion, a_tp, b_tp))
-
+class BaseArray:
+    # compound ops
     def where(self, trueval, falseval):
         cond = self != 0.0
         cond = cond.convert(trueval.dtype)  # TODO: type promotion logic

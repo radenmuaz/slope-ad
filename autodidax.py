@@ -133,7 +133,7 @@ class Trace:
         assert False  # must override
 
 
-class Tracer:
+class TracerArray:
     _trace: Trace
 
     __array_priority__ = 1000
@@ -248,7 +248,7 @@ class Array(ArrayShape):
 
 
 def get_aval(x):
-    if isinstance(x, Tracer):
+    if isinstance(x, TracerArray):
         return x.aval
     elif type(x) in jax_types:
         return Array(np.asarray(x))
@@ -271,7 +271,7 @@ jax_types = {
 
 def find_top_trace(xs) -> Trace:
     top_main = max(
-        (x._trace.main for x in xs if isinstance(x, Tracer)),
+        (x._trace.main for x in xs if isinstance(x, TracerArray)),
         default=trace_stack[0],
         key=op.attrgetter("level"),
     )
@@ -281,14 +281,14 @@ def find_top_trace(xs) -> Trace:
 
 
 def full_lower(val: Any):
-    if isinstance(val, Tracer):
+    if isinstance(val, TracerArray):
         return val.full_lower()
     else:
         return val
 
 
-def full_raise(trace: Trace, val: Any) -> Tracer:
-    if not isinstance(val, Tracer):
+def full_raise(trace: Trace, val: Any) -> TracerArray:
+    if not isinstance(val, TracerArray):
         assert type(val) in jax_types
         return trace.pure(val)
     level = trace.main.level
@@ -303,7 +303,7 @@ def full_raise(trace: Trace, val: Any) -> Tracer:
 
 
 class EvalTrace(Trace):
-    pure = lift = lambda self, x: x  # no boxing in Tracers needed
+    pure = lift = lambda self, x: x  # no boxing in TracerArrays needed
 
     def run_op(self, Op, tracers, params):
         return impl_rules[Op](*tracers, **params)
@@ -365,7 +365,7 @@ def zip(*args):
     return list(zip_(*args))
 
 
-class JVPTracer(Tracer):
+class JVPTracerArray(TracerArray):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -377,13 +377,13 @@ class JVPTracer(Tracer):
 
 
 class JVPTrace(Trace):
-    pure = lift = lambda self, val: JVPTracer(self, val, zeros_like(val))
+    pure = lift = lambda self, val: JVPTracerArray(self, val, zeros_like(val))
 
     def run_op(self, Op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         jvp_rule = jvp_rules[Op]
         primal_outs, tangent_outs = jvp_rule(primals_in, tangents_in, **params)
-        return [JVPTracer(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
+        return [JVPTracerArray(self, x, t) for x, t in zip(primal_outs, tangent_outs)]
 
 
 jvp_rules = {}
@@ -458,7 +458,7 @@ jvp_rules[less_p] = less_jvp
 def jvp_v1(f, primals, tangents):
     with new_main(JVPTrace) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
+        tracers_in = [JVPTracerArray(trace, x, t) for x, t in zip(primals, tangents)]
         out = f(*tracers_in)
         tracer_out = full_raise(trace, out)
         primal_out, tangent_out = tracer_out.primal, tracer_out.tangent
@@ -468,7 +468,7 @@ def jvp_v1(f, primals, tangents):
 def jvp_flat(f, primals, tangents):
     with new_main(JVPTrace) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracer(trace, x, t) for x, t in zip(primals, tangents)]
+        tracers_in = [JVPTracerArray(trace, x, t) for x, t in zip(primals, tangents)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
@@ -611,7 +611,7 @@ not_mapped = NotMapped()
 BatchAxis = Union[NotMapped, int]
 
 
-class BatchTracer(Tracer):
+class BatchTracerArray(TracerArray):
     def __init__(self, trace, val, batch_dim: BatchAxis):
         self._trace = trace
         self.val = val
@@ -632,13 +632,13 @@ class BatchTracer(Tracer):
 
 
 class BatchTrace(Trace):
-    pure = lift = lambda self, val: BatchTracer(self, val, not_mapped)
+    pure = lift = lambda self, val: BatchTracerArray(self, val, not_mapped)
 
     def run_op(self, Op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         vmap_rule = vmap_rules[Op]
         val_outs, bdim_outs = vmap_rule(self.axis_size, vals_in, bdims_in, **params)
-        return [BatchTracer(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
+        return [BatchTracerArray(self, x, bd) for x, bd in zip(val_outs, bdim_outs)]
 
     @property
     def axis_size(self):
@@ -688,7 +688,7 @@ def vmap_flat(f, in_axes, *args):
     with new_main(BatchTrace, axis_size) as main:
         trace = BatchTrace(main)
         tracers_in = [
-            BatchTracer(trace, x, ax) if ax is not None else x
+            BatchTracerArray(trace, x, ax) if ax is not None else x
             for x, ax in zip(args, in_axes)
         ]
         outs = f(*tracers_in)
@@ -846,7 +846,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     return lst1, lst2
 
 
-class JaxprTracer(Tracer):
+class JaxprTracerArray(TracerArray):
     __slots__ = ["aval"]
     aval: ArrayShape
 
@@ -856,13 +856,13 @@ class JaxprTracer(Tracer):
 
 
 class JaxprTrace(Trace):
-    def new_arg(self, aval: ArrayShape) -> JaxprTracer:
+    def new_arg(self, aval: ArrayShape) -> JaxprTracerArray:
         aval = raise_to_shaped(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
         return tracer
 
-    def get_or_make_const_tracer(self, val: Any) -> JaxprTracer:
+    def get_or_make_const_tracer(self, val: Any) -> JaxprTracerArray:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
             tracer = self.builder.new_tracer(self, raise_to_shaped(get_aval(val)))
@@ -891,9 +891,9 @@ shape_eval_rules = {}
 class JaxprBuilder:
     eqns: List[JaxprEqn]
     tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, JaxprTracer]
+    const_tracers: Dict[int, JaxprTracerArray]
     constvals: Dict[Var, Any]
-    tracers: List[JaxprTracer]
+    tracers: List[JaxprTracerArray]
 
     def __init__(self):
         self.eqns = []
@@ -902,32 +902,32 @@ class JaxprBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracer:
-        tracer = JaxprTracer(trace, aval)
+    def new_tracer(self, trace: JaxprTrace, aval: ArrayShape) -> JaxprTracerArray:
+        tracer = JaxprTracerArray(trace, aval)
         self.tracers.append(tracer)
         return tracer
 
     def add_eqn(self, eqn: JaxprEqn) -> None:
         self.eqns.append(eqn)
 
-    def add_var(self, tracer: JaxprTracer) -> Var:
+    def add_var(self, tracer: JaxprTracerArray) -> Var:
         assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
         return var
 
-    def getvar(self, tracer: JaxprTracer) -> Var:
+    def getvar(self, tracer: JaxprTracerArray) -> Var:
         var = self.tracer_to_var.get(id(tracer))
         assert var is not None
         return var
 
-    def add_const(self, tracer: JaxprTracer, val: Any) -> Var:
+    def add_const(self, tracer: JaxprTracerArray, val: Any) -> Var:
         var = self.add_var(tracer)
         self.const_tracers[id(val)] = tracer
         self.constvals[var] = val
         return var
 
     def build(
-        self, in_tracers: List[JaxprTracer], out_tracers: List[JaxprTracer]
+        self, in_tracers: List[JaxprTracerArray], out_tracers: List[JaxprTracerArray]
     ) -> Tuple[Jaxpr, List[Any]]:
         constvars, constvals = unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
@@ -1528,16 +1528,16 @@ class ConstRecipe(NamedTuple):
 
 class JaxprEqnRecipe(NamedTuple):
     prim: Op
-    tracers_in: List["partialEvalTracer"]
+    tracers_in: List["partialEvalTracerArray"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
-    tracer_refs_out: List["ReferenceType[partialEvalTracer]"]
+    tracer_refs_out: List["ReferenceType[partialEvalTracerArray]"]
 
 
 JaxprRecipe = Union[LambdaBindingRecipe, ConstRecipe, JaxprEqnRecipe]
 
 
-class partialEvalTracer(Tracer):
+class partialEvalTracerArray(TracerArray):
     pval: partialVal
     recipe: Optional[JaxprRecipe]
 
@@ -1556,19 +1556,19 @@ class partialEvalTracer(Tracer):
 
 class partialEvalTrace(Trace):
     def new_arg(self, pval: partialVal) -> Any:
-        return partialEvalTracer(self, pval, LambdaBindingRecipe())
+        return partialEvalTracerArray(self, pval, LambdaBindingRecipe())
 
-    def lift(self, val: Any) -> partialEvalTracer:
-        return partialEvalTracer(self, partialVal.known(val), None)
+    def lift(self, val: Any) -> partialEvalTracerArray:
+        return partialEvalTracerArray(self, partialVal.known(val), None)
 
     pure = lift
 
-    def instantiate_const(self, tracer: partialEvalTracer) -> partialEvalTracer:
+    def instantiate_const(self, tracer: partialEvalTracerArray) -> partialEvalTracerArray:
         if tracer.pval.is_unknown:
             return tracer
         else:
             pval = partialVal.unknown(raise_to_shaped(tracer.aval))
-            return partialEvalTracer(self, pval, ConstRecipe(tracer.pval.const))
+            return partialEvalTracerArray(self, pval, ConstRecipe(tracer.pval.const))
 
     def run_op(self, Op, tracers, params):
         if all(t.pval.is_known for t in tracers):
@@ -1580,7 +1580,7 @@ class partialEvalTrace(Trace):
         avals_in = [t.aval for t in tracers_in]
         avals_out = shape_eval_rules[Op](*avals_in, **params)
         tracers_out = [
-            partialEvalTracer(self, partialVal.unknown(aval), None)
+            partialEvalTracerArray(self, partialVal.unknown(aval), None)
             for aval in avals_out
         ]
         eqn = JaxprEqnRecipe(Op, tracers_in, params, avals_out, map(ref, tracers_out))
@@ -1593,7 +1593,7 @@ partial_eval_rules = {}
 
 
 def tracers_to_jaxpr(
-    tracers_in: List[partialEvalTracer], tracers_out: List[partialEvalTracer]
+    tracers_in: List[partialEvalTracerArray], tracers_out: List[partialEvalTracerArray]
 ):
     tracer_to_var: Dict[int, Var] = {
         id(t): Var(raise_to_shaped(t.aval)) for t in tracers_in
@@ -1637,7 +1637,7 @@ def recipe_to_eqn(tracer_to_var: Dict[int, Var], recipe: JaxprEqnRecipe) -> Jaxp
     return JaxprEqn(recipe.prim, inputs, recipe.params, out_binders)
 
 
-def tracer_parents(t: partialEvalTracer) -> List[partialEvalTracer]:
+def tracer_parents(t: partialEvalTracerArray) -> List[partialEvalTracerArray]:
     return t.recipe.tracers_in if isinstance(t.recipe, JaxprEqnRecipe) else []
 
 
@@ -1696,7 +1696,7 @@ def xla_call_partial_eval(trace, tracers, *, jaxpr, num_consts):
     outs1, res = split_list(outs1_res, len(jaxpr1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
     outs2 = [
-        partialEvalTracer(trace, partialVal.unknown(v.aval), None) for v in jaxpr2.outs
+        partialEvalTracerArray(trace, partialVal.unknown(v.aval), None) for v in jaxpr2.outs
     ]
     eqn = JaxprEqnRecipe(
         xla_call_p,
@@ -2139,7 +2139,7 @@ def cond_partial_eval(trace, tracers, *, true_jaxpr, false_jaxpr):
     pred_tracer_ = trace.instantiate_const(full_raise(trace, pred_tracer))
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
     outs2 = [
-        partialEvalTracer(trace, partialVal.unknown(v.aval), None)
+        partialEvalTracerArray(trace, partialVal.unknown(v.aval), None)
         for v in t_jaxpr2.outs
     ]
     eqn = JaxprEqnRecipe(

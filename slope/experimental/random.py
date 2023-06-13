@@ -208,7 +208,7 @@ class PRNGKeyArrayImpl(PRNGKeyArray):
     _base_array: typing.Array
 
     def __init__(self, impl, key_data: Any):
-        assert not isinstance(key_data, core.Tracer)
+        assert not isinstance(key_data, core.TracerArray)
         _check_prng_key_data(impl, key_data)
         self.impl = impl
         self._base_array = key_data

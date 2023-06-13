@@ -1,5 +1,5 @@
 from slope.array import Array
-from slope.tracer import Tracer
+from slope.tracer import TracerArray
 import slope
 from typing import (
     Sequence,
@@ -342,7 +342,7 @@ def _index_to_gather(
             continue
 
         try:
-            abstract_i = Tracer.get_aval(i)
+            abstract_i = TracerArray.get_aval(i)
         except TypeError:
             abstract_i = None
         # Handle basic int indexes.
@@ -376,7 +376,7 @@ def _index_to_gather(
                 if start is None or start == 0:
                     start = None
                 if stop is None or (
-                    not isinstance(stop, Tracer) and (stop >= x_shape[x_axis])
+                    not isinstance(stop, TracerArray) and (stop >= x_shape[x_axis])
                 ):
                     stop = None
             elif step == -1:
@@ -399,7 +399,7 @@ def _index_to_gather(
             # Handle slice index (only static, otherwise an error is raised)
             else:
                 if not all(
-                    (elt == None or Tracer.get_aval(elt) is Array)
+                    (elt == None or TracerArray.get_aval(elt) is Array)
                     for elt in (start, stop, step)
                 ):
                     msg = (
@@ -460,7 +460,7 @@ def _index_to_gather(
             g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim)))
             for g, i in gather_indices
         ]
-        gather_indices_array = Tracer.concatenate(gather_indices_list, last_dim)
+        gather_indices_array = TracerArray.concatenate(gather_indices_list, last_dim)
 
     return _Indexer(
         slice_shape=slice_shape,

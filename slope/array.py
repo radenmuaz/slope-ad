@@ -1,34 +1,23 @@
 import math
 from contextlib import contextmanager
-from slope import utils
 import numpy as np
 import itertools
 from typing import (
-    Sequence,
-    Callable,
-    Tuple,
-    List,
     Any,
-    List,
-    Tuple,
     Optional,
-    Any,
     Union,
-    Dict,
-    Set,
-    DefaultDict,
-    Callable,
 )
 import numpy as np
 import functools
 import slope
+from slope import utils
 from slope.array_shape import ValuedArrayShape
-from slope.compound_ops import CompoundOps
+from slope.base_array import BaseArray
 
-# patch numpy
+import numpy as np
 
 
-class Array(CompoundOps):
+class Array(BaseArray):
     __array_priority__ = 2000
     default_dtype = np.float32
 
@@ -195,6 +184,12 @@ class Array(CompoundOps):
     expand_dims = lambda self, axes: self.__class__(np.expand_dims(self.val, axes))
     swapaxes = lambda self, a1, a2: self.__class__(np.swapaxes(self.val, a1, a2))
     broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
+    def broadcast(self, shape, axes=None):
+        if axes is not None:
+            for a in sorted(axes):
+                self = self.expand_dims(a)
+        return (self.broadcast_to(shape))
+
     __getitem__ = lambda self, idx: self.__class__(self.val.__getitem__(idx))
     __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
     gather = lambda self, idx, axis: self.__class__(
@@ -209,8 +204,8 @@ class Array(CompoundOps):
         np.add.at(target, indices, updates)
         return target
 
-    where = lambda self, condval, trueval, falseval: self.__class__(
-        np.where(condval, trueval, falseval)
+    where = lambda self, trueval, falseval: self.__class__(
+        np.where(self, trueval, falseval)
     )
 
     # slice = lambda self, start, end, step: self.__class__(self.val.__getitem__(slice(start, end, step)))

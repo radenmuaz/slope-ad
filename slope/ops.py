@@ -526,6 +526,111 @@ class Gather(ShapeOp):
         return [z.gather(axis)]
 
 
+def _gather_jvp_rule(g, operand, indices, *, dimension_numbers,
+                     slice_sizes, unique_indices, indices_are_sorted, mode,
+                     fill_value):
+  return gather(g, indices, dimension_numbers, slice_sizes,
+                unique_indices=unique_indices,
+                indices_are_sorted=indices_are_sorted, mode=mode,
+                fill_value=0)
+
+def _gather_transpose_rule(t, operand, indices, *, dimension_numbers,
+                           slice_sizes, unique_indices, indices_are_sorted,
+                           mode, fill_value):
+  assert ad.is_undefined_primal(operand)
+  operand_shape = operand.aval.shape
+  if type(t) is ad_util.Zero:
+    out = ad_util.Zero(operand.aval)
+  else:
+    zeros = lax.full(operand_shape, lax._zero(t))
+    scatter_dnums = ScatterDimensionNumbers(
+      update_window_dims=dimension_numbers.offset_dims,
+      inserted_window_dims=dimension_numbers.collapsed_slice_dims,
+      scatter_dims_to_operand_dims=dimension_numbers.start_index_map)
+    out = scatter_add(zeros, indices, t, scatter_dnums,
+                      unique_indices=unique_indices,
+                      indices_are_sorted=indices_are_sorted,
+                      mode=mode)
+  return [out, None]
+
+def _gather_batching_rule(batched_args, batch_dims, *, dimension_numbers,
+                          slice_sizes, unique_indices, indices_are_sorted,
+                          mode, fill_value):
+  operand, indices = batched_args
+  operand_bdim, indices_bdim = batch_dims
+
+  if operand_bdim is not None and indices_bdim is None:
+    operand = batching.moveaxis(operand, operand_bdim, 0)
+    slice_sizes = (operand.shape[0],) + slice_sizes
+    offset_dims = (0,) + tuple(np.add(1, dimension_numbers.offset_dims))
+    collapsed_slice_dims = tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
+    start_index_map = tuple(np.add(1, dimension_numbers.start_index_map))
+    dnums = GatherDimensionNumbers(
+        offset_dims=offset_dims,
+        collapsed_slice_dims=collapsed_slice_dims,
+        start_index_map=start_index_map)
+    return gather(operand, indices, dimension_numbers=dnums,
+                  slice_sizes=slice_sizes, unique_indices=unique_indices,
+                  indices_are_sorted=indices_are_sorted, mode=mode,
+                  fill_value=fill_value), 0
+
+  elif operand_bdim is None and indices_bdim is not None:
+    indices = batching.moveaxis(indices, indices_bdim, 0)
+    offset_dims = tuple(1 + d for d in dimension_numbers.offset_dims)
+    dnums = GatherDimensionNumbers(
+        offset_dims=offset_dims,
+        collapsed_slice_dims=dimension_numbers.collapsed_slice_dims,
+        start_index_map=dimension_numbers.start_index_map)
+    # If batching indexed accesses into the same array, the batched gather may
+    # no longer have sorted or unique indices.
+    return gather(operand, indices, dimension_numbers=dnums,
+                  slice_sizes=slice_sizes, unique_indices=False,
+                  indices_are_sorted=False, mode=mode, fill_value=fill_value), 0
+
+  else:
+    # move batch dimensions to the front to simplify logic
+    operand = batching.moveaxis(operand, operand_bdim, 0)
+    indices = batching.moveaxis(indices, indices_bdim, 0)
+
+    # This slightly awkward special case is needed because the shape rule for
+    # gather does not allow size-1 slices out of a size-0 dimension, even if
+    # the number of slices is zero. Likely the best fix would be to change the
+    # definition of gather() so it can be batched without the construction of
+    # an explicit iota of size-1 slices.
+    if core.symbolic_equal_dim(operand.shape[0], 0):
+      output_shape = _gather_shape_rule(
+          core.ShapedArray(operand.shape[1:], operand.dtype),
+          core.ShapedArray(indices.shape[1:],
+                           dtypes.canonicalize_dtype(indices.dtype)),
+          dimension_numbers=dimension_numbers, slice_sizes=slice_sizes,
+          unique_indices=unique_indices, indices_are_sorted=indices_are_sorted,
+          mode=mode, fill_value=fill_value)
+      return lax.full((0,) + output_shape, lax._zero(operand)), 0
+
+    # Example: user code had indices shape (3, 4, 5), and we have to deal with
+    # indices shape (7, 3, 4, 5). We transform that to indices of shape
+    # (7, 3, 4, 6) where we concatenated an iota that counts along our batch
+    # dimension to the front of the ndindex.
+    count_shape = list(indices.shape)
+    count_shape[-1] = 1
+    counts = lax.broadcasted_iota(indices.dtype, tuple(count_shape), 0)
+    indices = lax.concatenate([counts, indices], len(count_shape) - 1)
+
+    slice_sizes = (1,) + slice_sizes
+    collapsed_slice_dims = (0,) + tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
+    offset_dims = tuple(np.add(1, dimension_numbers.offset_dims))
+    start_index_map = (0,) + tuple(np.add(1, dimension_numbers.start_index_map))
+
+    dnums = GatherDimensionNumbers(
+        offset_dims=offset_dims,
+        collapsed_slice_dims=collapsed_slice_dims,
+        start_index_map=start_index_map)
+    return gather(operand, indices, dimension_numbers=dnums,
+                  slice_sizes=slice_sizes, unique_indices=unique_indices,
+                  indices_are_sorted=indices_are_sorted, mode=mode,
+                  fill_value=fill_value), 0
+
+
 class Scatter(ShapeOp):
     @staticmethod
     def eval(x, idx, *, axis):
@@ -549,6 +654,116 @@ class Scatter(ShapeOp):
     def T(cts, *, axis):
         (z, idx) = cts
         return [z.gather(axis)]
+
+
+
+def _scatter_batching_rule(scatter_op, batched_args, batch_dims, *,
+                           update_jaxpr, update_consts, dimension_numbers,
+                           indices_are_sorted, unique_indices, mode):
+  operand, indices, updates = batched_args
+  operand_bdim, indices_bdim, updates_bdim = batch_dims
+  del update_jaxpr, update_consts  # Unused.
+
+  # move the operand batch dim to the front if it is not None, otherwise create
+  # it at the front (so that we can scatter into it)
+  size = next(x.shape[ax] for x, ax in zip(batched_args, batch_dims)
+              if ax is not None)
+  operand = batching.bdim_at_front(operand, operand_bdim, size)
+  operand_bdim = 0
+
+  updates = batching.bdim_at_front(updates, updates_bdim, size)
+
+  if indices_bdim is None:
+    inserted_window_dims = tuple(np.add(1, dimension_numbers.inserted_window_dims))
+    update_window_dims = (0,) + tuple(np.add(1, dimension_numbers.update_window_dims))
+    scatter_dims_to_operand_dims = tuple(np.add(1, dimension_numbers.scatter_dims_to_operand_dims))
+    dnums = ScatterDimensionNumbers(
+        update_window_dims=update_window_dims,
+        inserted_window_dims=inserted_window_dims,
+        scatter_dims_to_operand_dims=scatter_dims_to_operand_dims)
+    return scatter_op(
+      operand, indices, updates, dnums,
+      indices_are_sorted=indices_are_sorted, unique_indices=unique_indices,
+      mode=mode), 0
+
+
+  # see the third case in _gather_batching_rule for comparison and comments
+  indices = batching.bdim_at_front(indices, indices_bdim, size)
+
+  count_shape = list(indices.shape)
+  count_shape[-1] = 1
+  counts = lax.broadcasted_iota(indices.dtype, tuple(count_shape), 0)
+  indices = lax.concatenate([counts, indices], len(count_shape) - 1)
+
+  update_window_dims = tuple(np.add(1, dimension_numbers.update_window_dims))
+  inserted_window_dims = (0,) + tuple(np.add(1, dimension_numbers.inserted_window_dims))
+  scatter_dims_to_operand_dims = (0,) + tuple(np.add(1, dimension_numbers.scatter_dims_to_operand_dims))
+
+  dnums = ScatterDimensionNumbers(
+      update_window_dims=update_window_dims,
+      inserted_window_dims=inserted_window_dims,
+      scatter_dims_to_operand_dims=scatter_dims_to_operand_dims)
+  return scatter_op(
+      operand, indices, updates, dnums,
+      indices_are_sorted=indices_are_sorted, unique_indices=unique_indices,
+      mode=mode), 0
+
+
+def _scatter_add_jvp(primals, tangents, *, update_jaxpr, update_consts,
+                     dimension_numbers, indices_are_sorted, unique_indices,
+                     mode):
+  operand, indices, updates = primals
+  g_operand, g_indices, g_updates = tangents
+  del g_indices  # ignored
+  val_out = scatter_add_p.bind(
+      operand, indices, updates, update_jaxpr=update_jaxpr,
+      update_consts=update_consts, dimension_numbers=dimension_numbers,
+      indices_are_sorted=indices_are_sorted, unique_indices=unique_indices,
+      mode=mode)
+  if type(g_operand) is ad_util.Zero and type(g_updates) is ad_util.Zero:
+    tangent_out = ad_util.Zero.from_value(val_out)
+  else:
+    g_operand = ad.instantiate_zeros(g_operand)
+    g_updates = ad.instantiate_zeros(g_updates)
+    tangent_out = scatter_add_p.bind(
+        g_operand, indices, g_updates, update_jaxpr=update_jaxpr,
+        update_consts=update_consts, dimension_numbers=dimension_numbers,
+        indices_are_sorted=indices_are_sorted, unique_indices=unique_indices,
+        mode=mode)
+  return val_out, tangent_out
+
+def _scatter_add_transpose_rule(t, operand, indices, updates, *,
+                                update_jaxpr, update_consts, dimension_numbers,
+                                indices_are_sorted, unique_indices, mode):
+  assert not ad.is_undefined_primal(indices)
+  if ad.is_undefined_primal(updates):
+    updates_shape = updates.aval.shape
+  else:
+    updates_shape = updates.shape
+  if type(t) is ad_util.Zero:
+    operand_t = ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
+    update_t = ad_util.Zero(updates.aval) if ad.is_undefined_primal(updates) else None
+  else:
+    operand_t = update_t = None
+    if ad.is_undefined_primal(operand):
+      operand_t = t
+
+    if ad.is_undefined_primal(updates):
+      gather_dnums = GatherDimensionNumbers(
+        offset_dims=dimension_numbers.update_window_dims,
+        collapsed_slice_dims=dimension_numbers.inserted_window_dims,
+        start_index_map=dimension_numbers.scatter_dims_to_operand_dims)
+      slice_sizes = []
+      pos = 0
+      for i in range(len(t.shape)):
+        if i in dimension_numbers.inserted_window_dims:
+          slice_sizes.append(1)
+        else:
+          slice_sizes.append(updates_shape[dimension_numbers.update_window_dims[pos]])
+          pos += 1
+      update_t = gather(t, indices, dimension_numbers=gather_dnums,
+                        slice_sizes=slice_sizes, mode=mode, fill_value=0)
+  return [operand_t, None, update_t]
 
 
 class Pad(ShapeOp):
@@ -576,29 +791,174 @@ class Pad(ShapeOp):
         return [z.gather(padding)]
 
 
+def _pad_shape_rule(operand, padding_value, *, padding_config):
+  del padding_value
+  op_shape = np.shape(operand)
+  if not len(padding_config) == np.ndim(operand):
+    raise ValueError("length of padding_config must equal the number of axes "
+                     f"of operand, got padding_config {padding_config} "
+                     f"for operand shape {op_shape}")
+  if not all(i >= 0 for _, _, i in padding_config):
+    raise ValueError("interior padding in padding_config must be nonnegative, "
+                     f"got padding_config {padding_config}")
+  result = tuple(core.sum_dim(l, h, core.dilate_dim(d, i + 1))
+                 for (l, h, i), d in zip(padding_config, op_shape))
+  if not all(core.greater_equal_dim(d, 0) for d in result):
+    msg = (f"Dimension size after padding is not at least 0, "
+           f"got result shape {result}, for padding_config {padding_config}"
+           f" and operand shape {op_shape}")
+    raise ValueError(msg)
+  return result
+
+def _pad_transpose(t, operand, padding_value, *, padding_config):
+  if type(t) is ad_util.Zero:
+    t_operand = ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
+    t_padv = ad_util.Zero(padding_value.aval) if ad.is_undefined_primal(padding_value) else None
+  else:
+    lo, hi, interior = util.unzip3(padding_config)
+    total = lambda x: _reduce_sum(x, list(range(t.ndim)))
+
+    def t_op():
+      unpad_config = safe_zip(np.negative(lo), np.negative(hi),
+                              np.zeros_like(interior))
+      unpadded = pad(t, np.array(0., t.dtype), unpad_config)
+      return slicing.slice(unpadded, np.zeros_like(lo), unpadded.shape,
+                           np.add(interior, 1))
+
+    t_operand = t_op() if ad.is_undefined_primal(operand) else None
+    t_padv = sub(total(t), total(t_operand)) if ad.is_undefined_primal(padding_value) else None
+  return [t_operand, t_padv]
+
+def _pad_batch_rule(batched_args, batch_dims, *, padding_config):
+  operand, padding_value = batched_args
+  operand_bdim, padding_value_bdim = batch_dims
+  if operand_bdim is None:
+    operand_bdim = 0
+    operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
+
+  padding_config = list(padding_config)
+  padding_config.insert(operand_bdim, (0, 0, 0))
+  if padding_value_bdim is None:
+    return pad(operand, padding_value, padding_config), operand_bdim
+
+  assert padding_value_bdim == 0, padding_value_bdim
+
+  x = pad(operand, _zero(operand), padding_config)
+  mask = pad(full_like(operand, True, np.bool_), False, padding_config)
+  broadcasted_padding = broadcast_in_dim(padding_value, x.shape,
+                                         (operand_bdim,))
+  return select(mask, x, broadcasted_padding), operand_bdim
+
+# pad_p = standard_primitive(_pad_shape_rule, _pad_dtype_rule, 'pad')
+# ad.deflinear2(pad_p, _pad_transpose)
+# batching.primitive_batchers[pad_p] = _pad_batch_rule
+
+
 class Slice(ShapeOp):
     @staticmethod
-    def eval(x, *, padding):
-        return [x.slice(padding)]
+    def eval(x, *, starts, limits, strides):
+        return [x.slice(idx)]
 
     @staticmethod
-    def vmap(axis_size, vals_in, dims_in, *, perm):
+    def vmap(axis_size, vals_in, dims_in, *, starts, limits, strides):
         raise NotImplementedError
 
     @staticmethod
-    def jvp(primals, tangents, *, padding):
+    def jvp(primals, tangents, *, starts, limits, strides):
         (x,), (x_dot, _) = primals, tangents
-        return [x.slice(padding)], [x_dot.slice(padding)]
+        return [x.slice(idx)], [x_dot.slice(idx)]
 
     @staticmethod
-    def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
-        shape = [x.shape[i] for i in padding]
-        return [ArrayShape(shape, x.dtype)]
+    def shape_eval(x: ArrayShape, *, starts, limits, strides: Sequence[int]) -> List[ArrayShape]:
+        # TODO: compute shape without numpy
+        arr = np.zeros_like(x.shape)
+        arr = arr[idx]
+        return [ArrayShape(arr.shape, x.dtype)]
 
     @staticmethod
-    def T(cts, *, padding):
+    def T(cts, *, starts, limits, strides):
         (z,) = cts
-        return [z.pad(padding)]
+
+        return [z.pad()]
+
+
+def _slice_shape_rule(operand, *, start_indices, limit_indices, strides):
+  lax._check_shapelike("slice", "start_indices", start_indices)
+  lax._check_shapelike("slice", "limit_indices", limit_indices)
+  if operand.ndim != len(start_indices):
+    msg = ("slice start_indices must have length equal to the number of "
+           "dimensions of the operand, got indices {} for operand shape {}.")
+    raise TypeError(msg.format(start_indices, operand.shape))
+  if len(start_indices) != len(limit_indices):
+    msg = ("slice limit_indices must have the same length as start_indices, "
+           "got start_indices {} and limit_indices {}.")
+    raise TypeError(msg.format(start_indices, limit_indices))
+  if not core.greater_equal_shape(operand.shape, limit_indices):
+    msg = ("slice limit_indices must be less than or equal to operand shape, "
+           "got limit_indices {} for operand shape {}.")
+    raise TypeError(msg.format(limit_indices, operand.shape))
+  if not all(core.greater_equal_dim(si, 0) for si in start_indices):
+    msg = ("slice start_indices must be greater than or equal to zero, "
+           "got start_indices of {}.")
+    raise TypeError(msg.format(start_indices))
+  if not jax.config.jax_dynamic_shapes:
+    if not core.greater_equal_shape(limit_indices, start_indices):
+      msg = ("slice limit_indices must be greater than or equal to start_indices,"
+            " got start_indices {} and limit_indices {}.")
+      raise TypeError(msg.format(start_indices, limit_indices))
+  if strides is None or tuple(strides) == (1,) * len(operand.shape):
+    shape = [limit if type(start) is int and start == 0 else limit - start
+             for start, limit in zip(start_indices, limit_indices)]
+    return tuple(shape)
+
+  lax._check_shapelike("slice", "strides", strides)
+  if len(strides) != operand.ndim:
+    msg = ("slice strides must have length equal to the number of dimensions "
+            "of the operand, got strides {} for operand shape {}.")
+    raise TypeError(msg.format(strides, operand.shape))
+  if not core.greater_equal_shape(strides, (0,) * len(strides)):
+    msg = "slice strides must be positive, got {}"
+    raise TypeError(msg.format(strides))
+  diff = core.diff_shape(limit_indices, start_indices)
+  return core.stride_shape(diff, (1,) * len(diff), strides)
+
+def _slice_transpose_rule(t, operand, *, start_indices, limit_indices, strides):
+  assert ad.is_undefined_primal(operand)
+  operand_shape = operand.aval.shape
+  if strides is None or np.all(np.equal(strides, 1)):
+    pads = zip(start_indices, np.subtract(operand_shape, limit_indices),
+               (0,) * len(start_indices))
+  else:
+    real_limits = np.add(
+      start_indices,
+      np.where(np.array(t.shape) == 0, 0,
+               np.add(1, np.multiply(np.subtract(t.shape, 1), strides))))
+    pads = zip(start_indices, np.subtract(operand_shape, real_limits),
+               np.subtract(strides, 1))
+  result = lax.pad(t, lax._const(t, 0), pads)
+  assert result.shape == operand_shape, f"{result.shape=} {operand_shape=}"
+  return [result]
+
+
+def _slice_batching_rule(batched_args, batch_dims, *, start_indices,
+                         limit_indices, strides):
+  operand, = batched_args
+  bdim, = batch_dims
+
+  new_start_indices = list(start_indices)
+  new_start_indices.insert(bdim, 0)
+
+  new_limit_indices = list(limit_indices)
+  new_limit_indices.insert(bdim, operand.shape[bdim])
+
+  if strides is None:
+    new_strides = None
+  else:
+    new_strides = list(strides)
+    new_strides.insert(bdim, 1)
+
+  out = slice(operand, new_start_indices, new_limit_indices, new_strides)
+  return out, bdim
 
 
 class Flip(ShapeOp):

@@ -189,7 +189,10 @@ class Array(BaseArray):
             for a in sorted(axes):
                 self = self.expand_dims(a)
         return (self.broadcast_to(shape))
-
+    def slice(self, start_indices, limit_indices, strides):
+        slices = tuple(slice(s,l,r)
+            for s, l, r in zip(start_indices, limit_indices, strides))
+        return self.__class__(self.val[slices])
     __getitem__ = lambda self, idx: self.__class__(self.val.__getitem__(idx))
     __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
     gather = lambda self, idx, axis: self.__class__(

@@ -774,6 +774,24 @@ class Pad(ShapeOp):
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, perm):
         raise NotImplementedError
+        operand, padding_value = batched_args
+        operand_bdim, padding_value_bdim = batch_dims
+        if operand_bdim is None:
+            operand_bdim = 0
+            operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
+
+        padding_config = list(padding_config)
+        padding_config.insert(operand_bdim, (0, 0, 0))
+        if padding_value_bdim is None:
+            return pad(operand, padding_value, padding_config), operand_bdim
+
+        assert padding_value_bdim == 0, padding_value_bdim
+
+        x = pad(operand, _zero(operand), padding_config)
+        mask = pad(full_like(operand, True, np.bool_), False, padding_config)
+        broadcasted_padding = broadcast_in_dim(padding_value, x.shape,
+                                                (operand_bdim,))
+        return select(mask, x, broadcasted_padding), operand_bdim
 
     @staticmethod
     def jvp(primals, tangents, *, padding):
@@ -782,183 +800,107 @@ class Pad(ShapeOp):
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
-        shape = [x.shape[i] for i in padding]
-        return [ArrayShape(shape, x.dtype)]
+        op_shape = np.shape(x)
+        if not len(padding) == np.ndim(x):
+            raise ValueError("length of padding_config must equal the number of axes "
+                            f"of operand, got padding_config {padding} "
+                            f"for operand shape {op_shape}")
+        if not all(i >= 0 for _, _, i in padding):
+            raise ValueError("interior padding in padding_config must be nonnegative, "
+                            f"got padding_config {padding}")
+        def _dilate_dim(d, dilation):
+            return tuple(0 if d == 0 else 1 + dilation * (d - 1))
+        shape = (sum(l, h, _dilate_dim(d, i + 1)) for (l, h, i), d in zip(padding, op_shape))
+        res = ArrayShape(shape, x.dtype)
+        if not all(d >= 0 for d in res.shape):
+            msg = (f"Dimension size after padding is not at least 0, "
+                f"got result shape {res}, for padding_config {padding}"
+                f" and operand shape {op_shape}")
+            raise ValueError(msg)
+        return [res]
 
     @staticmethod
-    def T(cts, *, padding):
+    def T(cts, x, *, padding):
+        def _unzip3(xyzs):
+            xs, ys, zs = [], [], []
+            for x, y, z in xyzs:
+                xs += [x]; ys += [y]; zs += [z]
+            return tuple(xs), tuple(ys), tuple(zs)
         (z,) = cts
-        return [z.gather(padding)]
-
-
-def _pad_shape_rule(operand, padding_value, *, padding_config):
-  del padding_value
-  op_shape = np.shape(operand)
-  if not len(padding_config) == np.ndim(operand):
-    raise ValueError("length of padding_config must equal the number of axes "
-                     f"of operand, got padding_config {padding_config} "
-                     f"for operand shape {op_shape}")
-  if not all(i >= 0 for _, _, i in padding_config):
-    raise ValueError("interior padding in padding_config must be nonnegative, "
-                     f"got padding_config {padding_config}")
-  result = tuple(core.sum_dim(l, h, core.dilate_dim(d, i + 1))
-                 for (l, h, i), d in zip(padding_config, op_shape))
-  if not all(core.greater_equal_dim(d, 0) for d in result):
-    msg = (f"Dimension size after padding is not at least 0, "
-           f"got result shape {result}, for padding_config {padding_config}"
-           f" and operand shape {op_shape}")
-    raise ValueError(msg)
-  return result
-
-def _pad_transpose(t, operand, padding_value, *, padding_config):
-  if type(t) is ad_util.Zero:
-    t_operand = ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
-    t_padv = ad_util.Zero(padding_value.aval) if ad.is_undefined_primal(padding_value) else None
-  else:
-    lo, hi, interior = util.unzip3(padding_config)
-    total = lambda x: _reduce_sum(x, list(range(t.ndim)))
-
-    def t_op():
-      unpad_config = safe_zip(np.negative(lo), np.negative(hi),
-                              np.zeros_like(interior))
-      unpadded = pad(t, np.array(0., t.dtype), unpad_config)
-      return slicing.slice(unpadded, np.zeros_like(lo), unpadded.shape,
+        lo, hi, interior = _unzip3(padding)
+        def t_op():
+            unpadding = zip(np.negative(lo), np.negative(hi),
+                                    np.zeros_like(interior))
+            unpadded = z.pad(unpadding)
+            return unpadded.slice(np.zeros_like(lo), unpadded.shape,
                            np.add(interior, 1))
 
-    t_operand = t_op() if ad.is_undefined_primal(operand) else None
-    t_padv = sub(total(t), total(t_operand)) if ad.is_undefined_primal(padding_value) else None
-  return [t_operand, t_padv]
-
-def _pad_batch_rule(batched_args, batch_dims, *, padding_config):
-  operand, padding_value = batched_args
-  operand_bdim, padding_value_bdim = batch_dims
-  if operand_bdim is None:
-    operand_bdim = 0
-    operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
-
-  padding_config = list(padding_config)
-  padding_config.insert(operand_bdim, (0, 0, 0))
-  if padding_value_bdim is None:
-    return pad(operand, padding_value, padding_config), operand_bdim
-
-  assert padding_value_bdim == 0, padding_value_bdim
-
-  x = pad(operand, _zero(operand), padding_config)
-  mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-  broadcasted_padding = broadcast_in_dim(padding_value, x.shape,
-                                         (operand_bdim,))
-  return select(mask, x, broadcasted_padding), operand_bdim
-
-# pad_p = standard_primitive(_pad_shape_rule, _pad_dtype_rule, 'pad')
-# ad.deflinear2(pad_p, _pad_transpose)
-# batching.primitive_batchers[pad_p] = _pad_batch_rule
-
-
+        res = t_op() if isinstance(x.slope.ad.UndefPrimal) else None
+        return [res]
+    
 class Slice(ShapeOp):
     @staticmethod
     def eval(x, *, starts, limits, strides):
-        return [x.slice(idx)]
+        return [x.slice(starts, limits, strides)]
 
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, starts, limits, strides):
         raise NotImplementedError
+        x, = vals_in
+        x_bdim, = dims_in
+
+        new_start_indices = list(starts)
+        new_start_indices.insert(x_bdim, 0)
+
+        new_limit_indices = list(limits)
+        new_limit_indices.insert(x_bdim, x.shape[x_bdim])
+
+        if strides is None:
+            new_strides = None
+        else:
+            new_strides = list(strides)
+            new_strides.insert(x_bdim, 1)
+
+        out = x.slice(new_start_indices, new_limit_indices, new_strides)
+        return out, x_bdim
+
 
     @staticmethod
     def jvp(primals, tangents, *, starts, limits, strides):
         (x,), (x_dot, _) = primals, tangents
-        return [x.slice(idx)], [x_dot.slice(idx)]
+        return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
 
     @staticmethod
     def shape_eval(x: ArrayShape, *, starts, limits, strides: Sequence[int]) -> List[ArrayShape]:
-        # TODO: compute shape without numpy
-        arr = np.zeros_like(x.shape)
-        arr = arr[idx]
-        return [ArrayShape(arr.shape, x.dtype)]
+        if strides is None or tuple(strides) == (1,) * len(x.shape):
+            shape = [limit if type(start) is int and start == 0 else limit - start
+                    for start, limit in zip(starts, limits)]
+            return ArrayShape(shape, x.dtype)
+        else:
+            # TODO: compute strided shape without numpy
+            arr = np.zeros_like(x.shape)
+            arr = arr[tuple(slice(s,l,r) for s, l, r in zip(starts, limits, strides))]
+            return [ArrayShape(arr.shape, x.dtype)]
 
     @staticmethod
-    def T(cts, *, starts, limits, strides):
+    def T(cts, x, *, starts, limits, strides):
         (z,) = cts
+        x_shape = x.aval.shape
+        assert isinstance(x, slope.ad.UndefPrimal)
+        if strides is None or np.all(np.equal(strides, 1)):
+            pads = zip(starts, np.subtract(x.aval.shape, limits),
+                (0,) * len(starts))
+        else:
+            real_limits = np.add(
+            starts,
+            np.where(np.array(t.shape) == 0, 0,
+                    np.add(1, np.multiply(np.subtract(t.shape, 1), strides))))
+            pads = zip(starts, np.subtract(x_shape, real_limits),
+                    np.subtract(strides, 1))
+        res = z.pad(pads)
+        assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
+        return [res]
 
-        return [z.pad()]
-
-
-def _slice_shape_rule(operand, *, start_indices, limit_indices, strides):
-  lax._check_shapelike("slice", "start_indices", start_indices)
-  lax._check_shapelike("slice", "limit_indices", limit_indices)
-  if operand.ndim != len(start_indices):
-    msg = ("slice start_indices must have length equal to the number of "
-           "dimensions of the operand, got indices {} for operand shape {}.")
-    raise TypeError(msg.format(start_indices, operand.shape))
-  if len(start_indices) != len(limit_indices):
-    msg = ("slice limit_indices must have the same length as start_indices, "
-           "got start_indices {} and limit_indices {}.")
-    raise TypeError(msg.format(start_indices, limit_indices))
-  if not core.greater_equal_shape(operand.shape, limit_indices):
-    msg = ("slice limit_indices must be less than or equal to operand shape, "
-           "got limit_indices {} for operand shape {}.")
-    raise TypeError(msg.format(limit_indices, operand.shape))
-  if not all(core.greater_equal_dim(si, 0) for si in start_indices):
-    msg = ("slice start_indices must be greater than or equal to zero, "
-           "got start_indices of {}.")
-    raise TypeError(msg.format(start_indices))
-  if not jax.config.jax_dynamic_shapes:
-    if not core.greater_equal_shape(limit_indices, start_indices):
-      msg = ("slice limit_indices must be greater than or equal to start_indices,"
-            " got start_indices {} and limit_indices {}.")
-      raise TypeError(msg.format(start_indices, limit_indices))
-  if strides is None or tuple(strides) == (1,) * len(operand.shape):
-    shape = [limit if type(start) is int and start == 0 else limit - start
-             for start, limit in zip(start_indices, limit_indices)]
-    return tuple(shape)
-
-  lax._check_shapelike("slice", "strides", strides)
-  if len(strides) != operand.ndim:
-    msg = ("slice strides must have length equal to the number of dimensions "
-            "of the operand, got strides {} for operand shape {}.")
-    raise TypeError(msg.format(strides, operand.shape))
-  if not core.greater_equal_shape(strides, (0,) * len(strides)):
-    msg = "slice strides must be positive, got {}"
-    raise TypeError(msg.format(strides))
-  diff = core.diff_shape(limit_indices, start_indices)
-  return core.stride_shape(diff, (1,) * len(diff), strides)
-
-def _slice_transpose_rule(t, operand, *, start_indices, limit_indices, strides):
-  assert ad.is_undefined_primal(operand)
-  operand_shape = operand.aval.shape
-  if strides is None or np.all(np.equal(strides, 1)):
-    pads = zip(start_indices, np.subtract(operand_shape, limit_indices),
-               (0,) * len(start_indices))
-  else:
-    real_limits = np.add(
-      start_indices,
-      np.where(np.array(t.shape) == 0, 0,
-               np.add(1, np.multiply(np.subtract(t.shape, 1), strides))))
-    pads = zip(start_indices, np.subtract(operand_shape, real_limits),
-               np.subtract(strides, 1))
-  result = lax.pad(t, lax._const(t, 0), pads)
-  assert result.shape == operand_shape, f"{result.shape=} {operand_shape=}"
-  return [result]
-
-
-def _slice_batching_rule(batched_args, batch_dims, *, start_indices,
-                         limit_indices, strides):
-  operand, = batched_args
-  bdim, = batch_dims
-
-  new_start_indices = list(start_indices)
-  new_start_indices.insert(bdim, 0)
-
-  new_limit_indices = list(limit_indices)
-  new_limit_indices.insert(bdim, operand.shape[bdim])
-
-  if strides is None:
-    new_strides = None
-  else:
-    new_strides = list(strides)
-    new_strides.insert(bdim, 1)
-
-  out = slice(operand, new_start_indices, new_limit_indices, new_strides)
-  return out, bdim
 
 
 class Flip(ShapeOp):

@@ -189,6 +189,7 @@ class Array(BaseArray):
             for a in sorted(axes):
                 self = self.expand_dims(a)
         return (self.broadcast_to(shape))
+    pad = lambda self, padding: self.__class__(np.pad(self.val, padding))
     def slice(self, start_indices, limit_indices, strides):
         slices = tuple(slice(s,l,r)
             for s, l, r in zip(start_indices, limit_indices, strides))

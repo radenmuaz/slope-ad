@@ -194,8 +194,8 @@ class Array(BaseArray):
         slices = tuple(slice(s,l,r)
             for s, l, r in zip(start_indices, limit_indices, strides))
         return self.__class__(self.val[slices])
-    __getitem__ = lambda self, idx: self.__class__(self.val.__getitem__(idx))
-    __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
+    __getitem__ = lambda self, idx: self.__class__(self.val.slice(idx))
+    # __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
     gather = lambda self, idx, axis: self.__class__(
         np.take_along_axis(self.val, idx, axis)
     )

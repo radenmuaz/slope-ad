@@ -795,7 +795,7 @@ class Pad(ShapeOp):
 
     @staticmethod
     def jvp(primals, tangents, *, padding):
-        (x,), (x_dot, _) = primals, tangents
+        (x,), (x_dot,) = primals, tangents
         return [x.pad(padding)], [x_dot.pad(padding)]
 
     @staticmethod
@@ -867,7 +867,7 @@ class Slice(ShapeOp):
 
     @staticmethod
     def jvp(primals, tangents, *, starts, limits, strides):
-        (x,), (x_dot, _) = primals, tangents
+        (x,), (x_dot, ) = primals, tangents
         return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
 
     @staticmethod

@@ -265,6 +265,12 @@ class TracerArray(BaseArray):
 
     def transpose(self, perm):
         return ops.Transpose.do(self, perm=perm)
+    
+    def slice(self, starts, limits, strides):
+        return ops.Slice.do(self, starts=starts, limits=limits, strides=strides)
+
+    def pad(self, padding):
+        return ops.Pad.do(self, padding=padding)
 
     def __getitem__(self, idx):
         def _is_simple_reverse_slice(idx: Any) -> bool:

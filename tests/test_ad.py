@@ -16,6 +16,26 @@ class TestGrad(unittest.TestCase):
         print(y)
         print(y_dot)
     
+    def test_slice(self):
+        def f(x):
+            out = x.slice((0,), (2,), (1,))
+            return out
+        x = Array.arange(5)
+        x_dot = Array.ones_like(x)
+        y, y_dot = ad.jvp(f, (x,), (x_dot,))
+        print(f"{x=}, {x_dot=}")
+        print(f"{y=}, {y_dot=}")
+    
+    def test_pad(self):
+        def f(x):
+            out = x.pad((0,2))
+            return out
+        x = Array.arange(5)
+        x_dot = Array.ones_like(x)
+        y, y_dot = ad.jvp(f, (x,), (x_dot,))
+        print(f"{x=}, {x_dot=}")
+        print(f"{y=}, {y_dot=}")
+    
         # y, f_lin = ad.linearize(f, x)
         # y_dot = f_lin(x_dot)
     # def test_grad1(self):

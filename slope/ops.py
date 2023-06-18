@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 import math
 import functools
 from slope.array import Array
-
+from slope import utils
 
 class Op(ABC):
     @classmethod
@@ -875,7 +875,7 @@ class Slice(ShapeOp):
         if strides is None or tuple(strides) == (1,) * len(x.shape):
             shape = [limit if type(start) is int and start == 0 else limit - start
                     for start, limit in zip(starts, limits)]
-            return ArrayShape(shape, x.dtype)
+            return [ArrayShape(shape, x.dtype)]
         else:
             # TODO: compute strided shape without numpy
             arr = np.zeros_like(x.shape)
@@ -888,16 +888,15 @@ class Slice(ShapeOp):
         x_shape = x.aval.shape
         assert isinstance(x, slope.ad.UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
-            pads = zip(starts, np.subtract(x.aval.shape, limits),
-                (0,) * len(starts))
+            lo, hi, interior = starts, np.subtract(x.aval.shape, limits), (0,) * len(starts)
         else:
             real_limits = np.add(
             starts,
-            np.where(np.array(t.shape) == 0, 0,
+            np.where(np.array(x.shape) == 0, 0,
                     np.add(1, np.multiply(np.subtract(t.shape, 1), strides))))
-            pads = zip(starts, np.subtract(x_shape, real_limits),
+            lo, hi, interior = utils.list_zip(starts, np.subtract(x_shape, real_limits),
                     np.subtract(strides, 1))
-        res = z.pad(pads)
+        res = z.pad(lo, hi, interior)
         assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
         return [res]
 

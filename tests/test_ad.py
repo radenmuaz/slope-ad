@@ -25,6 +25,13 @@ class TestGrad(unittest.TestCase):
         y, y_dot = ad.jvp(f, (x,), (x_dot,))
         print(f"{x=}, {x_dot=}")
         print(f"{y=}, {y_dot=}")
+        # y, f_lin = slope.ad.linearize(f, x)
+
+        loss_fn = lambda x: f(x).sum()
+        y, g = ad.grad(loss_fn)(x)
+        print(f"{y=}")
+        print(f"{g=}")
+        
     
     def test_pad(self):
         def f(x):

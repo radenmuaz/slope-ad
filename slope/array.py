@@ -184,26 +184,30 @@ class Array(BaseArray):
     expand_dims = lambda self, axes: self.__class__(np.expand_dims(self.val, axes))
     swapaxes = lambda self, a1, a2: self.__class__(np.swapaxes(self.val, a1, a2))
     broadcast_to = lambda self, shape: self.__class__(np.broadcast_to(self.val, shape))
+
     def broadcast(self, shape, axes=None):
         if axes is not None:
             for a in sorted(axes):
                 self = self.expand_dims(a)
-        return (self.broadcast_to(shape))
-    
-    def pad(self, lo, hi, value=0, interior=None):
+        return self.broadcast_to(shape)
+
+    def pad(self, lo, hi, interior=None, value=0):
         if interior is None:
             interior = [1] * len(lo)
         new_shape, slices = [], []
-        for (s, l , h, t) in zip(self.shape, lo, hi, interior):
-            new_shape += [s*t + l + h]
-            slices += [slice(l, s*t + l, t)]
+        for s, l, h, r in zip(self.shape, lo, hi, interior):
+            stride = r + 1
+            new_shape += [s * stride + l + h]
+            slices += [slice(l, s * stride + l, stride)]
         padded = np.full(new_shape, value, dtype=self.dtype)
         padded[tuple(slices)] = self.val
         return self.__class__(padded)
-    
+
     def slice(self, starts, limits, strides):
-        return self.__class__(self.val[tuple(slice(s,l,r)
-            for s, l, r in zip(starts, limits, strides))])
+        return self.__class__(
+            self.val[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
+        )
+
     __getitem__ = lambda self, idx: self.__class__(self.val.slice(idx))
     # __setitem__ = lambda self, idx, val: self.__class__(self.val.__setitem__(idx, val))
     gather = lambda self, idx, axis: self.__class__(

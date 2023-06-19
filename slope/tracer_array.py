@@ -30,7 +30,6 @@ from slope.base_array import BaseArray
 from slope.array import Array
 
 
-
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
         if type(x) in [
@@ -69,7 +68,6 @@ def reduceop_decor(op_fn):
         return ret
 
     return wrapped_fn
-
 
 
 class TracerArray(BaseArray):
@@ -265,21 +263,30 @@ class TracerArray(BaseArray):
 
     def transpose(self, perm):
         return ops.Transpose.do(self, perm=perm)
-    
+
     def slice(self, starts, limits, strides):
         return ops.Slice.do(self, starts=starts, limits=limits, strides=strides)
 
-    def pad(self, padding):
-        return ops.Pad.do(self, padding=padding)
+    def pad(self, lo, hi, interior=None, value=0):
+        if interior is None:
+            interior = tuple([0] * len(lo))
+        assert len(lo) == len(hi) == len(interior)
+        return ops.Pad.do(self, lo=lo, hi=hi, interior=interior, value=value)
 
     def __getitem__(self, idx):
         def _is_simple_reverse_slice(idx: Any) -> bool:
-            return (isinstance(idx, slice) and
-                    idx.start is idx.stop is None and
-                    isinstance(idx.step, int) and idx.step == -1)
-        
+            return (
+                isinstance(idx, slice)
+                and idx.start is idx.stop is None
+                and isinstance(idx.step, int)
+                and idx.step == -1
+            )
+
         def _is_integer_index(idx: Any) -> bool:
-            return isinstance(idx, (int, np.integer)) and not isinstance(idx, (bool, np.bool_))
+            return isinstance(idx, (int, np.integer)) and not isinstance(
+                idx, (bool, np.bool_)
+            )
+
         def _is_valid_integer_index_for_slice(idx, size, mode):
             if size == 0:
                 return False
@@ -292,35 +299,49 @@ class TracerArray(BaseArray):
             if shape == () and np.issubdtype(dtype, np.integer):
                 True
             return False
-        def _is_contiguous_slice(idx):
-            return (isinstance(idx, slice) and
-                    (idx.start is None or _is_integer_index(idx.start)) and
-                    (idx.stop is None or _is_integer_index(idx.stop)) and
-                    (idx.step is None or (_is_integer_index(idx.step) and idx.step == 1)))
 
+        def _is_contiguous_slice(idx):
+            return (
+                isinstance(idx, slice)
+                and (idx.start is None or _is_integer_index(idx.start))
+                and (idx.stop is None or _is_integer_index(idx.stop))
+                and (
+                    idx.step is None or (_is_integer_index(idx.step) and idx.step == 1)
+                )
+            )
 
         arr = self
         # attempt to compute _rewriting_take via lax.slice(); return None if not possible.
         idx = idx if isinstance(idx, tuple) else (idx,)
-        if ((not all(isinstance(i, int) for i in arr.shape) or 
-            (len(idx) > arr.ndim) or
-            (any(i is None for i in idx)))):
+        if (
+            not all(isinstance(i, int) for i in arr.shape)
+            or (len(idx) > arr.ndim)
+            or (any(i is None for i in idx))
+        ):
             raise NotImplementedError
 
         simple_revs = {i for i, ind in enumerate(idx) if _is_simple_reverse_slice(ind)}
-        int_indices = {i for i, (ind, size) in enumerate(zip(idx, arr.shape))
-                 if _is_valid_integer_index_for_slice(ind, size, mode)}
-        contiguous_slices = {i for i, ind in enumerate(idx) if _is_contiguous_slice(ind)}
+        int_indices = {
+            i
+            for i, (ind, size) in enumerate(zip(idx, arr.shape))
+            if _is_valid_integer_index_for_slice(ind, size, mode)
+        }
+        contiguous_slices = {
+            i for i, ind in enumerate(idx) if _is_contiguous_slice(ind)
+        }
 
-        has_partial_slices = any(idx[i].indices(arr.shape[i]) != (0, arr.shape[i], 1)
-                           for i in contiguous_slices)
+        has_partial_slices = any(
+            idx[i].indices(arr.shape[i]) != (0, arr.shape[i], 1)
+            for i in contiguous_slices
+        )
         if len(simple_revs) + len(int_indices) + len(contiguous_slices) != len(idx):
             return None
 
         if simple_revs:
             arr = arr.flip(tuple(simple_revs))
-            idx = tuple(slice(None) if i in simple_revs else ind
-                for i, ind in enumerate(idx))
+            idx = tuple(
+                slice(None) if i in simple_revs else ind for i, ind in enumerate(idx)
+            )
             contiguous_slices |= simple_revs
 
         if not (int_indices or has_partial_slices):

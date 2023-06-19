@@ -15,6 +15,7 @@ from typing import (
 import functools
 from slope import utils
 
+
 class BaseArray:
     # compound ops
     def where(self, trueval, falseval):
@@ -354,7 +355,8 @@ class BaseArray:
                 *prefix, *utils.flatten((k, o, s) for k, o, s in zip(k_, o_, s_))
             )
             xup = xup.slice(
-                slc_prefix + utils.flatten(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
+                slc_prefix
+                + utils.flatten(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
             )
             xup = xup.reshape(*prefix, *utils.flatten((k, o) for k, o in zip(k_, o_)))
             return xup.transpose(

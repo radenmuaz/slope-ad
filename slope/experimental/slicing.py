@@ -19,6 +19,8 @@ from typing import (
     Callable,
 )
 import numpy as np
+
+
 def take(self, idx):
     treedef, static_idx, dynamic_idx = _split_index_for_jit(idx, self.shape)
     return _gather(self, treedef, static_idx, dynamic_idx)

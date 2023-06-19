@@ -768,8 +768,8 @@ def _scatter_add_transpose_rule(t, operand, indices, updates, *,
 
 class Pad(ShapeOp):
     @staticmethod
-    def eval(x, *, padding):
-        return [x.pad(padding)]
+    def eval(x, *, lo, hi, interior, value):
+        return [x.pad(lo, hi, interior, value)]
 
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, perm):
@@ -794,48 +794,37 @@ class Pad(ShapeOp):
         return select(mask, x, broadcasted_padding), operand_bdim
 
     @staticmethod
-    def jvp(primals, tangents, *, padding):
+    def jvp(primals, tangents, *, lo, hi, interior, value):
         (x,), (x_dot,) = primals, tangents
-        return [x.pad(padding)], [x_dot.pad(padding)]
+        return [x.pad(lo, hi, interior, value)], [x_dot.pad(lo, hi, interior, value)]
 
     @staticmethod
-    def shape_eval(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
+    def shape_eval(x: ArrayShape, *, lo, hi, interior, value) -> List[ArrayShape]:
         op_shape = np.shape(x)
-        if not len(padding) == np.ndim(x):
-            raise ValueError("length of padding_config must equal the number of axes "
-                            f"of operand, got padding_config {padding} "
-                            f"for operand shape {op_shape}")
-        if not all(i >= 0 for _, _, i in padding):
-            raise ValueError("interior padding in padding_config must be nonnegative, "
-                            f"got padding_config {padding}")
         def _dilate_dim(d, dilation):
-            return tuple(0 if d == 0 else 1 + dilation * (d - 1))
-        shape = (sum(l, h, _dilate_dim(d, i + 1)) for (l, h, i), d in zip(padding, op_shape))
+            return 0 if d == 0 else 1 + dilation * (d - 1)
+        shape = (sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in zip(lo, hi, interior, op_shape))
         res = ArrayShape(shape, x.dtype)
         if not all(d >= 0 for d in res.shape):
-            msg = (f"Dimension size after padding is not at least 0, "
-                f"got result shape {res}, for padding_config {padding}"
-                f" and operand shape {op_shape}")
-            raise ValueError(msg)
+            raise ValueError(
+                f"Dimension size after padding is not at least 0, "
+                f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
+                f"{op_shape=}"
+            )
         return [res]
 
     @staticmethod
-    def T(cts, x, *, padding):
-        def _unzip3(xyzs):
-            xs, ys, zs = [], [], []
-            for x, y, z in xyzs:
-                xs += [x]; ys += [y]; zs += [z]
-            return tuple(xs), tuple(ys), tuple(zs)
+    def T(cts, x, *, lo, hi, interior, value):
         (z,) = cts
-        lo, hi, interior = _unzip3(padding)
         def t_op():
-            unpadding = zip(np.negative(lo), np.negative(hi),
-                                    np.zeros_like(interior))
-            unpadded = z.pad(unpadding)
-            return unpadded.slice(np.zeros_like(lo), unpadded.shape,
-                           np.add(interior, 1))
-
-        res = t_op() if isinstance(x.slope.ad.UndefPrimal) else None
+            unpadded = z.slice(lo, 
+                               tuple(s-h for s,h in zip(z.shape, hi)),
+                                tuple([1]* len(interior))
+                               )
+            return unpadded.slice(tuple([0]* len(lo)), 
+                                  unpadded.shape,
+                           tuple(r+1 for r in interior))
+        res = t_op() if isinstance(x, slope.ad.UndefPrimal) else None
         return [res]
     
 class Slice(ShapeOp):

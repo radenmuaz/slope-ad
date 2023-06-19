@@ -226,7 +226,8 @@ class BatchTrace(Trace):
         vals_in, bdims_in = utils.unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
         return [
-            BatchTracerArray(self, x, bd) for x, bd in utils.list_zip(val_outs, bdim_outs)
+            BatchTracerArray(self, x, bd)
+            for x, bd in utils.list_zip(val_outs, bdim_outs)
         ]
 
     @property
@@ -312,7 +313,8 @@ class JVPTrace(Trace):
         primals_in, tangents_in = utils.unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray(self, x, t) for x, t in utils.list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self, x, t)
+            for x, t in utils.list_zip(primal_outs, tangent_outs)
         ]
 
 
@@ -593,7 +595,8 @@ class ProgBuilder:
     def _inline_literals(self, prog: Prog, consts: List[Any]) -> Tuple[Prog, List[Any]]:
         const_binders, other_binders = utils.split_list(prog.in_binders, len(consts))
         scalars = [
-            type(x) in TracerArray.TYPES and not TracerArray.get_aval(x).shape for x in consts
+            type(x) in TracerArray.TYPES and not TracerArray.get_aval(x).shape
+            for x in consts
         ]
         new_const_binders, lit_binders = utils.partition_list(scalars, const_binders)
         new_consts, lit_vals = utils.partition_list(scalars, consts)
@@ -744,7 +747,9 @@ class PartialEvalTrace(Trace):
 
     pure = lift
 
-    def instantiate_const(self, tracer: PartialEvalTracerArray) -> PartialEvalTracerArray:
+    def instantiate_const(
+        self, tracer: PartialEvalTracerArray
+    ) -> PartialEvalTracerArray:
         if tracer.pval.is_unknown:
             return tracer
         else:

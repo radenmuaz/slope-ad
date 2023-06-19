@@ -93,6 +93,7 @@ def loss_fn(params, batch):
     preds = predict(params, inputs)
     return -(preds * targets).sum(axes=(0, 1))
 
+
 def accuracy(params, batch):
     inputs, targets = batch
     target_class = np.argmax(targets, axis=-1)
@@ -137,7 +138,6 @@ if __name__ == "__main__":
     opt_state = opt_init(init_params)
 
     def update(i, opt_state, batch):
-
         params = get_params(opt_state)
         loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)

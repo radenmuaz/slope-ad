@@ -2,6 +2,7 @@ import slope
 import numpy as np
 from slope import ad, ops
 from slope.array import Array
+
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
 
@@ -52,7 +53,7 @@ y = Array.randn(2, 3)
 
 
 def f(x, y):
-    out = x*x
+    out = x * x
     # out = ops.mm(out, ops.T(y))
     # out = ops.log_softmax(out, axes=(1,))
     out = ops.sum(out, axes=(0, 1))

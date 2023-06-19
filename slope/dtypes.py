@@ -1,41 +1,20 @@
-import functools
 from typing import (
-    cast,
-    overload,
     Any,
     Dict,
     List,
-    Literal,
-    Optional,
-    Set,
-    Tuple,
-    Type,
     Union,
 )
-import warnings
-
-import ml_dtypes
 import numpy as np
 
-from jax._src.config import flags, config
-
-from jax._src import traceback_util
-
-traceback_util.register_exclusion(__file__)
-
 bool_: type = np.bool_
-int_: type = np.int32 if config.jax_default_dtype_bits == "32" else np.int64
-uint: type = np.uint32 if config.jax_default_dtype_bits == "32" else np.uint64
-float_: type = np.float32 if config.jax_default_dtype_bits == "32" else np.float64
-complex_: type = (
-    np.complex64 if config.jax_default_dtype_bits == "32" else np.complex128
-)
+int_: type = np.int32
+uint: type = np.uint32
+float_: type = np.float32
 _default_types: Dict[str, type] = {
     "b": bool_,
     "i": int_,
     "u": uint,
     "f": float_,
-    "c": complex_,
 }
 
 # Trivial vectorspace datatype needed for tangent values of int/bool primals
@@ -45,7 +24,6 @@ _dtype_to_32bit_dtype: Dict[Any, Any] = {
     np.dtype("int64"): np.dtype("int32"),
     np.dtype("uint64"): np.dtype("uint32"),
     np.dtype("float64"): np.dtype("float32"),
-    np.dtype("complex128"): np.dtype("complex64"),
 }
 
 # Note: we promote narrow types to float32 here for backward compatibility
@@ -61,8 +39,6 @@ _dtype_to_inexact: Dict[Any, Any] = {
         ("int16", "float32"),
         ("uint32", "float32"),
         ("int32", "float32"),
-        ("uint64", "float64"),
-        ("int64", "float64"),
     ]
 }
 
@@ -132,7 +108,6 @@ _type_classes = {
     np.unsignedinteger,
     np.inexact,
     np.floating,
-    np.complexfloating,
 }
 
 
@@ -173,15 +148,11 @@ _float_types: List[Dtype] = [
     np.dtype("float32"),
     np.dtype("float64"),
 ]
-_complex_types: List[Dtype] = [
-    np.dtype("complex64"),
-    np.dtype("complex128"),
-]
-_jax_types = _bool_types + _int_types + _float_types + _complex_types
-_jax_dtype_set = {float0, *_bool_types, *_int_types, *_float_types, *_complex_types}
+_slope_types = _bool_types + _int_types + _float_types
+_slope_dtype_set = {float0, *_bool_types, *_int_types, *_float_types}
 
 
-def _jax_type(dtype: Any, weak_type: bool) -> Dtype:
+def _slope_type(dtype: Any, weak_type: bool) -> Dtype:
     """Return the jax type for a dtype and weak type."""
     if weak_type:
         if dtype == bool:
@@ -195,8 +166,8 @@ def is_python_scalar(x: Any) -> bool:
 
 
 def check_valid_dtype(dtype: Any) -> None:
-    if dtype not in _jax_dtype_set:
+    if dtype not in _slope_dtype_set:
         raise TypeError(
-            f"Dtype {dtype} is not a valid JAX array "
-            "type. Only arrays of numeric types are supported by JAX."
+            f"Dtype {dtype} is not a valid Slope array "
+            "type. Only arrays of numeric types are supported by Slope."
         )

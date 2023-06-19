@@ -8,6 +8,7 @@ import numpy as np
 import os
 from typing import NamedTuple
 from functools import partial
+
 DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
@@ -24,8 +25,8 @@ class TestGrad(unittest.TestCase):
         args_dot = [Array.ones_like(x) for x in args]
         eval_out, f_lin = slope.ad.linearize(f, *args)
         jvp_out = f_lin(*args_dot)
-        loss_fn = ad.grad(lambda *args, : f(*args).sum())
-        loss, grads = loss_fn(*args,)
+        loss_fn = ad.grad(lambda *args,: f(*args).sum())
+        loss, grads = loss_fn(*args)
         if DEBUG:
             print(f"{args=}")
             print(f"{eval_out=}")
@@ -39,12 +40,14 @@ class TestGrad(unittest.TestCase):
             z = Array.zeros_like(x)
             out = x.maximum(z)
             return out
-        res = self.run_ad_fns(f,  Array([1, 0.5, -0.4, 0, -200]))
+
+        res = self.run_ad_fns(f, Array([1, 0.5, -0.4, 0, -200]))
 
     def test_slice(self):
         def _f(x, *, starts, limits, strides):
             out = x.slice(starts, limits, strides)
             return out
+
         # partial because slope ad funcs cannot accept kwargs
         f = partial(_f, starts=(0,), limits=(2,), strides=(1,))
         res = self.run_ad_fns(f, Array.arange(5))
@@ -53,6 +56,7 @@ class TestGrad(unittest.TestCase):
         def _f(x, *, lo, hi, interior, val):
             out = x.pad(lo, hi, interior, val)
             return out
+
         f = partial(_f, lo=(1,), hi=(2,), interior=(0,), val=0)
         res = self.run_ad_fns(f, Array.arange(5))
 

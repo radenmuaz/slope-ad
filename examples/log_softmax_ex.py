@@ -23,6 +23,7 @@ def f(x, y):
     out = out.sum()
     return out
 
+
 # print(f(x,y))
 out, grad_out = ad.grad(f)(x, y)
 print(x)

@@ -6,7 +6,18 @@ from typing import (
     Any,
 )
 
+class IDHashable:
+  val: Any
 
+  def __init__(self, val):
+    self.val = val
+
+  def __hash__(self) -> int:
+    return id(self.val)
+
+  def __eq__(self, other):
+    return type(other) is IDHashable and id(self.val) == id(other.val)
+  
 def swap(f):
     return lambda x, y: f(y, x)
 

@@ -1,6 +1,5 @@
 # from slope.ad import Runtime, vmap, jvp, make_jaxpr, linearize, vjp, grad
 from slope import ad
-
 RT = ad.Runtime()
 
 # patch numpy

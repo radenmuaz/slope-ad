@@ -38,7 +38,7 @@ from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope.array import Array
 from slope.tracer_array import TracerArray
 from slope import ops
-
+from slope.backends import Backend, NumpyBackend
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -955,9 +955,16 @@ def grad(f):
 
     return gradfun
 
+def jit(f):
+    def f_jitted(*args):
+        avals_in = [ArrayShape.like(TracerArray.get_aval(x)) for x in args]
+        jaxpr, consts, out_tree = make_prog(f, *avals_in)
+        outs = ops.Jit.do(*consts, *args, jaxpr=jaxpr, num_consts=len(consts))
+        return tree_unflatten(out_tree, outs)
+    return f_jitted
 
 class Runtime:
-    def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
+    def __init__(self, root_trace=MainTrace(0, EvalTrace, None), backend=NumpyBackend):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [root_trace]
@@ -969,6 +976,7 @@ class Runtime:
             lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
+        self.backend = backend
 
     def register_pytree_node(
         self, ty: Type, to_iter: Callable, from_iter: Callable

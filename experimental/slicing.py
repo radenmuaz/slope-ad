@@ -1,5 +1,5 @@
 from slope.array import Array
-from slope.tracer import TracerArray
+from slope.tracer_array import TracerArray
 import slope
 from typing import (
     Sequence,
@@ -19,7 +19,43 @@ from typing import (
     Callable,
 )
 import numpy as np
+'''
+// https://www.tensorflow.org/mlir/hlo_ops#mhlogather_mhlogatherop
 
+%result = "mhlo.scatter"(%input, %scatter_indices, %update) ({
+  ^bb0(%arg0: tensor<i32>, %arg1: tensor<i32>):
+    %0 = mhlo.add %arg0, %arg1 : tensor<i32>
+    mhlo.return %0 : tensor<i32>
+}) {
+  scatter_dimension_numbers = #mhlo.scatter<
+    update_window_dims = [2,3],
+    inserted_window_dims = [0],
+    scatter_dims_to_operand_dims = [1, 0],
+    index_vector_dim = 2>,
+  indices_are_sorted = false,
+  unique_indices = false
+} : (tensor<3x4x2xi32>, tensor<2x3x2xi64>, tensor<2x3x2x2xi32>) -> tensor<3x4x2xi32>
+
+'''
+class GatherDimensionNumbers(NamedTuple):
+  """
+  `index_vector_dim` is implicit, as last dimension.
+  To gather scalar indices, add a trailing dimension of size 1.
+  """
+  offset_dims: Tuple[int, ...]
+  collapsed_slice_dims: Tuple[int, ...]
+  start_index_map: Tuple[int, ...]
+  index_vector_dim = -1
+
+def gather(operand, start_indices,
+           dimension_numbers: GatherDimensionNumbers,
+           slice_sizes,
+           ):
+    # parsed_mode = 2 # PROMISE_IN_BOUNDS
+    # fill_value = None
+    return operand.gather(
+      operand, start_indices, dimension_numbers=dimension_numbers,
+      slice_sizes=slice_sizes)
 
 def take(self, idx):
     treedef, static_idx, dynamic_idx = _split_index_for_jit(idx, self.shape)
@@ -30,16 +66,13 @@ def _gather(arr, treedef, static_idx, dynamic_idx):
     idx = _merge_static_and_dynamic_indices(treedef, static_idx, dynamic_idx)
     indexer = _index_to_gather(arr.shape, idx)  # shared with _scatter_update
     y = arr
-    # handle cases like zeros(0)[array([], int32)].
     if indexer.slice_shape == ():
         return Array.zeros(shape=indexer.slice_shape, dtype=y.dtype)
-    # We avoid generating a gather when indexer.gather_indices.size is empty.
     if indexer.gather_indices.shape != ():
         y = y.gather(indexer.gather_indices, indexer.dnums, indexer.gather_slice_shape)
-    # Reverses axes with negative strides.
     if indexer.reversed_y_dims:
+        # y = y.flip(indexer.reversed_y_dims)
         raise NotImplementedError
-    # This adds np.newaxis/None dimensions.
     return y.expand_dims(indexer.newaxis_dims)
 
 
@@ -54,8 +87,6 @@ class _Indexer(NamedTuple):
     gather_slice_shape: Sequence[int]
     gather_indices: Array
     dnums: GatherDimensionNumbers
-    unique_indices: bool
-    indices_are_sorted: bool
     reversed_y_dims: Sequence[int]
     newaxis_dims: Sequence[int]
 
@@ -475,8 +506,6 @@ def _index_to_gather(
             start_index_map=tuple(start_index_map),
         ),
         gather_indices=gather_indices_array,
-        unique_indices=advanced_indexes is None,
-        indices_are_sorted=advanced_indexes is None,
     )
 
 

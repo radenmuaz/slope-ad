@@ -11,13 +11,48 @@ from typing import (
     Any,
     Union,
     Callable,
+    NamedTuple,
+    Final
 )
 import functools
 from slope import utils
 
-
 class BaseArray:
-    # compound ops
+    def notimplemented(self, *args, **kwargs):
+        raise NotImplementedError
+    convert = notimplemented
+    astype = convert
+    neg = notimplemented
+    exp = notimplemented
+    log = notimplemented
+    add = notimplemented
+    sub = notimplemented
+    mul = notimplemented
+    div = notimplemented
+    equal = notimplemented
+    not_equal = notimplemented
+    maximum = notimplemented
+    max = notimplemented
+    sum = notimplemented
+    choose = notimplemented
+    where = notimplemented
+
+    __neg__ = neg
+    __add__ = add
+    __radd__ = lambda self, other: self.__class__.add(other, self)
+    __sub__ = sub
+    __rsub__ = lambda self, other: self.__class__.sub(other, self)
+    __mul__ = __rmul__ = mul
+    __div__ = div
+    __rdiv__ = lambda self, other: self.__class__.div(other, self)
+    __truediv__ = __div__
+    __truerdiv__ = __rdiv__
+    __eq__ = lambda self, other: self.equal(other)
+    __ne__ = lambda self, other: self.not_equal(other)
+    __ge__ = lambda self, other: self.maximum(other).equal(self)
+    __le__ = lambda self, other: self.minimum(other).equal(self)
+    __gt__ = lambda self, other: 1.0 - (self <= other)
+    __lt__ = lambda self, other: 1.0 - (self >= other)
     def where(self, trueval, falseval):
         cond = self != 0.0
         cond = cond.convert(trueval.dtype)  # TODO: type promotion logic

@@ -116,6 +116,9 @@ class ReduceOp(Op):
 class ShapeOp(Op):
     pass
 
+class LoadOp(Op):
+    pass
+
 
 # -----------------------
 # UnaryOps
@@ -315,14 +318,6 @@ class Maximum(BinaryOp):
         (z_bar,) = cts
         return [z_bar, None]
 
-
-# max_p: core.Primitive = standard_naryop([_any, _any], 'max')
-# ad.defjvp2(max_p,
-#            lambda g, ans, x, y: mul(g, _balanced_eq(x, ans, y)),
-#            lambda g, ans, x, y: mul(g, _balanced_eq(y, ans, x)))
-# mlir.register_lowering(max_p, partial(_nary_lower_hlo, mlir.max_hlo))
-
-
 class Equal(BinaryOp):
     @staticmethod
     def eval(x, y):
@@ -391,6 +386,7 @@ class Sum(ReduceOp):
 # -----------------------
 # ShapeOps
 # -----------------------
+
 
 
 class Broadcast(ShapeOp):
@@ -1119,3 +1115,83 @@ class Concatenate(ShapeOp):
     def T(cts, *, axis):
         (zs,) = cts
         return [Array.concatenate(zs, axis=axis)]
+
+
+#
+
+
+class Full(LoadOp):
+    @staticmethod
+    def eval(*, fill_value, shape, dtype):
+        out = Array.full(fill_value, shape, dtype)
+        return [out]
+
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, shape, axes):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(*, fill_value, shape, dtype):
+        return (
+            [Array.full(fill_value, shape, dtype)],
+            [ Array.full(0, shape)],
+        )
+
+    @staticmethod
+    def shape_eval(fill_value, shape, dtype) -> List[ArrayShape]:
+        return [ArrayShape(tuple(shape), dtype)]
+
+    @staticmethod
+    def T(cts, *, fill_value, shape, dtype):
+        return [cts[0]]
+
+
+class FromNumpy(LoadOp):
+    @staticmethod
+    def eval(*, arr):
+        out = Array(arr)
+        return [out]
+
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, arr):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(*, arr):
+        return (
+            [ Array(arr)],
+            [ Array.full(0, arr.shape, arr.dtype)],
+        )
+
+    @staticmethod
+    def shape_eval(*, arr) -> List[ArrayShape]:
+        return [ArrayShape(tuple(arr.shape), arr.dtype)]
+
+    @staticmethod
+    def T(cts, *, arr):
+        return [cts[0]]
+
+
+class Jit(LoadOp):
+    @staticmethod
+    def eval(*args, prog, num_consts: int):
+        consts, args = args[:num_consts], args[num_consts:]
+        hashable_consts = tuple(map(utils.IDHashable, consts))
+        execute = slope.RT.backend.callable(utils.IDHashable(prog), hashable_consts)
+        return execute(*args)
+
+    @staticmethod
+    def vmap(axis_size, vals_in, dims_in, *, arr):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(*, arr):
+        raise NotImplementedError
+
+    @staticmethod
+    def shape_eval(*, arr) -> List[ArrayShape]:
+        raise NotImplementedError
+
+    @staticmethod
+    def T(cts, *, arr):
+        raise NotImplementedError

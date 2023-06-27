@@ -2,14 +2,7 @@ import math
 from contextlib import contextmanager
 import numpy as np
 import itertools
-from typing import (
-    Any,
-    Optional,
-    Union,
-    Tuple,
-    List,
-    Dict
-)
+from typing import Any, Optional, Union, Tuple, List, Dict
 import numpy as np
 import functools
 import slope
@@ -19,36 +12,39 @@ from slope.array_shape import ArrayShape
 from functools import lru_cache, partial
 import numpy as np
 from dataclasses import dataclass
-class Backend:
-    pass
+
+from slope.base_backend import BaseBackend, BaseBuilder, BaseConst, BaseParam, BaseOp
 import inspect
-@dataclass
-class NumpyConst:
-    val: Any
+
 
 @dataclass
-class NumpyParam:
+class NumpyConst(BaseConst):
+    val: Any
+
+
+@dataclass
+class NumpyParam(BaseParam):
     id: int
     val: Any
 
-class NumpyBuilder:
-    input_handlers = {ty: np.asarray for ty in
-                    [bool, int, float, np.ndarray, np.float64, np.float32]}
-    
+
+class NumpyBuilder(BaseBuilder):
+    input_handlers = {
+        ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]
+    }
+
     def __init__(self, name):
         self.name = name
-    
+
     def get_consts(c, consts: List[Any]) -> List[Any]:
         unique_consts = {id(cnst): cnst for cnst in consts}
-        numpy_consts = {
-            id_: NumpyConst(cnst) for id_, cnst in unique_consts.items()}
+        numpy_consts = {id_: NumpyConst(cnst) for id_, cnst in unique_consts.items()}
         return [numpy_consts[id(cnst)] for cnst in consts]
 
     def get_params(c, avals_in: List[ArrayShape]) -> List[Any]:
         return [NumpyParam(i, a) for i, a in enumerate(avals_in)]
-    
-    def prog_subcomp(c: Any, prog: slope.ad.Prog, args: List[Any]
-                  ) -> List[Any]:
+
+    def prog_subcomp(c: Any, prog: slope.ad.Prog, args: List[Any]) -> List[Any]:
         env: Dict[slope.ad.Var, NumpyOp] = {}
 
         def read(x: slope.ad.Atom) -> Any:
@@ -64,9 +60,9 @@ class NumpyBuilder:
             out_vals = eqn.op.jit(c, in_avals, in_vals, **eqn.params)
             map(write, eqn.out_binders, out_vals)
         return map(read, prog.outs)
-        
+
     def compile(self, backend_prog):
-        safe_builtins = {'__builtins__': None, 'math': math, 'np': np}
+        safe_builtins = {"__builtins__": None, "math": math, "np": np}
         exec_locals = {}
         code = ""
         return partial(exec, code, safe_builtins, exec_locals)
@@ -82,77 +78,63 @@ class NumpyBuilder:
         del aval
         return np.asarray(buf)
 
-class NumpyOp:
+
+class NumpyOp(BaseOp):
     def __call__(*args, **kwargs):
         raise NotImplementedError
-    
+
     def ir(self, *args, **kwargs):
         code: str = inspect.getsource(self.__call__)
+        return code
 
 
 class Full(NumpyOp):
     def __call__(self, fill_value, shape):
         return np.full(fill_value, shape)
 
+
+class Full(NumpyOp):
+    def __call__(self, fill_value, shape):
+        return np.full(fill_value, shape)
+
+
 class Add(NumpyOp):
     def __call__(self, x, y):
         return np.add(x, y)
 
+
+class Sub(NumpyOp):
+    def __call__(self, x, y):
+        return np.mul(x, y)
+
+
 class Mul(NumpyOp):
     def __call__(self, x, y):
         return np.mul(x, y)
-        
-class NumpyBackend(Backend):
-    @classmethod
-    @lru_cache()
-    def callable(cls, hashable_prog: utils.IDHashable,
-                    hashable_consts: Tuple[utils.IDHashable, ...]):
-        prog: slope.ad.Prog = hashable_prog.val
-        slope.ad.typecheck_prog(prog)
-        consts = [x.val for x in hashable_consts]
-        in_avals = [v.aval for v in prog.in_binders[len(consts):]]
-        c = NumpyBuilder('numpy_call')
-        backend_prog = c.prog_subcomp(c, prog, c.get_consts(consts) + c.get_params(in_avals))
-        compiled = c.compile(backend_prog)
-        return partial(c.execute_compiled, compiled, [v.aval for v in prog.outs])
 
+
+class Div(NumpyOp):
+    def __call__(self, x, y):
+        return np.div(x, y)
+
+
+class Exp(NumpyOp):
+    def __call__(self, x):
+        return np.exp(x)
+
+
+class Log(NumpyOp):
+    def __call__(self, x):
+        return np.log(x)
+
+
+class NumpyBackend(BaseBackend):
     default_dtype = np.float32
+
     def new_buffer(self, val, dtype=None):
         return np.asarray(val, dtype)
 
-    
-
-
-
-    
-
-    @staticmethod
-    def full(shape, fill_value, dtype=default_dtype, **kwargs):
-        return Array(np.full(shape, fill_value=fill_value, dtype=dtype, **kwargs))
-
-    @staticmethod
-    def zeros(shape, dtype=default_dtype, **kwargs):
-        return Array.full(shape, 0.0, dtype, **kwargs)
-
-    @staticmethod
-    def ones(shape, dtype=default_dtype, **kwargs):
-        return Array.full(shape, 1.0, dtype, **kwargs)
-
-    @staticmethod
-    def full_like(other, fill_value, **kwargs):
-        return Array.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
-
-    @staticmethod
-    def zeros_like(other, **kwargs):
-        return Array.zeros(other.shape, dtype=other.dtype, **kwargs)
-
-    @staticmethod
-    def ones_like(other, **kwargs):
-        return Array.ones(other.shape, dtype=other.dtype, **kwargs)
-
-    @staticmethod
-    def empty(*shape, **kwargs):
-        return Array.zeros(*shape, **kwargs)
+    full = Full()
 
     @staticmethod
     def eye(dim, **kwargs):
@@ -224,7 +206,6 @@ class NumpyBackend(Backend):
     equal = lambda arr, other: Array(np.equal(arr, other))
     not_equal = lambda arr, other: Array(np.not_equal(arr, other))
     maximum = lambda arr, other: Array(np.maximum(arr, other))
-    
 
     def max(arr, axes=None, keepdims=False):
         return Array(np.max(arr.val, axis=axes, keepdims=keepdims))
@@ -264,10 +245,19 @@ class NumpyBackend(Backend):
         return Array(
             arr.val[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
         )
+
     @staticmethod
-    def gather(operand, startIndices, offsetDims, collapsedSliceDims,
-                    startIndexMap, indexVectorDim, sliceSizes, indicesAreSorted,
-                    resultType):
+    def gather(
+        operand,
+        startIndices,
+        offsetDims,
+        collapsedSliceDims,
+        startIndexMap,
+        indexVectorDim,
+        sliceSizes,
+        indicesAreSorted,
+        resultType,
+    ):
         result = np.empty(resultType.shape, dtype=resultType.dtype)
         batchDims = [d for d in resultType.shape if d not in offsetDims]
         for resultIndex in np.ndindex(*resultType.shape):
@@ -277,7 +267,9 @@ class NumpyBackend(Backend):
 
             startIndicesIndex = batchIndex.copy()
             if indexVectorDim < startIndices.ndim:
-                startIndicesIndex = np.insert(startIndicesIndex, indexVectorDim, slice(None))
+                startIndicesIndex = np.insert(
+                    startIndicesIndex, indexVectorDim, slice(None)
+                )
             # startIndex = evalIndex(evalSliceOp(startIndices, startIndicesIndex))
             startIndex = startIndices.slice(startIndicesIndex)
 
@@ -291,7 +283,9 @@ class NumpyBackend(Backend):
 
             offsetIndex = np.array([resultIndex[d] for d in offsetDims])
 
-            fullOffsetIndex = np.zeros(offsetIndex.size + len(collapsedSliceDims), dtype=np.int64)
+            fullOffsetIndex = np.zeros(
+                offsetIndex.size + len(collapsedSliceDims), dtype=np.int64
+            )
             oi = 0
             for i in range(fullOffsetIndex.size):
                 if i in collapsedSliceDims:
@@ -303,10 +297,20 @@ class NumpyBackend(Backend):
             if np.all(np.less(operandIndex, operand.shape)):
                 result[tuple(resultIndex)] = operand[tuple(operandIndex)]
         return result
-    
+
     @staticmethod
-    def scatter(inputs, scatterIndices, updates, updateWindowDims, insertedWindowDims,
-                    scatterDimsToOperandDims, indexVectorDim, updateComputation, scope, resultTypes):
+    def scatter(
+        inputs,
+        scatterIndices,
+        updates,
+        updateWindowDims,
+        insertedWindowDims,
+        scatterDimsToOperandDims,
+        indexVectorDim,
+        updateComputation,
+        scope,
+        resultTypes,
+    ):
         results = []
         for input in inputs:
             results.append(input)
@@ -322,7 +326,9 @@ class NumpyBackend(Backend):
 
             startIndicesIndex = updateScatterIndex.copy()
             if indexVectorDim < scatterIndices.ndim:
-                startIndicesIndex = np.insert(startIndicesIndex, indexVectorDim, slice(None))
+                startIndicesIndex = np.insert(
+                    startIndicesIndex, indexVectorDim, slice(None)
+                )
 
             startIndex = scatterIndices.slice(startIndicesIndex)
 
@@ -365,12 +371,10 @@ class NumpyBackend(Backend):
                 result[resultIndex] = np.array(updatedValue)
 
         return results
-    
+
     # control flow
     choose = select = lambda arr, *vals, idx: Array(np.choose(idx, *vals))
-    where = lambda arr, trueval, falseval: Array(
-        np.where(arr, trueval, falseval)
-    )
+    where = lambda arr, trueval, falseval: Array(np.where(arr, trueval, falseval))
 
     # slice = lambda arr, start, end, step: Array(arr.val.__getitem__(slice(start, end, step)))
     # def broadcast_to(arr, shape):

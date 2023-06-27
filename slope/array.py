@@ -17,6 +17,7 @@ from slope.dtypes import dtypes
 import numpy as np
 import ops
 
+
 class Array(BaseArray):
     __array_priority__ = 2000
     default_dtype = dtypes.float32
@@ -37,7 +38,9 @@ class Array(BaseArray):
 
     @staticmethod
     def full(shape, fill_value, dtype=default_dtype, **kwargs):
-        return slope.RT.backend.full(shape, fill_value=fill_value, dtype=dtype, **kwargs)
+        return slope.RT.backend.full(
+            shape, fill_value=fill_value, dtype=dtype, **kwargs
+        )
 
     @staticmethod
     def zeros(shape, dtype=default_dtype, **kwargs):
@@ -49,7 +52,9 @@ class Array(BaseArray):
 
     @staticmethod
     def full_like(other, fill_value, **kwargs):
-        return slope.RT.backend.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
+        return slope.RT.backend.full(
+            other.shape, fill_value, dtype=other.dtype, **kwargs
+        )
 
     @staticmethod
     def zeros_like(other, **kwargs):
@@ -69,7 +74,9 @@ class Array(BaseArray):
 
     @staticmethod
     def arange(stop, start=0, step=1, **kwargs):
-        return slope.RT.backend.arange(start=start, stop=stop, step=step, dtype=float32, **kwargs)
+        return slope.RT.backend.arange(
+            start=start, stop=stop, step=step, dtype=float32, **kwargs
+        )
 
     # TODO: distill RNG code from jax
 
@@ -82,15 +89,16 @@ class Array(BaseArray):
     @staticmethod
     def rand(*shape, **kwargs):
         return slope.RT.backend.rand(
-                    size=shape, dtype=kwargs.get("dtype", slope.RT.backend.default_dtype),
+            size=shape,
+            dtype=kwargs.get("dtype", slope.RT.backend.default_dtype),
             **kwargs,
         )
 
     @staticmethod
     def randn(*shape, **kwargs):
         return slope.RT.backend.randn(
-                    size=shape, dtype=kwargs.get("dtype", slope.RT.backend.default_dtype)
-            **kwargs,
+            size=shape,
+            dtype=kwargs.get("dtype", slope.RT.backend.default_dtype) ** kwargs,
         )
 
     @staticmethod
@@ -125,8 +133,10 @@ class Array(BaseArray):
     equal = lambda self, other: slope.RT.backend.eager.equal(self, other)
     not_equal = lambda self, other: slope.RT.backend.eager.not_equal(self, other)
     maximum = lambda self, other: slope.RT.backend.eager.maximum(self, other)
+
     def max(self, axes=None, keepdims=False):
         return slope.RT.backend.eager.max(self.val, axis=axes, keepdims=keepdims)
+
     def sum(self, axes=None, keepdims=False):
         return slope.RT.backend.eager.sum(self.val, axis=axes, keepdims=keepdims)
 
@@ -135,7 +145,9 @@ class Array(BaseArray):
     transpose = lambda self, perm: slope.RT.backend.eager.transpose(self.val, perm)
     expand_dims = lambda self, axes: slope.RT.backend.eager.expand_dims(self.val, axes)
     swapaxes = lambda self, a1, a2: slope.RT.backend.eager.swapaxes(self.val, a1, a2)
-    broadcast_to = lambda self, shape: slope.RT.backend.eager.broadcast_to(self.val, shape)
+    broadcast_to = lambda self, shape: slope.RT.backend.eager.broadcast_to(
+        self.val, shape
+    )
 
     def broadcast(self, shape, axes=None):
         if axes is not None:
@@ -167,7 +179,9 @@ class Array(BaseArray):
 
     def __getitem__(self, idx, val):
         raise NotImplementedError
-      
+
     # control flow
     choose = select = lambda self, *vals, idx: slope.RT.backend.eagerchoose(idx, *vals)
-    where = lambda self, trueval, falseval: slope.RT.backend.eagerwhere(self, trueval, falseval)
+    where = lambda self, trueval, falseval: slope.RT.backend.eagerwhere(
+        self, trueval, falseval
+    )

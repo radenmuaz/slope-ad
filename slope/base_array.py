@@ -12,14 +12,16 @@ from typing import (
     Union,
     Callable,
     NamedTuple,
-    Final
+    Final,
 )
 import functools
 from slope import utils
 
+
 class BaseArray:
     def notimplemented(self, *args, **kwargs):
         raise NotImplementedError
+
     convert = notimplemented
     astype = convert
     neg = notimplemented
@@ -53,6 +55,7 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
+
     def where(self, trueval, falseval):
         cond = self != 0.0
         cond = cond.convert(trueval.dtype)  # TODO: type promotion logic

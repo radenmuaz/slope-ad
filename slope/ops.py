@@ -116,6 +116,7 @@ class ReduceOp(Op):
 class ShapeOp(Op):
     pass
 
+
 class LoadOp(Op):
     pass
 
@@ -318,6 +319,7 @@ class Maximum(BinaryOp):
         (z_bar,) = cts
         return [z_bar, None]
 
+
 class Equal(BinaryOp):
     @staticmethod
     def eval(x, y):
@@ -386,7 +388,6 @@ class Sum(ReduceOp):
 # -----------------------
 # ShapeOps
 # -----------------------
-
 
 
 class Broadcast(ShapeOp):
@@ -1134,7 +1135,7 @@ class Full(LoadOp):
     def jvp(*, fill_value, shape, dtype):
         return (
             [Array.full(fill_value, shape, dtype)],
-            [ Array.full(0, shape)],
+            [Array.full(0, shape)],
         )
 
     @staticmethod
@@ -1143,6 +1144,40 @@ class Full(LoadOp):
 
     @staticmethod
     def T(cts, *, fill_value, shape, dtype):
+        return [cts[0]]
+
+
+class Arange(LoadOp):
+    @staticmethod
+    def eval(*, start, stop, stride, dtype):
+        out = Array.arange(start, stop, stride, shape, dtype)
+        return [out]
+
+    @staticmethod
+    def vmap(
+        axis_size,
+        vals_in,
+        dims_in,
+        *,
+        start,
+        stop,
+        stride,
+    ):
+        raise NotImplementedError
+
+    @staticmethod
+    def jvp(*, start, stop, stride, dtype):
+        return (
+            [Array.arange(start, stop, stride, shape, dtype)],
+            [Array.full(0, len(tuple(slice(start, stop, stride))))],
+        )
+
+    @staticmethod
+    def shape_eval(start, stop, stride, dtype) -> List[ArrayShape]:
+        return [ArrayShape(len(tuple(slice(start, stop, stride))), dtype)]
+
+    @staticmethod
+    def T(cts, *, start, stop, stride, dtype):
         return [cts[0]]
 
 
@@ -1159,8 +1194,8 @@ class FromNumpy(LoadOp):
     @staticmethod
     def jvp(*, arr):
         return (
-            [ Array(arr)],
-            [ Array.full(0, arr.shape, arr.dtype)],
+            [Array(arr)],
+            [Array.full(0, arr.shape, arr.dtype)],
         )
 
     @staticmethod

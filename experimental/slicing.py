@@ -19,7 +19,8 @@ from typing import (
     Callable,
 )
 import numpy as np
-'''
+
+"""
 // https://www.tensorflow.org/mlir/hlo_ops#mhlogather_mhlogatherop
 
 %result = "mhlo.scatter"(%input, %scatter_indices, %update) ({
@@ -36,26 +37,36 @@ import numpy as np
   unique_indices = false
 } : (tensor<3x4x2xi32>, tensor<2x3x2xi64>, tensor<2x3x2x2xi32>) -> tensor<3x4x2xi32>
 
-'''
-class GatherDimensionNumbers(NamedTuple):
-  """
-  `index_vector_dim` is implicit, as last dimension.
-  To gather scalar indices, add a trailing dimension of size 1.
-  """
-  offset_dims: Tuple[int, ...]
-  collapsed_slice_dims: Tuple[int, ...]
-  start_index_map: Tuple[int, ...]
-  index_vector_dim = -1
+"""
 
-def gather(operand, start_indices,
-           dimension_numbers: GatherDimensionNumbers,
-           slice_sizes,
-           ):
+
+class GatherDimensionNumbers(NamedTuple):
+    """
+    `index_vector_dim` is implicit, as last dimension.
+    To gather scalar indices, add a trailing dimension of size 1.
+    """
+
+    offset_dims: Tuple[int, ...]
+    collapsed_slice_dims: Tuple[int, ...]
+    start_index_map: Tuple[int, ...]
+    index_vector_dim = -1
+
+
+def gather(
+    operand,
+    start_indices,
+    dimension_numbers: GatherDimensionNumbers,
+    slice_sizes,
+):
     # parsed_mode = 2 # PROMISE_IN_BOUNDS
     # fill_value = None
     return operand.gather(
-      operand, start_indices, dimension_numbers=dimension_numbers,
-      slice_sizes=slice_sizes)
+        operand,
+        start_indices,
+        dimension_numbers=dimension_numbers,
+        slice_sizes=slice_sizes,
+    )
+
 
 def take(self, idx):
     treedef, static_idx, dynamic_idx = _split_index_for_jit(idx, self.shape)

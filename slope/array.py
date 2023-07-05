@@ -15,7 +15,7 @@ from slope.array_shape import ValuedArrayShape
 from slope.base_array import BaseArray
 from slope.dtypes import dtypes
 import numpy as np
-import ops
+# import ops
 
 
 class Array(BaseArray):
@@ -75,7 +75,7 @@ class Array(BaseArray):
     @staticmethod
     def arange(stop, start=0, step=1, **kwargs):
         return slope.RT.backend.arange(
-            start=start, stop=stop, step=step, dtype=float32, **kwargs
+            start=start, stop=stop, step=step, **kwargs
         )
 
     # TODO: distill RNG code from jax
@@ -123,29 +123,29 @@ class Array(BaseArray):
 
     convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
     astype = convert
-    neg = lambda self: slope.RT.backend.eager.neg(self)
-    exp = lambda self: slope.RT.backend.eager.exp(self)
-    log = lambda self: slope.RT.backend.eager.log(self)
-    add = lambda self, other: slope.RT.backend.eager.add(self, other)
-    sub = lambda self, other: slope.RT.backend.eager.subtract(self, other)
-    mul = lambda self, other: slope.RT.backend.eager.multiply(self, other)
-    div = lambda self, other: slope.RT.backend.eager.divide(self, other)
-    equal = lambda self, other: slope.RT.backend.eager.equal(self, other)
-    not_equal = lambda self, other: slope.RT.backend.eager.not_equal(self, other)
-    maximum = lambda self, other: slope.RT.backend.eager.maximum(self, other)
+    neg = lambda self: slope.RT.backend.neg(self)
+    exp = lambda self: slope.RT.backend.exp(self)
+    log = lambda self: slope.RT.backend.log(self)
+    add = lambda self, other: slope.RT.backend.add(self, other)
+    sub = lambda self, other: slope.RT.backend.subtract(self, other)
+    mul = lambda self, other: slope.RT.backend.multiply(self, other)
+    div = lambda self, other: slope.RT.backend.divide(self, other)
+    equal = lambda self, other: slope.RT.backend.equal(self, other)
+    not_equal = lambda self, other: slope.RT.backend.not_equal(self, other)
+    maximum = lambda self, other: slope.RT.backend.maximum(self, other)
 
     def max(self, axes=None, keepdims=False):
-        return slope.RT.backend.eager.max(self.val, axis=axes, keepdims=keepdims)
+        return slope.RT.backend.max(self.val, axis=axes, keepdims=keepdims)
 
     def sum(self, axes=None, keepdims=False):
-        return slope.RT.backend.eager.sum(self.val, axis=axes, keepdims=keepdims)
+        return slope.RT.backend.sum(self.val, axis=axes, keepdims=keepdims)
 
     # Shape
-    reshape = lambda self, shape: slope.RT.backend.eager.reshape(self.val, shape)
-    transpose = lambda self, perm: slope.RT.backend.eager.transpose(self.val, perm)
-    expand_dims = lambda self, axes: slope.RT.backend.eager.expand_dims(self.val, axes)
-    swapaxes = lambda self, a1, a2: slope.RT.backend.eager.swapaxes(self.val, a1, a2)
-    broadcast_to = lambda self, shape: slope.RT.backend.eager.broadcast_to(
+    reshape = lambda self, shape: slope.RT.backend.reshape(self.val, shape)
+    transpose = lambda self, perm: slope.RT.backend.transpose(self.val, perm)
+    expand_dims = lambda self, axes: slope.RT.backend.expand_dims(self.val, axes)
+    swapaxes = lambda self, a1, a2: slope.RT.backend.swapaxes(self.val, a1, a2)
+    broadcast_to = lambda self, shape: slope.RT.backend.broadcast_to(
         self.val, shape
     )
 
@@ -163,7 +163,7 @@ class Array(BaseArray):
             stride = r + 1
             new_shape += [s * stride + l + h]
             slices += [slice(l, s * stride + l, stride)]
-        padded = slope.RT.backend.eager.full(new_shape, value, dtype=self.dtype)
+        padded = slope.RT.backend.full(new_shape, value, dtype=self.dtype)
         padded[tuple(slices)] = self.val
         return self.__class__(padded)
 
@@ -181,7 +181,7 @@ class Array(BaseArray):
         raise NotImplementedError
 
     # control flow
-    choose = select = lambda self, *vals, idx: slope.RT.backend.eagerchoose(idx, *vals)
-    where = lambda self, trueval, falseval: slope.RT.backend.eagerwhere(
+    choose = select = lambda self, *vals, idx: slope.RT.backendchoose(idx, *vals)
+    where = lambda self, trueval, falseval: slope.RT.backendwhere(
         self, trueval, falseval
     )

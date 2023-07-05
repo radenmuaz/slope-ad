@@ -17,6 +17,7 @@ from typing import (
 import functools
 from slope import utils
 
+from abc import ABC, abstractmethod
 
 class BaseArray:
     def notimplemented(self, *args, **kwargs):
@@ -39,10 +40,10 @@ class BaseArray:
     choose = notimplemented
     where = notimplemented
 
-    __neg__ = neg
-    __add__ = add
+    __neg__ = lambda self: self.neg()
+    __add__ = lambda self, other: self.add(other)
     __radd__ = lambda self, other: self.__class__.add(other, self)
-    __sub__ = sub
+    __sub__ = lambda self, other: self.sub(other)
     __rsub__ = lambda self, other: self.__class__.sub(other, self)
     __mul__ = __rmul__ = mul
     __div__ = div

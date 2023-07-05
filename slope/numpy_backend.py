@@ -13,59 +13,123 @@ from functools import lru_cache, partial
 import numpy as np
 from dataclasses import dataclass
 
-from slope.base_backend import BaseBackend, BaseBuilder, BaseConst, BaseParam, BaseOp
+from slope.base_backend import BaseBackend, BaseOpImpl
+from slope import ops
 import inspect
+# import ast
+
+# def pretty_print_ast(node, indent=0):
+#     indent_str = " " * indent
+#     node_str = indent_str + ast.dump(node)
+#     print(node_str)
+#     for child_node in ast.iter_child_nodes(node):
+#         pretty_print_ast(child_node, indent=indent + 4)
+
+# # Example AST node
+# tree = ast.parse("x = 1 + 2")
+
+# # Pretty print the AST node
+# pretty_print_ast(tree)
+
+# @dataclass
+# class NumpyConst(BaseConst):
+#     val: Any
 
 
-@dataclass
-class NumpyConst(BaseConst):
-    val: Any
+# @dataclass
+# class NumpyParam(BaseParam):
+#     id: int
+#     val: Any
+
+class NumpyOpImpl(BaseOpImpl):
+    ir_args = ()
+    ir_kwargs = {}
+    def __call__(self, *args, **kwargs):
+        exec_locals = { **{ir_a: a for ir_a, a in zip(self.ir_args, args)},
+                       **{ir_kwa: kwa for ir_kwa, kwa in zip(self.ir_kwargs, kwargs)}
+                       }
+        safe_builtins = {"__builtins__": None, "math": math, "np": np}
+        code = self.ir(*self.ir_args, **self.ir_kwargs)
+        exec(code, safe_builtins, exec_locals)
+        return Array(exec_locals["ret"])
+
+    def ir(self, *args, **kwargs):
+        raise NotImplementedError
+
+class Full(NumpyOpImpl):
+    def __call__(self, fill_value, shape):
+        return np.full(fill_value, shape)
 
 
-@dataclass
-class NumpyParam(BaseParam):
-    id: int
-    val: Any
+class AddImpl(NumpyOpImpl):
+    ir_args = ("x", "y")
+    def ir(self, x="x", y="y"):
+        return f"ret = np.add({x}, {y})"
 
 
-class NumpyBuilder(BaseBuilder):
+class Sub(NumpyOpImpl):
+    def __call__(self, x, y):
+        return np.mul(x, y)
+
+
+class Mul(NumpyOpImpl):
+    def __call__(self, x, y):
+        return np.mul(x, y)
+
+
+class Div(NumpyOpImpl):
+    def __call__(self, x, y):
+        return np.div(x, y)
+
+
+class Exp(NumpyOpImpl):
+    def __call__(self, x):
+        return np.exp(x)
+
+
+class Log(NumpyOpImpl):
+    def __call__(self, x):
+        return np.log(x)
+
+
+class NumpyBackend(BaseBackend):
+    default_dtype = np.float32
+    add_impl = AddImpl()
+
+    def new_buffer(self, val, dtype=None):
+        return np.asarray(val, dtype)
+
+    full = Full()
+
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]
     }
-
-    def __init__(self, name):
-        self.name = name
-
-    def get_consts(c, consts: List[Any]) -> List[Any]:
-        unique_consts = {id(cnst): cnst for cnst in consts}
-        numpy_consts = {id_: NumpyConst(cnst) for id_, cnst in unique_consts.items()}
-        return [numpy_consts[id(cnst)] for cnst in consts]
-
-    def get_params(c, avals_in: List[ArrayShape]) -> List[Any]:
-        return [NumpyParam(i, a) for i, a in enumerate(avals_in)]
-
-    def prog_subcomp(c: Any, prog: slope.ad.Prog, args: List[Any]) -> List[Any]:
-        env: Dict[slope.ad.Var, NumpyOp] = {}
-
+    
+    @classmethod
+    def compile(cls, prog, consts, in_avals) -> List[Any]:
+        safe_builtins = {"__builtins__": None, "math": math, "np": np}
+        exec_locals = {}
+        code = []
+        arg_names = [f"x{i}" for i in range(len(in_avals))]
+        code += [f"def f({', '.join(arg_names)})"]
+        args = consts + in_avals
+        env: Dict[slope.ad.Var, Any] = {}
         def read(x: slope.ad.Atom) -> Any:
-            return env[x] if type(x) is slope.ad.Var else NumpyConst(x.val)
+            return env[x] if type(x) is slope.ad.Var else x.val
 
-        def write(v: slope.ad.Var, val: NumpyOp) -> None:
+        def write(v: slope.ad.Var, val) -> None:
             env[v] = val
 
         map(write, prog.in_binders, args)
+        breakpoint()
         for eqn in prog.instrs:
             in_avals = [x.aval for x in eqn.inputs]
             in_vals = map(read, eqn.inputs)
-            out_vals = eqn.op.jit(c, in_avals, in_vals, **eqn.params)
+            out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
             map(write, eqn.out_binders, out_vals)
-        return map(read, prog.outs)
-
-    def compile(self, backend_prog):
-        safe_builtins = {"__builtins__": None, "math": math, "np": np}
-        exec_locals = {}
-        code = ""
+        var_outs = map(read, prog.outs)
         return partial(exec, code, safe_builtins, exec_locals)
+        return partial(c.execute_compiled, compiled, [v.aval for v in prog.outs])
 
     @classmethod
     def execute_compiled(cls, compiled, out_avals, *args):
@@ -78,64 +142,6 @@ class NumpyBuilder(BaseBuilder):
         del aval
         return np.asarray(buf)
 
-
-class NumpyOp(BaseOp):
-    def __call__(*args, **kwargs):
-        raise NotImplementedError
-
-    def ir(self, *args, **kwargs):
-        code: str = inspect.getsource(self.__call__)
-        return code
-
-
-class Full(NumpyOp):
-    def __call__(self, fill_value, shape):
-        return np.full(fill_value, shape)
-
-
-class Full(NumpyOp):
-    def __call__(self, fill_value, shape):
-        return np.full(fill_value, shape)
-
-
-class Add(NumpyOp):
-    def __call__(self, x, y):
-        return np.add(x, y)
-
-
-class Sub(NumpyOp):
-    def __call__(self, x, y):
-        return np.mul(x, y)
-
-
-class Mul(NumpyOp):
-    def __call__(self, x, y):
-        return np.mul(x, y)
-
-
-class Div(NumpyOp):
-    def __call__(self, x, y):
-        return np.div(x, y)
-
-
-class Exp(NumpyOp):
-    def __call__(self, x):
-        return np.exp(x)
-
-
-class Log(NumpyOp):
-    def __call__(self, x):
-        return np.log(x)
-
-
-class NumpyBackend(BaseBackend):
-    default_dtype = np.float32
-
-    def new_buffer(self, val, dtype=None):
-        return np.asarray(val, dtype)
-
-    full = Full()
-
     @staticmethod
     def eye(dim, **kwargs):
         return Array(np.eye(dim), **kwargs)
@@ -145,8 +151,6 @@ class NumpyBackend(BaseBackend):
         return Array(
             np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs
         )
-
-    # TODO: distill RNG code from jax
 
     _rng: np.random.Generator = np.random.default_rng()
 
@@ -193,19 +197,6 @@ class NumpyBackend(BaseBackend):
     @staticmethod
     def stop_gradient(cls, arr):
         return cls.zeros_like(arr)
-
-    convert = lambda arr, dtype: Array(arr.val, dtype=dtype)
-    astype = convert
-    neg = lambda arr: Array(np.negative(arr))
-    exp = lambda arr: Array(np.exp(arr))
-    log = lambda arr: Array(np.log(arr))
-    add = lambda arr, other: Array(np.add(arr, other))
-    sub = lambda arr, other: Array(np.subtract(arr, other))
-    mul = lambda arr, other: Array(np.multiply(arr, other))
-    div = lambda arr, other: Array(np.divide(arr, other))
-    equal = lambda arr, other: Array(np.equal(arr, other))
-    not_equal = lambda arr, other: Array(np.not_equal(arr, other))
-    maximum = lambda arr, other: Array(np.maximum(arr, other))
 
     def max(arr, axes=None, keepdims=False):
         return Array(np.max(arr.val, axis=axes, keepdims=keepdims))

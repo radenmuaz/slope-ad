@@ -41,7 +41,7 @@ class Op(ABC):
 
     @staticmethod
     @abstractmethod
-    def stablehlo(*args, **params):
+    def jit(*args, **params):
         raise NotImplementedError
 
 
@@ -1150,7 +1150,7 @@ class Full(LoadOp):
 class Arange(LoadOp):
     @staticmethod
     def eval(*, start, stop, stride, dtype):
-        out = Array.arange(start, stop, stride, shape, dtype)
+        out = Array.arange(start, stop, stride, dtype)
         return [out]
 
     @staticmethod
@@ -1168,7 +1168,7 @@ class Arange(LoadOp):
     @staticmethod
     def jvp(*, start, stop, stride, dtype):
         return (
-            [Array.arange(start, stop, stride, shape, dtype)],
+            [Array.arange(start, stop, stride, dtype)],
             [Array.full(0, len(tuple(slice(start, stop, stride))))],
         )
 
@@ -1212,7 +1212,8 @@ class Jit(LoadOp):
     def eval(*args, prog, num_consts: int):
         consts, args = args[:num_consts], args[num_consts:]
         hashable_consts = tuple(map(utils.IDHashable, consts))
-        execute = slope.RT.backend.callable(utils.IDHashable(prog), hashable_consts)
+        hashable_prog = utils.IDHashable(prog)
+        execute = slope.RT.backend.callable(hashable_prog, hashable_consts)
         return execute(*args)
 
     @staticmethod

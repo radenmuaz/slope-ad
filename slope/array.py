@@ -15,6 +15,7 @@ from slope.array_shape import ValuedArrayShape
 from slope.base_array import BaseArray
 from slope.dtypes import dtypes
 import numpy as np
+
 # import ops
 
 
@@ -74,9 +75,7 @@ class Array(BaseArray):
 
     @staticmethod
     def arange(stop, start=0, step=1, **kwargs):
-        return slope.RT.backend.arange(
-            start=start, stop=stop, step=step, **kwargs
-        )
+        return slope.RT.backend.arange(start=start, stop=stop, step=step, **kwargs)
 
     # TODO: distill RNG code from jax
 
@@ -145,9 +144,7 @@ class Array(BaseArray):
     transpose = lambda self, perm: slope.RT.backend.transpose(self.val, perm)
     expand_dims = lambda self, axes: slope.RT.backend.expand_dims(self.val, axes)
     swapaxes = lambda self, a1, a2: slope.RT.backend.swapaxes(self.val, a1, a2)
-    broadcast_to = lambda self, shape: slope.RT.backend.broadcast_to(
-        self.val, shape
-    )
+    broadcast_to = lambda self, shape: slope.RT.backend.broadcast_to(self.val, shape)
 
     def broadcast(self, shape, axes=None):
         if axes is not None:

@@ -19,6 +19,7 @@ from slope import utils
 
 from abc import ABC, abstractmethod
 
+
 class BaseArray:
     def notimplemented(self, *args, **kwargs):
         raise NotImplementedError

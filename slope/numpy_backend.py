@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from slope.base_backend import BaseBackend, BaseOpImpl
 from slope import ops
 import inspect
+
 # import ast
 
 # def pretty_print_ast(node, indent=0):
@@ -41,13 +42,16 @@ import inspect
 #     id: int
 #     val: Any
 
+
 class NumpyOpImpl(BaseOpImpl):
     ir_args = ()
     ir_kwargs = {}
+
     def __call__(self, *args, **kwargs):
-        exec_locals = { **{ir_a: a for ir_a, a in zip(self.ir_args, args)},
-                       **{ir_kwa: kwa for ir_kwa, kwa in zip(self.ir_kwargs, kwargs)}
-                       }
+        exec_locals = {
+            **{ir_a: a for ir_a, a in zip(self.ir_args, args)},
+            **{ir_kwa: kwa for ir_kwa, kwa in zip(self.ir_kwargs, kwargs)},
+        }
         safe_builtins = {"__builtins__": None, "math": math, "np": np}
         code = self.ir(*self.ir_args, **self.ir_kwargs)
         exec(code, safe_builtins, exec_locals)
@@ -56,6 +60,7 @@ class NumpyOpImpl(BaseOpImpl):
     def ir(self, *args, **kwargs):
         raise NotImplementedError
 
+
 class Full(NumpyOpImpl):
     def __call__(self, fill_value, shape):
         return np.full(fill_value, shape)
@@ -63,7 +68,8 @@ class Full(NumpyOpImpl):
 
 class AddImpl(NumpyOpImpl):
     ir_args = ("x", "y")
-    def ir(self, x="x", y="y"):
+
+    def ir(self, x: str, y: str):
         return f"ret = np.add({x}, {y})"
 
 
@@ -104,7 +110,7 @@ class NumpyBackend(BaseBackend):
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]
     }
-    
+
     @classmethod
     def compile(cls, prog, consts, in_avals) -> List[Any]:
         safe_builtins = {"__builtins__": None, "math": math, "np": np}
@@ -114,6 +120,7 @@ class NumpyBackend(BaseBackend):
         code += [f"def f({', '.join(arg_names)})"]
         args = consts + in_avals
         env: Dict[slope.ad.Var, Any] = {}
+
         def read(x: slope.ad.Atom) -> Any:
             return env[x] if type(x) is slope.ad.Var else x.val
 

@@ -13,7 +13,7 @@ from functools import lru_cache, partial
 import numpy as np
 from dataclasses import dataclass
 
-from slope.base_backend import BaseBackend, BaseOpImpl
+from slope.base_backend import BaseBackend
 from slope import ops
 import inspect
 
@@ -43,69 +43,76 @@ import inspect
 #     val: Any
 
 
-class NumpyOpImpl(BaseOpImpl):
-    ir_args = ()
-    ir_kwargs = {}
-
-    def __call__(self, *args, **kwargs):
-        exec_locals = {
-            **{ir_a: a for ir_a, a in zip(self.ir_args, args)},
-            **{ir_kwa: kwa for ir_kwa, kwa in zip(self.ir_kwargs, kwargs)},
-        }
-        safe_builtins = {"__builtins__": None, "math": math, "np": np}
-        code = self.ir(*self.ir_args, **self.ir_kwargs)
-        exec(code, safe_builtins, exec_locals)
-        return Array(exec_locals["ret"])
-
-    def ir(self, *args, **kwargs):
-        raise NotImplementedError
-
-
-class Full(NumpyOpImpl):
-    def __call__(self, fill_value, shape):
-        return np.full(fill_value, shape)
-
-
-class AddImpl(NumpyOpImpl):
-    ir_args = ("x", "y")
-
-    def ir(self, x: str, y: str):
-        return f"ret = np.add({x}, {y})"
-
-
-class Sub(NumpyOpImpl):
-    def __call__(self, x, y):
-        return np.mul(x, y)
-
-
-class Mul(NumpyOpImpl):
-    def __call__(self, x, y):
-        return np.mul(x, y)
-
-
-class Div(NumpyOpImpl):
-    def __call__(self, x, y):
-        return np.div(x, y)
-
-
-class Exp(NumpyOpImpl):
-    def __call__(self, x):
-        return np.exp(x)
-
-
-class Log(NumpyOpImpl):
-    def __call__(self, x):
-        return np.log(x)
 
 
 class NumpyBackend(BaseBackend):
     default_dtype = np.float32
-    add_impl = AddImpl()
+
+    class NumpyOpImpl(BaseBackend.BaseOpImpl):
+        ir_args = ()
+        ir_kwargs = {}
+        @classmethod
+        def do(cls, *args, **kwargs):
+            exec_locals = {
+                **{ir_a: a for ir_a, a in zip(cls.ir_args, args)},
+                **{ir_kwa: kwa for ir_kwa, kwa in zip(cls.ir_kwargs, kwargs)},
+            }
+            safe_builtins = {"__builtins__": None, "math": math, "np": np}
+            code = cls.ir(*cls.ir_args, **cls.ir_kwargs)
+            exec(code, safe_builtins, exec_locals)
+            return Array(exec_locals["ret"])
+    
+
+    class ExpImpl(NumpyOpImpl):
+        ir_args = ("x")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.exp({x})"
+
+
+    class LogImpl(NumpyOpImpl):
+        ir_args = ("x")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.log({x})"
+
+    class SubImpl(NumpyOpImpl):
+        ir_args = ("x", "y")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.add({x}, {y})"
+
+
+    class MulImpl(NumpyOpImpl):
+        ir_args = ("x", "y")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.mul({x}, {y})"
+
+
+    class DivImpl(NumpyOpImpl):
+        ir_args = ("x", "y")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.div({x}, {y})"
+
+
+    class FullImpl(NumpyOpImpl):
+        ir_kwargs = ("fill_value", "shape")
+        @classmethod
+        def ir(cls, *, fill_value: str, shape: str):
+            return f"ret = np.full({fill_value}, {shape})"
+
+    class AddImpl(NumpyOpImpl):
+        ir_args = ("x", "y")
+        @classmethod
+        def ir(cls, x: str, y: str):
+            return f"ret = np.add({x}, {y})"
 
     def new_buffer(self, val, dtype=None):
         return np.asarray(val, dtype)
 
-    full = Full()
+    
 
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]

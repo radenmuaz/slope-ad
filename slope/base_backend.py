@@ -4,16 +4,16 @@ from functools import partial, lru_cache
 from typing import Tuple
 from slope.array import Array
 
-
-class BaseOpImpl:
-    def __call__(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def ir(self, *args, **kwargs):
-        raise NotImplementedError
-
-
 class BaseBackend:
+
+    class BaseOpImpl:
+        @classmethod
+        def do(cls, *args, **kwargs):
+            raise NotImplementedError
+
+        @classmethod
+        def ir(cls, *args, **kwargs):
+            raise NotImplementedError
     @classmethod
     @lru_cache()
     def callable(
@@ -31,35 +31,28 @@ class BaseBackend:
     @classmethod
     def compile(cls, prog, consts, in_avals, name: str):
         raise NotImplementedError
+    
+    AddImpl = BaseOpImpl
+    SubImpl = BaseOpImpl
+    MulImpl = BaseOpImpl
+    DivImpl = BaseOpImpl
+    ExpImpl = BaseOpImpl
+    LogImpl = BaseOpImpl
+    FullImpl = BaseOpImpl
+    ReshapeImpl = BaseOpImpl
 
-    convert_impl = BaseOpImpl()
-    neg_impl = BaseOpImpl()
-    exp_impl = BaseOpImpl()
-    log_impl = BaseOpImpl()
-    add_impl = BaseOpImpl()
-    sub_impl = BaseOpImpl()
-    mul_impl = BaseOpImpl()
-    div_impl = BaseOpImpl()
-    equal_impl = BaseOpImpl()
-    not_equal_impl = BaseOpImpl()
-    maximum_impl = BaseOpImpl()
-    max_impl = BaseOpImpl()
-    sum_impl = BaseOpImpl()
-    choose_impl = BaseOpImpl()
-    where_impl = BaseOpImpl()
-
-    convert = classmethod(lambda cls, arr, dtype: cls.convert_impl(arr, dtype=dtype))
+    convert = classmethod(lambda cls, arr, dtype: cls.ConvertImpl(arr, dtype=dtype))
     astype = convert
-    neg = classmethod(lambda cls, arr: cls.neg_impl(arr))
-    exp = classmethod(lambda cls, arr: cls.exp_impl(arr))
-    log = classmethod(lambda cls, arr: cls.log_impl(arr))
-    add = classmethod(lambda cls, arr, other: cls.add_impl(arr, other))
-    sub = classmethod(lambda cls, arr, other: cls.sub_impl(arr, other))
-    mul = classmethod(lambda cls, arr, other: cls.mul_impl(arr, other))
-    div = classmethod(lambda cls, arr, other: cls.div_impl(arr, other))
-    equal = classmethod(lambda cls, arr, other: cls.equal_impl(arr, other))
-    not_equal = classmethod(lambda cls, arr, other: cls.not_equal_impl(arr, other))
-    maximum = classmethod(lambda cls, arr, other: cls.maximum_impl(arr, other))
+    neg = classmethod(lambda cls, arr: cls.NegImpl.do(arr))
+    exp = classmethod(lambda cls, arr: cls.ExpImpl.do(arr))
+    log = classmethod(lambda cls, arr: cls.LogImpl.do(arr))
+    add = classmethod(lambda cls, arr, other: cls.AddImpl.do(arr, other))
+    sub = classmethod(lambda cls, arr, other: cls.SubImpl.do(arr, other))
+    mul = classmethod(lambda cls, arr, other: cls.MulImpl.do(arr, other))
+    div = classmethod(lambda cls, arr, other: cls.DivImpl.do(arr, other))
+    equal = classmethod(lambda cls, arr, other: cls.EqualImpl.do(arr, other))
+    not_equal = classmethod(lambda cls, arr, other: cls.NotEqualImpl.do(arr, other))
+    maximum = classmethod(lambda cls, arr, other: cls.MaximumImpl.do(arr, other))
 
 
 # class BaseBuilder:

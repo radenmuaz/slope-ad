@@ -11,6 +11,10 @@ from slope import utils
 
 class Op(ABC):
     @classmethod
+    def impl(cls):
+        return getattr(slope.RT.backend, f"{cls.__name__}Impl")
+    
+    @classmethod
     def do(cls, *args, **params):
         return slope.RT.bind1(cls, *args, **params)
 
@@ -126,38 +130,38 @@ class LoadOp(Op):
 # -----------------------
 
 
-class Identity(UnaryOp):
-    @staticmethod
-    def eval(x):
-        return [x]
+# class Identity(UnaryOp):
+#     @staticmethod
+#     def eval(x):
+#         return [x]
 
-    @staticmethod
-    def jvp(cls, primals, tangents, **params):
-        (x,), (x_dot,) = primals, tangents
-        return [identity(x, **params)], [identity(x_dot, **params)]
+#     @staticmethod
+#     def jvp(cls, primals, tangents, **params):
+#         (x,), (x_dot,) = primals, tangents
+#         return [identity(x, **params)], [identity(x_dot, **params)]
 
-    @staticmethod
-    def T(t, x):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [identity(z)]
+#     @staticmethod
+#     def T(t, x):
+#         (z,) = t
+#         assert type(x) is slope.ad.UndefPrimal
+#         return [identity(z)]
 
 
-class StopGradient(UnaryOp):
-    @staticmethod
-    def eval(x):
-        return [identity(x)]
+# class StopGradient(UnaryOp):
+#     @staticmethod
+#     def eval(x):
+#         return [identity(x)]
 
-    @staticmethod
-    def jvp(primals, tangents, **params):
-        (x,), (x_dot,) = primals, tangents
-        return [identity(x, **params)], [zeros_like(x)]
+#     @staticmethod
+#     def jvp(primals, tangents, **params):
+#         (x,), (x_dot,) = primals, tangents
+#         return [identity(x, **params)], [zeros_like(x)]
 
-    @staticmethod
-    def T(t, x):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [zeros_like(z)]
+#     @staticmethod
+#     def T(t, x):
+#         (z,) = t
+#         assert type(x) is slope.ad.UndefPrimal
+#         return [zeros_like(z)]
 
 
 class Convert(UnaryOp):
@@ -168,19 +172,19 @@ class Convert(UnaryOp):
     @staticmethod
     def jvp(primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
-        return [convert(x, dtype)], [convert(x_dot, dtype)]
+        return [x.convert(dtype)], [x_dot.convert(dtype)]
 
     @staticmethod
     def T(t, x):
         (z,) = t
         assert type(x) is slope.ad.UndefPrimal
-        return [convert(z, x.dtype)]
+        return [z.convert(x.dtype)]
 
 
 class Exp(UnaryOp):
     @staticmethod
     def eval(x):
-        return [np.exp(x)]
+        return [x.exp()]
 
     @staticmethod
     def jvp(primals, tangents):
@@ -191,7 +195,7 @@ class Exp(UnaryOp):
 class Log(UnaryOp):
     @staticmethod
     def eval(x):
-        return [np.log(x)]
+        return [x.log()]
 
     @staticmethod
     def jvp(primals, tangents):

@@ -119,12 +119,12 @@ class NumpyBackend(BaseBackend):
     }
 
     @classmethod
-    def compile(cls, prog, consts, in_avals) -> List[Any]:
+    def compile(cls, prog, consts, in_avals, name) -> List[Any]:
         safe_builtins = {"__builtins__": None, "math": math, "np": np}
         exec_locals = {}
         code = []
         arg_names = [f"x{i}" for i in range(len(in_avals))]
-        code += [f"def f({', '.join(arg_names)})"]
+        code += [f"def {name}({', '.join(arg_names)})"]
         args = consts + in_avals
         env: Dict[slope.ad.Var, Any] = {}
 
@@ -135,11 +135,12 @@ class NumpyBackend(BaseBackend):
             env[v] = val
 
         map(write, prog.in_binders, args)
-        breakpoint()
         for eqn in prog.instrs:
             in_avals = [x.aval for x in eqn.inputs]
             in_vals = map(read, eqn.inputs)
+            breakpoint()
             out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
+            # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
             map(write, eqn.out_binders, out_vals)
         var_outs = map(read, prog.outs)
         return partial(exec, code, safe_builtins, exec_locals)

@@ -25,7 +25,7 @@ class BaseBackend:
         slope.ad.typecheck_prog(prog)
         consts = [x.val for x in hashable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
-        compiled = cls.compile(prog, consts, in_avals, name="numpy_fn")
+        compiled = cls.compile(prog, consts, in_avals, name=f"{cls.__name__.lower()}_fn")
         return compiled
 
     @classmethod

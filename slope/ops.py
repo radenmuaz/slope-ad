@@ -89,7 +89,9 @@ class BinaryOp(Op):
 
     @staticmethod
     def shape_eval(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
-        if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
+        # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
+        if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
+            # breakpoint()
             raise TypeError
         if ArrayShape.like(x) != ArrayShape.like(y):
             raise TypeError(f"{x} != {y}")

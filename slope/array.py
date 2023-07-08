@@ -144,13 +144,7 @@ class Array(BaseArray):
     transpose = lambda self, perm: slope.RT.backend.transpose(self.val, perm)
     expand_dims = lambda self, axes: slope.RT.backend.expand_dims(self.val, axes)
     swapaxes = lambda self, a1, a2: slope.RT.backend.swapaxes(self.val, a1, a2)
-    broadcast_to = lambda self, shape: slope.RT.backend.broadcast_to(self.val, shape)
-
-    def broadcast(self, shape, axes=None):
-        if axes is not None:
-            for a in sorted(axes):
-                self = self.expand_dims(a)
-        return self.broadcast_to(shape)
+    broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(self.val, shape, axes)
 
     def pad(self, lo, hi, interior=None, value=0):
         if interior is None:

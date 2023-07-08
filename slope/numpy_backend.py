@@ -55,10 +55,10 @@ class NumpyBackend(BaseBackend):
         def do(cls, *args, **kwargs):
             exec_locals = {
                 **{ir_a: a for ir_a, a in zip(cls.ir_args, args)},
-                **{ir_kwa: kwa for ir_kwa, kwa in zip(cls.ir_kwargs, kwargs)},
+                **kwargs,
             }
-            safe_builtins = {"__builtins__": None, "math": math, "np": np}
-            code = cls.ir(*cls.ir_args, **cls.ir_kwargs)
+            safe_builtins = {"math": math, "np": np}
+            code = cls.ir(*cls.ir_args, **{**{kwa:kwa for kwa in cls.ir_kwargs}, "ret":"ret"})
             exec(code, safe_builtins, exec_locals)
             return Array(exec_locals["ret"])
     
@@ -66,53 +66,60 @@ class NumpyBackend(BaseBackend):
     class ExpImpl(NumpyOpImpl):
         ir_args = ("x")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.exp({x})"
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.exp({x})"
 
 
     class LogImpl(NumpyOpImpl):
         ir_args = ("x")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.log({x})"
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.log({x})"
 
     class SubImpl(NumpyOpImpl):
         ir_args = ("x", "y")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.add({x}, {y})"
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.add({x}, {y})"
 
 
     class MulImpl(NumpyOpImpl):
         ir_args = ("x", "y")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.mul({x}, {y})"
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.mul({x}, {y})"
 
 
     class DivImpl(NumpyOpImpl):
         ir_args = ("x", "y")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.div({x}, {y})"
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.div({x}, {y})"
 
 
     class FullImpl(NumpyOpImpl):
         ir_kwargs = ("fill_value", "shape")
         @classmethod
-        def ir(cls, *, fill_value: str, shape: str):
-            return f"ret = np.full({fill_value}, {shape})"
+        def ir(cls, fill_value: str, shape: str, *, ret: str):
+            return f"{ret} = np.full({fill_value}, {shape})"
 
     class AddImpl(NumpyOpImpl):
         ir_args = ("x", "y")
         @classmethod
-        def ir(cls, x: str, y: str):
-            return f"ret = np.add({x}, {y})"
-
-    def new_buffer(self, val, dtype=None):
-        return np.asarray(val, dtype)
-
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.add({x}, {y})"
     
+    class BroadcastImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("shape", "axes")
+        @classmethod
+        def ir(cls, x: str, *, shape: str, axes: str, ret: str):
+            return (
+f'''if axes is not None:
+    for a in sorted({axes}):
+        {x} = np.expand_dims({x},a)
+{ret} = np.broadcast_to({x}, {shape})
+''')
 
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]
@@ -129,19 +136,31 @@ class NumpyBackend(BaseBackend):
         env: Dict[slope.ad.Var, Any] = {}
 
         def read(x: slope.ad.Atom) -> Any:
-            return env[x] if type(x) is slope.ad.Var else x.val
+            return env[x]
 
-        def write(v: slope.ad.Var, val) -> None:
-            env[v] = val
+        def write(v: slope.ad.Var) -> None:
+            assert v not in env
+            env[v] = f"z{len(env)}"
+    
 
-        map(write, prog.in_binders, args)
+        utils.list_map(write, prog.in_binders)
         for eqn in prog.instrs:
             in_avals = [x.aval for x in eqn.inputs]
-            in_vals = map(read, eqn.inputs)
-            breakpoint()
-            out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
+            in_vals = utils.list_map(read, eqn.inputs)
+            utils.list_map(write, eqn.out_binders)
+            out_vals = utils.list_map(read, eqn.out_binders)
+            assert not len(out_vals) > 1, "Op with >1 output not supported"
+            ir = eqn.op.get_impl().ir(*in_vals, **eqn.params, ret=out_vals[0])
+            ir = "\n".join(["    " + line for line in ir.strip().split("\n")])
+            code += [ir]
             # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
-            map(write, eqn.out_binders, out_vals)
+        
+        outs =  utils.list_map(read, prog.outs)
+        code += [f"    return {outs.join(', ') if len(outs)>1 else outs[0]}"]
+        for i, c in enumerate(code):
+            print(f'{i}\n{c}')
+        breakpoint()
+        
         var_outs = map(read, prog.outs)
         return partial(exec, code, safe_builtins, exec_locals)
         return partial(c.execute_compiled, compiled, [v.aval for v in prog.outs])
@@ -218,20 +237,6 @@ class NumpyBackend(BaseBackend):
 
     def sum(arr, axes=None, keepdims=False):
         return Array(np.sum(arr.val, axis=axes, keepdims=keepdims))
-
-    # Shape
-    reshape = lambda arr, shape: Array(np.reshape(arr.val, shape))
-    transpose = lambda arr, perm: Array(np.transpose(arr.val, perm))
-    expand_dims = lambda arr, axes: Array(np.expand_dims(arr.val, axes))
-    swapaxes = lambda arr, a1, a2: Array(np.swapaxes(arr.val, a1, a2))
-    broadcast_to = lambda arr, shape: Array(np.broadcast_to(arr.val, shape))
-
-    @staticmethod
-    def broadcast(arr, shape, axes=None):
-        if axes is not None:
-            for a in sorted(axes):
-                arr = arr.expand_dims(a)
-        return arr.broadcast_to(shape)
 
     @staticmethod
     def pad(arr, lo, hi, interior=None, value=0):

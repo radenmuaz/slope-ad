@@ -16,32 +16,7 @@ from dataclasses import dataclass
 from slope.base_backend import BaseBackend
 from slope import ops
 import inspect
-
-# import ast
-
-# def pretty_print_ast(node, indent=0):
-#     indent_str = " " * indent
-#     node_str = indent_str + ast.dump(node)
-#     print(node_str)
-#     for child_node in ast.iter_child_nodes(node):
-#         pretty_print_ast(child_node, indent=indent + 4)
-
-# # Example AST node
-# tree = ast.parse("x = 1 + 2")
-
-# # Pretty print the AST node
-# pretty_print_ast(tree)
-
-# @dataclass
-# class NumpyConst(BaseConst):
-#     val: Any
-
-
-# @dataclass
-# class NumpyParam(BaseParam):
-#     id: int
-#     val: Any
-
+import pickle
 
 
 
@@ -54,7 +29,7 @@ class NumpyBackend(BaseBackend):
         @classmethod
         def do(cls, *args, **kwargs):
             exec_locals = {
-                **{ir_a: a for ir_a, a in zip(cls.ir_args, args)},
+                **{ir_a: a.val for ir_a, a in zip(cls.ir_args, args)},
                 **kwargs,
             }
             safe_builtins = {"math": math, "np": np}
@@ -129,10 +104,11 @@ f'''if axes is not None:
     def compile(cls, prog, consts, in_avals, name) -> List[Any]:
         safe_builtins = {"__builtins__": None, "math": math, "np": np}
         exec_locals = {}
-        code = []
         arg_names = [f"x{i}" for i in range(len(in_avals))]
-        code += [f"def {name}({', '.join(arg_names)})"]
-        args = consts + in_avals
+        ops_code = []
+        ops_code += [f"def {name}({', '.join(arg_names)})"]
+        for i, const in consts:
+            ops_code += [f"    c{i} = pickle.loads('{pickle.dumps(const.val)}')"]
         env: Dict[slope.ad.Var, Any] = {}
 
         def read(x: slope.ad.Atom) -> Any:
@@ -150,15 +126,15 @@ f'''if axes is not None:
             utils.list_map(write, eqn.out_binders)
             out_vals = utils.list_map(read, eqn.out_binders)
             assert not len(out_vals) > 1, "Op with >1 output not supported"
-            ir = eqn.op.get_impl().ir(*in_vals, **eqn.params, ret=out_vals[0])
-            ir = "\n".join(["    " + line for line in ir.strip().split("\n")])
-            code += [ir]
+            op_ir = eqn.op.get_impl().ir(*in_vals, **eqn.params, ret=out_vals[0])
+            op_ir = "\n".join(["    " + line for line in op_ir.strip().split("\n")])
+            ops_code += [op_ir]
             # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
         
         outs =  utils.list_map(read, prog.outs)
-        code += [f"    return {outs.join(', ') if len(outs)>1 else outs[0]}"]
-        for i, c in enumerate(code):
-            print(f'{i}\n{c}')
+        ops_code += [f"    return {outs.join(', ') if len(outs)>1 else outs[0]}"]
+        for i, code in enumerate(ops_code):
+            print(f'{i}\n{code}')
         breakpoint()
         
         var_outs = map(read, prog.outs)

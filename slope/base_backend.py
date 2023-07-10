@@ -13,10 +13,11 @@ class BaseBackend:
         @classmethod
         def ir(cls, *args, **kwargs):
             raise NotImplementedError
-    
+
     class BaseJitFn:
         def __init__(self, *args, **kwargs):
             raise NotImplementedError
+
         def __call__(self, *args, **kwargs):
             raise NotImplementedError
 

@@ -112,6 +112,7 @@ if not {ret}_axes is None:
         def __init__(self, code, fn):
             self.code = code
             self.fn = fn
+
         def __call__(self, *args, **kwargs):
             args = [a.val if isinstance(a, Array) else a for a in args]
             outs = self.fn(*args, **kwargs)
@@ -139,7 +140,7 @@ if not {ret}_axes is None:
         ops_code = []
         ops_code += [f"def {name}({', '.join(inb_args)}):"]
         for inb_const, const in zip(inb_consts, consts):
-            ops_code += [f'    {inb_const} = pickle.loads({pickle.dumps(const.val)})']
+            ops_code += [f"    {inb_const} = pickle.loads({pickle.dumps(const.val)})"]
         for eqn in prog.instrs:
             in_vals = utils.list_map(lambda x: env[x], eqn.inputs)
             for outb in eqn.out_binders:
@@ -155,7 +156,7 @@ if not {ret}_axes is None:
         outs = utils.list_map(lambda y: env[y], prog.outs)
         # ops_code += [f"    outs[0]}"]
         ops_code += [f"    return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
-        fn_code = '\n'.join(ops_code)
+        fn_code = "\n".join(ops_code)
         exec(fn_code, safe_builtins, exec_locals)
         fn = exec_locals[name]
         # exec('\n'.join(ops_code), safe_builtins, exec_locals)

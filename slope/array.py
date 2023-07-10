@@ -132,8 +132,12 @@ class Array(BaseArray):
     equal = lambda self, other: slope.RT.backend.equal(self, other)
     not_equal = lambda self, other: slope.RT.backend.not_equal(self, other)
     maximum = lambda self, other: slope.RT.backend.maximum(self, other)
-    max = lambda self, axes=None, keepdims=False: slope.RT.backend.max(self.val, axis=axes, keepdims=keepdims)
-    sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(self.val, axis=axes, keepdims=keepdims)
+    max = lambda self, axes=None, keepdims=False: slope.RT.backend.max(
+        self.val, axis=axes, keepdims=keepdims
+    )
+    sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(
+        self.val, axis=axes, keepdims=keepdims
+    )
 
     # Shape
     reshape = lambda self, shape: slope.RT.backend.reshape(self.val, shape)

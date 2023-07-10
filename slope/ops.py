@@ -1247,11 +1247,9 @@ class Constant(LoadOp):
 
 class Jit(LoadOp):
     @staticmethod
-    def eval(consts, args, prog):
-        hashable_consts = tuple(map(utils.IDHashable, consts))
-        hashable_prog = utils.IDHashable(prog)
+    def eval(*args, hashable_prog, hashable_consts):
         jit_fn = slope.RT.backend.callable(hashable_prog, hashable_consts)
-        return [jit_fn(*args)]
+        return [jit_fn(*args), jit_fn]
 
     @staticmethod
     def vmap(axis_size, vals_in, dims_in, *, x):

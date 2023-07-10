@@ -16,15 +16,17 @@ class TestJit(unittest.TestCase):
     def test_add(self):
         @slope.ad.jit
         def f(x, **kwargs):
-            print('tracing!')
+            print("tracing!")
             out = x + x
             out = x + Array([4.0, 5.0, 6.0])
             return out
-
+        print(f"{f.get_jit_fn()=}")
         res = f(Array([1.0, 2.0, 3.0]))
         print(res)
-        res = f(Array([2.0, 4.0, 6.0])) # should not print 'tracing!'
+        print(f"{f.get_jit_fn()=}")
+        res = f(Array([2.0, 4.0, 6.0]))  # should not print 'tracing!'
         print(res)
+        breakpoint()
 
 
 if __name__ == "__main__":

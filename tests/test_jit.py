@@ -20,6 +20,7 @@ class TestJit(unittest.TestCase):
             out = x + x
             out = x + Array([4.0, 5.0, 6.0])
             return out
+
         print(f"{f.get_jit_fn()=}")
         res = f(Array([1.0, 2.0, 3.0]))
         print(res)

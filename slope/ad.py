@@ -961,21 +961,25 @@ def grad(f):
 def jit(f):
     hashable_prog = None
     hashable_consts = None
+
     def get_jit_fn():
         nonlocal hashable_consts, hashable_prog
         if hashable_prog is None and hashable_consts is None:
             print("Run with an input first to get jit_fn")
             return None
         return slope.RT.backend.callable(hashable_prog, hashable_consts)
-    
+
     def f_jitted(*args):
         avals_in = [ArrayShape.like(TracerArray.get_aval(x)) for x in args]
         prog, consts, out_tree = make_prog(f, *avals_in)
         nonlocal hashable_consts, hashable_prog
         hashable_consts = tuple(map(utils.IDHashable, consts))
         hashable_prog = utils.IDHashable(prog)
-        outs = ops.Jit.do(*args, hashable_prog=hashable_prog, hashable_consts=hashable_consts)
+        outs = ops.Jit.do(
+            *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
+        )
         return tree_unflatten(out_tree, outs)
+
     f_jitted.get_jit_fn = get_jit_fn
     return f_jitted
 

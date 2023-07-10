@@ -962,7 +962,7 @@ def jit(f):
     def f_jitted(*args):
         avals_in = [ArrayShape.like(TracerArray.get_aval(x)) for x in args]
         prog, consts, out_tree = make_prog(f, *avals_in)
-        outs = ops.Jit.do(*consts, *args, prog=prog, num_consts=len(consts))
+        outs = ops.Jit.do(consts, args, prog=prog)
         return tree_unflatten(out_tree, outs)
 
     return f_jitted

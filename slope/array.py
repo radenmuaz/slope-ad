@@ -132,19 +132,17 @@ class Array(BaseArray):
     equal = lambda self, other: slope.RT.backend.equal(self, other)
     not_equal = lambda self, other: slope.RT.backend.not_equal(self, other)
     maximum = lambda self, other: slope.RT.backend.maximum(self, other)
-
-    def max(self, axes=None, keepdims=False):
-        return slope.RT.backend.max(self.val, axis=axes, keepdims=keepdims)
-
-    def sum(self, axes=None, keepdims=False):
-        return slope.RT.backend.sum(self.val, axis=axes, keepdims=keepdims)
+    max = lambda self, axes=None, keepdims=False: slope.RT.backend.max(self.val, axis=axes, keepdims=keepdims)
+    sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(self.val, axis=axes, keepdims=keepdims)
 
     # Shape
     reshape = lambda self, shape: slope.RT.backend.reshape(self.val, shape)
     transpose = lambda self, perm: slope.RT.backend.transpose(self.val, perm)
     expand_dims = lambda self, axes: slope.RT.backend.expand_dims(self.val, axes)
     swapaxes = lambda self, a1, a2: slope.RT.backend.swapaxes(self.val, a1, a2)
-    broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(self.val, shape, axes)
+    broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(
+        self.val, shape, axes
+    )
 
     def pad(self, lo, hi, interior=None, value=0):
         if interior is None:
@@ -168,7 +166,7 @@ class Array(BaseArray):
             return self.slice(slice(idx))
         raise NotImplementedError
 
-    def __getitem__(self, idx, val):
+    def __setitem__(self, idx, val):
         raise NotImplementedError
 
     # control flow

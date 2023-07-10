@@ -3,8 +3,8 @@ from slope import utils
 from functools import partial, lru_cache
 from typing import Tuple
 
-class BaseBackend:
 
+class BaseBackend:
     class BaseOpImpl:
         @classmethod
         def do(cls, *args, **kwargs):
@@ -13,6 +13,13 @@ class BaseBackend:
         @classmethod
         def ir(cls, *args, **kwargs):
             raise NotImplementedError
+    
+    class BaseJitFn:
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError
+        def __call__(self, *args, **kwargs):
+            raise NotImplementedError
+
     @classmethod
     @lru_cache()
     def callable(
@@ -24,13 +31,15 @@ class BaseBackend:
         slope.ad.typecheck_prog(prog)
         consts = [x.val for x in hashable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
-        compiled = cls.compile(prog, consts, in_avals, name=f"{cls.__name__.lower()}_fn")
+        compiled = cls.compile(
+            prog, consts, in_avals, name=f"{cls.__name__.lower()}_fn"
+        )
         return compiled
 
     @classmethod
     def compile(cls, prog, consts, in_avals, name: str):
         raise NotImplementedError
-    
+
     NegImpl = BaseOpImpl
     ExpImpl = BaseOpImpl
     LogImpl = BaseOpImpl
@@ -43,7 +52,7 @@ class BaseBackend:
     MaximumImpl = BaseOpImpl
     EqualImpl = BaseOpImpl
     NotEqualImpl = BaseOpImpl
-    
+
     MaxImpl = BaseOpImpl
     SumImpl = BaseOpImpl
 
@@ -69,7 +78,9 @@ class BaseBackend:
     max = classmethod(lambda cls, x, other: cls.MaxImpl.do(x, other))
     sum = classmethod(lambda cls, x, other: cls.SumImpl.do(x, other))
     full = classmethod(lambda cls, x, other: cls.FullImpl.do(x, other))
-    broadcast = classmethod(lambda cls, x, shape, axes: cls.BroadcastImpl.do(x, shape=shape, axes=axes))
+    broadcast = classmethod(
+        lambda cls, x, shape, axes: cls.BroadcastImpl.do(x, shape=shape, axes=axes)
+    )
 
 
 # class BaseBuilder:

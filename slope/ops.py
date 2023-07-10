@@ -11,7 +11,7 @@ from slope import utils
 
 class Op(ABC):
     get_impl = lambda: None
-    
+
     @classmethod
     def do(cls, *args, **params):
         return slope.RT.bind1(cls, *args, **params)
@@ -166,6 +166,7 @@ class LoadOp(Op):
 
 class Convert(UnaryOp):
     get_impl = lambda: slope.RT.backend.ConvertImpl
+
     @staticmethod
     def eval(x, *, dtype):
         return [x.astype(dtype)]
@@ -184,6 +185,7 @@ class Convert(UnaryOp):
 
 class Exp(UnaryOp):
     get_impl = lambda: slope.RT.backend.ExpImpl
+
     @staticmethod
     def eval(x):
         return [x.exp()]
@@ -196,6 +198,7 @@ class Exp(UnaryOp):
 
 class Log(UnaryOp):
     get_impl = lambda: slope.RT.backend.LogImpl
+
     @staticmethod
     def eval(x):
         return [x.log()]
@@ -208,6 +211,7 @@ class Log(UnaryOp):
 
 class Neg(UnaryOp):
     get_impl = lambda: slope.RT.backend.NegImpl
+
     @staticmethod
     def eval(x):
         return [-x]
@@ -230,6 +234,7 @@ class Neg(UnaryOp):
 
 class Add(BinaryOp):
     get_impl = lambda: slope.RT.backend.AddImpl
+
     @staticmethod
     def eval(x, y):
         return [x + y]
@@ -247,6 +252,7 @@ class Add(BinaryOp):
 
 class Sub(BinaryOp):
     get_impl = lambda: slope.RT.backend.SubImpl
+
     @staticmethod
     def eval(x, y):
         return [x - y]
@@ -264,6 +270,7 @@ class Sub(BinaryOp):
 
 class Mul(BinaryOp):
     get_impl = lambda: slope.RT.backend.MulImpl
+
     @staticmethod
     def eval(x, y):
         return [x * y]
@@ -289,6 +296,7 @@ class Mul(BinaryOp):
 
 class Div(BinaryOp):
     get_impl = lambda: slope.RT.backend.DivImpl
+
     @staticmethod
     def eval(x, y):
         return [x / y]
@@ -308,6 +316,7 @@ class Div(BinaryOp):
 
 class Maximum(BinaryOp):
     get_impl = lambda: slope.RT.backend.MaximumImpl
+
     @staticmethod
     def eval(x, y):
         return [np.maximum(x, y)]
@@ -335,6 +344,7 @@ class Maximum(BinaryOp):
 
 class Equal(BinaryOp):
     get_impl = lambda: slope.RT.backend.EqualImpl
+
     @staticmethod
     def eval(x, y):
         return [x.equal(y)]
@@ -358,6 +368,7 @@ class Equal(BinaryOp):
 
 class Max(ReduceOp):
     get_impl = lambda: slope.RT.backend.MaxImpl
+
     @staticmethod
     def eval(x, axes):
         return [x.max(axes)]
@@ -382,6 +393,7 @@ class Max(ReduceOp):
 
 class Sum(ReduceOp):
     get_impl = lambda: slope.RT.backend.SumImpl
+
     @staticmethod
     def eval(x, *, axes, keepdims):
         return [x.sum(axes, keepdims)]
@@ -408,6 +420,7 @@ class Sum(ReduceOp):
 
 class Broadcast(ShapeOp):
     get_impl = lambda: slope.RT.backend.BroadcastImpl
+
     @staticmethod
     def eval(x, *, shape, axes):
         if axes is not None:
@@ -463,6 +476,7 @@ class Broadcast(ShapeOp):
 
 class Reshape(ShapeOp):
     get_impl = lambda: slope.RT.backend.ReshapeImpl
+
     @staticmethod
     def eval(x, *, shape):
         return [x.reshape(shape)]
@@ -484,6 +498,7 @@ class Reshape(ShapeOp):
 
 class Transpose(ShapeOp):
     get_impl = lambda: slope.RT.backend.TransposeImpl
+
     @staticmethod
     def eval(x, *, perm):
         return [np.transpose(x, perm)]
@@ -520,6 +535,7 @@ class Transpose(ShapeOp):
 
 class Gather(ShapeOp):
     get_impl = lambda: slope.RT.backend.GatherImpl
+
     @staticmethod
     def eval(x, idx, *, axis):
         return [x.gather(idx)]
@@ -729,6 +745,7 @@ def _gather_batching_rule(
 
 class Scatter(ShapeOp):
     get_impl = lambda: slope.RT.backend.ScatterImpl
+
     @staticmethod
     def eval(x, idx, *, axis):
         return [x.gather(idx)]
@@ -1055,9 +1072,9 @@ class Slice(ShapeOp):
             return [ArrayShape(shape, x.dtype)]
         else:
             # TODO: compute strided shape without numpy
-            arr = np.zeros_like(x.shape)
-            arr = arr[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
-            return [ArrayShape(arr.shape, x.dtype)]
+            x = np.zeros_like(x.shape)
+            x = x[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
+            return [ArrayShape(x.shape, x.dtype)]
 
     @staticmethod
     def T(cts, x, *, starts, limits, strides):
@@ -1202,53 +1219,52 @@ class Arange(LoadOp):
         return [cts[0]]
 
 
-class FromNumpy(LoadOp):
+class Constant(LoadOp):
     @staticmethod
-    def eval(*, arr):
-        out = Array(arr)
+    def eval(*, x):
+        out = Array(x)
         return [out]
 
     @staticmethod
-    def vmap(axis_size, vals_in, dims_in, *, arr):
+    def vmap(axis_size, vals_in, dims_in, *, x):
         raise NotImplementedError
 
     @staticmethod
-    def jvp(*, arr):
+    def jvp(*, x):
         return (
-            [Array(arr)],
-            [Array.full(0, arr.shape, arr.dtype)],
+            [Array(x)],
+            [Array.full(0, x.shape, x.dtype)],
         )
 
     @staticmethod
-    def shape_eval(*, arr) -> List[ArrayShape]:
-        return [ArrayShape(tuple(arr.shape), arr.dtype)]
+    def shape_eval(*, x) -> List[ArrayShape]:
+        return [ArrayShape(tuple(x.shape), x.dtype)]
 
     @staticmethod
-    def T(cts, *, arr):
+    def T(cts, *, x):
         return [cts[0]]
 
 
 class Jit(LoadOp):
     @staticmethod
-    def eval(*args, prog, num_consts: int):
-        consts, args = args[:num_consts], args[num_consts:]
+    def eval(consts, args, prog):
         hashable_consts = tuple(map(utils.IDHashable, consts))
         hashable_prog = utils.IDHashable(prog)
-        execute = slope.RT.backend.callable(hashable_prog, hashable_consts)
-        return execute(*args)
+        jit_fn = slope.RT.backend.callable(hashable_prog, hashable_consts)
+        return [jit_fn(*args)]
 
     @staticmethod
-    def vmap(axis_size, vals_in, dims_in, *, arr):
+    def vmap(axis_size, vals_in, dims_in, *, x):
         raise NotImplementedError
 
     @staticmethod
-    def jvp(*, arr):
+    def jvp(*, x):
         raise NotImplementedError
 
     @staticmethod
-    def shape_eval(*, arr) -> List[ArrayShape]:
+    def shape_eval(*, x) -> List[ArrayShape]:
         raise NotImplementedError
 
     @staticmethod
-    def T(cts, *, arr):
+    def T(cts, *, x):
         raise NotImplementedError

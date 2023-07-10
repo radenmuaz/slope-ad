@@ -32,16 +32,14 @@ from slope.array import Array
 
 def binaryop_decor(op_fn):
     def wrapped_fn(x, y):
-        if type(x) in [
-            bool,
-            int,
-            float,
-        ]:  # TODO: more elegant way handling python types
+        if type(x) in [bool, int, float, Array]:
             x = y._trace.pure(x)
-        elif type(y) in [bool, int, float]:
+        elif type(y) in [bool, int, float, Array]:
             y = x._trace.pure(y)
         bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
         by = list(range((max(x.ndim, y.ndim) - y.ndim)))
+        bx = bx if len(bx) > 0 else None
+        by = by if len(by) > 0 else None
         shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
         x = x.broadcast(shape_ret, bx)
         y = y.broadcast(shape_ret, by)
@@ -247,11 +245,13 @@ class TracerArray(BaseArray):
 
     # Shape
     def broadcast(self, shape, axes=None):
-        if axes is None:
-            axes = tuple(range(self.ndim))
-        elif isinstance(axes, int):
+        # if axes is None:
+        #     axes = tuple(range(self.ndim))
+        # elif isinstance(axes, int):
+        if isinstance(axes, int):
             axes = (axes,)
-        axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
+        if axes is not None:
+            axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
         return ops.Broadcast.do(self, shape=shape, axes=axes)
 
     def reshape(self, shape):

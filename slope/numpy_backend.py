@@ -19,13 +19,13 @@ import inspect
 import pickle
 
 
-
 class NumpyBackend(BaseBackend):
     default_dtype = np.float32
 
     class NumpyOpImpl(BaseBackend.BaseOpImpl):
         ir_args = ()
         ir_kwargs = {}
+
         @classmethod
         def do(cls, *args, **kwargs):
             exec_locals = {
@@ -33,113 +33,133 @@ class NumpyBackend(BaseBackend):
                 **kwargs,
             }
             safe_builtins = {"math": math, "np": np}
-            code = cls.ir(*cls.ir_args, **{**{kwa:kwa for kwa in cls.ir_kwargs}, "ret":"ret"})
+            code = cls.ir(
+                *cls.ir_args, **{**{kwa: kwa for kwa in cls.ir_kwargs}, "ret": "ret"}
+            )
             exec(code, safe_builtins, exec_locals)
             return Array(exec_locals["ret"])
-    
 
     class ExpImpl(NumpyOpImpl):
-        ir_args = ("x")
+        ir_args = "x"
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.exp({x})"
 
-
     class LogImpl(NumpyOpImpl):
-        ir_args = ("x")
+        ir_args = "x"
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.log({x})"
 
     class SubImpl(NumpyOpImpl):
         ir_args = ("x", "y")
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.add({x}, {y})"
 
-
     class MulImpl(NumpyOpImpl):
         ir_args = ("x", "y")
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.mul({x}, {y})"
 
-
     class DivImpl(NumpyOpImpl):
         ir_args = ("x", "y")
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.div({x}, {y})"
 
-
     class FullImpl(NumpyOpImpl):
         ir_kwargs = ("fill_value", "shape")
+
         @classmethod
         def ir(cls, fill_value: str, shape: str, *, ret: str):
             return f"{ret} = np.full({fill_value}, {shape})"
 
     class AddImpl(NumpyOpImpl):
         ir_args = ("x", "y")
+
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.add({x}, {y})"
-    
+
     class BroadcastImpl(NumpyOpImpl):
         ir_args = ("x",)
         ir_kwargs = ("shape", "axes")
+
         @classmethod
-        def ir(cls, x: str, *, shape: str, axes: str, ret: str):
-            return (
-f'''if axes is not None:
-    for a in sorted({axes}):
-        {x} = np.expand_dims({x},a)
-{ret} = np.broadcast_to({x}, {shape})
-''')
+        def ir(cls, x: str, *, shape, axes, ret):
+            return f"""
+{ret}_shape = {shape} 
+{ret}_axes = {axes} 
+{ret} = {x}
+if not {ret}_axes is None:
+    for a in sorted({ret}_axes):
+        {ret} = np.expand_dims({ret},a)
+{ret} = np.broadcast_to({ret}, {ret}_shape)
+"""
 
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]
     }
 
+    class JitFn(BaseBackend.BaseJitFn):
+        def __init__(self, code, fn):
+            self.code = code
+            self.fn = fn
+        def __call__(self, *args, **kwargs):
+            args = [a.val if isinstance(a, Array) else a for a in args]
+            outs = self.fn(*args, **kwargs)
+            return [Array(o) if isinstance(o, np.ndarray) else o for o in outs]
+
     @classmethod
     def compile(cls, prog, consts, in_avals, name) -> List[Any]:
-        safe_builtins = {"__builtins__": None, "math": math, "np": np}
+        safe_builtins = {"math": math, "np": np, "pickle": pickle}
         exec_locals = {}
-        arg_names = [f"x{i}" for i in range(len(in_avals))]
-        ops_code = []
-        ops_code += [f"def {name}({', '.join(arg_names)})"]
-        for i, const in consts:
-            ops_code += [f"    c{i} = pickle.loads('{pickle.dumps(const.val)}')"]
         env: Dict[slope.ad.Var, Any] = {}
-
-        def read(x: slope.ad.Atom) -> Any:
-            return env[x]
-
-        def write(v: slope.ad.Var) -> None:
-            assert v not in env
-            env[v] = f"z{len(env)}"
-    
-
-        utils.list_map(write, prog.in_binders)
+        ncs = 0
+        nxs = 0
+        nzs = 0
+        inb_args = []
+        inb_consts = []
+        for inb in prog.in_binders:
+            if type(inb.aval) is not ArrayShape:
+                env[inb] = f"c{ncs}"
+                inb_consts += [env[inb]]
+                ncs += 1
+            else:
+                env[inb] = f"x{nxs}"
+                inb_args += [env[inb]]
+                nxs += 1
+        ops_code = []
+        ops_code += [f"def {name}({', '.join(inb_args)}):"]
+        for inb_const, const in zip(inb_consts, consts):
+            ops_code += [f'    {inb_const} = pickle.loads({pickle.dumps(const.val)})']
         for eqn in prog.instrs:
-            in_avals = [x.aval for x in eqn.inputs]
-            in_vals = utils.list_map(read, eqn.inputs)
-            utils.list_map(write, eqn.out_binders)
-            out_vals = utils.list_map(read, eqn.out_binders)
+            in_vals = utils.list_map(lambda x: env[x], eqn.inputs)
+            for outb in eqn.out_binders:
+                env[outb] = f"z{nzs}"
+                nzs += 1
+            out_vals = utils.list_map(lambda z: env[z], eqn.out_binders)
             assert not len(out_vals) > 1, "Op with >1 output not supported"
             op_ir = eqn.op.get_impl().ir(*in_vals, **eqn.params, ret=out_vals[0])
             op_ir = "\n".join(["    " + line for line in op_ir.strip().split("\n")])
             ops_code += [op_ir]
             # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
-        
-        outs =  utils.list_map(read, prog.outs)
-        ops_code += [f"    return {outs.join(', ') if len(outs)>1 else outs[0]}"]
-        for i, code in enumerate(ops_code):
-            print(f'{i}\n{code}')
-        breakpoint()
-        
-        var_outs = map(read, prog.outs)
-        return partial(exec, code, safe_builtins, exec_locals)
-        return partial(c.execute_compiled, compiled, [v.aval for v in prog.outs])
+
+        outs = utils.list_map(lambda y: env[y], prog.outs)
+        # ops_code += [f"    outs[0]}"]
+        ops_code += [f"    return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
+        fn_code = '\n'.join(ops_code)
+        exec(fn_code, safe_builtins, exec_locals)
+        fn = exec_locals[name]
+        # exec('\n'.join(ops_code), safe_builtins, exec_locals)
+        return cls.JitFn(fn_code, fn)
 
     @classmethod
     def execute_compiled(cls, compiled, out_avals, *args):

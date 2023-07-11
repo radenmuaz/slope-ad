@@ -15,15 +15,16 @@ from typing import (
     Final,
 )
 import functools
+import slope
 from slope import utils
 
 from abc import ABC, abstractmethod
-
 
 class BaseArray:
     def notimplemented(self, *args, **kwargs):
         raise NotImplementedError
 
+    constant = notimplemented
     convert = notimplemented
     astype = convert
     neg = notimplemented
@@ -57,6 +58,16 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
+
+    def random_normal(self, x, dtype):
+        # Box-Muller transform
+        nbits = dtype.np.itemsize
+        u1 = 0
+        while u1 == 0:
+            u1 = x / (2**nbits)  # Convert the 64-bit integer to a float between 0 and 1
+        u2 = self.rng_bit(x) / (2**nbits)
+        z0 = np.sqrt(-2.0 * np.log(u1)) * np.cos(2 * np.pi * u2)
+        return z0
 
     def where(self, trueval, falseval):
         cond = self != 0.0

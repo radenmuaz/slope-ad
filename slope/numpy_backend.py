@@ -7,15 +7,12 @@ import numpy as np
 import functools
 import slope
 from slope import utils
-from slope.array import Array
+from slope.array import Array, ArrayBuffer
 from slope.array_shape import ArrayShape
-from functools import lru_cache, partial
 import numpy as np
-from dataclasses import dataclass
 
 from slope.base_backend import BaseBackend
 from slope import ops
-import inspect
 import pickle
 
 
@@ -37,7 +34,7 @@ class NumpyBackend(BaseBackend):
                 *cls.ir_args, **{**{kwa: kwa for kwa in cls.ir_kwargs}, "ret": "ret"}
             )
             exec(code, safe_builtins, exec_locals)
-            return Array(exec_locals["ret"])
+            return Array(ArrayBuffer(exec_locals["ret"]))
 
     class ExpImpl(NumpyOpImpl):
         ir_args = "x"
@@ -103,6 +100,20 @@ if not {ret}_axes is None:
         {ret} = np.expand_dims({ret},a)
 {ret} = np.broadcast_to({ret}, {ret}_shape)
 """
+
+    class ConstantImpl(NumpyOpImpl):
+        ir_args = ()
+        ir_kwargs = ("val", "dtype")
+
+        @classmethod
+        def ir(cls, *, val, dtype, ret: str):
+            return f"{ret} = np.array(val, dtype=dtype)"
+        
+    class RngBitImpl(NumpyOpImpl):
+        ir_args = ('x',)
+        @classmethod
+        def ir(cls, x, * dtype, ret: str):
+            return f"{ret} = np.random.randint(2**dict(np.uint32=32, np.uint64=64)[dtype], dtype=dtype)"
 
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]

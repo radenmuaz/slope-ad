@@ -73,7 +73,7 @@ class TracerArray(BaseArray):
         bool,
         int,
         float,
-        Array,
+        # Array,
     }
     __array_priority__ = 1000
 
@@ -106,8 +106,9 @@ class TracerArray(BaseArray):
             return x.aval
         elif type(x) in TracerArray.TYPES:
             return Array(np.asarray(x))
+        elif isinstance(x, Array):
+            return x
         else:
-            breakpoint()
             raise TypeError(x)
 
     def full_lower(self):
@@ -131,11 +132,8 @@ class TracerArray(BaseArray):
     def ndim(self):
         return len(self.shape)
 
-    def identity(x):
-        return ops.Identity.do(x)
-
-    def stop_gradient(x):
-        return ops.StopGradient.do(x)
+    def constant(x, val):
+        return ops.Constant.do(x, val=val)
 
     def convert(x, dtype):
         return ops.Convert.do(x, dtype=dtype)

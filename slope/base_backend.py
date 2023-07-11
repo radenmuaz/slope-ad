@@ -57,14 +57,19 @@ class BaseBackend:
     MaxImpl = BaseOpImpl
     SumImpl = BaseOpImpl
 
+    ConstantImpl = BaseOpImpl
     FullImpl = BaseOpImpl
+    RngBitGeneratorImpl = BaseOpImpl
     ReshapeImpl = BaseOpImpl
     TransposeImpl = BaseOpImpl
     BroadcastImpl = BaseOpImpl
     GatherImpl = BaseOpImpl
     ScatterImpl = BaseOpImpl
 
-    convert = classmethod(lambda cls, x, dtype: cls.ConvertImpl(x, dtype=dtype))
+    constant = classmethod(
+        lambda cls, val, dtype: cls.ConstantImpl.do(val=val, dtype=dtype)
+    )
+    convert = classmethod(lambda cls, x, dtype: cls.ConvertImpl.do(x, dtype=dtype))
     astype = convert
     neg = classmethod(lambda cls, x: cls.NegImpl.do(x))
     exp = classmethod(lambda cls, x: cls.ExpImpl.do(x))

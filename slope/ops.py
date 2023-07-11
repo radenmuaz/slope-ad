@@ -959,6 +959,8 @@ def _scatter_add_transpose_rule(
 
 
 class Pad(ShapeOp):
+    get_impl = lambda: slope.RT.backend.PadImpl
+
     @staticmethod
     def eval(x, *, lo, hi, interior, value):
         return [x.pad(lo, hi, interior, value)]
@@ -1028,6 +1030,8 @@ class Pad(ShapeOp):
 
 
 class Slice(ShapeOp):
+    get_impl = lambda: slope.RT.backend.AddImpl
+
     @staticmethod
     def eval(x, *, starts, limits, strides):
         return [x.slice(starts, limits, strides)]
@@ -1105,6 +1109,8 @@ class Slice(ShapeOp):
 
 
 class Flip(ShapeOp):
+    get_impl = lambda: slope.RT.backend.FlipImpl
+
     @staticmethod
     def eval(x, *, padding):
         return [x.crop(padding)]
@@ -1130,6 +1136,8 @@ class Flip(ShapeOp):
 
 
 class Concatenate(ShapeOp):
+    get_impl = lambda: slope.RT.backend.ConcatenateImpl
+
     @staticmethod
     def eval(xs: Sequence[Any], *, axis):
         return [Array.concatenate(xs, axis=axis)]
@@ -1160,6 +1168,8 @@ class Concatenate(ShapeOp):
 
 
 class Full(LoadOp):
+    get_impl = lambda: slope.RT.backend.FullImpl
+
     @staticmethod
     def eval(*, fill_value, shape, dtype):
         out = Array.full(fill_value, shape, dtype)
@@ -1171,10 +1181,9 @@ class Full(LoadOp):
 
     @staticmethod
     def jvp(*, fill_value, shape, dtype):
-        return (
-            [Array.full(fill_value, shape, dtype)],
-            [Array.full(0, shape)],
-        )
+        out = Array.full(fill_value, shape, dtype)
+        out_jvp = Array.zeros_like(out)
+        return [out], [out_jvp]
 
     @staticmethod
     def shape_eval(fill_value, shape, dtype) -> List[ArrayShape]:
@@ -1186,6 +1195,8 @@ class Full(LoadOp):
 
 
 class Arange(LoadOp):
+    get_impl = lambda: slope.RT.backend.ArangeImpl
+
     @staticmethod
     def eval(*, start, stop, stride, dtype):
         out = Array.arange(start, stop, stride, dtype)
@@ -1205,10 +1216,9 @@ class Arange(LoadOp):
 
     @staticmethod
     def jvp(*, start, stop, stride, dtype):
-        return (
-            [Array.arange(start, stop, stride, dtype)],
-            [Array.full(0, len(tuple(slice(start, stop, stride))))],
-        )
+        out = Array.arange(start, stop, stride, dtype)
+        out_jvp = Array.zeros_like(out)
+        return [out], [out_jvp]
 
     @staticmethod
     def shape_eval(start, stop, stride, dtype) -> List[ArrayShape]:
@@ -1220,28 +1230,29 @@ class Arange(LoadOp):
 
 
 class Constant(LoadOp):
+    get_impl = lambda: slope.RT.backend.ConstantImpl
+
     @staticmethod
-    def eval(*, x):
-        out = Array(x)
+    def eval(*, val, dtype):
+        out = Array(val, dtype)
         return [out]
 
     @staticmethod
-    def vmap(axis_size, vals_in, dims_in, *, x):
+    def vmap(axis_size, vals_in, dims_in, *, val, dtype):
         raise NotImplementedError
 
     @staticmethod
-    def jvp(*, x):
-        return (
-            [Array(x)],
-            [Array.full(0, x.shape, x.dtype)],
-        )
+    def jvp(*, val, dtype):
+        out = Array(val, dtype)
+        out_jvp = Array.zeros_like(out)
+        return [out], [out_jvp]
 
     @staticmethod
-    def shape_eval(*, x) -> List[ArrayShape]:
-        return [ArrayShape(tuple(x.shape), x.dtype)]
+    def shape_eval(*, val, dtype) -> List[ArrayShape]:
+        return [ArrayShape(np.array(val).shape, dtype)]
 
     @staticmethod
-    def T(cts, *, x):
+    def T(cts, *, val, dtype):
         return [cts[0]]
 
 

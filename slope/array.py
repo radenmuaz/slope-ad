@@ -19,59 +19,66 @@ import numpy as np
 # import ops
 
 
+class ArrayBuffer:
+    def __init__(self, val):
+        self.val = val
+
+
 class Array(BaseArray):
     __array_priority__ = 2000
     default_dtype = dtypes.float32
 
     def __init__(
-        self, val: Union[list, tuple, np.ndarray], dtype: Optional[Any] = None
+        self,
+        val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
+        dtype: Optional[Any] = None,
     ):
-        self.val = np.asarray(val, dtype)
+        # Decides whether point existing buffer or create new buffer
+        self.buf = (
+            val
+            if isinstance(val, ArrayBuffer)
+            else slope.RT.backend.constant(val, dtype).buf
+        )
 
-    dtype = property(lambda self: self.val.dtype)
-    shape = property(lambda self: self.val.shape)
-    ndim = property(lambda self: self.val.ndim)
+    val = property(lambda self: self.buf.val)
+    dtype = property(lambda self: self.buf.val.dtype)
+    shape = property(lambda self: self.buf.val.shape)
+    ndim = property(lambda self: self.buf.val.ndim)
 
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
 
     __str__ = __repr__
 
-    @staticmethod
-    def full(shape, fill_value, dtype=default_dtype, **kwargs):
+    @classmethod
+    def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
         return slope.RT.backend.full(
             shape, fill_value=fill_value, dtype=dtype, **kwargs
         )
 
-    @staticmethod
-    def zeros(shape, dtype=default_dtype, **kwargs):
+    @classmethod
+    def zeros(cls, shape, dtype=default_dtype, **kwargs):
         return slope.RT.backend.full(shape, 0.0, dtype, **kwargs)
 
-    @staticmethod
+    @classmethod
     def ones(shape, dtype=default_dtype, **kwargs):
         return slope.RT.backend.full(shape, 1.0, dtype, **kwargs)
 
-    @staticmethod
+    @classmethod
     def full_like(other, fill_value, **kwargs):
         return slope.RT.backend.full(
             other.shape, fill_value, dtype=other.dtype, **kwargs
         )
 
-    @staticmethod
+    @classmethod
     def zeros_like(other, **kwargs):
         return slope.RT.backend.zeros(other.shape, dtype=other.dtype, **kwargs)
 
-    @staticmethod
-    def ones_like(other, **kwargs):
-        return slope.RT.backend.ones(other.shape, dtype=other.dtype, **kwargs)
-
-    @staticmethod
-    def empty(*shape, **kwargs):
-        return slope.RT.backend.zeros(*shape, **kwargs)
-
-    @staticmethod
-    def eye(dim, **kwargs):
-        return slope.RT.backend.eye(dim, **kwargs)
+    @classmethod
+    def ones_like(cls, other, **kwargs):
+        return slope.RT.backend.full(
+            other.shape, fill_value=1.0, dtype=other.dtype, **kwargs
+        )
 
     @staticmethod
     def arange(stop, start=0, step=1, **kwargs):
@@ -122,6 +129,7 @@ class Array(BaseArray):
 
     convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
     astype = convert
+    constant = lambda self, val: slope.RT.backend.constant(self, val=val)
     neg = lambda self: slope.RT.backend.neg(self)
     exp = lambda self: slope.RT.backend.exp(self)
     log = lambda self: slope.RT.backend.log(self)

@@ -60,6 +60,64 @@ class BaseArray:
     __lt__ = lambda self, other: 1.0 - (self >= other)
 
     @classmethod
+    def philox(cls, key, rounds=10):
+        def rotl(x, r):
+            return (x << r) | (x >> (64 - r))
+
+        def philox_round(a, b, key):
+            a += b
+            b = rotl(b, 32)
+            a ^= key
+            return a, b
+
+        assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
+        assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
+
+        key0, key1 = key
+        state = np.array([key0, key1], dtype=np.uint64)
+
+        for _ in range(rounds):
+            state[0], state[1] = philox_round(state[0], state[1], _)
+            state[0] += 1
+        return  state[:2], state #  [0, 1] are new keys, [:] are random numbers,
+
+    
+    @classmethod
+    def threefry(cls, key, rounds=20):
+        def rotl(x, r):
+            return (x << r) | (x >> (64 - r))
+
+        def threefry_round(a, b, c, d, r):
+            a += b
+            d ^= a
+            d = rotl(d, r)
+            c += d
+            b ^= c
+            b = rotl(b, r)
+            a += b
+            d ^= a
+            d = rotl(d, r)
+            c += d
+            b ^= c
+            b = rotl(b, r)
+            return a, b, c, d
+
+        assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
+        assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
+
+        key0, key1 = key
+        state = np.array([0, 0, key0, key1], dtype=np.uint64)
+
+        for _ in range(rounds):
+            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 14)
+            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 16)
+            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 52)
+            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 57)
+
+        return state[:2], state[2:]  # [0, 1] are new keys, [2:] are random numbers
+
+
+    @classmethod
     def random_normal(cls, x, dtype):
         # Box-Muller transform
         nbits = dtype.itemsize*8

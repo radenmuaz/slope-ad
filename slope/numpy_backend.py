@@ -108,12 +108,8 @@ if not {ret}_axes is None:
         @classmethod
         def ir(cls, *, val, dtype, ret: str):
             return f"{ret} = np.array(val, dtype=dtype)"
-        
-    class RngBitImpl(NumpyOpImpl):
-        ir_args = ('x',)
-        @classmethod
-        def ir(cls, x, * dtype, ret: str):
-            return f"{ret} = np.random.randint(2**dict(np.uint32=32, np.uint64=64)[dtype], dtype=dtype)"
+    
+    
 
     input_handlers = {
         ty: np.asarray for ty in [bool, int, float, np.ndarray, np.float64, np.float32]

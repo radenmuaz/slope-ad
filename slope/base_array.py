@@ -59,14 +59,15 @@ class BaseArray:
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
 
-    def random_normal(self, x, dtype):
+    @classmethod
+    def random_normal(cls, x, dtype):
         # Box-Muller transform
-        nbits = dtype.np.itemsize
+        nbits = dtype.itemsize*8
         u1 = 0
         while u1 == 0:
-            u1 = x / (2**nbits)  # Convert the 64-bit integer to a float between 0 and 1
-        u2 = self.rng_bit(x) / (2**nbits)
-        z0 = np.sqrt(-2.0 * np.log(u1)) * np.cos(2 * np.pi * u2)
+            u1 = cls.rng_bit(x) / (2**nbits)  # normalize to [0, 1]
+        u2 = cls.rng_bit(x) / (2**nbits)
+        z0 = (-2.0 * u1.log()).sqrt() * (2 * math.pi * u2).cos()
         return z0
 
     def where(self, trueval, falseval):

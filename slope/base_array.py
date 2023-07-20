@@ -20,16 +20,26 @@ from slope import utils
 
 from abc import ABC, abstractmethod
 
+
 class BaseArray:
     def notimplemented(self, *args, **kwargs):
         raise NotImplementedError
 
     constant = notimplemented
+    full = notimplemented
+    arange = notimplemented
+    random_normal = notimplemented
+    randn = random_normal
+    random_uniform = notimplemented
+    rand = random_uniform
+    stop_gradient = notimplemented
     convert = notimplemented
     astype = convert
     neg = notimplemented
     exp = notimplemented
     log = notimplemented
+    sqrt = notimplemented
+    sin = notimplemented
     add = notimplemented
     sub = notimplemented
     mul = notimplemented
@@ -39,8 +49,15 @@ class BaseArray:
     maximum = notimplemented
     max = notimplemented
     sum = notimplemented
+    broadcast = notimplemented
+    reshape = notimplemented
+    transpose = notimplemented
+    flip = notimplemented
+    slice = notimplemented
+    pad = notimplemented
+    gather = notimplemented
+    scatter = notimplemented
     choose = notimplemented
-    where = notimplemented
 
     __neg__ = lambda self: self.neg()
     __add__ = lambda self, other: self.add(other)
@@ -58,75 +75,6 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
-
-    @classmethod
-    def philox(cls, key, rounds=10):
-        def rotl(x, r):
-            return (x << r) | (x >> (64 - r))
-
-        def philox_round(a, b, key):
-            a += b
-            b = rotl(b, 32)
-            a ^= key
-            return a, b
-
-        assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
-        assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
-
-        key0, key1 = key
-        state = np.array([key0, key1], dtype=np.uint64)
-
-        for _ in range(rounds):
-            state[0], state[1] = philox_round(state[0], state[1], _)
-            state[0] += 1
-        return  state[:2], state #  [0, 1] are new keys, [:] are random numbers,
-
-    
-    @classmethod
-    def threefry(cls, key, rounds=20):
-        def rotl(x, r):
-            return (x << r) | (x >> (64 - r))
-
-        def threefry_round(a, b, c, d, r):
-            a += b
-            d ^= a
-            d = rotl(d, r)
-            c += d
-            b ^= c
-            b = rotl(b, r)
-            a += b
-            d ^= a
-            d = rotl(d, r)
-            c += d
-            b ^= c
-            b = rotl(b, r)
-            return a, b, c, d
-
-        assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
-        assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
-
-        key0, key1 = key
-        state = np.array([0, 0, key0, key1], dtype=np.uint64)
-
-        for _ in range(rounds):
-            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 14)
-            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 16)
-            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 52)
-            state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 57)
-
-        return state[:2], state[2:]  # [0, 1] are new keys, [2:] are random numbers
-
-
-    @classmethod
-    def random_normal(cls, x, dtype):
-        # Box-Muller transform
-        nbits = dtype.itemsize*8
-        u1 = 0
-        while u1 == 0:
-            u1 = cls.rng_bit(x) / (2**nbits)  # normalize to [0, 1]
-        u2 = cls.rng_bit(x) / (2**nbits)
-        z0 = (-2.0 * u1.log()).sqrt() * (2 * math.pi * u2).cos()
-        return z0
 
     def where(self, trueval, falseval):
         cond = self != 0.0
@@ -170,72 +118,12 @@ class BaseArray:
 
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
-
-    # # NOTE: using slice is discouraged and things should migrate to pad and shrink
-    # def slice(self, arg: Sequence[Optional[Tuple[int, int]]]):
-    #     arg_ = tuple(a if a is not None else (0, s) for s, a in zip(self.shape, arg))
-    #     padding = tuple(
-    #         (max(0, -p[0]), max(0, p[1] - self.shape[i])) for i, p in enumerate(arg_)
-    #     )
-    #     return self.pad(padding).shrink(
-    #         tuple(
-    #             (p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)
-    #         )
-    #     )
-
-    # def __getitem__(self, val):
-    #     def slcfix(i, sz, default):
-    #         return (
-    #             default if i is None else max(0, min(sz, sz + i if i < 0 else i))
-    #         )  # Fix negative idxs, clamp to [0,N]
-
-    #     new_slice, new_shape = [], []
-    #     val = [val] if not isinstance(val, (list, tuple)) else val
-    #     assert sum(s is not None for s in val) <= len(self.shape)
-    #     assert all(s.step is None or s.step == 1 for s in val if isinstance(s, slice))
-    #     for i, (sz, s) in enumerate(
-    #         zip(self.shape, [v for v in val if v is not None])
-    #     ):  # Slicing only depends on ints + slices
-    #         if isinstance(s, int) and not (-sz <= s < sz):
-    #             raise IndexError(
-    #                 f"index {s} is out of bounds for dimension {i} with size {sz}"
-    #             )
-    #     new_slice.append(
-    #         (s % sz, s % sz + 1)
-    #         if isinstance(s, int)
-    #         else (slcfix(s.start, sz, 0), slcfix(s.stop, sz, sz))
-    #     )
-    #     for s, sz in zip(
-    #         val,
-    #         [
-    #             self.shape[i - 1]
-    #             for i in itertools.accumulate([int(s is not None) for s in val])
-    #         ],
-    #     ):  # Shape depends on slices + positions of Nones
-    #         if not isinstance(s, int):
-    #             new_shape.append(
-    #                 1 if s is None else slcfix(s.stop, sz, sz) - slcfix(s.start, sz, 0)
-    #             )
-    #     new_shape += [self.shape[i] for i in range(len(new_slice), len(self.shape))]
-    #     new_slice += [
-    #         (0, self.shape[i]) for i in range(len(new_slice), len(self.shape))
-    #     ]
-    #     return self.slice(new_slice).reshape(new_shape if len(new_shape) else (1,))
-
-    # def concatenate(self, *args, dim=0):
-    #     dim = (dim + len(self.shape)) if dim < 0 else dim
-    #     for y in args:
-    #         assert len(y.shape) == len(self.shape) and all(
-    #             y.shape[i] == s for i, s in enumerate(self.shape) if i != dim
-    #         )
-    #     catargs = [self] + list(args)
-    #     shape_cumsum = [0, *itertools.accumulate([y.shape[dim] for y in catargs])]
-    #     slc = [[(0, s) for s in self.shape] for _ in catargs]
-    #     for s, k in zip(slc, shape_cumsum):
-    #         s[dim] = (-k, shape_cumsum[-1] - k)
-    #     return functools.reduce(
-    #         self.__class__.__add__, [arg.slice(s) for arg, s in zip(catargs, slc)]
-    #     )
+    
+    @classmethod
+    def glorot_uniform(cls, *shape, **kwargs):
+        return cls.rand(*shape, **kwargs).mul(
+            (6 / (shape[0] + math.prod(shape[1:]))) ** 0.5
+        )
 
     # # TODO: make this nicer with syntactic sugar in slice
     # def split(self, num, dim):
@@ -243,17 +131,6 @@ class BaseArray:
     #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
     #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
     #     return [self.slice(p) for p in slice_params]
-
-    # # (padding_left, padding_right, padding_top, padding_bottom)
-    # def pad2d(self, padding: Union[List[int], Tuple[int, ...]]):
-    #     return self.slice(
-    #         (
-    #             (0, self.shape[0]),
-    #             (0, self.shape[1]),
-    #             (-padding[2], self.shape[2] + padding[3]),
-    #             (-padding[0], self.shape[3] + padding[1]),
-    #         )
-    #     )
 
     # @staticmethod
     # def stack(tensors, dim=0):
@@ -277,11 +154,6 @@ class BaseArray:
     #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
     #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
     #     return [self.slice(p) for p in slice_params]
-
-    # def unsqueeze(self, dim):
-    #     if dim < 0:
-    #         dim = len(self.shape) + dim + 1
-    #     return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
 
     @property
     def T(self):
@@ -307,11 +179,11 @@ class BaseArray:
         w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
         return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
-    def sqrt(self):
-        return self.pow(0.5)
+    # def sqrt(self):
+    #     return self.pow(0.5)
 
-    def rsqrt(self):
-        return self.pow(-0.5)
+    # def rsqrt(self):
+    #     return self.pow(-0.5)
 
     def square(self):
         return self * self
@@ -330,8 +202,8 @@ class BaseArray:
 
     # # ***** activation functions (unary) *****
 
-    def relu(self):
-        return ops.ReLU.do(self)
+    # def relu(self):
+    #     return ops.ReLU.do(self)
 
     def sigmoid(self):
         return (1.0 + (-self).exp()).reciprocal()

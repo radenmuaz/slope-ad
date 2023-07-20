@@ -39,6 +39,7 @@ class dtypes:
     int64: Final[DType] = DType(2, 8, "int64", np.int64)
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
 
+
 # bool: Final[DType] = DType(0, 1, "bool", bool)
 # float16: Final[DType] = DType(0, 2, "half", np.float16)
 # float32: Final[DType] = DType(4, 4, "float", np.float32)

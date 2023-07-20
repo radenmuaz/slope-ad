@@ -127,12 +127,15 @@ class Array(BaseArray):
     def __array__(self, dtype=None):
         return self.val
 
-    convert = lambda self, dtype: self.__class__(self.val, dtype=dtype)
+    convert = lambda self, dtype: slope.RT.backend.convert(self, dtype=dtype)
     astype = convert
-    constant = lambda self, val: slope.RT.backend.constant(self, val=val)
+    stop_gradient = lambda self: slope.RT.backend.stop_gradient(self)
+    sqrt = lambda self: slope.RT.backend.sqrt(self)
     neg = lambda self: slope.RT.backend.neg(self)
     exp = lambda self: slope.RT.backend.exp(self)
     log = lambda self: slope.RT.backend.log(self)
+    sin = lambda self: slope.RT.backend.sin(self)
+
     add = lambda self, other: slope.RT.backend.add(self, other)
     sub = lambda self, other: slope.RT.backend.subtract(self, other)
     mul = lambda self, other: slope.RT.backend.multiply(self, other)
@@ -146,32 +149,25 @@ class Array(BaseArray):
     sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(
         self.val, axis=axes, keepdims=keepdims
     )
+    
+    constant = lambda self, val, dtype: slope.RT.backend.constant(self, val=val, dtype=dtype)
+    full = lambda self, val, shape, dtype: slope.RT.backend.full(self, val=val, shape=shape, dtype=dtype)
+    arange = lambda self, start, stop, stride, dtype: slope.RT.backend.arange(self, start, stop, stride, dtype=dtype)
+    random_normal = lambda self, shape, dtype: slope.RT.backend.random_normal(self, shape, dtype=dtype)
+    randn = random_normal
+    random_uniform = lambda self, shape, dtype: slope.RT.backend.random_uniform(self, shape, dtype=dtype)
+    rand = random_uniform
 
     # Shape
-    reshape = lambda self, shape: slope.RT.backend.reshape(self.val, shape)
-    transpose = lambda self, perm: slope.RT.backend.transpose(self.val, perm)
-    expand_dims = lambda self, axes: slope.RT.backend.expand_dims(self.val, axes)
-    swapaxes = lambda self, a1, a2: slope.RT.backend.swapaxes(self.val, a1, a2)
+    reshape = lambda self, shape: slope.RT.backend.reshape(self, shape)
+    transpose = lambda self, perm: slope.RT.backend.transpose(self, perm)
     broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(
-        self.val, shape, axes
+        self, shape, axes
     )
-
-    def pad(self, lo, hi, interior=None, value=0):
-        if interior is None:
-            interior = [1] * len(lo)
-        new_shape, slices = [], []
-        for s, l, h, r in zip(self.shape, lo, hi, interior):
-            stride = r + 1
-            new_shape += [s * stride + l + h]
-            slices += [slice(l, s * stride + l, stride)]
-        padded = slope.RT.backend.full(new_shape, value, dtype=self.dtype)
-        padded[tuple(slices)] = self.val
-        return self.__class__(padded)
-
-    def slice(self, starts, limits, strides):
-        return self.__class__(
-            self.val[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
-        )
+    pad = lambda self, lo, hi, interior, value: slope.RT.backend.pad(self, lo, hi, interior, value)
+    slice = lambda self, starts, limits, strides: slope.RT.backend.slice(self, starts, limits, strides)
+    flip = lambda self, axes: slope.RT.backend.flip(self, axes)
+    concatenate = classmethod(lambda cls, xs, axes: slope.RT.backend.concatenate(xs, axes))
 
     def __getitem__(self, idx):
         if type(idx) in (tuple, list):
@@ -182,7 +178,7 @@ class Array(BaseArray):
         raise NotImplementedError
 
     # control flow
-    choose = select = lambda self, *vals, idx: slope.RT.backendchoose(idx, *vals)
-    where = lambda self, trueval, falseval: slope.RT.backendwhere(
+    choose = select = lambda self, *vals, idx: slope.RT.backend.choose(idx, *vals)
+    where = lambda self, trueval, falseval: slope.RT.backend.where(
         self, trueval, falseval
     )

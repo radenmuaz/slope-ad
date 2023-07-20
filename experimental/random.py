@@ -409,3 +409,91 @@ def make_key_array_phys_sharding(aval, sharding, is_sharding_from_xla):
             sharding._device_assignment,
             KeyTyRules.physical_op_sharding(aval, sharding_proto),
         )
+
+
+##############
+
+
+def philox(cls, key, rounds=10):
+    def rotl(x, r):
+        return (x << r) | (x >> (64 - r))
+
+    def philox_round(a, b, key):
+        a += b
+        b = rotl(b, 32)
+        a ^= key
+        return a, b
+
+    assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
+    assert (
+        isinstance(rounds, int) and rounds > 0
+    ), "Number of rounds must be a positive integer"
+
+    key0, key1 = key
+    state = np.array([key0, key1], dtype=np.uint64)
+
+    for _ in range(rounds):
+        state[0], state[1] = philox_round(state[0], state[1], _)
+        state[0] += 1
+    return state[:2], state  #  [0, 1] are new keys, [:] are random numbers,
+
+
+def threefry(cls, key, rounds=20):
+    def rotl(x, r):
+        return (x << r) | (x >> (64 - r))
+
+    def threefry_round(a, b, c, d, r):
+        a += b
+        d ^= a
+        d = rotl(d, r)
+        c += d
+        b ^= c
+        b = rotl(b, r)
+        a += b
+        d ^= a
+        d = rotl(d, r)
+        c += d
+        b ^= c
+        b = rotl(b, r)
+        return a, b, c, d
+
+    assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
+    assert (
+        isinstance(rounds, int) and rounds > 0
+    ), "Number of rounds must be a positive integer"
+
+    key0, key1 = key
+    state = np.array([0, 0, key0, key1], dtype=np.uint64)
+
+    for _ in range(rounds):
+        state[0], state[1], state[2], state[3] = threefry_round(
+            state[0], state[1], state[2], state[3], 14
+        )
+        state[0], state[1], state[2], state[3] = threefry_round(
+            state[0], state[1], state[2], state[3], 16
+        )
+        state[0], state[1], state[2], state[3] = threefry_round(
+            state[0], state[1], state[2], state[3], 52
+        )
+        state[0], state[1], state[2], state[3] = threefry_round(
+            state[0], state[1], state[2], state[3], 57
+        )
+
+    return state[:2], state[2:]  # [0, 1] are new keys, [2:] are random numbers
+
+
+def rng_bit(cls, key, algorithm="philox"):
+    return dict(philox=cls.philox, threefry=cls.threefry)[algorithm](key)
+
+
+def random_normal(cls, x, key, dtype):
+    # Box-Muller transform
+    nbits = dtype.itemsize * 8
+    u1 = 0
+    while u1 == 0:
+        u1, key = cls.rng_bit(x, key)
+        u1 = u1 / (2**nbits)  # normalize to [0, 1]
+    u2, key = cls.rng_bit(x, key)
+    u2 = u2 / (2**nbits)
+    z0 = (-2.0 * u1.log()).sqrt() * (2 * math.pi * u2).cos()
+    return z0, key

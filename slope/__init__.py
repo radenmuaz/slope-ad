@@ -18,7 +18,6 @@ from dataclasses import dataclass, asdict
 #         return f"dtypes.{self.name}"
 
 
-
 # bool: Final[DType] = DType(0, 1, "bool", bool)
 # float16: Final[DType] = DType(0, 2, "half", np.float16)
 # float32: Final[DType] = DType(4, 4, "float", np.float32)

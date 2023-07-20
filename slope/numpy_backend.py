@@ -21,7 +21,7 @@ class NumpyBackend(BaseBackend):
 
     class NumpyOpImpl(BaseBackend.BaseOpImpl):
         ir_args = ()
-        ir_kwargs = {}
+        ir_kwargs = ()
 
         @classmethod
         def do(cls, *args, **kwargs):
@@ -33,29 +33,65 @@ class NumpyBackend(BaseBackend):
             code = cls.ir(
                 *cls.ir_args, **{**{kwa: kwa for kwa in cls.ir_kwargs}, "ret": "ret"}
             )
-            exec(code, safe_builtins, exec_locals)
+            exec(compile(code, '<string>', 'exec'), safe_builtins, exec_locals)
             return Array(ArrayBuffer(exec_locals["ret"]))
+    class ConvertImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("dtype",)
 
-    class ExpImpl(NumpyOpImpl):
-        ir_args = "x"
+        @classmethod
+        def ir(cls, x: str, *, dtype: str, ret: str):
+            return f"{ret} = np.astype({x}, {dtype})"
+    
+    class StopGradientImpl(NumpyOpImpl):
+        ir_args = ("x",)
+
+        @classmethod
+        def ir(cls, x: str, *, dtype: str, ret: str):
+            return f"{ret} = {x}"
+        
+    class NegImpl(NumpyOpImpl):
+        ir_args = ("x",)
 
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.neg({x})"
+    
+    class SqrtImpl(NumpyOpImpl):
+        ir_args = ("x",)
+
+        @classmethod
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.sqrt({x})"
+    
+    
+    class ExpImpl(NumpyOpImpl):
+        ir_args = ("x",)
+
+        @classmethod
+        def ir(cls, x: str, *, ret: str):
             return f"{ret} = np.exp({x})"
 
     class LogImpl(NumpyOpImpl):
-        ir_args = "x"
+        ir_args = ("x",)
 
         @classmethod
-        def ir(cls, x: str, y: str, *, ret: str):
+        def ir(cls, x: str, *, ret: str):
             return f"{ret} = np.log({x})"
 
-    class SubImpl(NumpyOpImpl):
+    class AddImpl(NumpyOpImpl):
         ir_args = ("x", "y")
 
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.add({x}, {y})"
+        
+    class SubImpl(NumpyOpImpl):
+        ir_args = ("x", "y")
+
+        @classmethod
+        def ir(cls, x: str, y: str, *, ret: str):
+            return f"{ret} = np.sub({x}, {y})"
 
     class MulImpl(NumpyOpImpl):
         ir_args = ("x", "y")
@@ -70,20 +106,43 @@ class NumpyBackend(BaseBackend):
         @classmethod
         def ir(cls, x: str, y: str, *, ret: str):
             return f"{ret} = np.div({x}, {y})"
+    
+    class ConstantImpl(NumpyOpImpl):
+        ir_args = ()
+        ir_kwargs = ("val", "dtype")
+
+        @classmethod
+        def ir(cls, *, val: str, dtype: str, ret: str):
+            return f"{ret} = np.array(val, dtype={dtype})"
+    
+    class ArangeImpl(NumpyOpImpl):
+        ir_args = ()
+        ir_kwargs = ("start", "stop", "stride", "dtype")
+
+        @classmethod
+        def ir(cls, *, start: str, stop: str , stride: str, dtype: str, ret: str):
+            return f"{ret} = np.array({start}, {stop}, {stride}, dtype={dtype})"
 
     class FullImpl(NumpyOpImpl):
         ir_kwargs = ("fill_value", "shape")
 
         @classmethod
-        def ir(cls, fill_value: str, shape: str, *, ret: str):
-            return f"{ret} = np.full({fill_value}, {shape})"
-
-    class AddImpl(NumpyOpImpl):
-        ir_args = ("x", "y")
+        def ir(cls,  *, fill_value: str, shape: str, dtype: str,ret: str):
+            return f"{ret} = np.full({fill_value}, {shape}, dtype={dtype})"
+    
+    class RandomUniformImpl(NumpyOpImpl):
+        ir_kwargs = ("shape")
 
         @classmethod
-        def ir(cls, x: str, y: str, *, ret: str):
-            return f"{ret} = np.add({x}, {y})"
+        def ir(cls, *, shape: str, dtype: str, ret: str):
+            return f"{ret} = np.random.uniform(size={shape}, dtype={dtype})"
+    
+    class RandomNormalImpl(NumpyOpImpl):
+        ir_kwargs = ("shape")
+
+        @classmethod
+        def ir(cls, *, shape: str, dtype: str, ret: str):
+            return f"{ret} = np.random.normal(size={shape}, dtype={dtype})"
 
     class BroadcastImpl(NumpyOpImpl):
         ir_args = ("x",)
@@ -100,14 +159,214 @@ if not {ret}_axes is None:
         {ret} = np.expand_dims({ret},a)
 {ret} = np.broadcast_to({ret}, {ret}_shape)
 """
-
-    class ConstantImpl(NumpyOpImpl):
-        ir_args = ()
-        ir_kwargs = ("val", "dtype")
+    class ReshapeImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("shape",)
 
         @classmethod
-        def ir(cls, *, val, dtype, ret: str):
-            return f"{ret} = np.array(val, dtype=dtype)"
+        def ir(cls, x: str, *, shape: str, ret: str):
+            return f"{ret} = np.reshape({x}, {shape})"
+    
+    class PadImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("lo", "hi", "interior", "value")
+
+        @classmethod
+        def ir(cls, x: str, *, lo, hi, interior, value, ret: str):
+            return f"""
+assert {interior} is None, "Not supported for numpy backend"
+args = {lo}, {hi}, {interior}, {value}
+{ret} = np.pad({x}, list(zip(lo,hi)), constant_values={value})
+"""
+    
+    class SliceImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("starts", "limits", "strides")
+
+        @classmethod
+        def ir(cls, x: str, *, starts, limits, strides, ret: str):
+            return f"""
+{ret} = x[[slice(s, l, st] for ])
+            """
+    
+    class ConcatenateImpl(NumpyOpImpl):
+        ir_args = ("xs",)
+        ir_kwargs = ("axes")
+
+        @classmethod
+        def ir(cls, xs: str, *, axes, ret: str):
+            return f"""
+{ret} = np.concatenate({xs}, {axes})
+"""
+        
+    class TransposeImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("axes",)
+
+        @classmethod
+        def ir(cls, x: str, *, axes: str, ret: str):
+            return f"{ret} = np.transpose({x}, {axes})"
+    
+    class FlipImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("axes",)
+
+        @classmethod
+        def ir(cls, x: str, *, axes, ret):
+            return f"{ret} = np.flip({x}, {axes})"
+    
+    class ScatterImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("axes",)
+
+        @classmethod
+        def ir(cls,
+               inputs, scatter_indices, updates,
+                *, update_window_dims, inserted_window_dims,
+                    scatter_dims_to_operand_dims, index_vector_dim: int,
+                    slice_sizes, result_type, 
+               ret: str):
+            return """
+# SmallVector<Tensor> evalScatterOp(
+#     ArrayRef<Tensor> inputs, const Tensor &scatterIndices,
+#     ArrayRef<Tensor> updates, const Axes &updateWindowDims,
+#     const Axes &insertedWindowDims, const Axes &scatterDimsToOperandDims,
+#     Axis indexVectorDim, Region &updateComputation, Scope &scope,
+#     ArrayRef<ShapedType> resultTypes) {
+#   SmallVector<Tensor> results;
+#   for (auto input : inputs) results.push_back(input);
+
+#   Axes updateScatterDims;
+#   for (auto d : updates[0].getAxes())
+#     if (!llvm::is_contained(updateWindowDims, d))
+#       updateScatterDims.push_back(d);
+
+#   for (auto updateIndexIt = updates[0].index_begin();
+#        updateIndexIt != updates[0].index_end(); ++updateIndexIt) {
+#     auto updateIndex = *updateIndexIt;
+#     Index updateScatterIndex;
+#     for (auto d : updateScatterDims)
+#       updateScatterIndex.push_back(updateIndex[d]);
+
+#     auto startIndicesIndex = updateScatterIndex;
+#     if (indexVectorDim < scatterIndices.getRank())
+#       startIndicesIndex.insert(startIndicesIndex.begin() + indexVectorDim,
+#                                kColon);
+#     auto startIndex = evalIndex(evalSliceOp(scatterIndices, startIndicesIndex));
+
+#     Index fullStartIndex(inputs[0].getRank(), 0);
+#     for (auto dInput : inputs[0].getAxes()) {
+#       auto dStartIt = llvm::find(scatterDimsToOperandDims, dInput);
+#       if (dStartIt == scatterDimsToOperandDims.end()) continue;
+#       auto dStart = dStartIt - scatterDimsToOperandDims.begin();
+#       fullStartIndex[dInput] = startIndex[dStart];
+#     }
+
+#     Index updateWindowIndex;
+#     for (auto d : updateWindowDims) updateWindowIndex.push_back(updateIndex[d]);
+
+#     Index fullWindowIndex(updateWindowIndex.size() + insertedWindowDims.size(),
+#                           0);
+#     for (size_t i = 0, wi = 0; i < fullWindowIndex.size(); ++i) {
+#       if (llvm::is_contained(insertedWindowDims, i)) continue;
+#       fullWindowIndex[i] = updateWindowIndex[wi++];
+#     }
+
+#     auto resultIndex = fullStartIndex + fullWindowIndex;
+#     if (!resultIndex.inBounds(results[0].getShape())) continue;
+
+#     SmallVector<InterpreterValue> updateComputationArgs;
+#     for (auto result : results)
+#       updateComputationArgs.push_back(
+#           Tensor(RankedTensorType::get({}, result.getElementType()),
+#                  result.get(resultIndex)));
+#     for (auto update : updates)
+#       updateComputationArgs.push_back(
+#           Tensor(RankedTensorType::get({}, update.getElementType()),
+#                  update.get(updateIndex)));
+
+#     auto updatedValues = eval(updateComputation, updateComputationArgs, &scope);
+#     for (auto [result, updatedValue] : llvm::zip(results, updatedValues))
+#       result.set(resultIndex, updatedValue.getTensor().get({}));
+#   }
+
+#   return results;
+# }
+"""
+    
+    class GatherImpl(NumpyOpImpl):
+        ir_args = ("x",)
+        ir_kwargs = ("axes",)
+
+        @classmethod
+        def ir(cls, operand, start_indices, 
+                *, collapsed_slice_dim, start_index_map,
+                    offset_dims,  index_vector_dim: int,
+                    slice_sizes, result_type, 
+               ret: str):
+            return f"""
+expanded_indices_shape = list(start_indices.shape)
+if len(expanded_indices_shape) == index_vector_dim:
+    expanded_indices_shape.append(1)
+
+output_offset_dim_count = len(offset_dims)
+output_shape_rank = len(offset_dims) + _rank(indices) - 1
+
+for i in range(output_offset_dim_count):
+    offset_dim = offset_dims[i]
+
+    for i in range(len(start_index_map)):
+        operand_dim_for_start_index_i = start_index_map[i]
+
+for i in range(len(slice_sizes)):
+    slice_size = slice_sizes[i]
+    corresponding_input_size = operand.shape[i]
+
+
+for i in range(len(collapsed_slice_dims)):
+    bound = slice_sizes[collapsed_slice_dims[i]]
+
+expanded_indices_shape.pop(index_vector_dim)
+indices_shape = iter(expanded_indices_shape)
+
+slice_sizes = (s for i, s in enumerate(slice_sizes)
+            if i not in collapsed_slice_dims)
+res_size= tuple(next(slice_sizes) if i in offset_dims
+        else next(indices_shape) for i in range(output_shape_rank))
+
+res = np.zeros_like(res_size)
+batch_dims = [d for d in list(range(res.ndim)) if d in offset_dims]
+
+for res_idx, _ in np.ndenumerate(res):
+    batch_idx = [res_idx[d] for d in batch_dims]
+
+    start_indices_idx = batch_idx[:]
+    if index_vector_dim < start_indices.ndim:
+        start_indices_idx.insert(index_vector_dim, -1)
+    start_idx = start_indices[start_indices_idx]
+
+    full_start_idx = [None]*operand.ndim
+    for d in range(operand.ndim):
+        dStartIt = start _index_map[d]
+        if (dStartIt == start_index_map[-1]):
+            continue
+        dStart = dStartIt - start_index_map[0]
+        full_start_idx[d] = np.clip(start_idx[d], operand.shape[d] - slice_sizes[d])
+    
+    offset_idx = [res_idx[d] for d in offset_dims]
+    full_offset_idx = [None]*(len(offset_dims) + len(collapsed_slice_dim))
+    oi = 0
+    for i in range(len(full_offset_idx)):
+        if i in collapsed_slice_dim:
+            continue
+        full_offset_idx[i] = offset_idx[oi]
+        oi += 1
+    operand_idx = full_start_index + full_offset_index
+    result[result_index] = operand[operandIndex]
+    return result
+"""
+
+    
     
     
 
@@ -164,7 +423,7 @@ if not {ret}_axes is None:
         # ops_code += [f"    outs[0]}"]
         ops_code += [f"    return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
         fn_code = "\n".join(ops_code)
-        exec(fn_code, safe_builtins, exec_locals)
+        exec(compile(fn_code, '<string>', 'exec'), safe_builtins, exec_locals)
         fn = exec_locals[name]
         # exec('\n'.join(ops_code), safe_builtins, exec_locals)
         return cls.JitFn(fn_code, fn)
@@ -179,218 +438,15 @@ if not {ret}_axes is None:
     def handle_result(cls, aval: ArrayShape, buf):
         del aval
         return np.asarray(buf)
-
-    @staticmethod
-    def eye(dim, **kwargs):
-        return Array(np.eye(dim), **kwargs)
-
-    @staticmethod
-    def arange(stop, start=0, step=1, **kwargs):
-        return Array(
-            np.arange(start=start, stop=stop, step=step, dtype=np.float32), **kwargs
-        )
-
+    
     _rng: np.random.Generator = np.random.default_rng()
 
     @classmethod
     def manual_seed(cls, seed=None):
         cls._rng = np.random.default_rng(seed=seed)
-
-    @classmethod
-    def rand(cls, *shape, **kwargs):
-        return Array(
-            np.array(
-                cls._rng.random(
-                    size=shape, dtype=kwargs.get("dtype", cls.default_dtype)
-                ),
-            ),
-            **kwargs,
-        )
-
-    @classmethod
-    def randn(cls, *shape, **kwargs):
-        return Array(
-            np.array(
-                cls._rng.standard_normal(
-                    size=shape, dtype=kwargs.get("dtype", cls.default_dtype)
-                ),
-            ),
-            **kwargs,
-        )
-
-    @staticmethod
-    def uniform(*shape, **kwargs):
-        return Array.rand(*shape, **kwargs) * 2 - 1
-
-    @staticmethod
-    def scaled_uniform(*shape, **kwargs):
-        return Array.uniform(*shape, **kwargs).mul(math.prod(shape) ** -0.5)
-
-    @staticmethod
-    def glorot_uniform(*shape, **kwargs):
-        return Array.uniform(*shape, **kwargs).mul(
-            (6 / (shape[0] + math.prod(shape[1:]))) ** 0.5
-        )
-
-    @staticmethod
-    def stop_gradient(cls, arr):
-        return cls.zeros_like(arr)
-
-    def max(arr, axes=None, keepdims=False):
-        return Array(np.max(arr.val, axis=axes, keepdims=keepdims))
-
-    def sum(arr, axes=None, keepdims=False):
-        return Array(np.sum(arr.val, axis=axes, keepdims=keepdims))
-
-    @staticmethod
-    def pad(arr, lo, hi, interior=None, value=0):
-        if interior is None:
-            interior = [1] * len(lo)
-        new_shape, slices = [], []
-        for s, l, h, r in zip(arr.shape, lo, hi, interior):
-            stride = r + 1
-            new_shape += [s * stride + l + h]
-            slices += [slice(l, s * stride + l, stride)]
-        padded = np.full(new_shape, value, dtype=arr.dtype)
-        padded[tuple(slices)] = arr.val
-        return Array(padded)
-
-    @staticmethod
-    def slice(arr, starts, limits, strides):
-        return Array(
-            arr.val[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
-        )
-
-    @staticmethod
-    def gather(
-        operand,
-        startIndices,
-        offsetDims,
-        collapsedSliceDims,
-        startIndexMap,
-        indexVectorDim,
-        sliceSizes,
-        indicesAreSorted,
-        resultType,
-    ):
-        result = np.empty(resultType.shape, dtype=resultType.dtype)
-        batchDims = [d for d in resultType.shape if d not in offsetDims]
-        for resultIndex in np.ndindex(*resultType.shape):
-            resultIndex = np.array(resultIndex)
-
-            batchIndex = np.array([resultIndex[d] for d in batchDims])
-
-            startIndicesIndex = batchIndex.copy()
-            if indexVectorDim < startIndices.ndim:
-                startIndicesIndex = np.insert(
-                    startIndicesIndex, indexVectorDim, slice(None)
-                )
-            # startIndex = evalIndex(evalSliceOp(startIndices, startIndicesIndex))
-            startIndex = startIndices.slice(startIndicesIndex)
-
-            fullStartIndex = np.zeros(operand.ndim, dtype=np.int64)
-            for dOperand in operand.shape:
-                dStartIt = np.where(startIndexMap == dOperand)[0]
-                if len(dStartIt) == 0:
-                    continue
-                dStart = dStartIt[0]
-                fullStartIndex[dOperand] = startIndex[dStart]
-
-            offsetIndex = np.array([resultIndex[d] for d in offsetDims])
-
-            fullOffsetIndex = np.zeros(
-                offsetIndex.size + len(collapsedSliceDims), dtype=np.int64
-            )
-            oi = 0
-            for i in range(fullOffsetIndex.size):
-                if i in collapsedSliceDims:
-                    continue
-                fullOffsetIndex[i] = offsetIndex[oi]
-                oi += 1
-
-            operandIndex = fullStartIndex + fullOffsetIndex
-            if np.all(np.less(operandIndex, operand.shape)):
-                result[tuple(resultIndex)] = operand[tuple(operandIndex)]
-        return result
-
-    @staticmethod
-    def scatter(
-        inputs,
-        scatterIndices,
-        updates,
-        updateWindowDims,
-        insertedWindowDims,
-        scatterDimsToOperandDims,
-        indexVectorDim,
-        updateComputation,
-        scope,
-        resultTypes,
-    ):
-        results = []
-        for input in inputs:
-            results.append(input)
-
-        updateScatterDims = []
-        for d in updates[0].getAxes():
-            if d not in updateWindowDims:
-                updateScatterDims.append(d)
-
-        for updateIndexIt in np.ndindex(updates[0].shape):
-            updateIndex = np.array(updateIndexIt)
-            updateScatterIndex = updateIndex[updateScatterDims]
-
-            startIndicesIndex = updateScatterIndex.copy()
-            if indexVectorDim < scatterIndices.ndim:
-                startIndicesIndex = np.insert(
-                    startIndicesIndex, indexVectorDim, slice(None)
-                )
-
-            startIndex = scatterIndices.slice(startIndicesIndex)
-
-            fullStartIndex = np.zeros_like(inputs[0].shape)
-            for dInput in inputs[0].getAxes():
-                dStart = np.where(scatterDimsToOperandDims == dInput)[0]
-                if len(dStart) == 0:
-                    continue
-                dStart = dStart[0]
-                fullStartIndex[dInput] = startIndex[dStart]
-
-            updateWindowIndex = updateIndex[updateWindowDims]
-
-            fullWindowIndex = np.zeros(updateWindowIndex.size + len(insertedWindowDims))
-            wi = 0
-            for i in range(fullWindowIndex.size):
-                if i in insertedWindowDims:
-                    continue
-                fullWindowIndex[i] = updateWindowIndex[wi]
-                wi += 1
-
-            resultIndex = fullStartIndex + fullWindowIndex
-            if not np.all(np.less(resultIndex, results[0].shape)):
-                continue
-
-            updateComputationArgs = []
-            for result in results:
-                resultType = np.dtype(result.getElementType())
-                resultValue = result.get(resultIndex)
-                updateComputationArgs.append(np.array(resultValue, dtype=resultType))
-
-            for update in updates:
-                updateType = np.dtype(update.getElementType())
-                updateValue = update[tuple(updateIndex)]
-                updateComputationArgs.append(np.array(updateValue, dtype=updateType))
-
-            updatedValues = eval(updateComputation, updateComputationArgs, scope)
-
-            for result, updatedValue in zip(results, updatedValues):
-                result[resultIndex] = np.array(updatedValue)
-
-        return results
-
+   
     # control flow
     choose = select = lambda arr, *vals, idx: Array(np.choose(idx, *vals))
     where = lambda arr, trueval, falseval: Array(np.where(arr, trueval, falseval))
 
-    # slice = lambda arr, start, end, step: Array(arr.val.__getitem__(slice(start, end, step)))
-    # def broadcast_to(arr, shape):
-    #     return Array(np.broadcast_to(arr.val, shape))
+

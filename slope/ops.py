@@ -22,36 +22,36 @@ class Op:
     def __call__(self, *args, **kwargs):
         return slope.RT.bind1(self, *args, **kwargs)[0]
     
-    def def_eval(self, fn):
+    def set_eval(self, fn):
         self.eval = fn
 
-    def def_jvp(self, fn):
+    def set_jvp(self, fn):
         self.jvp = fn
 
-    def def_vmap(self, fn):
+    def set_vmap(self, fn):
         self.vmap = fn
 
-    def def_T(self, fn):
+    def set_T(self, fn):
         self.T = fn
     
-    def def_shape_eval(self, fn):
+    def set_shape_eval(self, fn):
         self.shape_eval = fn
     
     @classmethod
     def unary(cls, name):
         op = cls(name)
 
-        @op.def_vmap
+        @op.set_vmap
         def fn(self, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
         
-        @op.def_shape_eval
+        @op.set_shape_eval
         def fn(self, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
         
-        @op.def_jvp
+        @op.set_jvp
         def fn(self, primals, tangents, **params):
             (x,), (x_dot,) = primals, tangents
             return [self(x, **params)], [self(x_dot, **params)]
@@ -62,7 +62,7 @@ class Op:
     def binary(cls, name):
         op = cls(name)
 
-        @op.def_vmap
+        @op.set_vmap
         def fn(self, axis_size, vals_in, dims_in, **params):
             (x, y), (x_bdim, y_bdim) = vals_in, dims_in
             if x_bdim != y_bdim:
@@ -73,7 +73,7 @@ class Op:
                     y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
             return [self(x, y, **params)], [x_bdim]
         
-        @op.def_shape_eval
+        @op.set_shape_eval
         def fn(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
             # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
@@ -83,7 +83,7 @@ class Op:
                 raise TypeError(f"{x} != {y}")
             return [ArrayShape(x.shape, x.dtype)]
         
-        @op.def_jvp
+        @op.set_jvp
         def fn(self, primals, tangents, **params):
             (x,), (x_dot,) = primals, tangents
             return [self(x, **params)], [self(x_dot, **params)]
@@ -94,7 +94,7 @@ class Op:
     def reduce(cls, name):
         op = cls(name)
         
-        @op.def_vmap
+        @op.set_vmap
         def fn(cls, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             axes = list(params["axes"])
@@ -103,7 +103,7 @@ class Op:
             params["axes"] = tuple(axes)
             return [cls.do(x, **params)], [out_bdim]
 
-        @op.def_shape_eval
+        @op.set_shape_eval
         def fn(x: ArrayShape, **params) -> List[ArrayShape]:
             axes = params["axes"]
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
@@ -120,133 +120,133 @@ class Op:
     @classmethod
     def load(cls, name):
         op = cls(name)
-        @op.def_jvp
+        @op.set_jvp
         def fn(self, *args, **kwargs):
             out = cls.load_fn(*args, **kwargs)
             out_jvp = Array.ones_like(out)
             return [out], [out_jvp]
         
-        @op.def_T
+        @op.set_T
         def fn(self, cts, *args, **kwargs):
             return [cts[0]]
         return op
 
 stop_gradient = Op.unary("stop_gradient")
 
-@stop_gradient.def_eval
+@stop_gradient.set_eval
 def fn(x):
     return [x]
 
-@stop_gradient.def_jvp
+@stop_gradient.set_jvp
 def fn(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [x], [Array.zeros_like(x_dot)]
 
-@stop_gradient.def_T
+@stop_gradient.set_T
 def fn(cts, x):
     (z,) = cts
     assert type(x) is slope.ad.UndefPrimal
     return [Array.zeros_like(z)]
 
-class Convert(UnaryOp):
-    get_impl = lambda: slope.RT.backend.ConvertImpl
+# class Convert(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.ConvertImpl
 
-    @staticmethod
-    def eval(x, *, dtype):
-        return [x.astype(dtype)]
+#     @staticmethod
+#     def eval(x, *, dtype):
+#         return [x.astype(dtype)]
 
-    @staticmethod
-    def jvp(primals, tangents, *, dtype):
-        (x,), (x_dot,) = primals, tangents
-        return [x.convert(dtype)], [x_dot.convert(dtype)]
+#     @staticmethod
+#     def jvp(primals, tangents, *, dtype):
+#         (x,), (x_dot,) = primals, tangents
+#         return [x.convert(dtype)], [x_dot.convert(dtype)]
 
-    @staticmethod
-    def T(t, x):
-        (z,) = t
-        assert type(x) is slope.ad.UndefPrimal
-        return [z.convert(x.dtype)]
+#     @staticmethod
+#     def T(t, x):
+#         (z,) = t
+#         assert type(x) is slope.ad.UndefPrimal
+#         return [z.convert(x.dtype)]
 
 
-class Sqrt(UnaryOp):
-    get_impl = lambda: slope.RT.backend.SqrtImpl
+# class Sqrt(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.SqrtImpl
 
-    @staticmethod
-    def eval(x):
-        return [x.sqrt()]
+#     @staticmethod
+#     def eval(x):
+#         return [x.sqrt()]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        ans = x.sqrt()
-        return [ans], [x_dot * (0.5/ans)]
+#     @staticmethod
+#     def jvp(primals, tangents):
+#         (x,), (x_dot,) = primals, tangents
+#         ans = x.sqrt()
+#         return [ans], [x_dot * (0.5/ans)]
 
-class Sin(UnaryOp):
-    get_impl = lambda: slope.RT.backend.SinImpl
+# class Sin(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.SinImpl
 
-    @staticmethod
-    def eval(x):
-        return [x.sin()]
+#     @staticmethod
+#     def eval(x):
+#         return [x.sin()]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        ans = x.sin()
-        return [ans], [x_dot * (1 - ans)]
+#     @staticmethod
+#     def jvp(primals, tangents):
+#         (x,), (x_dot,) = primals, tangents
+#         ans = x.sin()
+#         return [ans], [x_dot * (1 - ans)]
     
-    def T(cts, x):
-        (z,) = cts
-        return [-z * (1 - x.sin())]
+#     def T(cts, x):
+#         (z,) = cts
+#         return [-z * (1 - x.sin())]
     
-class Exp(UnaryOp):
-    get_impl = lambda: slope.RT.backend.ExpImpl
+# class Exp(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.ExpImpl
 
-    @staticmethod
-    def eval(x):
-        return [x.exp()]
+#     @staticmethod
+#     def eval(x):
+#         return [x.exp()]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        return [x.exp()], [x_dot * x.exp()]
+#     @staticmethod
+#     def jvp(primals, tangents):
+#         (x,), (x_dot,) = primals, tangents
+#         return [x.exp()], [x_dot * x.exp()]
     
-    def T(cts, x):
-        (z,) = cts
-        return [1 / z]
+#     def T(cts, x):
+#         (z,) = cts
+#         return [1 / z]
 
 
-class Log(UnaryOp):
-    get_impl = lambda: slope.RT.backend.LogImpl
+# class Log(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.LogImpl
 
-    @staticmethod
-    def eval(x):
-        return [x.log()]
+#     @staticmethod
+#     def eval(x):
+#         return [x.log()]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        return [x.log()], [x_dot / x]
+#     @staticmethod
+#     def jvp(primals, tangents):
+#         (x,), (x_dot,) = primals, tangents
+#         return [x.log()], [x_dot / x]
 
-    def T(cts, x):
-        (z,) = cts
-        return [1 / z]
+#     def T(cts, x):
+#         (z,) = cts
+#         return [1 / z]
 
 
-class Neg(UnaryOp):
-    get_impl = lambda: slope.RT.backend.NegImpl
+# class Neg(UnaryOp):
+#     get_impl = lambda: slope.RT.backend.NegImpl
 
-    @staticmethod
-    def eval(x):
-        return [-x]
+#     @staticmethod
+#     def eval(x):
+#         return [-x]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x,), (x_dot,) = primals, tangents
-        return [-x], [-x_dot]
+#     @staticmethod
+#     def jvp(primals, tangents):
+#         (x,), (x_dot,) = primals, tangents
+#         return [-x], [-x_dot]
 
-    @staticmethod
-    def T(cts, x):
-        (z,) = cts
-        return [-z]
+#     @staticmethod
+#     def T(cts, x):
+#         (z,) = cts
+#         return [-z]
 
 
 # -----------------------
@@ -254,24 +254,24 @@ class Neg(UnaryOp):
 # -----------------------
 
 
-class Add(BinaryOp):
-    get_impl = lambda: slope.RT.backend.AddImpl
+add = Op.binary("add")
 
-    @staticmethod
-    def eval(x, y):
-        return [x + y]
+@add.set_eval
+def add_eval(x, y):
+    return [x + y]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), (x_dot, y_dot) = primals, tangents
-        return [x + y], [x_dot + y_dot]
+@add.set_jvp
+def add_jvp(primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x + y], [x_dot + y_dot]
 
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar, z_bar]
+@add.set_T
+def add_T(cts, x, y):
+    (z_bar,) = cts
+    return [z_bar, z_bar]
 
 
+'''
 class Sub(BinaryOp):
     get_impl = lambda: slope.RT.backend.SubImpl
 
@@ -1353,3 +1353,4 @@ class Scatter(ShapeOp):
                     fill_value=0,
                 )
         return [operand_t, None, update_t]
+        '''

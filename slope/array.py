@@ -13,10 +13,7 @@ import slope
 from slope import utils
 from slope.array_shape import ValuedArrayShape
 from slope.base_array import BaseArray
-from slope.dtypes import dtypes
 import numpy as np
-
-# import ops
 
 
 class ArrayBuffer:
@@ -26,7 +23,7 @@ class ArrayBuffer:
 
 class Array(BaseArray):
     __array_priority__ = 2000
-    default_dtype = dtypes.float32
+    default_dtype = BaseArray.float32
 
     def __init__(
         self,
@@ -37,7 +34,7 @@ class Array(BaseArray):
         self.buf = (
             val
             if isinstance(val, ArrayBuffer)
-            else slope.RT.backend.constant(val, dtype).buf
+            else slope.RT.backend.constant(val=val, dtype=dtype).buf
         )
 
     val = property(lambda self: self.buf.val)

@@ -26,6 +26,7 @@ from typing import (
     DefaultDict,
     Callable,
     Hashable,
+    Final
 )
 from collections import defaultdict
 import numpy as np
@@ -38,8 +39,7 @@ from slope.array_shape import ArrayShape, ValuedArrayShape
 from slope.array import Array
 from slope.tracer_array import TracerArray
 from slope import ops
-from slope.base_backend import BaseBackend
-from slope.numpy_backend import NumpyBackend
+from slope.base_backend import Backend
 
 
 class PPrint:
@@ -982,15 +982,17 @@ def jit(f):
 
     f_jitted.get_jit_fn = get_jit_fn
     return f_jitted
-
+from dataclasses import dataclass, asdict
 
 class Runtime:
-    def __init__(self, root_trace=MainTrace(0, EvalTrace, None), backend=NumpyBackend):
+    
+
+    def __init__(self, root_trace=MainTrace(0, EvalTrace, None), ops=dict(), backend=None):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [root_trace]
         self.node_types = dict()
-        self.ops = dict()
+        self.ops = ops
         self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
         self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
         self.register_pytree_node(
@@ -1002,6 +1004,12 @@ class Runtime:
     
     def add_op(self, op):
         self.ops[op.name] = op
+    
+    def set_backend(self, backend):
+        if self.backend is not None:
+            print(f"Warning: backend already set to {self.backend}")
+            print(f"Changing to {backend}")
+        self.backend = backend
 
     def register_pytree_node(
         self, ty: Type, to_iter: Callable, from_iter: Callable
@@ -1144,11 +1152,11 @@ class Runtime:
 
 # @lru_cache()
 # def transpose_Program(
-#     Program: Program, undef_primals: Tuple[bool, ...]
+#     Program: Program, unset_primals: Tuple[bool, ...]
 # ) -> Tuple[Program, List[Any]]:
 #     avals_in, avals_out = typecheck_program(Program)
 #     traceable = partial(eval_Program_transposed, Program)
-#     args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
+#     args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, unset_primals)]
 #     trans_Program, consts, _ = make_Program(traceable, tuple(args), tuple(avals_out))
 #     typecheck_program(trans_Program)
 #     return trans_Program, consts

@@ -990,6 +990,7 @@ class Runtime:
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [root_trace]
         self.node_types = dict()
+        self.ops = dict()
         self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
         self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
         self.register_pytree_node(
@@ -998,6 +999,9 @@ class Runtime:
             lambda keys, vals: dict(zip(keys, vals)),
         )
         self.backend = backend
+    
+    def add_op(self, op):
+        self.ops[op.name] = op
 
     def register_pytree_node(
         self, ty: Type, to_iter: Callable, from_iter: Callable

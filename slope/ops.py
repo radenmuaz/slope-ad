@@ -7,187 +7,146 @@ import math
 import functools
 from slope.array import Array
 from slope import utils
+def raise_not_implemented(self, *args, **kwargs):
+    raise NotImplementedError
 
+class Op:
+    def __init__(self, name):
+        self.name = name
+        self.eval = raise_not_implemented
+        self.jvp = raise_not_implemented
+        self.vmap = raise_not_implemented
+        self.T = raise_not_implemented
+        self.shape_eval = raise_not_implemented
+    
+    def __call__(self, *args, **kwargs):
+        return slope.RT.bind1(self, *args, **kwargs)[0]
+    
+    def def_eval(self, fn):
+        self.eval = fn
 
-class Op(ABC):
-    get_impl = lambda: None
+    def def_jvp(self, fn):
+        self.jvp = fn
+
+    def def_vmap(self, fn):
+        self.vmap = fn
+
+    def def_T(self, fn):
+        self.T = fn
+    
+    def def_shape_eval(self, fn):
+        self.shape_eval = fn
+    
+    @classmethod
+    def unary(cls, name):
+        op = cls(name)
+
+        @op.def_vmap
+        def fn(self, axis_size, vals_in, dims_in, **params):
+            (x,), (x_bdim,) = vals_in, dims_in
+            return [self(x, **params)], [x_bdim]
+        
+        @op.def_shape_eval
+        def fn(self, axis_size, vals_in, dims_in, **params):
+            (x,), (x_bdim,) = vals_in, dims_in
+            return [self(x, **params)], [x_bdim]
+        
+        @op.def_jvp
+        def fn(self, primals, tangents, **params):
+            (x,), (x_dot,) = primals, tangents
+            return [self(x, **params)], [self(x_dot, **params)]
+        
+        return op
 
     @classmethod
-    def do(cls, *args, **params):
-        return slope.RT.bind1(cls, *args, **params)
+    def binary(cls, name):
+        op = cls(name)
 
-    @staticmethod
-    @abstractmethod
-    def eval(*args, **params):
-        raise NotImplementedError
-
-    @staticmethod
-    @abstractmethod
-    def vmap(*args, **params):
-        raise NotImplementedError
-
-    @staticmethod
-    @abstractmethod
-    def jvp(*args, **params):
-        raise NotImplementedError
-
-    @staticmethod
-    @abstractmethod
-    def shape_eval(*args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError
-
-    @staticmethod
-    @abstractmethod
-    def pprint(cls):
-        return None
-
-    @staticmethod
-    @abstractmethod
-    def jit(*args, **params):
-        raise NotImplementedError
-
-
-class UnaryOp(Op):
+        @op.def_vmap
+        def fn(self, axis_size, vals_in, dims_in, **params):
+            (x, y), (x_bdim, y_bdim) = vals_in, dims_in
+            if x_bdim != y_bdim:
+                if x_bdim is None:
+                    x = slope.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                    x_bdim = y_bdim
+                else:
+                    y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
+            return [self(x, y, **params)], [x_bdim]
+        
+        @op.def_shape_eval
+        def fn(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
+            # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
+            if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
+                # breakpoint()
+                raise TypeError
+            if ArrayShape.like(x) != ArrayShape.like(y):
+                raise TypeError(f"{x} != {y}")
+            return [ArrayShape(x.shape, x.dtype)]
+        
+        @op.def_jvp
+        def fn(self, primals, tangents, **params):
+            (x,), (x_dot,) = primals, tangents
+            return [self(x, **params)], [self(x_dot, **params)]
+        
+        return op
+    
     @classmethod
-    def vmap(cls, axis_size, vals_in, dims_in, **params):
-        (x,), (x_bdim,) = vals_in, dims_in
-        return [cls.do(x, **params)], [x_bdim]
+    def reduce(cls, name):
+        op = cls(name)
+        
+        @op.def_vmap
+        def fn(cls, axis_size, vals_in, dims_in, **params):
+            (x,), (x_bdim,) = vals_in, dims_in
+            axes = list(params["axes"])
+            axes = tuple(a + (x_bdim <= a) for a in axes)
+            out_bdim = x_bdim - sum(a < x_bdim for a in axes)
+            params["axes"] = tuple(axes)
+            return [cls.do(x, **params)], [out_bdim]
 
-    @staticmethod
-    def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
-        return [ArrayShape(x.shape, x.dtype)]
-
+        @op.def_shape_eval
+        def fn(x: ArrayShape, **params) -> List[ArrayShape]:
+            axes = params["axes"]
+            axes = [a + len(x.shape) if a < 0 else a for a in axes]
+            axes_ = set(axes)
+            new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
+            return [ArrayShape(tuple(new_shape), x.dtype)]
+        return op
+    
     @classmethod
-    def identity_jvp(cls, primals, tangents, **params):
-        (x,), (x_dot,) = primals, tangents
-        return [cls.do(x, **params)], [cls.do(x_dot, **params)]
-
-    # @classmethod
-    # def identity_T(cls, t, x):
-    #     (z,) = t
-    #     assert type(x) is slope.ad.UndefPrimal
-    #     return [cls.do(z)]
-
-    # @classmethod
-    # def zero_T(cls, t, x):
-    #     (z,) = t
-    #     assert type(x) is slope.ad.UndefPrimal
-    #     return [z.zeros_like()]
-
-
-class BinaryOp(Op):
+    def shape(cls, name):
+        op = cls(name)
+        return op
+    
     @classmethod
-    def vmap(cls, axis_size, vals_in, dims_in, **params):
-        (x, y), (x_bdim, y_bdim) = vals_in, dims_in
-        if x_bdim != y_bdim:
-            if x_bdim is None:
-                x = slope.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
-                x_bdim = y_bdim
-            else:
-                y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-        return [cls.do(x, y, **params)], [x_bdim]
+    def load(cls, name):
+        op = cls(name)
+        @op.def_jvp
+        def fn(self, *args, **kwargs):
+            out = cls.load_fn(*args, **kwargs)
+            out_jvp = Array.ones_like(out)
+            return [out], [out_jvp]
+        
+        @op.def_T
+        def fn(self, cts, *args, **kwargs):
+            return [cts[0]]
+        return op
 
-    @staticmethod
-    def shape_eval(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
-        # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
-        if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
-            # breakpoint()
-            raise TypeError
-        if ArrayShape.like(x) != ArrayShape.like(y):
-            raise TypeError(f"{x} != {y}")
-        return [ArrayShape(x.shape, x.dtype)]
+stop_gradient = Op.unary("stop_gradient")
 
+@stop_gradient.def_eval
+def fn(x):
+    return [x]
 
-class ReduceOp(Op):
-    @classmethod
-    def vmap(cls, axis_size, vals_in, dims_in, **params):
-        (x,), (x_bdim,) = vals_in, dims_in
-        axes = list(params["axes"])
-        axes = tuple(a + (x_bdim <= a) for a in axes)
-        out_bdim = x_bdim - sum(a < x_bdim for a in axes)
-        params["axes"] = tuple(axes)
-        return [cls.do(x, **params)], [out_bdim]
+@stop_gradient.def_jvp
+def fn(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    return [x], [Array.zeros_like(x_dot)]
 
-    @staticmethod
-    def shape_eval(x: ArrayShape, **params) -> List[ArrayShape]:
-        axes = params["axes"]
-        axes = [a + len(x.shape) if a < 0 else a for a in axes]
-        axes_ = set(axes)
-        new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
-        return [ArrayShape(tuple(new_shape), x.dtype)]
-
-
-class ShapeOp(Op):
-    pass
-
-
-class LoadOp:
-    @staticmethod
-    def load_fn(*args, **kwargs):
-        raise NotImplementedError
-
-    @classmethod
-    def eval(cls, *args, **kwargs):
-        out = cls.load_fn(*args, **kwargs)
-        return [out]
-
-    @classmethod
-    def vmap(cls, axis_size, vals_in, dims_in, *args, **kwargs):
-        raise NotImplementedError
-
-    @classmethod
-    def jvp(cls, *args, **kwargs):
-        out = cls.load_fn(*args, **kwargs)
-        out_jvp = Array.ones_like(out)
-        return [out], [out_jvp]
-
-    @classmethod
-    def shape_eval(cls, *args, **kwargs) -> List[ArrayShape]:
-        raise NotImplementedError
-
-    @classmethod
-    def T(cls, cts, *args, **kwargs):
-        return [cts[0]]
-
-
-# -----------------------
-# UnaryOps
-# -----------------------
-
-
-# class Identity(UnaryOp):
-#     @staticmethod
-#     def eval(x):
-#         return [x]
-
-#     @staticmethod
-#     def jvp(cls, primals, tangents, **params):
-#         (x,), (x_dot,) = primals, tangents
-#         return [identity(x, **params)], [identity(x_dot, **params)]
-
-#     @staticmethod
-#     def T(t, x):
-#         (z,) = t
-#         assert type(x) is slope.ad.UndefPrimal
-#         return [identity(z)]
-
-
-class StopGradient(UnaryOp):
-    @staticmethod
-    def eval(x):
-        return [x]
-
-    @staticmethod
-    def jvp(primals, tangents, **params):
-        (x,), (x_dot,) = primals, tangents
-        return [x], [Array.zeros_like(x_dot)]
-
-    @staticmethod
-    def T(cts, x):
-        (z,) = cts
-        assert type(x) is slope.ad.UndefPrimal
-        return [Array.zeros_like(z)]
-
+@stop_gradient.def_T
+def fn(cts, x):
+    (z,) = cts
+    assert type(x) is slope.ad.UndefPrimal
+    return [Array.zeros_like(z)]
 
 class Convert(UnaryOp):
     get_impl = lambda: slope.RT.backend.ConvertImpl

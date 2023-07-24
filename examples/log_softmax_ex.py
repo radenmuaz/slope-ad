@@ -1,6 +1,6 @@
 import slope
 import numpy as np
-from slope import ad, ops
+from slope import ad, base_ops
 
 # x = ad.Array(np.ones((1,3)))
 # y = ad.Array(np.full(shape=(1,3), fill_value=2.))

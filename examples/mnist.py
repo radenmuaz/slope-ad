@@ -1,5 +1,5 @@
 import slope
-from slope import ops
+from slope import base_ops
 from slope.nn import init, layers, optim
 
 import time

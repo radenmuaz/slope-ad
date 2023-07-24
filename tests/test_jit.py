@@ -1,9 +1,10 @@
 import unittest
 
 import slope
-from slope import ad
+
+# from slope import ad
 from slope.base_array import BaseArray
-from slope.array import Array
+from slope.base_array import Array
 import numpy as np
 import os
 from typing import NamedTuple

@@ -39,6 +39,7 @@ class BaseArray:
     int32: Final[DType] = DType(1, 4, "int", np.int32)
     int64: Final[DType] = DType(2, 8, "int64", np.int64)
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+    default_dtype = float32
 
     # def is_int(x: DType) -> bool:
     #     return x in (int8, uint8, int32, int64)
@@ -49,23 +50,9 @@ class BaseArray:
     # def is_unsigned(x: DType) -> bool:
     #     return x in (uint8)
     def notimplemented(self, *args, **kwargs):
-        raise NotImplementedError
+        raise
 
-    constant = notimplemented
-    full = notimplemented
-    arange = notimplemented
-    random_normal = notimplemented
-    randn = random_normal
-    random_uniform = notimplemented
-    rand = random_uniform
-    stop_gradient = notimplemented
-    convert = notimplemented
-    astype = convert
     neg = notimplemented
-    exp = notimplemented
-    log = notimplemented
-    sqrt = notimplemented
-    sin = notimplemented
     add = notimplemented
     sub = notimplemented
     mul = notimplemented
@@ -73,17 +60,6 @@ class BaseArray:
     equal = notimplemented
     not_equal = notimplemented
     maximum = notimplemented
-    max = notimplemented
-    sum = notimplemented
-    broadcast = notimplemented
-    reshape = notimplemented
-    transpose = notimplemented
-    flip = notimplemented
-    slice = notimplemented
-    pad = notimplemented
-    gather = notimplemented
-    scatter = notimplemented
-    choose = notimplemented
 
     __neg__ = lambda self: self.neg()
     __add__ = lambda self, other: self.add(other)
@@ -101,6 +77,26 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
+
+    @classmethod
+    def zeros(cls, shape, dtype=default_dtype, **kwargs):
+        return cls.full(shape, 0.0, dtype, **kwargs)
+
+    @classmethod
+    def ones(cls, shape, dtype=default_dtype, **kwargs):
+        return cls.full(shape, 1.0, dtype, **kwargs)
+
+    @classmethod
+    def full_like(cls, other, fill_value, **kwargs):
+        return cls.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
+
+    @classmethod
+    def zeros_like(cls, other, **kwargs):
+        return cls.zeros(other.shape, dtype=other.dtype, **kwargs)
+
+    @classmethod
+    def ones_like(cls, other, **kwargs):
+        return cls.full(other.shape, fill_value=1.0, dtype=other.dtype, **kwargs)
 
     def where(self, trueval, falseval):
         cond = self != 0.0
@@ -144,42 +140,12 @@ class BaseArray:
 
     def flatten(self, start_dim=0):
         return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
-    
+
     @classmethod
     def glorot_uniform(cls, *shape, **kwargs):
         return cls.rand(*shape, **kwargs).mul(
             (6 / (shape[0] + math.prod(shape[1:]))) ** 0.5
         )
-
-    # # TODO: make this nicer with syntactic sugar in slice
-    # def split(self, num, dim):
-    #     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
-    #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
-    #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
-    #     return [self.slice(p) for p in slice_params]
-
-    # @staticmethod
-    # def stack(tensors, dim=0):
-    #     first = tensors[0].unsqueeze(dim)
-    #     unsqueezed_tensors = [tensor.unsqueeze(dim) for tensor in tensors[1:]]
-    #     # checks for shapes and number of dimensions delegated to cat
-    #     return first.cat(*unsqueezed_tensors, dim=dim)
-
-    # def repeat(self, repeats):
-    #     base_shape = self.shape
-    #     if len(repeats) > self.ndim:
-    #         base_shape = (1,) * (len(repeats) - self.ndim) + base_shape
-    #     new_shape = [x for i in range(len(base_shape)) for x in [1, base_shape[i]]]
-    #     expand_shape = [x for r, s in zip(repeats, base_shape) for x in [r, s]]
-    #     final_shape = [r * s for r, s in zip(repeats, base_shape)]
-    #     return self.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
-
-    # # TODO: make this nicer with syntactic sugar in slice
-    # def chunk(self, num, dim):
-    #     slice_params = [[(0, s) for s in self.shape] for _ in range(num)]
-    #     for i, k in enumerate(range(0, self.shape[dim], self.shape[dim] // num)):
-    #         slice_params[i][dim] = (k, min(self.shape[dim], k + self.shape[dim] // num))
-    #     return [self.slice(p) for p in slice_params]
 
     @property
     def T(self):
@@ -204,13 +170,7 @@ class BaseArray:
         x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
         w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
         return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
-
-    # def sqrt(self):
-    #     return self.pow(0.5)
-
-    # def rsqrt(self):
-    #     return self.pow(-0.5)
-
+    
     def square(self):
         return self * self
 
@@ -226,306 +186,114 @@ class BaseArray:
     def reciprocal(self):
         return 1.0 / self
 
-    # # ***** activation functions (unary) *****
 
-    # def relu(self):
-    #     return ops.ReLU.do(self)
 
-    def sigmoid(self):
-        return (1.0 + (-self).exp()).reciprocal()
+class ArrayBuffer:
+    def __init__(self, val):
+        self.val = val
 
-    def elu(self, alpha=1.0):
-        return self.relu() - alpha * (1 - self.exp()).relu()
 
-    def celu(self, alpha=1.0):
-        return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+class Array(BaseArray):
+    __array_priority__ = 2000
+    default_dtype = BaseArray.float32
 
-    def swish(self):
-        return self * self.sigmoid()
-
-    def silu(self):
-        return self.swish()  # The SiLU function is also known as the swish function.
-
-    def relu6(self):
-        return self.relu() - (self - 6).relu()
-
-    def hardswish(self):
-        return self * (self + 3).relu6() * (1 / 6)
-
-    def tanh(self):
-        return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-
-    def hardtanh(self, min_val=-1, max_val=1):
-        return self.clip(min_val, max_val)
-
-    def gelu(self):
-        return (
-            0.5
-            * self
-            * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
-        )
-
-    def quick_gelu(self):
-        return self * (self * 1.702).sigmoid()
-
-    def leakyrelu(self, neg_slope=0.01):
-        return self.relu() - (-neg_slope * self).relu()
-
-    def mish(self):
-        return self * self.softplus().tanh()
-
-    def softplus(self, beta=1):
-        return (1 / beta) * (1 + (self * beta).exp()).log()
-
-    def softsign(self):
-        return self / (1 + self.abs())
-
-    # ***** functional nn ops *****
-
-    def linear(self, weight, bias=None):
-        x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
-        return x.add(bias) if bias is not None else x
-
-    def serial(self, ll: List[Callable]):
-        return functools.reduce(lambda x, f: f(x), ll, self)
-
-    def layernorm(self, axis=-1, eps: float = 1e-5):
-        y = self - self.mean(axis, keepdim=True)
-        return y.mul((y * y).mean(axis, keepdim=True).add(eps).rsqrt())
-
-    def batchnorm(
+    def __init__(
         self,
-        weight,
-        bias,
-        mean,
-        invstd,
+        val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
+        dtype: Optional[Any] = None,
     ):
-        x = self - mean.reshape(shape=[1, -1, 1, 1])
-        if weight:
-            x = x * weight.reshape(shape=[1, -1, 1, 1])
-        ret = x.mul(
-            invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd
-        )
-        return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
-
-    #
-    def _pool(
-        self,
-        k_: Tuple[int, ...],
-        stride: Union[Tuple[int, ...], int] = 1,
-        dilation: Union[Tuple[int, ...], int] = 1,
-        _insert_dims=tuple(),
-    ):
-        assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
-        s_, d_ = utils.make_pair(stride, len(k_)), utils.make_pair(dilation, len(k_))
-        assert len(k_) == len(s_) and len(k_) == len(
-            d_
-        ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-        slc_prefix, prefix, i_ = (
-            [(0, x) for x in self.shape[0 : -len(k_)]],
-            self.shape[0 : -len(k_)],
-            self.shape[-len(k_) :],
-        )
-        if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
-            o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-            e_ = [
-                math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
-            ]  # expands such that we don't need padding
-            xup = (
-                self.reshape(
-                    *prefix,
-                    *([1] * len(_insert_dims)),
-                    *utils.flatten((1, i) for i in i_),
-                )
-                .broadcast(
-                    *prefix,
-                    *_insert_dims,
-                    *utils.flatten((e, i) for e, i in zip(e_, i_)),
-                )
-                .reshape(*prefix, *_insert_dims, *[e * i for e, i in zip(e_, i_)])
-            )
-            # NOTE: _insert_dims is required because reduces can't be merged (yet)
-            prefix += _insert_dims
-            slc_prefix += [(0, x) for x in _insert_dims]
-            # slide by dilation
-            xup = xup.slice(
-                slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)]
-            )
-            xup = xup.reshape(
-                *prefix, *utils.flatten((k, i + d) for k, i, d in zip(k_, i_, d_))
-            )
-            xup = xup.slice(
-                slc_prefix
-                + utils.flatten(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
-            )
-            # handle stride, and permute to move reduce to the end
-            xup = xup.reshape(
-                *prefix, *utils.flatten((k, o, s) for k, o, s in zip(k_, o_, s_))
-            )
-            xup = xup.slice(
-                slc_prefix
-                + utils.flatten(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
-            )
-            xup = xup.reshape(*prefix, *utils.flatten((k, o) for k, o in zip(k_, o_)))
-            return xup.transpose(
-                *range(len(prefix)),
-                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-                *[len(prefix) + i * 2 for i in range(len(k_))],
-            )
-        else:
-            # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
-            o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
-            xup = self.slice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
-            xup = xup.reshape(
-                *prefix,
-                *([1] * len(_insert_dims)),
-                *utils.flatten(((o, s) for o, s in zip(o_, s_))),
-            )
-            if len(_insert_dims):
-                xup = xup.broadcast(
-                    *prefix,
-                    *_insert_dims,
-                    *utils.flatten(((o, s) for o, s in zip(o_, s_))),
-                )
-                prefix += _insert_dims
-                slc_prefix += [(0, x) for x in _insert_dims]
-            xup = xup.slice(
-                slc_prefix + utils.flatten(((0, o), (0, k)) for o, k in zip(o_, k_))
-            )
-            return xup.transpose(
-                *range(len(prefix)),
-                *[len(prefix) + i * 2 for i in range(len(k_))],
-                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-            )
-
-    # NOTE: these work for more than 2D
-    def avg_pool2d(self, kernel_size=(2, 2), stride=None):
-        return self._pool(
-            utils.make_pair(kernel_size), stride if stride is not None else kernel_size
-        ).mean(axis=tuple(range(0 - len(utils.make_pair(kernel_size)), 0)))
-
-    def max_pool2d(self, kernel_size=(2, 2), stride=None, dilation=1):
-        return self._pool(
-            utils.make_pair(kernel_size),
-            stride if stride is not None else kernel_size,
-            dilation,
-        ).max(axis=tuple(range(0 - len(utils.make_pair(kernel_size)), 0)))
-
-    def conv_transpose2d(
-        self,
-        weight,
-        bias: Optional[Any] = None,
-        groups=1,
-        stride=1,
-        dilation=1,
-        padding=0,
-        output_padding=0,
-    ):
-        HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
-        x, w = self, weight.reshape(
-            groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]
-        ).transpose(0, 2, 1, *trailing).flip(trailing)
-        stride = utils.make_pair(stride, len(HW))
-        if any(s > 1 for s in stride):
-            x = x.reshape(*x.shape[:2], *utils.flatten((k, 1) for k in x.shape[2:]))
-            x = x.pad(
-                ((0, 0), (0, 0), *utils.flatten(((0, 0), (0, s - 1)) for s in stride))
-            )
-            x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
-            x = x.shrink(
-                (
-                    (0, x.shape[0]),
-                    (0, x.shape[1]),
-                    *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
-                )
-            )
-        padding = utils.flatten(
-            (
-                ((k - 1) * d - p, (k - 1) * d - p + op)
-                for k, d, p, op in reversed(
-                    list(
-                        zip(
-                            HW,
-                            utils.make_pair(dilation, len(HW)),
-                            utils.make_pair(padding, len(HW)),
-                            utils.make_pair(output_padding, len(HW)),
-                        )
-                    )
-                )
-            )
-        )
-        return x.conv2d(
-            w.reshape(w.shape[0] * w.shape[1], *w.shape[2:]),
-            groups=groups,
-            bias=bias,
-            dilation=dilation,
-            padding=padding,
+        # Decides whether point existing buffer or create new buffer
+        self.buf = (
+            val
+            if isinstance(val, ArrayBuffer)
+            else slope.backend.constant(val=val, dtype=dtype).buf
         )
 
-    def conv2d(
-        self,
-        weight,
-        bias: Optional[Any] = None,
-        groups=1,
-        stride=1,
-        dilation=1,
-        padding=0,
-    ):
-        (bs, cin_), (cout, cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
-        assert groups * cin == cin_ and len(self.shape) == len(
-            weight.shape
-        ), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-        if isinstance(padding, (tuple, list)):
-            assert len(padding) == 2 * len(HW) or len(padding) == len(
-                HW
-            ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
-        padding_ = (
-            [padding] * 2 * len(HW)
-            if isinstance(padding, int)
-            else (
-                padding
-                if len(padding) == 2 * len(HW)
-                else [p for p in padding for _ in range(2)][::-1]
-            )
+    val = property(lambda self: self.buf.val)
+    dtype = property(lambda self: self.buf.val.dtype)
+    shape = property(lambda self: self.buf.val.shape)
+    ndim = property(lambda self: self.buf.val.ndim)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
+
+    __str__ = __repr__
+
+    @classmethod
+    def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
+        return slope.RT.backend.full(
+            shape, fill_value=fill_value, dtype=dtype, **kwargs
         )
 
-        # conv2d is a pooling op (with padding)
-        x = self.pad2d(padding_)._pool(
-            HW, stride, dilation
-        )  # (bs, groups*cin, oy, ox, H, W)
-        rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
-        x = (
-            x.reshape(bs, groups, cin, 1, *oyx, *HW)
-            .broadcast(bs, groups, cin, rcout, *oyx, *HW)
-            .transpose(
-                0,
-                1,
-                3,
-                *[4 + i for i in range(len(oyx))],
-                2,
-                *[4 + len(oyx) + i for i in range(len(HW))],
-            )
-        )
+    def __array__(self, dtype=None):
+        return self.val
 
-        # expand the channels with the pool
-        # TODO: this reduces the number of kernels, but it's slower!
-        # x = self.pad2d(padding_)._pool((H,W), stride, dilation, _insert_dims=(cout//groups,))   # (bs, groups*cin, rcout, oy, ox, H, W)
-        # rcout, oy, ox = x.shape[2:5]
-        # x = x.reshape(bs, groups, cin, rcout, oy, ox, H, W).permute(0,1,3,4,5,2,6,7)
+    convert = lambda self, dtype: slope.RT.backend.convert(self, dtype=dtype)
+    astype = convert
+    stop_gradient = lambda self: slope.RT.backend.stop_gradient(self)
+    sqrt = lambda self: slope.RT.backend.sqrt(self)
+    neg = lambda self: slope.RT.backend.neg(self)
+    exp = lambda self: slope.RT.backend.exp(self)
+    log = lambda self: slope.RT.backend.log(self)
+    sin = lambda self: slope.RT.backend.sin(self)
 
-        # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-        ret = (
-            (
-                x
-                * weight.reshape(
-                    1, groups, rcout, *[1 for _ in range(len(oyx))], cin, *HW
-                )
-            )
-            .sum([-1 - i for i in range(1 + len(oyx))], keepdim=True)
-            .reshape(bs, cout, *oyx)
-        )
-        return (
-            ret
-            if bias is None
-            else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
-        )
+    add = lambda self, other: slope.RT.backend.add(self, other)
+    sub = lambda self, other: slope.RT.backend.subtract(self, other)
+    mul = lambda self, other: slope.RT.backend.multiply(self, other)
+    div = lambda self, other: slope.RT.backend.divide(self, other)
+    equal = lambda self, other: slope.RT.backend.equal(self, other)
+    not_equal = lambda self, other: slope.RT.backend.not_equal(self, other)
+    maximum = lambda self, other: slope.RT.backend.maximum(self, other)
+    max = lambda self, axes=None, keepdims=False: slope.RT.backend.max(
+        self.val, axis=axes, keepdims=keepdims
+    )
+    sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(
+        self.val, axis=axes, keepdims=keepdims
+    )
+
+    constant = lambda self, val, dtype: slope.RT.backend.constant(
+        self, val=val, dtype=dtype
+    )
+    full = lambda self, val, shape, dtype: slope.RT.backend.full(
+        self, val=val, shape=shape, dtype=dtype
+    )
+    arange = lambda self, start, stop, stride, dtype: slope.RT.backend.arange(
+        self, start, stop, stride, dtype=dtype
+    )
+    random_normal = lambda self, shape, dtype: slope.RT.backend.random_normal(
+        self, shape, dtype=dtype
+    )
+    randn = random_normal
+    random_uniform = lambda self, shape, dtype: slope.RT.backend.random_uniform(
+        self, shape, dtype=dtype
+    )
+    rand = random_uniform
+
+    # Shape
+    reshape = lambda self, shape: slope.RT.backend.reshape(self, shape)
+    transpose = lambda self, perm: slope.RT.backend.transpose(self, perm)
+    broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(self, shape, axes)
+    pad = lambda self, lo, hi, interior, value: slope.RT.backend.pad(
+        self, lo, hi, interior, value
+    )
+    slice = lambda self, starts, limits, strides: slope.RT.backend.slice(
+        self, starts, limits, strides
+    )
+    flip = lambda self, axes: slope.RT.backend.flip(self, axes)
+    concatenate = classmethod(
+        lambda cls, xs, axes: slope.RT.backend.concatenate(xs, axes)
+    )
+
+    def __getitem__(self, idx):
+        if type(idx) in (tuple, list):
+            return self.slice(slice(idx))
+        raise NotImplementedError
+
+    def __setitem__(self, idx, val):
+        raise NotImplementedError
+
+    # control flow
+    choose = select = lambda self, *vals, idx: slope.RT.backend.choose(idx, *vals)
+    where = lambda self, trueval, falseval: slope.RT.backend.where(
+        self, trueval, falseval
+    )

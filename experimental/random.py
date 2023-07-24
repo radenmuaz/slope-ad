@@ -1,5 +1,5 @@
 import slope
-from slope import ops
+from slope import base_ops
 from slope.array_shape import ArrayShape
 import numpy as np
 
@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 
-class RandomBitGenerator(ops.Op):
+class RandomBitGenerator(base_ops.Op):
     @staticmethod
     def eval(key, *, shape, dtype, algorithm):
         return []
@@ -56,8 +56,8 @@ class PRNGImpl(NamedTuple):
 
 
 def _threefry_split_original(key, num):
-    counts = ops.iota(np.uint32, num * 2)
-    return ops.reshape(threefry_2x32(key, counts), (num, 2))
+    counts = base_ops.iota(np.uint32, num * 2)
+    return base_ops.reshape(threefry_2x32(key, counts), (num, 2))
 
 
 def threefry_seed(seed):
@@ -76,10 +76,10 @@ def threefry_seed(seed):
         raise TypeError(f"PRNG key seed must be a scalar; got {seed!r}.")
     if not np.issubdtype(seed.dtype, np.integer):
         raise TypeError(f"PRNG key seed must be an integer; got {seed!r}")
-    convert = lambda k: ops.reshape(convert(k, np.uint32), [1])
-    k1 = convert(ops.shift_right_logical(seed, np.array(32, dtype=seed.dtype)))
+    convert = lambda k: base_ops.reshape(convert(k, np.uint32), [1])
+    k1 = convert(base_ops.shift_right_logical(seed, np.array(32, dtype=seed.dtype)))
     k2 = convert(np.bitwise_and(seed, np.uint32(0xFFFFFFFF)))
-    return ops.concatenate([k1, k2], 0)
+    return base_ops.concatenate([k1, k2], 0)
 
 
 def random_seed(seeds, impl):

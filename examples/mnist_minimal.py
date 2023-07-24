@@ -1,5 +1,5 @@
 import slope
-from slope import ops
+from slope import base_ops
 from slope.nn import init, layers, optim
 
 import time
@@ -91,7 +91,7 @@ def loss_fn(params, batch):
 
     preds = predict(params, inputs)
     # return -ops.reduce_sum(preds * targets, axis=(0, 1))
-    return -ops.reduce_mean(preds * targets, axis=(0, 1))
+    return -base_ops.reduce_mean(preds * targets, axis=(0, 1))
 
 
 def accuracy(params, batch):
@@ -103,11 +103,13 @@ def accuracy(params, batch):
 
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
-        layers.Fn(lambda x: ops.reshape(x, shape=(x.shape[0], math.prod(x.shape[1:])))),
+        layers.Fn(
+            lambda x: base_ops.reshape(x, shape=(x.shape[0], math.prod(x.shape[1:])))
+        ),
         layers.Dense(200),
-        layers.Fn(ops.relu),
+        layers.Fn(base_ops.relu),
         layers.Dense(10),
-        layers.Fn(lambda x: ops.log_softmax(x, axis=(-1,))),
+        layers.Fn(lambda x: base_ops.log_softmax(x, axis=(-1,))),
     )
     _, init_params = init_random_params((-1, 28 * 28))
 

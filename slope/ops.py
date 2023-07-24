@@ -1,152 +1,27 @@
 import slope
-import numpy as np
-from slope.array_shape import ArrayShape
-from typing import List, Tuple, Sequence, Any, Callable, Optional, Union
-from abc import ABC, abstractmethod
-import math
-import functools
-from slope.array import Array
-from slope import utils
-def raise_not_implemented(self, *args, **kwargs):
-    raise NotImplementedError
-
-class Op:
-    def __init__(self, name):
-        self.name = name
-        self.eval = raise_not_implemented
-        self.jvp = raise_not_implemented
-        self.vmap = raise_not_implemented
-        self.T = raise_not_implemented
-        self.shape_eval = raise_not_implemented
-    
-    def __call__(self, *args, **kwargs):
-        return slope.RT.bind1(self, *args, **kwargs)[0]
-    
-    def set_eval(self, fn):
-        self.eval = fn
-
-    def set_jvp(self, fn):
-        self.jvp = fn
-
-    def set_vmap(self, fn):
-        self.vmap = fn
-
-    def set_T(self, fn):
-        self.T = fn
-    
-    def set_shape_eval(self, fn):
-        self.shape_eval = fn
-    
-    @classmethod
-    def unary(cls, name):
-        op = cls(name)
-
-        @op.set_vmap
-        def fn(self, axis_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            return [self(x, **params)], [x_bdim]
-        
-        @op.set_shape_eval
-        def fn(self, axis_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            return [self(x, **params)], [x_bdim]
-        
-        @op.set_jvp
-        def fn(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
-        
-        return op
-
-    @classmethod
-    def binary(cls, name):
-        op = cls(name)
-
-        @op.set_vmap
-        def fn(self, axis_size, vals_in, dims_in, **params):
-            (x, y), (x_bdim, y_bdim) = vals_in, dims_in
-            if x_bdim != y_bdim:
-                if x_bdim is None:
-                    x = slope.ad.move_batch_axis(axis_size, x_bdim, y_bdim, x)
-                    x_bdim = y_bdim
-                else:
-                    y = slope.ad.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-            return [self(x, y, **params)], [x_bdim]
-        
-        @op.set_shape_eval
-        def fn(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
-            # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
-            if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
-                # breakpoint()
-                raise TypeError
-            if ArrayShape.like(x) != ArrayShape.like(y):
-                raise TypeError(f"{x} != {y}")
-            return [ArrayShape(x.shape, x.dtype)]
-        
-        @op.set_jvp
-        def fn(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
-        
-        return op
-    
-    @classmethod
-    def reduce(cls, name):
-        op = cls(name)
-        
-        @op.set_vmap
-        def fn(cls, axis_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            axes = list(params["axes"])
-            axes = tuple(a + (x_bdim <= a) for a in axes)
-            out_bdim = x_bdim - sum(a < x_bdim for a in axes)
-            params["axes"] = tuple(axes)
-            return [cls.do(x, **params)], [out_bdim]
-
-        @op.set_shape_eval
-        def fn(x: ArrayShape, **params) -> List[ArrayShape]:
-            axes = params["axes"]
-            axes = [a + len(x.shape) if a < 0 else a for a in axes]
-            axes_ = set(axes)
-            new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
-            return [ArrayShape(tuple(new_shape), x.dtype)]
-        return op
-    
-    @classmethod
-    def shape(cls, name):
-        op = cls(name)
-        return op
-    
-    @classmethod
-    def load(cls, name):
-        op = cls(name)
-        @op.set_jvp
-        def fn(self, *args, **kwargs):
-            out = cls.load_fn(*args, **kwargs)
-            out_jvp = Array.ones_like(out)
-            return [out], [out_jvp]
-        
-        @op.set_T
-        def fn(self, cts, *args, **kwargs):
-            return [cts[0]]
-        return op
+from slope.base_ops import Op as Op
+from slope import array as array
 
 stop_gradient = Op.unary("stop_gradient")
+
 
 @stop_gradient.set_eval
 def fn(x):
     return [x]
+
 
 @stop_gradient.set_jvp
 def fn(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [x], [Array.zeros_like(x_dot)]
 
+
 @stop_gradient.set_T
 def fn(cts, x):
     (z,) = cts
     assert type(x) is slope.ad.UndefPrimal
-    return [Array.zeros_like(z)]
+    return [array.Array.zeros_like(z)]
+
 
 # class Convert(UnaryOp):
 #     get_impl = lambda: slope.RT.backend.ConvertImpl
@@ -192,11 +67,11 @@ def fn(cts, x):
 #         (x,), (x_dot,) = primals, tangents
 #         ans = x.sin()
 #         return [ans], [x_dot * (1 - ans)]
-    
+
 #     def T(cts, x):
 #         (z,) = cts
 #         return [-z * (1 - x.sin())]
-    
+
 # class Exp(UnaryOp):
 #     get_impl = lambda: slope.RT.backend.ExpImpl
 
@@ -208,7 +83,7 @@ def fn(cts, x):
 #     def jvp(primals, tangents):
 #         (x,), (x_dot,) = primals, tangents
 #         return [x.exp()], [x_dot * x.exp()]
-    
+
 #     def T(cts, x):
 #         (z,) = cts
 #         return [1 / z]
@@ -256,14 +131,17 @@ def fn(cts, x):
 
 add = Op.binary("add")
 
+
 @add.set_eval
 def add_eval(x, y):
     return [x + y]
+
 
 @add.set_jvp
 def add_jvp(primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x + y], [x_dot + y_dot]
+
 
 @add.set_T
 def add_T(cts, x, y):
@@ -271,7 +149,7 @@ def add_T(cts, x, y):
     return [z_bar, z_bar]
 
 
-'''
+"""
 class Sub(BinaryOp):
     get_impl = lambda: slope.RT.backend.SubImpl
 
@@ -1353,4 +1231,4 @@ class Scatter(ShapeOp):
                     fill_value=0,
                 )
         return [operand_t, None, update_t]
-        '''
+        """

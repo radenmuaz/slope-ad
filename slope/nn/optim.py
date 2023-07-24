@@ -1,5 +1,5 @@
 import slope
-from slope import ad, ops, utils
+from slope import ad, base_ops, utils
 from typing import Any, Callable, NamedTuple, Tuple, Union
 import numpy as np
 from collections import namedtuple
@@ -196,7 +196,7 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-8):
         v = (1 - b2) * np.square(g) + b2 * v  # Second moment estimate.
         mhat = m / (1 - np.asarray(b1, m.dtype) ** (i + 1))  # Bias correction.
         vhat = v / (1 - np.asarray(b2, m.dtype) ** (i + 1))
-        x = x - step_size(i) * mhat / (ops.sqrt(vhat) + eps)
+        x = x - step_size(i) * mhat / (base_ops.sqrt(vhat) + eps)
         return x, m, v
 
     def get_params(state):

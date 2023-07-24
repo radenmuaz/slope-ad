@@ -1,6 +1,6 @@
 import slope
 import numpy as np
-from slope import ad, ops
+from slope import ad, base_ops
 from slope.array import Array
 
 # x = np.ones((1, 3))
@@ -56,7 +56,7 @@ def f(x, y):
     out = x * x
     # out = ops.mm(out, ops.T(y))
     # out = ops.log_softmax(out, axes=(1,))
-    out = ops.sum(out, axes=(0, 1))
+    out = base_ops.sum(out, axes=(0, 1))
     return out
 
 

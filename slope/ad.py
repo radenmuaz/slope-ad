@@ -26,7 +26,6 @@ from typing import (
     DefaultDict,
     Callable,
     Hashable,
-    Final
 )
 from collections import defaultdict
 import numpy as np
@@ -35,10 +34,10 @@ import string
 from functools import lru_cache, reduce
 import math
 import slope
-from slope.array_shape import ArrayShape, ValuedArrayShape
-from slope.array import Array
+from slope.array_shape import ArrayShape
+from slope.base_array import Array as Array
 from slope.tracer_array import TracerArray
-from slope import ops
+from slope import base_ops
 from slope.base_backend import Backend
 
 
@@ -245,15 +244,15 @@ def move_batch_axis(axis_size, src, dst, x):
         if type(dst) in (tuple, list):
             out_ndim += 1
         reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
-        x = ops.reshape(x, reshape_shape)
-        x = ops.broadcast(x, target_shape)
+        x = base_ops.reshape(x, reshape_shape)
+        x = base_ops.broadcast(x, target_shape)
         return x
     elif src == dst:
         return x
     else:
         perm = [i for i in range(len(x.shape)) if i != src]
         perm.insert(dst, src)
-        return ops.transpose(x, perm)
+        return base_ops.transpose(x, perm)
 
 
 def vmap_flat(f, in_axes, *args):
@@ -373,7 +372,7 @@ Atom = Union[Var, Lit]
 
 
 class ProgEqn(NamedTuple):
-    op: ops.Op
+    op: base_ops.Op
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Atom]
@@ -711,7 +710,7 @@ class ConstProto(NamedTuple):
 
 
 class ProgEqnProto(NamedTuple):
-    prim: ops.Op
+    prim: base_ops.Op
     tracers_in: List["PartialEvalTracerArray"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
@@ -975,24 +974,24 @@ def jit(f):
         nonlocal hashable_consts, hashable_prog
         hashable_consts = tuple(map(utils.IDHashable, consts))
         hashable_prog = utils.IDHashable(prog)
-        outs = ops.Jit.do(
+        outs = base_ops.Jit.do(
             *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
         )
         return tree_unflatten(out_tree, outs)
 
     f_jitted.get_jit_fn = get_jit_fn
     return f_jitted
+
+
 from dataclasses import dataclass, asdict
 
-class Runtime:
-    
 
-    def __init__(self, root_trace=MainTrace(0, EvalTrace, None), ops=dict(), backend=None):
+class Runtime:
+    def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [root_trace]
         self.node_types = dict()
-        self.ops = ops
         self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
         self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
         self.register_pytree_node(
@@ -1000,11 +999,10 @@ class Runtime:
             lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
             lambda keys, vals: dict(zip(keys, vals)),
         )
-        self.backend = backend
-    
+
     def add_op(self, op):
         self.ops[op.name] = op
-    
+
     def set_backend(self, backend):
         if self.backend is not None:
             print(f"Warning: backend already set to {self.backend}")

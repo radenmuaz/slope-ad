@@ -1,6 +1,6 @@
 import slope
 import numpy as np
-from slope import ops
+from slope import base_ops
 from slope.array import Array
 
 # a = Array([1])

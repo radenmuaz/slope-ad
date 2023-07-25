@@ -279,26 +279,27 @@ class TracerArray(BaseArray):
     def full_lower(self):
         return self
 
-    @staticmethod
-    def reduceop_patch(op_fn):
-        def wrapped_fn(x, axes=None, keepdims=False):
-            ret = op_fn(x, axes, keepdims)
-            if keepdims:
-                if len(ret.shape) == 0:
-                    shape = (1,)
-                else:
-                    shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
-                ret = ret.reshape(shape)
-            return ret
+    # @staticmethod
+    # def reduceop_patch(op_fn):
+    #     def wrapped_fn(x, axes=None, keepdims=False):
+    #         ret = op_fn(x, axes, keepdims)
+    #         if keepdims: 
+    #             if len(ret.shape) == 0:
+    #                 shape = (1,)
+    #             else:
+    #                 shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
+    #             ret = ret.reshape(shape)
+    #         return ret
 
-        return wrapped_fn
+    #     return wrapped_fn
 
     def __getattr__(self, attr):
         if attr in vars(ops).keys():
             op = getattr(ops, attr)
-            if op.op_type is OpType.Reduce:
-                return self.reduceop_patch(partial(op, self))
-            elif op.op_type is not OpType.Other:
+            # if op.op_type is OpType.Reduce:
+            #     return self.reduceop_patch(partial(op, self))
+            # elif op.op_type is not OpType.Other:
+            if op.op_type is not OpType.Other:
                 return partial(op, self)
             else:
                 return op
@@ -735,11 +736,13 @@ class Op:
             return [cls.do(x, **params)], [out_bdim]
 
         @op.set_shape_eval
-        def fn(x: ArrayShape, **params) -> List[ArrayShape]:
-            axes = params["axes"]
+        def fn(x: ArrayShape, axes=None, keepdims=False) -> List[ArrayShape]:
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
             axes_ = set(axes)
-            new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
+            if keepdims:
+                new_shape = [d if i not in axes_ else 1 for i, d in enumerate(x.shape)]
+            else:
+                new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
             return [ArrayShape(tuple(new_shape), x.dtype)]
 
         return op

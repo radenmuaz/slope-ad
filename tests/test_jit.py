@@ -16,6 +16,7 @@ class TestJit(unittest.TestCase):
         def f(x, **kwargs):
             print("tracing!")
             out = x + x
+            out = out.sum(keepdims=True)
             # out = x + Array([4.0, 5.0, 6.0])
             return out
 

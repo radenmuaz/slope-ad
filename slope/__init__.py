@@ -219,7 +219,7 @@ class Array(BaseArray):
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
     def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
+        return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
 
     __str__ = __repr__
 
@@ -1910,6 +1910,16 @@ def fn(x, y):
 def fn(x, y):
     return np.divide(x, y)
 
+
+
+@numpy_backend.set_impl(ops.sum)
+def fn(x, axes, keepdims):
+    return np.sum(x, axis=axes, keepdims=keepdims)
+
+
+@numpy_backend.set_impl(ops.max)
+def fn(x, axes, keepdims):
+    return np.max(x, axis=axes, keepdims=keepdims)
 
 @numpy_backend.set_impl(ops.constant)
 def fn(*, val, dtype):

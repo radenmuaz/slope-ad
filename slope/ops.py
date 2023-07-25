@@ -1,127 +1,172 @@
 import slope
 from slope.base_ops import Op as Op
-from slope import array as array
+from slope.base_array import Array
 
 stop_gradient = Op.unary("stop_gradient")
 
 
 @stop_gradient.set_eval
-def fn(x):
+def stop_gradient_eval(x):
     return [x]
 
 
 @stop_gradient.set_jvp
-def fn(primals, tangents, **params):
+def stop_gradient_jvp(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [x], [Array.zeros_like(x_dot)]
 
 
 @stop_gradient.set_T
-def fn(cts, x):
+def stop_gradient_T(cts, x):
     (z,) = cts
     assert type(x) is slope.ad.UndefPrimal
     return [array.Array.zeros_like(z)]
 
 
-# class Convert(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.ConvertImpl
-
-#     @staticmethod
-#     def eval(x, *, dtype):
-#         return [x.astype(dtype)]
-
-#     @staticmethod
-#     def jvp(primals, tangents, *, dtype):
-#         (x,), (x_dot,) = primals, tangents
-#         return [x.convert(dtype)], [x_dot.convert(dtype)]
-
-#     @staticmethod
-#     def T(t, x):
-#         (z,) = t
-#         assert type(x) is slope.ad.UndefPrimal
-#         return [z.convert(x.dtype)]
+convert = Op.unary("convert")
 
 
-# class Sqrt(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.SqrtImpl
-
-#     @staticmethod
-#     def eval(x):
-#         return [x.sqrt()]
-
-#     @staticmethod
-#     def jvp(primals, tangents):
-#         (x,), (x_dot,) = primals, tangents
-#         ans = x.sqrt()
-#         return [ans], [x_dot * (0.5/ans)]
-
-# class Sin(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.SinImpl
-
-#     @staticmethod
-#     def eval(x):
-#         return [x.sin()]
-
-#     @staticmethod
-#     def jvp(primals, tangents):
-#         (x,), (x_dot,) = primals, tangents
-#         ans = x.sin()
-#         return [ans], [x_dot * (1 - ans)]
-
-#     def T(cts, x):
-#         (z,) = cts
-#         return [-z * (1 - x.sin())]
-
-# class Exp(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.ExpImpl
-
-#     @staticmethod
-#     def eval(x):
-#         return [x.exp()]
-
-#     @staticmethod
-#     def jvp(primals, tangents):
-#         (x,), (x_dot,) = primals, tangents
-#         return [x.exp()], [x_dot * x.exp()]
-
-#     def T(cts, x):
-#         (z,) = cts
-#         return [1 / z]
+@convert.set_eval
+def convert_eval(x):
+    return [x]
 
 
-# class Log(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.LogImpl
-
-#     @staticmethod
-#     def eval(x):
-#         return [x.log()]
-
-#     @staticmethod
-#     def jvp(primals, tangents):
-#         (x,), (x_dot,) = primals, tangents
-#         return [x.log()], [x_dot / x]
-
-#     def T(cts, x):
-#         (z,) = cts
-#         return [1 / z]
+@convert.set_jvp
+def convert_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    return [x], [Array.zeros_like(x_dot)]
 
 
-# class Neg(UnaryOp):
-#     get_impl = lambda: slope.RT.backend.NegImpl
+@convert.set_T
+def convert_T(cts, x):
+    (z,) = cts
+    assert type(x) is slope.ad.UndefPrimal
+    return [Array.zeros_like(z)]
 
-#     @staticmethod
-#     def eval(x):
-#         return [-x]
 
-#     @staticmethod
-#     def jvp(primals, tangents):
-#         (x,), (x_dot,) = primals, tangents
-#         return [-x], [-x_dot]
+sqrt = Op.unary("sqrt")
 
-#     @staticmethod
-#     def T(cts, x):
-#         (z,) = cts
-#         return [-z]
+
+@sqrt.set_eval
+def sqrt_eval(x):
+    return [x.sqrt()]
+
+
+@sqrt.set_jvp
+def sqrt_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    ans = x.sqrt()
+    return [ans], [x_dot * (0.5 / ans)]
+
+
+@convert.set_T
+def sqrt_T(cts, x):
+    (z,) = cts
+    assert type(x) is slope.ad.UndefPrimal
+    return [Array.zeros_like(z)]
+
+
+sin = Op.unary("sin")
+
+
+@sin.set_eval
+def sin_eval(x):
+    return [x.sin()]
+
+
+@sin.set_jvp
+def sin_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    ans = x.sin()
+    return [ans], [x_dot * (1 - ans)]
+
+
+@sin.set_T
+def sin_T(cts, x):
+    (z,) = cts
+    return [-z * (1 - x.sin())]
+
+
+exp = Op.unary("exp")
+
+
+@exp.set_eval
+def exp_eval(x):
+    return [x.exp()]
+
+
+@exp.set_jvp
+def exp_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    ans = x.exp()
+    return [ans], [x_dot * ans]
+
+
+@exp.set_T
+def exp_T(cts, x):
+    (z,) = cts
+    return [1 / z]
+
+
+log = Op.unary("log")
+
+
+@log.set_eval
+def log_eval(x):
+    return [x.log()]
+
+
+@log.set_jvp
+def log_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    ans = x.log()
+    return [ans], [x_dot / x]
+
+
+@log.set_T
+def log_T(cts, x):
+    (z,) = cts
+    return [1 / z]
+
+
+neg = Op.unary("neg")
+
+
+@neg.set_eval
+def neg_eval(x):
+    return [-x]
+
+
+@neg.set_jvp
+def neg_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    return [-x], [-x_dot]
+
+
+@neg.set_T
+def relu_T(cts, x):
+    (z,) = cts
+    return [-z]
+
+
+relu = Op.unary("relu")
+
+
+@relu.set_eval
+def relu_eval(x):
+    return [-x]
+
+
+@relu.set_jvp
+def relu_jvp(primals, tangents, **params):
+    (x,), (x_dot,) = primals, tangents
+    return [-x], [-x_dot]
+
+
+@relu.set_T
+def relu_T(cts, x):
+    (z,) = cts
+    return [-z]
 
 
 # -----------------------
@@ -149,116 +194,150 @@ def add_T(cts, x, y):
     return [z_bar, z_bar]
 
 
-"""
-class Sub(BinaryOp):
-    get_impl = lambda: slope.RT.backend.SubImpl
-
-    @staticmethod
-    def eval(x, y):
-        return [x - y]
-
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), (x_dot, y_dot) = primals, tangents
-        return [x - y], [x_dot - y_dot]
-
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar, -z_bar]
+sub = Op.binary("sub")
 
 
-class Mul(BinaryOp):
-    get_impl = lambda: slope.RT.backend.MulImpl
-
-    @staticmethod
-    def eval(x, y):
-        return [x * y]
-
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), (x_dot, y_dot) = primals, tangents
-        eval_out = x * y
-        jvp_out = (x_dot * y) + (y_dot * x)
-        # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
-        # check about __array_priority
-        return [eval_out], [jvp_out]
-
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        assert (type(x) is slope.ad.UndefPrimal) ^ (type(y) is slope.ad.UndefPrimal)
-        if type(x) is slope.ad.UndefPrimal:
-            return [z_bar * y, None]
-        elif type(y) is slope.ad.UndefPrimal:
-            return [None, x * z_bar]
+@sub.set_eval
+def sub_eval(x, y):
+    return [x - y]
 
 
-class Div(BinaryOp):
-    get_impl = lambda: slope.RT.backend.DivImpl
-
-    @staticmethod
-    def eval(x, y):
-        return [x / y]
-
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), (x_dot, y_dot) = primals, tangents
-        return [x / y], [
-            (x_dot / y) + (-y_dot * x * (y**-2))
-        ]  # bug: power returns float64
-
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar / y, None]
+@sub.set_jvp
+def sub_jvp(primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x - y], [x_dot - y_dot]
 
 
-class Maximum(BinaryOp):
-    get_impl = lambda: slope.RT.backend.MaximumImpl
+@sub.set_T
+def sub_T(cts, x, y):
+    (z_bar,) = cts
+    return [z_bar, -z_bar]
 
-    @staticmethod
-    def eval(x, y):
-        return [np.maximum(x, y)]
 
-    @staticmethod
-    def jvp(primals, tangents):
-        def _balanced_eq(x, z, y):
-            return ((x == z).where(Array.ones_like(z), Array.zeros_like(z))) / (
-                (y == z).where(Array.full_like(z, 2), Array.ones_like(z))
-            )
+mul = Op.binary("mul")
 
-        (x, y), (x_dot, y_dot) = primals, tangents
-        eval_out = x.maximum(y)
-        jvp_out = x_dot * _balanced_eq(x, eval_out, y) + y_dot * _balanced_eq(
-            y, eval_out, x
+
+@mul.set_eval
+def mul_eval(x, y):
+    return [x * y]
+
+
+@mul.set_jvp
+def mul_jvp(primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x * y], [(x_dot * y) + (y_dot * x)]
+    # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
+
+
+@mul.set_T
+def mul_T(cts, x, y):
+    (z_bar,) = cts
+    assert (type(x) is slope.ad.UndefPrimal) ^ (type(y) is slope.ad.UndefPrimal)
+    if type(x) is slope.ad.UndefPrimal:
+        return [z_bar * y, None]
+    elif type(y) is slope.ad.UndefPrimal:
+        return [None, x * z_bar]
+
+
+div = Op.binary("div")
+
+
+@div.set_eval
+def div_eval(x, y):
+    return [x / y]
+
+
+@div.set_jvp
+def div_jvp(primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x / y], [
+        (x_dot / y) + (-y_dot * x * (y**-2))
+    ]  # bug: power returns float64
+
+
+@div.set_T
+def div_T(cts, x, y):
+    (z_bar,) = cts
+    return [z_bar / y, None]
+
+
+maximum = Op.binary("maximum")
+
+
+@maximum.set_eval
+def maximum_eval(x, y):
+    return [x.maximum(y)]
+
+
+@maximum.set_jvp
+def maximum_jvp(primals, tangents):
+    def _balanced_eq(x, z, y):
+        return ((x == z).where(Array.ones_like(z), Array.zeros_like(z))) / (
+            (y == z).where(Array.full_like(z, 2), Array.ones_like(z))
         )
 
+    (x, y), (x_dot, y_dot) = primals, tangents
+    eval_out = x.maximum(y)
+    jvp_out = x_dot * _balanced_eq(x, eval_out, y) + y_dot * _balanced_eq(
+        y, eval_out, x
+    )
+
+    return [eval_out], [jvp_out]
+
+
+@maximum.set_T
+def maximum_T(cts, x, y):
+    (z_bar,) = cts
+    return [z_bar, None]
+
+
+equal = Op.binary("equal")
+
+
+@equal.set_eval
+def equal_eval(x, y):
+    return [x.equal(y)]
+
+
+@equal.set_jvp
+def equal_jvp(primals, tangents):
+    (x, y), _ = primals, tangents
+    out_primal = x.equal(y)
+    return [out_primal], [Array.zeros(out_primal.shape, out_primal.dtype)]
+
+
+@equal.set_T
+def equal_T(cts, x, y):
+    (z_bar,) = cts
+    return [z_bar, None]
+
+
+max = Op.reduce("max")
+
+
+@max.set_eval
+def eval(x, axes):
+    return [x.max(axes)]
+
+    @staticmethod
+    def jvp(primals, tangents, axes):
+        (x,), (x_dot,) = primals, tangents
+        eval_out = x.max(axes)
+        locs = x.equal(eval_out.broadcast(x.shape, axes))
+        locs = locs.convert(x_dot.dtype)
+        counts = locs.sum(axes)
+        jvp_out = (x_dot * locs).sum(axes)
+        jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
+
         return [eval_out], [jvp_out]
 
     @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar, None]
+    def T(cts, x, *, axes):
+        (z,) = cts
+        return [z.broadcast(x.aval.shape, ())]
 
 
-class Equal(BinaryOp):
-    get_impl = lambda: slope.RT.backend.EqualImpl
-
-    @staticmethod
-    def eval(x, y):
-        return [x.equal(y)]
-
-    @staticmethod
-    def jvp(primals, tangents):
-        (x, y), _ = primals, tangents
-        out_primal = x.equal(y)
-        return [out_primal], [np.zeros(out_primal.shape, out_primal.dtype)]
-
-    @staticmethod
-    def T(cts, x, y):
-        (z_bar,) = cts
-        return [z_bar, None]
+"""
 
 
 # -----------------------
@@ -1232,3 +1311,136 @@ class Scatter(ShapeOp):
                 )
         return [operand_t, None, update_t]
         """
+
+
+# Functions
+@classmethod
+def zeros(cls, shape, dtype=default_dtype, **kwargs):
+    return cls.full(shape, 0.0, dtype, **kwargs)
+
+
+@classmethod
+def ones(cls, shape, dtype=default_dtype, **kwargs):
+    return cls.full(shape, 1.0, dtype, **kwargs)
+
+
+@classmethod
+def full_like(cls, other, fill_value, **kwargs):
+    return cls.full(other.shape, fill_value, dtype=other.dtype, **kwargs)
+
+
+@classmethod
+def zeros_like(cls, other, **kwargs):
+    return cls.zeros(other.shape, dtype=other.dtype, **kwargs)
+
+
+@classmethod
+def ones_like(cls, other, **kwargs):
+    return cls.full(other.shape, fill_value=1.0, dtype=other.dtype, **kwargs)
+
+
+def where(self, trueval, falseval):
+    cond = self != 0.0
+    cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
+    return cond * trueval + (1.0 - cond) * falseval
+
+
+def pow(self, y):
+    assert type(y) is int
+    if y == 0:
+        return self.ones_like(x)
+    is_reciprocal = y < 0
+    if is_reciprocal:
+        y = -y
+    acc = None
+    while y > 0:
+        if y & 1:
+            acc = x if acc is None else acc * x
+        y >>= 1
+        if y > 0:
+            x = x * x
+    ret = acc
+    if is_reciprocal:
+        ret = self.ones_like(acc) / acc
+    return ret
+
+
+def cross_entropy(x, y):
+    return x * y.log()
+
+
+def mse(x, y):
+    return pow((x - y), 2)
+
+
+def mean(self, axes=None, keepdims=False):
+    out = self.sum(axes=axes, keepdim=keepdims)
+    return out * (math.prod(out.shape) / math.prod(self.shape))
+
+
+def minimum(self, other):
+    return -self.maximum(-self, -other)
+
+
+def min(self, axes=None, keepdims=False):
+    return -((-self).max(self, axes, keepdims))
+
+
+def flatten(self, start_dim=0):
+    return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
+
+
+@classmethod
+def glorot_uniform(cls, *shape, **kwargs):
+    return cls.rand(*shape, **kwargs).mul(
+        (6 / (shape[0] + math.prod(shape[1:]))) ** 0.5
+    )
+
+
+@property
+def T(self):
+    perm = list(range(self.ndim))
+    perm[-2], perm[-1] = perm[-1], perm[-2]
+    return self.transpose(perm)
+
+
+def _softmax(self, axes):
+    m = self - self.max(axes, keepdims=True)
+    e = m.exp()
+    return m, e, e.sum(axes, keepdims=True)
+
+
+def softmax(self, axes=-1):
+    _, e, ss = self._softmax(axes)
+    return e.div(ss)
+
+
+def log_softmax(self, axes=-1):
+    m, _, ss = self._softmax(axes)
+    return m - ss.log()
+
+
+def dot(self, w):
+    x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
+    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
+    return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
+
+
+def square(self):
+    return self * self
+
+
+def clip(self, min_, max_):
+    return ((self - min_).relu() + min_) - (self - max_).relu()
+
+
+def abs(self):
+    return self.relu() + (-self).relu()
+
+
+def sign(self):
+    return self / (self.abs() + 1e-10)
+
+
+def reciprocal(self):
+    return 1.0 / self

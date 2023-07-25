@@ -983,94 +983,88 @@ def jit(f):
     return f_jitted
 
 
-from dataclasses import dataclass, asdict
+# class Runtime:
+#     def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
+#         self.trace_stack: List[MainTrace] = []
+#         self.dynamic_trace: Optional[MainTrace] = None
+#         self.trace_stack += [root_trace]
+#         self.node_types = dict()
+#         self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
+#         self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
+#         self.register_pytree_node(
+#             dict,
+#             lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
+#             lambda keys, vals: dict(zip(keys, vals)),
+#         )
 
+#     def set_backend(self, backend):
+#         if self.backend is not None:
+#             print(f"Warning: backend already set to {self.backend}")
+#             print(f"Changing to {backend}")
+#         self.backend = backend
 
-class Runtime:
-    def __init__(self, root_trace=MainTrace(0, EvalTrace, None)):
-        self.trace_stack: List[MainTrace] = []
-        self.dynamic_trace: Optional[MainTrace] = None
-        self.trace_stack += [root_trace]
-        self.node_types = dict()
-        self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
-        self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
-        self.register_pytree_node(
-            dict,
-            lambda d: map(tuple, utils.unzip2(sorted(d.items()))),
-            lambda keys, vals: dict(zip(keys, vals)),
-        )
+#     def register_pytree_node(
+#         self, ty: Type, to_iter: Callable, from_iter: Callable
+#     ) -> None:
+#         self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
 
-    def add_op(self, op):
-        self.ops[op.name] = op
+#     @contextmanager
+#     def new_main(self, trace_type: Type["Trace"], global_data=None):
+#         level = len(self.trace_stack)
+#         main = MainTrace(level, trace_type, global_data)
+#         self.trace_stack.append(main)
 
-    def set_backend(self, backend):
-        if self.backend is not None:
-            print(f"Warning: backend already set to {self.backend}")
-            print(f"Changing to {backend}")
-        self.backend = backend
+#         try:
+#             yield main
+#         finally:
+#             self.trace_stack.pop()
 
-    def register_pytree_node(
-        self, ty: Type, to_iter: Callable, from_iter: Callable
-    ) -> None:
-        self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
+#     @contextmanager
+#     def new_dynamic(self, main: MainTrace):
+#         prev_dynamic_trace, self.dynamic_trace = self.dynamic_trace, main
+#         try:
+#             yield
+#         finally:
+#             self.dynamic_trace = prev_dynamic_trace
 
-    @contextmanager
-    def new_main(self, trace_type: Type["Trace"], global_data=None):
-        level = len(self.trace_stack)
-        main = MainTrace(level, trace_type, global_data)
-        self.trace_stack.append(main)
+#     def bind(self, op, *args, **params):
+#         top_trace = self.find_top_trace(args)
+#         tracers = [self.full_raise(top_trace, arg) for arg in args]
+#         outs = top_trace.run_op(op, tracers, params)
+#         lowered = [self.full_lower(out) for out in outs]
+#         return lowered
 
-        try:
-            yield main
-        finally:
-            self.trace_stack.pop()
+#     def bind1(self, *args, **params):
+#         return self.bind(*args, **params)[0]
 
-    @contextmanager
-    def new_dynamic(self, main: MainTrace):
-        prev_dynamic_trace, self.dynamic_trace = self.dynamic_trace, main
-        try:
-            yield
-        finally:
-            self.dynamic_trace = prev_dynamic_trace
+#     def find_top_trace(self, xs) -> Trace:
+#         top_main = max(
+#             (x._trace.main for x in xs if isinstance(x, TracerArray)),
+#             default=self.trace_stack[0],
+#             key=op.attrgetter("level"),
+#         )
+#         if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
+#             top_main = self.dynamic_trace
+#         return top_main.trace_type(top_main)
 
-    def bind(self, op, *args, **params):
-        top_trace = self.find_top_trace(args)
-        tracers = [self.full_raise(top_trace, arg) for arg in args]
-        outs = top_trace.run_op(op, tracers, params)
-        lowered = [self.full_lower(out) for out in outs]
-        return lowered
+#     def full_raise(self, trace: Trace, val: Any) -> TracerArray:
+#         if not isinstance(val, TracerArray):
+#             return trace.pure(val)
+#         level = trace.main.level
+#         if val._trace.main is trace.main:
+#             return val
+#         elif val._trace.main.level < level:
+#             return trace.lift(val)
+#         elif val._trace.main.level > level:
+#             raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
+#         else:  # val._trace.level == level
+#             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
-    def bind1(self, *args, **params):
-        return self.bind(*args, **params)[0]
-
-    def find_top_trace(self, xs) -> Trace:
-        top_main = max(
-            (x._trace.main for x in xs if isinstance(x, TracerArray)),
-            default=self.trace_stack[0],
-            key=op.attrgetter("level"),
-        )
-        if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
-            top_main = self.dynamic_trace
-        return top_main.trace_type(top_main)
-
-    def full_raise(self, trace: Trace, val: Any) -> TracerArray:
-        if not isinstance(val, TracerArray):
-            return trace.pure(val)
-        level = trace.main.level
-        if val._trace.main is trace.main:
-            return val
-        elif val._trace.main.level < level:
-            return trace.lift(val)
-        elif val._trace.main.level > level:
-            raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
-        else:  # val._trace.level == level
-            raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
-
-    def full_lower(self, val: Any):
-        if isinstance(val, TracerArray):
-            return val.full_lower()
-        else:
-            return val
+#     def full_lower(self, val: Any):
+#         if isinstance(val, TracerArray):
+#             return val.full_lower()
+#         else:
+#             return val
 
 
 # def partial_eval_Program(

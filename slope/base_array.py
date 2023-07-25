@@ -170,7 +170,7 @@ class BaseArray:
         x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
         w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
         return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
-    
+
     def square(self):
         return self * self
 
@@ -185,7 +185,6 @@ class BaseArray:
 
     def reciprocal(self):
         return 1.0 / self
-
 
 
 class ArrayBuffer:
@@ -206,7 +205,7 @@ class Array(BaseArray):
         self.buf = (
             val
             if isinstance(val, ArrayBuffer)
-            else slope.backend.constant(val=val, dtype=dtype).buf
+            else slope.runtime.backend.constant(val=val, dtype=dtype).buf
         )
 
     val = property(lambda self: self.buf.val)
@@ -221,67 +220,69 @@ class Array(BaseArray):
 
     @classmethod
     def full(cls, shape, fill_value, dtype=default_dtype, **kwargs):
-        return slope.RT.backend.full(
+        return slope.runtime.backend.full(
             shape, fill_value=fill_value, dtype=dtype, **kwargs
         )
 
     def __array__(self, dtype=None):
         return self.val
 
-    convert = lambda self, dtype: slope.RT.backend.convert(self, dtype=dtype)
+    convert = lambda self, dtype: slope.runtime.backend.convert(self, dtype=dtype)
     astype = convert
-    stop_gradient = lambda self: slope.RT.backend.stop_gradient(self)
-    sqrt = lambda self: slope.RT.backend.sqrt(self)
-    neg = lambda self: slope.RT.backend.neg(self)
-    exp = lambda self: slope.RT.backend.exp(self)
-    log = lambda self: slope.RT.backend.log(self)
-    sin = lambda self: slope.RT.backend.sin(self)
+    stop_gradient = lambda self: slope.runtime.backend.stop_gradient(self)
+    sqrt = lambda self: slope.runtime.backend.sqrt(self)
+    neg = lambda self: slope.runtime.backend.neg(self)
+    exp = lambda self: slope.runtime.backend.exp(self)
+    log = lambda self: slope.runtime.backend.log(self)
+    sin = lambda self: slope.runtime.backend.sin(self)
 
-    add = lambda self, other: slope.RT.backend.add(self, other)
-    sub = lambda self, other: slope.RT.backend.subtract(self, other)
-    mul = lambda self, other: slope.RT.backend.multiply(self, other)
-    div = lambda self, other: slope.RT.backend.divide(self, other)
-    equal = lambda self, other: slope.RT.backend.equal(self, other)
-    not_equal = lambda self, other: slope.RT.backend.not_equal(self, other)
-    maximum = lambda self, other: slope.RT.backend.maximum(self, other)
-    max = lambda self, axes=None, keepdims=False: slope.RT.backend.max(
+    add = lambda self, other: slope.runtime.backend.add(self, other)
+    sub = lambda self, other: slope.runtime.backend.subtract(self, other)
+    mul = lambda self, other: slope.runtime.backend.multiply(self, other)
+    div = lambda self, other: slope.runtime.backend.divide(self, other)
+    equal = lambda self, other: slope.runtime.backend.equal(self, other)
+    not_equal = lambda self, other: slope.runtime.backend.not_equal(self, other)
+    maximum = lambda self, other: slope.runtime.backend.maximum(self, other)
+    max = lambda self, axes=None, keepdims=False: slope.runtime.backend.max(
         self.val, axis=axes, keepdims=keepdims
     )
-    sum = lambda self, axes=None, keepdims=False: slope.RT.backend.sum(
+    sum = lambda self, axes=None, keepdims=False: slope.runtime.backend.sum(
         self.val, axis=axes, keepdims=keepdims
     )
 
-    constant = lambda self, val, dtype: slope.RT.backend.constant(
+    constant = lambda self, val, dtype: slope.runtime.backend.constant(
         self, val=val, dtype=dtype
     )
-    full = lambda self, val, shape, dtype: slope.RT.backend.full(
+    full = lambda self, val, shape, dtype: slope.runtime.backend.full(
         self, val=val, shape=shape, dtype=dtype
     )
-    arange = lambda self, start, stop, stride, dtype: slope.RT.backend.arange(
+    arange = lambda self, start, stop, stride, dtype: slope.runtime.backend.arange(
         self, start, stop, stride, dtype=dtype
     )
-    random_normal = lambda self, shape, dtype: slope.RT.backend.random_normal(
+    random_normal = lambda self, shape, dtype: slope.runtime.backend.random_normal(
         self, shape, dtype=dtype
     )
     randn = random_normal
-    random_uniform = lambda self, shape, dtype: slope.RT.backend.random_uniform(
+    random_uniform = lambda self, shape, dtype: slope.runtime.backend.random_uniform(
         self, shape, dtype=dtype
     )
     rand = random_uniform
 
     # Shape
-    reshape = lambda self, shape: slope.RT.backend.reshape(self, shape)
-    transpose = lambda self, perm: slope.RT.backend.transpose(self, perm)
-    broadcast = lambda self, shape, axes: slope.RT.backend.broadcast(self, shape, axes)
-    pad = lambda self, lo, hi, interior, value: slope.RT.backend.pad(
+    reshape = lambda self, shape: slope.runtime.backend.reshape(self, shape)
+    transpose = lambda self, perm: slope.runtime.backend.transpose(self, perm)
+    broadcast = lambda self, shape, axes: slope.runtime.backend.broadcast(
+        self, shape, axes
+    )
+    pad = lambda self, lo, hi, interior, value: slope.runtime.backend.pad(
         self, lo, hi, interior, value
     )
-    slice = lambda self, starts, limits, strides: slope.RT.backend.slice(
+    slice = lambda self, starts, limits, strides: slope.runtime.backend.slice(
         self, starts, limits, strides
     )
-    flip = lambda self, axes: slope.RT.backend.flip(self, axes)
+    flip = lambda self, axes: slope.runtime.backend.flip(self, axes)
     concatenate = classmethod(
-        lambda cls, xs, axes: slope.RT.backend.concatenate(xs, axes)
+        lambda cls, xs, axes: slope.runtime.backend.concatenate(xs, axes)
     )
 
     def __getitem__(self, idx):
@@ -293,7 +294,7 @@ class Array(BaseArray):
         raise NotImplementedError
 
     # control flow
-    choose = select = lambda self, *vals, idx: slope.RT.backend.choose(idx, *vals)
-    where = lambda self, trueval, falseval: slope.RT.backend.where(
+    choose = select = lambda self, *vals, idx: slope.runtime.backend.choose(idx, *vals)
+    where = lambda self, trueval, falseval: slope.runtime.backend.where(
         self, trueval, falseval
     )

@@ -8,14 +8,26 @@ import functools
 from slope.base_array import Array
 from slope import utils
 
+from enum import Enum, auto
+
 
 def raise_not_implemented(self, *args, **kwargs):
     raise NotImplementedError
 
 
+class OpType(Enum):
+    Unary = auto()
+    Binary = auto()
+    Reduce = auto()
+    Shape = auto()
+    Load = auto()
+    Other = auto()
+
+
 class Op:
-    def __init__(self, name):
+    def __init__(self, name, op_type=OpType.Other):
         self.name = name
+        self.op_type = op_type
         self.impls = dict()
         self.eval = raise_not_implemented
         self.jvp = raise_not_implemented
@@ -49,7 +61,7 @@ class Op:
 
     @classmethod
     def unary(cls, name):
-        op = cls(name)
+        op = cls(name, OpType.Unary)
 
         @op.set_vmap
         def fn(self, axis_size, vals_in, dims_in, **params):
@@ -70,7 +82,7 @@ class Op:
 
     @classmethod
     def binary(cls, name):
-        op = cls(name)
+        op = cls(name, OpType.Binary)
 
         @op.set_vmap
         def fn(self, axis_size, vals_in, dims_in, **params):
@@ -102,7 +114,7 @@ class Op:
 
     @classmethod
     def reduce(cls, name):
-        op = cls(name)
+        op = cls(name, OpType.Reduce)
 
         @op.set_vmap
         def fn(cls, axis_size, vals_in, dims_in, **params):
@@ -125,12 +137,12 @@ class Op:
 
     @classmethod
     def shape(cls, name):
-        op = cls(name)
+        op = cls(name, OpType.Shape)
         return op
 
     @classmethod
     def load(cls, name):
-        op = cls(name)
+        op = cls(name, OpType.Load)
 
         @op.set_jvp
         def fn(self, *args, **kwargs):

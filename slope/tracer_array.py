@@ -22,10 +22,12 @@ import numpy as np
 import functools
 import slope
 from slope import utils
-from slope import base_ops
+from slope import ops
 
 import numpy as np
 from slope.base_array import BaseArray, Array
+from slope.base_ops import OpType
+from functools import partial
 
 
 def binaryop_decor(op_fn):
@@ -112,56 +114,62 @@ class TracerArray(BaseArray):
     def full_lower(self):
         return self
 
-    def __getattr__(self, name):
+    def __getattr__(self, attr):
+        if attr in vars(ops).keys():
+            op = getattr(ops, attr)
+            if op.op_type is not OpType.Other:
+                return partial(op, self)
+            else:
+                return op
         try:
-            return getattr(self.aval, name)
+            return getattr(self.aval, attr)
         except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
+            raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
     @property
     def ndim(self):
         return len(self.shape)
 
     def constant(x, val):
-        return base_ops.Constant.do(x, val=val)
+        return ops.Constant.do(x, val=val)
 
     def convert(x, dtype):
-        return base_ops.Convert.do(x, dtype=dtype)
+        return ops.Convert.do(x, dtype=dtype)
 
     astype = convert
 
     def exp(x):
-        return base_ops.Exp.do(x)
+        return ops.Exp.do(x)
 
     def log(x):
-        return base_ops.Log.do(x)
+        return ops.Log.do(x)
 
     def neg(x):
-        return base_ops.Neg.do(x)
+        return ops.Neg.do(x)
 
     @binaryop_decor
     def add(self, other):
-        return base_ops.Add.do(self, other)
+        return ops.Add.do(self, other)
 
     @binaryop_decor
     def sub(self, other):
-        return base_ops.Sub.do(self, other)
+        return ops.Sub.do(self, other)
 
     @binaryop_decor
     def mul(self, other):
-        return base_ops.Mul.do(self, other)
+        return ops.Mul.do(self, other)
 
     @binaryop_decor
     def div(self, other):
-        return base_ops.Div.do(self, other)
+        return ops.Div.do(self, other)
 
     @binaryop_decor
     def equal(self, other):
-        return base_ops.Equal.do(self, other)
+        return ops.Equal.do(self, other)
 
     @binaryop_decor
     def maximum(self, other):
-        return base_ops.Maximum.do(self, other)
+        return ops.Maximum.do(self, other)
 
     def __neg__(self):
         return self.neg()
@@ -225,11 +233,11 @@ class TracerArray(BaseArray):
 
     @reduceop_decor
     def sum(self, axes=None, keepdims=False):
-        return base_ops.Sum.do(self, axes=axes, keepdims=keepdims)
+        return ops.Sum.do(self, axes=axes, keepdims=keepdims)
 
     @reduceop_decor
     def max(self, axes=None, keepdim=False):
-        return base_ops.Max.do(self, axes=axes)
+        return ops.Max.do(self, axes=axes)
 
     # Shape
     def broadcast(self, shape, axes=None):
@@ -240,26 +248,26 @@ class TracerArray(BaseArray):
             axes = (axes,)
         if axes is not None:
             axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
-        return base_ops.Broadcast.do(self, shape=shape, axes=axes)
+        return ops.Broadcast.do(self, shape=shape, axes=axes)
 
     def reshape(self, shape):
         if -1 in shape:
             others = math.prod([d for d in shape if d != -1])
             numel = math.prod(self.shape)
             shape = tuple(d if d != -1 else (numel // others) for d in shape)
-        return base_ops.Reshape.do(self, shape=shape)
+        return ops.Reshape.do(self, shape=shape)
 
     def transpose(self, perm):
-        return base_ops.Transpose.do(self, perm=perm)
+        return ops.Transpose.do(self, perm=perm)
 
     def slice(self, starts, limits, strides):
-        return base_ops.Slice.do(self, starts=starts, limits=limits, strides=strides)
+        return ops.Slice.do(self, starts=starts, limits=limits, strides=strides)
 
     def pad(self, lo, hi, interior=None, value=0):
         if interior is None:
             interior = tuple([0] * len(lo))
         assert len(lo) == len(hi) == len(interior)
-        return base_ops.Pad.do(self, lo=lo, hi=hi, interior=interior, value=value)
+        return ops.Pad.do(self, lo=lo, hi=hi, interior=interior, value=value)
 
     def __getitem__(self, idx):
         def _is_simple_reverse_slice(idx: Any) -> bool:
@@ -366,4 +374,4 @@ class TracerArray(BaseArray):
         dnums,
         gather_slice_shape,
     ):
-        return base_ops.Gather.do(self, gather_indices, dnums, gather_slice_shape)
+        return ops.Gather.do(self, gather_indices, dnums, gather_slice_shape)

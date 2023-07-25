@@ -1,4 +1,3 @@
-
 class Gather(ShapeOp):
     get_impl = lambda: slope.RT.backend.GatherImpl
 
@@ -6,9 +5,11 @@ class Gather(ShapeOp):
     def eval(x, idx, *, axis):
         return [x.gather(idx)]
 
-    
     @staticmethod
-    def _gather_batching_rule(axis_size, vals_in, dims_in,
+    def _gather_batching_rule(
+        axis_size,
+        vals_in,
+        dims_in,
         # batched_args,
         # batch_dims,
         *,
@@ -26,7 +27,9 @@ class Gather(ShapeOp):
             operand = batching.moveaxis(operand, operand_bdim, 0)
             slice_sizes = (operand.shape[0],) + slice_sizes
             offset_dims = (0,) + tuple(np.add(1, dimension_numbers.offset_dims))
-            collapsed_slice_dims = tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
+            collapsed_slice_dims = tuple(
+                np.add(1, dimension_numbers.collapsed_slice_dims)
+            )
             start_index_map = tuple(np.add(1, dimension_numbers.start_index_map))
             dnums = GatherDimensionNumbers(
                 offset_dims=offset_dims,
@@ -131,35 +134,44 @@ class Gather(ShapeOp):
                 0,
             )
 
-
     @staticmethod
-    def jvp(primals, tangents, indices,
-    # g,
-    # operand,
-    *,
-    dimension_numbers,
-    slice_sizes,
-    unique_indices,
-    indices_are_sorted,
-    mode,
-    fill_value,
-    ):
-        return gather(
-        g,
+    def jvp(
+        primals,
+        tangents,
         indices,
+        # g,
+        # operand,
+        *,
         dimension_numbers,
         slice_sizes,
-        unique_indices=unique_indices,
-        indices_are_sorted=indices_are_sorted,
-        mode=mode,
-        fill_value=0,
-    )
-
+        unique_indices,
+        indices_are_sorted,
+        mode,
+        fill_value,
+    ):
+        return gather(
+            g,
+            indices,
+            dimension_numbers,
+            slice_sizes,
+            unique_indices=unique_indices,
+            indices_are_sorted=indices_are_sorted,
+            mode=mode,
+            fill_value=0,
+        )
 
     @staticmethod
-    def shape_eval(x: ArrayShape, idx, *,  dimension_numbers,
-                       slice_sizes, unique_indices, indices_are_sorted,
-                       mode, fill_value) -> List[ArrayShape]:
+    def shape_eval(
+        x: ArrayShape,
+        idx,
+        *,
+        dimension_numbers,
+        slice_sizes,
+        unique_indices,
+        indices_are_sorted,
+        mode,
+        fill_value,
+    ) -> List[ArrayShape]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -171,21 +183,23 @@ class Gather(ShapeOp):
         # This case should never happen in JAX, due to the implicit construction of
         # index_vector_dim, but is included for completeness.
         if _rank(indices) < index_vector_dim or index_vector_dim < 0:
-            raise TypeError(f"Gather index leaf dimension must be within [0, rank("
-                    f"indices) + 1). rank(indices) is {_rank(indices)} and "
-                    f"gather index leaf dimension is {index_vector_dim}.")
+            raise TypeError(
+                f"Gather index leaf dimension must be within [0, rank("
+                f"indices) + 1). rank(indices) is {_rank(indices)} and "
+                f"gather index leaf dimension is {index_vector_dim}."
+            )
 
         expanded_indices_shape = list(indices.shape)
 
-  # This case should never happen in JAX, due to the implicit construction of
-  # index_vector_dim, but is included for completeness.
+        # This case should never happen in JAX, due to the implicit construction of
+        # index_vector_dim, but is included for completeness.
         if len(expanded_indices_shape) == index_vector_dim:
             expanded_indices_shape.append(1)
 
-  # Start ValidateGatherDimensions
-  # In the error messages output by XLA, "offset_dims" is called "Output window
-  # dimensions" in error messages. For consistency's sake, our error messages
-  # stick to "offset_dims".
+        # Start ValidateGatherDimensions
+        # In the error messages output by XLA, "offset_dims" is called "Output window
+        # dimensions" in error messages. For consistency's sake, our error messages
+        # stick to "offset_dims".
         _is_sorted(offset_dims, "gather", "offset_dims")
         _no_duplicate_dims(offset_dims, "gather", "offset_dims")
 
@@ -195,74 +209,95 @@ class Gather(ShapeOp):
         for i in range(output_offset_dim_count):
             offset_dim = offset_dims[i]
             if offset_dim < 0 or offset_dim >= output_shape_rank:
-                raise TypeError(f"Offset dimension {i} in gather op is out of bounds; "
-                      f"got {offset_dim}, but should have been in "
-                      f"[0, {output_shape_rank})")
+                raise TypeError(
+                    f"Offset dimension {i} in gather op is out of bounds; "
+                    f"got {offset_dim}, but should have been in "
+                    f"[0, {output_shape_rank})"
+                )
 
             if len(start_index_map) != indices.shape[index_vector_dim]:
-                raise TypeError(f"Gather op has {len(start_index_map)} elements in "
+                raise TypeError(
+                    f"Gather op has {len(start_index_map)} elements in "
                     f"start_index_map and the bound of dimension "
                     f"{index_vector_dim=} of indices is "
                     f"{indices.shape[index_vector_dim]}. These two "
-                    f"numbers must be equal.")
+                    f"numbers must be equal."
+                )
 
             for i in range(len(start_index_map)):
                 operand_dim_for_start_index_i = start_index_map[i]
-                if (operand_dim_for_start_index_i < 0 or
-                    operand_dim_for_start_index_i >= _rank(operand)):
-                    raise TypeError(f"Invalid start_index_map; domain is "
-                      f"[0, {_rank(operand)}), got: "
-                      f"{i}->{operand_dim_for_start_index_i}.")
+                if (
+                    operand_dim_for_start_index_i < 0
+                    or operand_dim_for_start_index_i >= _rank(operand)
+                ):
+                    raise TypeError(
+                        f"Invalid start_index_map; domain is "
+                        f"[0, {_rank(operand)}), got: "
+                        f"{i}->{operand_dim_for_start_index_i}."
+                    )
 
             _no_duplicate_dims(start_index_map, "gather", "start_index_map")
 
-  # _is_sorted and _sorted_dims_in_range are checked in the opposite order
-  # compared to the XLA implementation. In cases when the input is not sorted
-  # AND there are problematic collapsed_slice_dims, the error message will thus
-  # be different.
+        # _is_sorted and _sorted_dims_in_range are checked in the opposite order
+        # compared to the XLA implementation. In cases when the input is not sorted
+        # AND there are problematic collapsed_slice_dims, the error message will thus
+        # be different.
         _is_sorted(collapsed_slice_dims, "gather", "collapsed_slice_dims")
-        _sorted_dims_in_range(collapsed_slice_dims, _rank(operand), "gather",
-                                "collapsed_slice_dims")
+        _sorted_dims_in_range(
+            collapsed_slice_dims, _rank(operand), "gather", "collapsed_slice_dims"
+        )
         _no_duplicate_dims(collapsed_slice_dims, "gather", "collapsed_slice_dims")
         # End ValidateGatherDimensions
 
         if _rank(operand) != len(slice_sizes):
-            raise TypeExrror(f"Gather op must have one slice size for every input "
-                    f"dimension; got: len(slice_sizes)={len(slice_sizes)}, "
-                    f"input_shape.rank={_rank(operand)}")
+            raise TypeExrror(
+                f"Gather op must have one slice size for every input "
+                f"dimension; got: len(slice_sizes)={len(slice_sizes)}, "
+                f"input_shape.rank={_rank(operand)}"
+            )
 
         if len(slice_sizes) != len(offset_dims) + len(collapsed_slice_dims):
-            raise TypeError(f"All components of the offset index in a gather op must "
-                    f"either be a offset dimension or explicitly collapsed; "
-                    f"got len(slice_sizes)={len(slice_sizes)}, "
-                    f"output_slice_sizes={offset_dims}, collapsed_slice_dims="
-                    f"{collapsed_slice_dims}.")
+            raise TypeError(
+                f"All components of the offset index in a gather op must "
+                f"either be a offset dimension or explicitly collapsed; "
+                f"got len(slice_sizes)={len(slice_sizes)}, "
+                f"output_slice_sizes={offset_dims}, collapsed_slice_dims="
+                f"{collapsed_slice_dims}."
+            )
 
         for i in range(len(slice_sizes)):
             slice_size = slice_sizes[i]
             corresponding_input_size = operand.shape[i]
 
-            if not (core.greater_equal_dim(slice_size, 0) and
-            core.greater_equal_dim(corresponding_input_size, slice_size)):
-                raise TypeError(f"Slice size at index {i} in gather op is out of range, "
-                      f"must be within [0, {corresponding_input_size} + 1), "
-                      f"got {slice_size}.")
+            if not (
+                core.greater_equal_dim(slice_size, 0)
+                and core.greater_equal_dim(corresponding_input_size, slice_size)
+            ):
+                raise TypeError(
+                    f"Slice size at index {i} in gather op is out of range, "
+                    f"must be within [0, {corresponding_input_size} + 1), "
+                    f"got {slice_size}."
+                )
 
         for i in range(len(collapsed_slice_dims)):
             bound = slice_sizes[collapsed_slice_dims[i]]
             if bound != 1:
-                raise TypeError(f"Gather op can only collapse slice dims with bound 1, "
-                      f"but bound is {bound} for index "
-                      f"{collapsed_slice_dims[i]} at position {i}.")
+                raise TypeError(
+                    f"Gather op can only collapse slice dims with bound 1, "
+                    f"but bound is {bound} for index "
+                    f"{collapsed_slice_dims[i]} at position {i}."
+                )
 
         expanded_indices_shape.pop(index_vector_dim)
         indices_shape = iter(expanded_indices_shape)
 
-        slice_sizes = (s for i, s in enumerate(slice_sizes)
-                 if i not in collapsed_slice_dims)
-        return tuple(next(slice_sizes) if i in offset_dims
-               else next(indices_shape) for i in range(output_shape_rank))
-
+        slice_sizes = (
+            s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims
+        )
+        return tuple(
+            next(slice_sizes) if i in offset_dims else next(indices_shape)
+            for i in range(output_shape_rank)
+        )
 
     @staticmethod
     def T(
@@ -300,9 +335,6 @@ class Gather(ShapeOp):
         return [out, None]
 
 
-
-
-
 class Scatter(ShapeOp):
     get_impl = lambda: slope.RT.backend.ScatterImpl
 
@@ -312,7 +344,9 @@ class Scatter(ShapeOp):
 
     @staticmethod
     def vmap(
-            axis_size, vals_in, dims_in, 
+        axis_size,
+        vals_in,
+        dims_in,
         # scatter_op,
         # batched_args,
         # batch_dims,
@@ -339,7 +373,9 @@ class Scatter(ShapeOp):
         updates = batching.bdim_at_front(updates, updates_bdim, size)
 
         if indices_bdim is None:
-            inserted_window_dims = tuple(np.add(1, dimension_numbers.inserted_window_dims))
+            inserted_window_dims = tuple(
+                np.add(1, dimension_numbers.inserted_window_dims)
+            )
             update_window_dims = (0,) + tuple(
                 np.add(1, dimension_numbers.update_window_dims)
             )
@@ -442,16 +478,18 @@ class Scatter(ShapeOp):
             )
         return val_out, tangent_out
 
-
     @staticmethod
     def shape_eval(x: ArrayShape, idx, *, axis: Sequence[int]) -> List[ArrayShape]:
         shape = [x.shape[i] for i in axis]
         return [ArrayShape(shape, x.dtype)]
 
     @staticmethod
-    def T(cts,operand,
+    def T(
+        cts,
+        operand,
         indices,
-        updates, *,
+        updates,
+        *,
         update_jaxpr,
         update_consts,
         dimension_numbers,
@@ -501,7 +539,6 @@ class Scatter(ShapeOp):
                     fill_value=0,
                 )
         return [operand_t, None, update_t]
-
 
 
 @numpy_backend.set_impl("scatter")
@@ -645,4 +682,3 @@ def fn(
     operand_idx = full_start_idx + full_offset_idx
     res[res_idx] = operand[operand_idx]
     return res
-

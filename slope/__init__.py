@@ -22,7 +22,7 @@ from typing import (
     Callable,
     Hashable,
     Final,
-    Sequence
+    Sequence,
 )
 from contextlib import contextmanager
 import itertools
@@ -35,6 +35,7 @@ import string
 import numpy as np
 import math
 import pickle
+
 
 class IDHashable:
     val: Any
@@ -101,8 +102,6 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     return lst1, lst2
 
 
-
-
 class MainTrace(NamedTuple):
     level: int
     trace_type: Type["Trace"]
@@ -132,7 +131,6 @@ class EvalTrace(Trace):
         return op.eval(*tracers, **params)
 
 
-
 class DType(NamedTuple):
     priority: int
     itemsize: int
@@ -160,33 +158,9 @@ class BaseArray:
         return self.dtype in (self.float16, self.float32)
 
     def is_unsigned(self) -> bool:
-        return  self.dtype is self.uint8
-    
+        return self.dtype is self.uint8
+
     def __getattr__(self, attr):
-        raise NotImplementedError
-    
-    def neg(self):
-        raise NotImplementedError
-    
-    def add(self, other):
-        raise NotImplementedError
-    
-    def sub(self, other):
-        raise NotImplementedError
-    
-    def mul(self, other):
-        raise NotImplementedError
-    
-    def div(self, other):
-        raise NotImplementedError
-    
-    def maximum(self, other):
-        raise NotImplementedError
-    
-    def equal(self, other):
-        raise NotImplementedError
-    
-    def not_equal(self, other):
         raise NotImplementedError
 
     __neg__ = lambda self: self.neg()
@@ -194,9 +168,10 @@ class BaseArray:
     __radd__ = lambda self, other: self.__class__.add(other, self)
     __sub__ = lambda self, other: self.sub(other)
     __rsub__ = lambda self, other: self.__class__.sub(other, self)
-    __mul__ = __rmul__ = mul
-    __div__ = div
-    __rdiv__ = lambda self, other: self.__class__.div(other, self)
+    __mul__  = lambda self, other: self.mul(other)
+    __rmul__  = lambda self, other: self.__class__.mul(other, self)
+    __div__  = lambda self, other: self.div(other)
+    __rdiv__  = lambda self, other: self.__class__.div(other, self)
     __truediv__ = __div__
     __truerdiv__ = __rdiv__
     __eq__ = lambda self, other: self.equal(other)
@@ -205,6 +180,7 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
+
 
 class ArrayBuffer:
     def __init__(self, val):
@@ -220,7 +196,6 @@ class Array(BaseArray):
         val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
         dtype: Optional[Any] = None,
     ):
-        # Decides whether point existing buffer or create new buffer
         self.buf = (
             val
             if isinstance(val, ArrayBuffer)
@@ -242,13 +217,11 @@ class Array(BaseArray):
             else:
                 return op
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
-        
-        
+
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)[6:-1]}"
 
     __str__ = __repr__
-
 
     def __getitem__(self, idx):
         if type(idx) in (tuple, list):
@@ -257,43 +230,6 @@ class Array(BaseArray):
 
     def __setitem__(self, idx, val):
         raise NotImplementedError
-
-def binaryop_decor(op_fn):
-    def wrapped_fn(x, y):
-        if type(x) in [bool, int, float, Array]:
-            x = y._trace.pure(x)
-        elif type(y) in [bool, int, float, Array]:
-            y = x._trace.pure(y)
-        bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
-        by = list(range((max(x.ndim, y.ndim) - y.ndim)))
-        bx = bx if len(bx) > 0 else None
-        by = by if len(by) > 0 else None
-        shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
-        x = x.broadcast(shape_ret, bx)
-        y = y.broadcast(shape_ret, by)
-        return op_fn(x, y)
-
-    return wrapped_fn
-
-
-def reduceop_decor(op_fn):
-    def wrapped_fn(x, axes=None, keepdims=False):
-        if axes is None:
-            axes = tuple(range(x.ndim))
-        elif isinstance(axes, int):
-            axes = (axes,)
-        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-        ret = op_fn(x, axes)
-
-        if keepdims:
-            if len(ret.shape) == 0:
-                shape = (1,)
-            else:
-                shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
-            ret = ret.reshape(shape)
-        return ret
-
-    return wrapped_fn
 
 
 class TracerArray(BaseArray):
@@ -311,10 +247,11 @@ class TracerArray(BaseArray):
     def __init__(self):
         raise NotImplementedError
 
-    @property
-    def aval(self):
-        return self.get_aval(self.val)
+    # @property
+    # def aval(self):
+    #     return self.get_aval(self.val)
 
+    aval = property(lambda self: self.get_aval(self.val))
     dtype = property(lambda self: self.val.dtype)
     shape = property(lambda self: self.val.shape)
     ndim = property(lambda self: self.val.ndim)
@@ -342,10 +279,26 @@ class TracerArray(BaseArray):
     def full_lower(self):
         return self
 
+    @staticmethod
+    def reduceop_patch(op_fn):
+        def wrapped_fn(x, axes=None, keepdims=False):
+            ret = op_fn(x, axes, keepdims)
+            if keepdims:
+                if len(ret.shape) == 0:
+                    shape = (1,)
+                else:
+                    shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
+                ret = ret.reshape(shape)
+            return ret
+
+        return wrapped_fn
+
     def __getattr__(self, attr):
         if attr in vars(ops).keys():
             op = getattr(ops, attr)
-            if op.op_type is not OpType.Other:
+            if op.op_type is OpType.Reduce:
+                return self.reduceop_patch(partial(op, self))
+            elif op.op_type is not OpType.Other:
                 return partial(op, self)
             else:
                 return op
@@ -357,252 +310,6 @@ class TracerArray(BaseArray):
     @property
     def ndim(self):
         return len(self.shape)
-
-    def constant(x, val):
-        return ops.Constant.do(x, val=val)
-
-    def convert(x, dtype):
-        return ops.Convert.do(x, dtype=dtype)
-
-    astype = convert
-
-    def exp(x):
-        return ops.Exp.do(x)
-
-    def log(x):
-        return ops.Log.do(x)
-
-    def neg(x):
-        return ops.Neg.do(x)
-
-    @binaryop_decor
-    def add(self, other):
-        return ops.Add.do(self, other)
-
-    @binaryop_decor
-    def sub(self, other):
-        return ops.Sub.do(self, other)
-
-    @binaryop_decor
-    def mul(self, other):
-        return ops.Mul.do(self, other)
-
-    @binaryop_decor
-    def div(self, other):
-        return ops.Div.do(self, other)
-
-    @binaryop_decor
-    def equal(self, other):
-        return ops.Equal.do(self, other)
-
-    @binaryop_decor
-    def maximum(self, other):
-        return ops.Maximum.do(self, other)
-
-    def __neg__(self):
-        return self.neg()
-
-    def __add__(self, other):
-        return self.add(other)
-
-    def __radd__(self, other):
-        return self.__class__.add(other, self)
-
-    def __sub__(self, other):
-        return self.sub(other)
-
-    def __rsub__(self, other):
-        return self.__class__.sub(other, self)
-
-    def __mul__(self, other):
-        return self.mul(other)
-
-    def __rmul__(self, other):
-        return self.__class__.mul(other, self)
-
-    def __div__(self, other):
-        return self.div(other)
-
-    def __rdiv__(self, other):
-        return self.__class__.div(other, self)
-
-    def __truediv__(self, other):
-        return self.div(other)
-
-    def __rtruediv__(self, other):
-        return self.__class__.div(other, self)
-
-    def __pow__(self, other):
-        return self.pow(other)
-
-    def __bool__(self):
-        return self.aval._bool(self)
-
-    def __nonzero__(self):
-        return self.aval._nonzero(self)
-
-    def __ge__(self, x):
-        return self.maximum(x).equal(self)
-
-    def __le__(self, x):
-        return self.maximum(x).equal(x)
-
-    def __lt__(self, x):
-        return 1.0 - (self >= x)
-
-    def __gt__(self, x):
-        return 1.0 - (self <= x)
-
-    def __eq__(self, x):
-        return self.equal(x)
-
-    def __ne__(self, x):
-        return 1.0 - self.equal(x)
-
-    @reduceop_decor
-    def sum(self, axes=None, keepdims=False):
-        return ops.Sum.do(self, axes=axes, keepdims=keepdims)
-
-    @reduceop_decor
-    def max(self, axes=None, keepdim=False):
-        return ops.Max.do(self, axes=axes)
-
-    # Shape
-    def broadcast(self, shape, axes=None):
-        # if axes is None:
-        #     axes = tuple(range(self.ndim))
-        # elif isinstance(axes, int):
-        if isinstance(axes, int):
-            axes = (axes,)
-        if axes is not None:
-            axes = tuple(a if a >= 0 else a + len(self.shape) for a in axes)
-        return ops.Broadcast.do(self, shape=shape, axes=axes)
-
-    def reshape(self, shape):
-        if -1 in shape:
-            others = math.prod([d for d in shape if d != -1])
-            numel = math.prod(self.shape)
-            shape = tuple(d if d != -1 else (numel // others) for d in shape)
-        return ops.Reshape.do(self, shape=shape)
-
-    def transpose(self, perm):
-        return ops.Transpose.do(self, perm=perm)
-
-    def slice(self, starts, limits, strides):
-        return ops.Slice.do(self, starts=starts, limits=limits, strides=strides)
-
-    def pad(self, lo, hi, interior=None, value=0):
-        if interior is None:
-            interior = tuple([0] * len(lo))
-        assert len(lo) == len(hi) == len(interior)
-        return ops.Pad.do(self, lo=lo, hi=hi, interior=interior, value=value)
-
-    def __getitem__(self, idx):
-        def _is_simple_reverse_slice(idx: Any) -> bool:
-            return (
-                isinstance(idx, slice)
-                and idx.start is idx.stop is None
-                and isinstance(idx.step, int)
-                and idx.step == -1
-            )
-
-        def _is_integer_index(idx: Any) -> bool:
-            return isinstance(idx, (int, np.integer)) and not isinstance(
-                idx, (bool, np.bool_)
-            )
-
-        def _is_valid_integer_index_for_slice(idx, size, mode):
-            if size == 0:
-                return False
-            if _is_integer_index(idx):
-                return -size <= idx < size
-            try:
-                shape, dtype = np.shape(idx), idx.dtype
-            except:
-                return False
-            if shape == () and np.issubdtype(dtype, np.integer):
-                True
-            return False
-
-        def _is_contiguous_slice(idx):
-            return (
-                isinstance(idx, slice)
-                and (idx.start is None or _is_integer_index(idx.start))
-                and (idx.stop is None or _is_integer_index(idx.stop))
-                and (
-                    idx.step is None or (_is_integer_index(idx.step) and idx.step == 1)
-                )
-            )
-
-        arr = self
-        # attempt to compute _rewriting_take via lax.slice(); return None if not possible.
-        idx = idx if isinstance(idx, tuple) else (idx,)
-        if (
-            not all(isinstance(i, int) for i in arr.shape)
-            or (len(idx) > arr.ndim)
-            or (any(i is None for i in idx))
-        ):
-            raise NotImplementedError
-
-        simple_revs = {i for i, ind in enumerate(idx) if _is_simple_reverse_slice(ind)}
-        int_indices = {
-            i
-            for i, (ind, size) in enumerate(zip(idx, arr.shape))
-            if _is_valid_integer_index_for_slice(ind, size, mode)
-        }
-        contiguous_slices = {
-            i for i, ind in enumerate(idx) if _is_contiguous_slice(ind)
-        }
-
-        has_partial_slices = any(
-            idx[i].indices(arr.shape[i]) != (0, arr.shape[i], 1)
-            for i in contiguous_slices
-        )
-        if len(simple_revs) + len(int_indices) + len(contiguous_slices) != len(idx):
-            return None
-
-        if simple_revs:
-            arr = arr.flip(tuple(simple_revs))
-            idx = tuple(
-                slice(None) if i in simple_revs else ind for i, ind in enumerate(idx)
-            )
-            contiguous_slices |= simple_revs
-
-        if not (int_indices or has_partial_slices):
-            return arr
-
-        idx += (arr.ndim - len(idx)) * (slice(None),)
-        start_indices: Sequence[ArrayLike] = []
-        slice_sizes: Sequence[int] = []
-
-        for ind, size in list_zip(idx, arr.shape):
-            if isinstance(ind, slice):
-                start, stop, step = ind.indices(size)
-                assert step == 1  # checked above
-                start_indices.append(start)
-                slice_sizes.append(max(0, stop - start))
-        else:
-            assert np.issubdtype(ind.dtype, np.integer)  # checked above
-            assert np.shape(ind) == ()  # checked above
-            start_indices.append(ind)
-            slice_sizes.append(1)
-        if len(start_indices) > 1:
-            start_indices = promote_dtypes(*start_indices)
-        arr = arr.slice(start_indices=start_indices, slice_sizes=slice_sizes)
-        if int_indices:
-            arr = arr.squeeze(tuple(int_indices))
-        return arr
-
-    def __setitem__(self, idx, val):
-        raise NotImplementedError
-
-    def gather(
-        self,
-        gather_indices,
-        dnums,
-        gather_slice_shape,
-    ):
-        return ops.Gather.do(self, gather_indices, dnums, gather_slice_shape)
 
 
 class Empty:
@@ -648,9 +355,7 @@ def tree_flatten(x: Any) -> Any:
 
         if node_type:
             node_metadata, children = node_type.to_iterable(x)
-            children_flat, child_trees = unzip2(
-                list_map(_tree_flatten, children)
-            )
+            children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
             flattened = itertools.chain.from_iterable(children_flat)
             return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
         else:
@@ -763,7 +468,6 @@ class Runtime:
             return val
 
 
-
 class Backend:
     def __init__(self, name, default_dtype=Array.float32):
         self.name = name
@@ -800,14 +504,18 @@ class Backend:
     def set_impl(self, op):
         def set_impl_(fn):
             self.impls[op] = fn
+
         return set_impl_
 
-    
     # def set_run_impl(self, fn):
     #     self.run_impl = partial(fn, self)
 
     def run_impl(self, op, *args, **kwargs):
-        return Array(ArrayBuffer(self.impls[op](*args, **kwargs))) #     raise NotImplementedError
+        args = [a.val for a in args]
+        return Array(
+            ArrayBuffer(self.impls[op](*args, **kwargs))
+        )  #     raise NotImplementedError
+
     #     # self.op_impls[op_name](*args, **kwargs)
 
     def set_input_handler(self, typ, fn):
@@ -835,6 +543,7 @@ class JitFn:
 
 
 RT = Runtime()
+
 
 class ArrayShape:
     array_abstraction_level = 1
@@ -897,12 +606,20 @@ class Op:
         self.vmap = raise_not_implemented
         self.T = raise_not_implemented
         self.shape_eval = raise_not_implemented
-    
+        self.args_fixer = None
+
     def impl(self, *args, **kwargs):
+        if self.args_fixer is not None:
+            args, kwargs = self.args_fixer(*args, **kwargs)
         return backend.run_impl(self, *args, **kwargs)
 
     def __call__(self, *args, **kwargs):
+        if self.args_fixer is not None:
+            args, kwargs = self.args_fixer(*args, **kwargs)
         return RT.bind1(self, *args, **kwargs)[0]
+
+    def set_args_fixer(self, fn):
+        self.args_fixer = fn
 
     def set_eval(self, fn):
         self.eval = fn
@@ -924,7 +641,6 @@ class Op:
             self[backend] = impl
 
         return add_impl_
-    
 
     @classmethod
     def unary(cls, name):
@@ -950,6 +666,23 @@ class Op:
     @classmethod
     def binary(cls, name):
         op = cls(name, OpType.Binary)
+
+        @op.set_args_fixer
+        def fn(x, y, **kwargs):
+            # if x.shape == y.shape:
+            # #     return (x, y), kwargs
+            # if type(x) in [bool, int, float, Array]:
+            #     x = y._trace.pure(x)
+            # elif type(y) in [bool, int, float, Array]:
+            #     y = x._trace.pure(y)
+            bx = list(range((max(x.ndim, y.ndim) - x.ndim)))
+            by = list(range((max(x.ndim, y.ndim) - y.ndim)))
+            bx = bx if len(bx) > 0 else None
+            by = by if len(by) > 0 else None
+            shape_ret = tuple(max(sx, sy) for sx, sy in zip(x.shape, y.shape))
+            x = x.broadcast(shape=shape_ret, axes=bx)
+            y = y.broadcast(shape=shape_ret, axes=by)
+            return (x, y), kwargs
 
         @op.set_vmap
         def fn(self, axis_size, vals_in, dims_in, **params):
@@ -982,6 +715,15 @@ class Op:
     @classmethod
     def reduce(cls, name):
         op = cls(name, OpType.Reduce)
+
+        @op.set_args_fixer
+        def fn(x, axes=None, keepdims=False):
+            if axes is None:
+                axes = tuple(range(x.ndim))
+            elif isinstance(axes, int):
+                axes = (axes,)
+            axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+            return (x,), dict(axes=axes, keepdims=keepdims)
 
         @op.set_vmap
         def fn(axis_size, vals_in, dims_in, **params):
@@ -1016,11 +758,13 @@ class Op:
             def fn(*args, **kwargs):
                 out = fn_(*args, **kwargs)
                 return [out]
+
             @op.set_jvp
             def fn(*args, **kwargs):
                 out = fn_(*args, **kwargs)
                 out_jvp = Array.ones_like(out)
                 return [out], [out_jvp]
+
         op.set_load_fn = set_load_fn
 
         @op.set_T
@@ -1029,12 +773,15 @@ class Op:
 
         return op
 
-#========================
+
+# ========================
 # Ops
-#========================
+# ========================
+
 
 class OpsDir:
     pass
+
 
 ops = OpsDir()
 
@@ -1044,6 +791,7 @@ class ProcsDir:
         setattr(self, fn.__name__, fn)
         del fn
 
+
 procs = ProcsDir()
 
 # -----------------------
@@ -1051,6 +799,7 @@ procs = ProcsDir()
 # -----------------------
 
 ops.stop_gradient = Op.unary("stop_gradient")
+
 
 @ops.stop_gradient.set_eval
 def fn(x):
@@ -1366,6 +1115,7 @@ ops.max = Op.reduce("max")
 def fn(x, axes):
     return [x.max(axes)]
 
+
 @ops.max.set_jvp
 def fn(primals, tangents, axes):
     (x,), (x_dot,) = primals, tangents
@@ -1378,6 +1128,7 @@ def fn(primals, tangents, axes):
 
     return [eval_out], [jvp_out]
 
+
 @ops.max.set_T
 def fn(cts, x, *, axes):
     (z,) = cts
@@ -1386,9 +1137,11 @@ def fn(cts, x, *, axes):
 
 ops.sum = Op.reduce("sum")
 
+
 @ops.sum.set_eval
 def fn(x, *, axes, keepdims):
     return [x.sum(axes, keepdims)]
+
 
 @ops.sum.set_jvp
 def fn(primals, tangents, *, axes, keepdims):
@@ -1396,6 +1149,7 @@ def fn(primals, tangents, *, axes, keepdims):
     eval_out = x.sum(axes, keepdims)
     jvp_out = x_dot.sum(axes, keepdims)
     return [eval_out], [jvp_out]
+
 
 @ops.sum.set_T
 def fn(cts, x, *, axes, keepdims):
@@ -1405,12 +1159,22 @@ def fn(cts, x, *, axes, keepdims):
     return [out]
 
 
-
 # -----------------------
 # ShapeOps
 # -----------------------
 
 ops.broadcast = Op.shape("broadcast")
+
+
+@ops.broadcast.set_args_fixer
+def fn(x, *, shape, axes):
+    if isinstance(axes, int):
+        axes = (axes,)
+    if axes is not None:
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+    return (x,), dict(shape=shape, axes=axes)
+
+
 @ops.broadcast.set_eval
 def fn(x, *, shape, axes):
     if axes is not None:
@@ -1418,6 +1182,7 @@ def fn(x, *, shape, axes):
             x = x.expand_dims(a)
     out = x.broadcast_to(shape)
     return [out]
+
 
 @ops.broadcast.set_vmap
 def fn(axis_size, vals_in, dims_in, *, shape, axes):
@@ -1436,6 +1201,7 @@ def fn(axis_size, vals_in, dims_in, *, shape, axes):
 
     return [x.broadcast(shape, axes)], [x_bdim]
 
+
 @ops.broadcast.set_jvp
 def fn(primals, tangents, *, shape, axes):
     (x,), (x_dot,) = primals, tangents
@@ -1444,9 +1210,11 @@ def fn(primals, tangents, *, shape, axes):
         [x_dot.broadcast(shape=shape, axes=axes)],
     )
 
+
 @ops.broadcast.set_shape_eval
 def fn(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
+
 
 @ops.broadcast.set_T
 def fn(cts, x, *, shape, axes):
@@ -1465,18 +1233,32 @@ def fn(cts, x, *, shape, axes):
 
 
 ops.reshape = Op.shape("reshape")
+
+
+@ops.reshape.set_args_fixer
+def fn(x, *, shape):
+    if -1 in shape:
+        others = math.prod([d for d in shape if d != -1])
+        numel = math.prod(x.shape)
+        shape = tuple(d if d != -1 else (numel // others) for d in shape)
+    return (x,), dict(shape=shape)
+
+
 @ops.reshape.set_eval
 def fn(x, *, shape):
     return [x.reshape(shape)]
+
 
 @ops.reshape.set_jvp
 def fn(primals, tangents, *, shape):
     (x,), (x_dot,) = primals, tangents
     return [x.reshape(shape)], [x_dot.reshape(shape)]
 
+
 @ops.reshape.set_shape_eval
 def fn(x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
+
 
 @ops.reshape.set_T
 def fn(cts, x, *, shape):
@@ -1486,9 +1268,11 @@ def fn(cts, x, *, shape):
 
 ops.transpose = Op.shape("transpose")
 
+
 @ops.transpose.set_eval
 def fn(x, *, perm):
     return [x.transpose(perm)]
+
 
 @ops.transpose.set_vmap
 def fn(axis_size, vals_in, dims_in, *, perm):
@@ -1504,15 +1288,18 @@ def fn(axis_size, vals_in, dims_in, *, perm):
     # breakpoint()
     return [x.tranpose(perm)], [x_bdim]
 
+
 @ops.transpose.set_jvp
 def fn(primals, tangents, *, perm):
     (x,), (x_dot,) = primals, tangents
     return [x.transpose(perm)], [x_dot.transpose(perm)]
 
+
 @ops.transpose.set_shape_eval
 def fn(x: ArrayShape, *, perm: Sequence[int]) -> List[ArrayShape]:
     shape = [x.shape[i] for i in perm]
     return [ArrayShape(shape, x.dtype)]
+
 
 @ops.transpose.set_T
 def fn(cts, x, *, perm):
@@ -1522,9 +1309,18 @@ def fn(cts, x, *, perm):
 
 ops.pad = Op.shape("pad")
 
+
 @ops.pad.set_eval
 def fn(x, *, lo, hi, interior, value):
     return [x.pad(lo, hi, interior, value)]
+
+
+@ops.pad.set_args_fixer
+def fn(x, *, lo, hi, interior, value):
+    if interior is None:
+        interior = tuple([0] * len(lo))
+    return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
+
 
 @ops.pad.set_vmap
 def fn(axis_size, vals_in, dims_in, *, perm):
@@ -1547,10 +1343,12 @@ def fn(axis_size, vals_in, dims_in, *, perm):
     broadcasted_padding = broadcast_in_dim(padding_value, x.shape, (operand_bdim,))
     return select(mask, x, broadcasted_padding), operand_bdim
 
+
 @ops.pad.set_jvp
 def fn(primals, tangents, *, lo, hi, interior, value):
     (x,), (x_dot,) = primals, tangents
     return [x.pad(lo, hi, interior, value)], [x_dot.pad(lo, hi, interior, value)]
+
 
 @ops.pad.set_shape_eval
 def fn(x: ArrayShape, *, lo, hi, interior, value) -> List[ArrayShape]:
@@ -1572,6 +1370,7 @@ def fn(x: ArrayShape, *, lo, hi, interior, value) -> List[ArrayShape]:
         )
     return [res]
 
+
 @ops.pad.set_T
 def fn(cts, x, *, lo, hi, interior, value):
     (z,) = cts
@@ -1589,10 +1388,14 @@ def fn(cts, x, *, lo, hi, interior, value):
     res = t_op() if isinstance(x, UndefPrimal) else None
     return [res]
 
+
 ops.slice = Op.shape("shape")
+
+
 @ops.slice.set_eval
 def fn(x, *, starts, limits, strides):
     return [x.slice(starts, limits, strides)]
+
 
 @ops.slice.set_vmap
 def fn(axis_size, vals_in, dims_in, *, starts, limits, strides):
@@ -1615,17 +1418,15 @@ def fn(axis_size, vals_in, dims_in, *, starts, limits, strides):
     out = x.slice(new_start_indices, new_limit_indices, new_strides)
     return out, x_bdim
 
+
 @ops.slice.set_jvp
 def fn(primals, tangents, *, starts, limits, strides):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice(starts, limits, strides)], [
-        x_dot.slice(starts, limits, strides)
-    ]
+    return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
+
 
 @ops.slice.set_shape_eval
-def fn(
-    x: ArrayShape, *, starts, limits, strides: Sequence[int]
-) -> List[ArrayShape]:
+def fn(x: ArrayShape, *, starts, limits, strides: Sequence[int]) -> List[ArrayShape]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
             limit if type(start) is int and start == 0 else limit - start
@@ -1637,6 +1438,7 @@ def fn(
         x = np.zeros_like(x.shape)
         x = x[tuple(slice(s, l, r) for s, l, r in zip(starts, limits, strides))]
         return [ArrayShape(x.shape, x.dtype)]
+
 
 @ops.slice.set_T
 def T(cts, x, *, starts, limits, strides):
@@ -1666,51 +1468,62 @@ def T(cts, x, *, starts, limits, strides):
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
+
 ops.flip = Op.shape("flip")
+
 
 @ops.flip.set_eval
 def fn(x, *, axes):
     return [x.flip(axes)]
 
+
 @ops.flip.set_vmap
 def fn(axis_size, vals_in, dims_in, *, perm):
     raise NotImplementedError
+
 
 @ops.flip.set_jvp
 def fn(primals, tangents, *, axes):
     (x,), (x_dot,) = primals, tangents
     return [x.flip(axes)], [x_dot.flip(axes)]
 
+
 @ops.flip.set_shape_eval
 def fn(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
     shape = [x.shape[i] for i in padding]
     return [ArrayShape(shape, x.dtype)]
+
 
 @ops.flip.set_T
 def T(cts, *, axes):
     (z,) = cts
     return [z.flip(axes)]
 
+
 ops.concatenate = Op.shape("concatenate")
+
+
 @ops.concatenate.set_eval
-def fn(xs: Sequence[Any],*, axis):
+def fn(xs: Sequence[Any], *, axis):
     return [Array.concatenate(xs, axis=axis)]
+
 
 @ops.concatenate.set_vmap
 def fn(axis_size, vals_in, dims_in, *, perm):
     raise NotImplementedError
 
+
 @ops.concatenate.set_jvp
 def jvp(primals, tangents, *, axis):
     (xs,), (xs_dot,) = primals, tangents
-    return [Array.concatenate(xs, axis=axis)], [
-        Array.concatenate(xs_dot, axis=axis)
-    ]
+    return [Array.concatenate(xs, axis=axis)], [Array.concatenate(xs_dot, axis=axis)]
+
 
 @ops.concatenate.set_shape_eval
 def fn(x: ArrayShape, idx, *, axis: Sequence[int]) -> List[ArrayShape]:
     shape = [x.shape[i] for i in axis]
     return [ArrayShape(shape, x.dtype)]
+
 
 @ops.concatenate.set_T
 def T(cts, xs, *, axis):
@@ -1724,9 +1537,12 @@ def T(cts, xs, *, axis):
 
 ops.constant = Op.load("constant")
 
+
 @ops.constant.set_load_fn
 def fn(*, val, dtype):
     return Array(val, dtype)
+
+
 @ops.constant.set_shape_eval
 def fn(*, val, dtype) -> List[ArrayShape]:
     # TODO: not using numpy to extract shape
@@ -1735,48 +1551,69 @@ def fn(*, val, dtype) -> List[ArrayShape]:
 
 ops.full = Op.load("full")
 
+
 @ops.full.set_load_fn
 def fn(*, fill_value, shape, dtype):
     return Array.full(fill_value, shape, dtype)
+
+
 @ops.full.set_shape_eval
 def fn(*, fill_value, shape, dtype) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), dtype)]
 
+
 ops.random_uniform = Op.load("random_uniform")
+
 
 @ops.random_uniform.set_load_fn
 def fn(*, shape, dtype):
     return Array.random_uniform(shape, dtype)
+
+
 @ops.random_uniform.set_shape_eval
 def fn(*, shape, dtype) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), dtype)]
 
+
 ops.random_normal = Op.load("random_normal")
+
+
 @ops.random_normal.set_load_fn
 def fn(*, shape, dtype):
     return Array.random_normal(shape, dtype)
+
+
 @ops.random_normal.set_shape_eval
 def fn(*, shape, dtype) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), dtype)]
 
 
 ops.arange = Op.load("arange")
+
+
 @ops.arange.set_load_fn
 def fn(*, start, stop, stride, dtype):
     return Array.arange(start, stop, stride, dtype)
+
+
 @ops.arange.set_shape_eval
 def fn(*, start, stop, stride, dtype):
     return [ArrayShape(len(tuple(slice(start, stop, stride))), dtype)]
 
 
 ops.jit = Op("jit")
+
+
 @ops.jit.set_eval
 def fn(*args, hashable_prog, hashable_consts):
     jit_fn = RT.backend.callable(hashable_prog, hashable_consts)
     return [jit_fn(*args)]
 
+
 # Functions
 default_dtype = Array.default_dtype
+
+
 @procs.add
 @classmethod
 def zeros(cls, shape, dtype=default_dtype, **kwargs):
@@ -1935,6 +1772,7 @@ def reciprocal(self):
 numpy_backend = Backend("numpy")
 for typ in [bool, int, float, np.ndarray, np.float64, np.float32]:
     numpy_backend.set_input_handler(typ, np.asarray)
+
 
 @numpy_backend.set_compile
 def fn(self, prog, consts, in_avals, name) -> List[Any]:
@@ -2137,7 +1975,9 @@ def fn(x, *, axes):
 def fn(x, *, axes):
     return np.flip(x, axes)
 
+
 backend = numpy_backend
+
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -2216,8 +2056,7 @@ class BatchTrace(Trace):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
         return [
-            BatchTracerArray(self, x, bd)
-            for x, bd in list_zip(val_outs, bdim_outs)
+            BatchTracerArray(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)
         ]
 
     @property
@@ -2245,9 +2084,7 @@ def move_batch_axis(axis_size, src, dst, x):
 
 
 def vmap_flat(f, in_axes, *args):
-    axis_set = {
-        x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None
-    }
+    axis_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
     assert len(axis_set) == 1
     (axis_size,) = axis_set
     with RT.new_main(BatchTrace, axis_size) as main:
@@ -2303,8 +2140,7 @@ class JVPTrace(Trace):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray(self, x, t)
-            for x, t in list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
         ]
 
 
@@ -2316,9 +2152,7 @@ def jvp_flat(f, primals, tangents):
         ]
         outs = f(*tracers_in)
         tracers_out = [RT.full_raise(trace, out) for out in outs]
-        primals_out, tangents_out = unzip2(
-            (t.primal, t.tangent) for t in tracers_out
-        )
+        primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
     return primals_out, tangents_out
 
 
@@ -2970,4 +2804,3 @@ def jit(f):
 
     f_jitted.get_jit_fn = get_jit_fn
     return f_jitted
-

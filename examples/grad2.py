@@ -32,17 +32,18 @@ from slope import Array, ops
 # y = np.random.randn(2, 3)
 
 x = Array.randn((1, 3))
-breakpoint()
-y = Array.randn(2, 3)
-breakpoint()
+y = Array.randn((1, 3))
+
+
 def f(x, y):
     out = x
     out = ops.dot(out, ops.T(y))
     out = ops.softmax(out, axis=(1,))
     return out
 
+breakpoint()
 
-out, grad_out = ad.grad(f)(x, y)
+out, grad_out = slope.grad(f)(x, y)
 print(x)
 print(y)
 print(out)

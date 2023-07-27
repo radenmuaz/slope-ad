@@ -32,7 +32,7 @@ def f(x):
     y = y.broadcast(shape=(3,))
     y = y.sum(axes=(0,))
     return y
-
+breakpoint()
 
 x, x_dot = Array(3), Array(1.0)
 y, f_lin = slope.ad.linearize(f, x)

@@ -1,7 +1,7 @@
 import numpy as np
 
 from slope.nn.init import glorot_normal, normal
-from slope import base_ops
+from slope import ops
 
 
 def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):

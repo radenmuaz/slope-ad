@@ -1,3 +1,4 @@
+import types
 from typing import (
     Callable,
     NamedTuple,
@@ -35,7 +36,7 @@ import string
 import numpy as np
 import math
 import pickle
-
+import inspect
 
 class IDHashable:
     val: Any
@@ -141,7 +142,16 @@ class DType(NamedTuple):
         return f"dtypes.{self.name}"
 
 
-class BaseArray:
+class BaseArrayMeta(type):
+    def __getattr__(cls, attr):
+        if attr in vars(ops):
+            return getattr(ops, attr)
+        elif attr in cls.__dict__:
+            return cls.__dict__[attr]
+        else:
+            raise AttributeError(f"{cls.__name__} has no attribute {attr}")
+
+class BaseArray(metaclass=BaseArrayMeta):
     bool: Final[DType] = DType(0, 1, "bool", bool)
     float16: Final[DType] = DType(0, 2, "half", np.float16)
     float32: Final[DType] = DType(4, 4, "float", np.float32)
@@ -186,7 +196,6 @@ class ArrayBuffer:
     def __init__(self, val):
         self.val = val
 
-
 class Array(BaseArray):
     __array_priority__ = 2000
     default_dtype = BaseArray.float32
@@ -206,8 +215,9 @@ class Array(BaseArray):
     dtype = property(lambda self: self.buf.val.dtype)
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
-
+    
     def __getattr__(self, attr):
+        breakpoint()
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
         if attr in vars(ops).keys():
@@ -216,6 +226,12 @@ class Array(BaseArray):
                 return partial(op.impl, self)
             else:
                 return op
+        elif attr in vars(procs).keys():
+            proc = getattr(procs, attr)
+            if type(proc) is classmethod:
+                return partial(proc.__wrapped__, self.__class__)
+            else:
+                return partial(proc, self)
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
     def __repr__(self):
@@ -303,6 +319,12 @@ class TracerArray(BaseArray):
                 return partial(op, self)
             else:
                 return op
+        elif attr in vars(procs).keys():
+            proc = getattr(procs, attr)
+            if type(proc) is classmethod:
+                return partial(proc.__wrapped__, self.__class__)
+            else:
+                return partial(proc, self)
         try:
             return getattr(self.aval, attr)
         except AttributeError:
@@ -512,7 +534,7 @@ class Backend:
     #     self.run_impl = partial(fn, self)
 
     def run_impl(self, op, *args, **kwargs):
-        args = [a.val for a in args]
+        args = [a.val if isinstance(a, Array) else a for a in args]
         return Array(
             ArrayBuffer(self.impls[op](*args, **kwargs))
         )  #     raise NotImplementedError
@@ -607,18 +629,43 @@ class Op:
         self.vmap = raise_not_implemented
         self.T = raise_not_implemented
         self.shape_eval = raise_not_implemented
-        self.args_fixer = None
+    
+        self.args_fixer = lambda *args, **kwargs: (args, kwargs)
+    
+    def pack_args(self, args, kwargs):
+        sig = inspect.signature(self.eval)
+        args_strs = [k for k,v in sig.parameters.items() 
+                    if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD]
+        kwargs_strs = [k for k,v in sig.parameters.items() 
+                    if v.kind == inspect.Parameter.KEYWORD_ONLY]
+        breakpoint()
+        if len(args) > len(args_strs):
+            args, rest = args[:len(args_strs)], args[len(args_strs):]
+            new_kwargs = {}
+            for i, rest_arg in enumerate(rest):
+                k = kwargs_strs[i]
+                assert k not in kwargs.keys()
+                new_kwargs[k] = rest_arg
+            kwargs = {**new_kwargs, **kwargs}
+        elif len(args) < len(args_strs):
+            args = list(args)
+            for i, k in enumerate(args_strs):
+                if k in kwargs.keys():
+                    args.insert(i, kwargs[k])
+                    del kwargs[k]
+            assert len(args) == len(args_strs)
+        return args, kwargs
+
 
     def impl(self, *args, **kwargs):
-        if self.args_fixer is not None:
-            args, kwargs = self.args_fixer(*args, **kwargs)
         return backend.run_impl(self, *args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        if self.args_fixer is not None:
-            args, kwargs = self.args_fixer(*args, **kwargs)
-        return RT.bind1(self, *args, **kwargs)[0]
-
+        breakpoint()
+        args, kwargs = self.pack_args(args, kwargs)
+        args, kwargs = self.args_fixer(*args, **kwargs)
+        return RT.bind1(self, *args, **kwargs)
+    
     def set_args_fixer(self, fn):
         self.args_fixer = fn
 
@@ -636,12 +683,6 @@ class Op:
 
     def set_shape_eval(self, fn):
         self.shape_eval = fn
-
-    def add_impl(self, backend):
-        def add_impl_(impl):
-            self[backend] = impl
-
-        return add_impl_
 
     @classmethod
     def unary(cls, name):
@@ -703,6 +744,7 @@ class Op:
                 # breakpoint()
                 raise TypeError
             if ArrayShape.like(x) != ArrayShape.like(y):
+                breakpoint()
                 raise TypeError(f"{x} != {y}")
             return [ArrayShape(x.shape, x.dtype)]
 
@@ -757,16 +799,36 @@ class Op:
         op = cls(name, OpType.Load)
 
         def set_load_fn(fn_):
-            @op.set_eval
-            def fn(*args, **kwargs):
-                out = fn_(*args, **kwargs)
-                return [out]
+            sig = inspect.signature(fn_)
+            args_strs = [k for k,v in sig.parameters.items() 
+                        if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD]
+            kwargs_strs = [k for k,v in sig.parameters.items() 
+                        if v.kind == inspect.Parameter.KEYWORD_ONLY]
+            eval_code_str = f"""
+def fn({','.join(args_strs) + "," if len(args_strs) > 0 else ""} *, {','.join(kwargs_strs)}):
+    out = fn_(*args, **kwargs)
+    return [out]        
+            """
+            env = {}
+            eval_code = compile(eval_code_str, "<string>", "exec")
+            exec(eval_code, env)
+            op.set_eval(env["fn"])
 
-            @op.set_jvp
-            def fn(*args, **kwargs):
-                out = fn_(*args, **kwargs)
-                out_jvp = Array.ones_like(out)
-                return [out], [out_jvp]
+            unpack_code = (f"""
+({','.join(args_strs)}), {','.join([f'{a}_dot' for a in args_strs])} = primals, tangents
+jvp_code_str = f
+""" if len(args_strs) > 0 else "")
+            jvp_code_str = f"""
+def fn(primals, tangents, *, {','.join(kwargs_strs)}):
+    {unpack_code}
+    out = fn_(*args, **kwargs)
+    out_jvp = Array.ones_like(out)
+    return [out], [out_jvp]        
+            """
+            env = {}
+            eval_code = compile(jvp_code_str, "<string>", "exec")
+            exec(eval_code, env)
+            op.set_jvp(env["fn"])
 
         op.set_load_fn = set_load_fn
 
@@ -1566,19 +1628,21 @@ def fn(*, fill_value, shape, dtype) -> List[ArrayShape]:
 
 
 ops.random_uniform = Op.load("random_uniform")
+ops.rand = ops.random_uniform
 
 
 @ops.random_uniform.set_load_fn
-def fn(*, shape, dtype):
+def fn(*, shape, dtype=Array.default_dtype):
     return Array.random_uniform(shape, dtype)
 
 
 @ops.random_uniform.set_shape_eval
-def fn(*, shape, dtype) -> List[ArrayShape]:
+def fn(*, shape, dtype=Array.default_dtype) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), dtype)]
 
 
 ops.random_normal = Op.load("random_normal")
+ops.randn = ops.random_normal
 
 
 @ops.random_normal.set_load_fn
@@ -1743,7 +1807,7 @@ def log_softmax(self, axes=-1):
 @procs.add
 def dot(self, w):
     x = self.reshape((*self.shape[0:-1], 1, self.shape[-1]))
-    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T
+    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
 
@@ -1861,7 +1925,6 @@ def fn(self, prog, consts, in_avals, name) -> List[Any]:
 @numpy_backend.set_impl(ops.convert)
 def fn(
     x,
-    *,
     dtype,
 ):
     return np.astype(x, dtype)
@@ -1925,32 +1988,32 @@ def fn(x, axes, keepdims):
     return np.max(x, axis=axes, keepdims=keepdims)
 
 @numpy_backend.set_impl(ops.constant)
-def fn(*, val, dtype):
+def fn(val, dtype):
     return np.array(val, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.arange)
-def fn(*, start, stop, stride, dtype):
+def fn(start, stop, stride, dtype):
     return np.arange(start, stop, stride, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.full)
-def fn(*, fill_value, dtype):
+def fn(fill_value, dtype):
     return np.full(fill_value=fill_value, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_uniform)
-def fn(*, shape, dtype):
+def fn(shape, dtype):
     return np.random.uniform(size=shape, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_normal)
-def fn(*, shape, dtype):
+def fn(shape, dtype):
     return np.random.normal(size=shape, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.broadcast)
-def fn(x, *, shape, axes):
+def fn(x, shape, axes):
     ret = x
     if not axes is None:
         for a in sorted(axes):
@@ -1960,32 +2023,32 @@ def fn(x, *, shape, axes):
 
 
 @numpy_backend.set_impl(ops.reshape)
-def fn(x, *, shape):
+def fn(x, shape):
     return np.reshape(x, shape)
 
 
 @numpy_backend.set_impl(ops.pad)
-def fn(x, *, lo, hi, interior, value):
+def fn(x, lo, hi, interior, value):
     return np.pad({x}, list(zip(lo, hi)), constant_values={value})
 
 
 @numpy_backend.set_impl(ops.slice)
-def fn(x, *, starts, limits, strides):
+def fn(x, starts, limits, strides):
     return x[[slice(s, l, st) for s, l, st in zip(starts, limits, strides)]]
 
 
 @numpy_backend.set_impl(ops.concatenate)
-def fn(xs, *, axes):
+def fn(xs, axes):
     return np.concatenate(xs, axes)
 
 
 @numpy_backend.set_impl(ops.transpose)
-def fn(x, *, axes):
+def fn(x, axes):
     return np.transpose(x, axes)
 
 
 @numpy_backend.set_impl(ops.flip)
-def fn(x, *, axes):
+def fn(x, axes):
     return np.flip(x, axes)
 
 

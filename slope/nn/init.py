@@ -6,7 +6,7 @@ from typing import (
     Callable,
 )
 import math
-from slope.array import Array
+from slope import Array
 
 
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):

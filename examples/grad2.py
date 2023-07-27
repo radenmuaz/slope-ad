@@ -1,7 +1,7 @@
 import slope
 import numpy as np
-from slope import ad, base_ops
-from slope.array import Array
+from slope import Array, ops
+
 
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
@@ -31,32 +31,14 @@ from slope.array import Array
 # x = np.random.randn(1, 3)
 # y = np.random.randn(2, 3)
 
-
-# def f(x, y):
-#     out = x
-#     out = ops.dot(out, ops.T(y))
-#     out = ops.softmax(out, axis=(1,))
-#     out = ops.reduce_sum(out, axis=(0, 1))
-#     return out
-
-
-# out, grad_out = ad.grad(f)(x, y)
-# print(x)
-# print(y)
-# print(out)
-# print(grad_out)
-
-
-# dot product
-x = Array.randn(1, 3)
+x = Array.randn((1, 3))
+breakpoint()
 y = Array.randn(2, 3)
-
-
+breakpoint()
 def f(x, y):
-    out = x * x
-    # out = ops.mm(out, ops.T(y))
-    # out = ops.log_softmax(out, axes=(1,))
-    out = base_ops.sum(out, axes=(0, 1))
+    out = x
+    out = ops.dot(out, ops.T(y))
+    out = ops.softmax(out, axis=(1,))
     return out
 
 
@@ -65,6 +47,24 @@ print(x)
 print(y)
 print(out)
 print(grad_out)
+
+
+# dot product
+
+
+# def f(x, y):
+#     out = x * x
+#     # out = ops.mm(out, ops.T(y))
+#     # out = ops.log_softmax(out, axes=(1,))
+#     out = base_ops.sum(out, axes=(0, 1))
+#     return out
+
+
+# out, grad_out = ad.grad(f)(x, y)
+# print(x)
+# print(y)
+# print(out)
+# print(grad_out)
 
 
 # def f(x,y):

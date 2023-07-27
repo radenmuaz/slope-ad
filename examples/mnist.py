@@ -1,6 +1,7 @@
 import slope
-from slope import base_ops
+from slope import ops
 from slope.nn import init, layers, optim
+from slope import Array
 
 import time
 import itertools
@@ -9,7 +10,6 @@ import numpy as np
 from tqdm import tqdm
 
 import array
-from slope.array import Array
 import gzip
 import os
 from os import path
@@ -139,7 +139,7 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        loss, (g_params, _) = slope.ad.grad(loss_fn)(params, batch)
+        loss, (g_params, _) = slope.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()

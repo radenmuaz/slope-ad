@@ -1326,17 +1326,6 @@ def f(primals, tangents, *, shape, axes):
 def f(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
 
-
-
-# @numpy_backend.set_impl(broadcast)
-# def f(x, shape, axes=None):
-#     ret = x
-#     if not axes is None:
-#         for a in sorted(axes):
-#             ret = np.expand_dims(ret, a)
-#     ret = np.broadcast_to(ret, shape)
-#     return ret
-
 @broadcast.set_T
 def f(cts, x, *, shape, axes):
     (z,) = cts
@@ -1346,12 +1335,12 @@ def f(cts, x, *, shape, axes):
 
     x_ndim = len(x.aval.shape)
     if x_ndim < out.ndim:
-        b_axes = 0
-        for i in range(x_ndim):
-            if x.aval.shape[i] == out.shape[i]:
-                b_axes += 1
-        out = out.sum(b_axes, keepdims=False)
-    # out = z
+        b_axes = []
+        for i, dim in enumerate(out.shape):
+            if dim not in x.aval.shape:
+                b_axes += [i]
+        out = out.sum(tuple(b_axes), keepdims=False)
+    
     elif x.aval.shape != out.shape:
         b_axes = []
         for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):

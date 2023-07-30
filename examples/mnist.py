@@ -100,7 +100,7 @@ if __name__ == "__main__":
         # layers.Dense(200),
         # layers.Fn(lambda x: x.maximum(sp.zeros_like(x))),
         layers.Dense(10),
-        # layers.Fn(lambda x: x.log_softmax(axes=-1)          ),
+        layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
     out_shape, init_params = init_random_params((-1, 28 * 28))
 

@@ -31,7 +31,7 @@ import weakref
 from functools import lru_cache, reduce, partial
 from collections import defaultdict
 from enum import Enum, auto
-import operator as op
+import operator as operator_py
 import string
 import numpy as np
 import math
@@ -480,7 +480,7 @@ class Runtime:
         top_main = max_(
             (x._trace.main for x in xs if isinstance(x, TracerArray)),
             default=self.trace_stack[0],
-            key=op.attrgetter("level"),
+            key=operator_py.attrgetter("level"),
         )
         if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
             top_main = self.dynamic_trace
@@ -1266,7 +1266,6 @@ def f(primals, tangents, *, axes, keepdims=False):
 @sum.set_T
 def f(cts, x, *, axes, keepdims=False):
     (z,) = cts
-    out = z
     out = z.broadcast(x.aval.shape, None if keepdims else axes)
     return [out]
 
@@ -1328,24 +1327,37 @@ def f(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
 
 
+
+# @numpy_backend.set_impl(broadcast)
+# def f(x, shape, axes=None):
+#     ret = x
+#     if not axes is None:
+#         for a in sorted(axes):
+#             ret = np.expand_dims(ret, a)
+#     ret = np.broadcast_to(ret, shape)
+#     return ret
+
 @broadcast.set_T
 def f(cts, x, *, shape, axes):
     (z,) = cts
     out = z
-    # if len(axes) > 0:
-        # out = out.sum(axes, keepdims=True)
-    out = out.sum(axes, keepdims=False)
-    more_axes = []
-    # if len(x.aval.shape) == len(z.shape):
-    #     for i, (dx, dz) in enumerate(list_zip(x.aval.shape, z.shape)):
-    #         if dz > dx and i not in axes:
-    #             more_axes += [i]
-    #     out = out.sum(axes=tuple(more_axes), keepdims=True)
-    for i, (dx, dz) in enumerate(zip(x.aval.shape, z.shape)):
-        if dz > dx and i not in axes:
-            more_axes += [i]
-        out = out.sum(axes=tuple(more_axes), keepdims=True)
-    # print(axes, z.shape, x.aval.shape, more_axes, out.shape)
+    if x.aval.shape == z.shape:
+        return [out]
+
+    x_ndim = len(x.aval.shape)
+    if x_ndim < out.ndim:
+        b_axes = 0
+        for i in range(x_ndim):
+            if x.aval.shape[i] == out.shape[i]:
+                b_axes += 1
+        out = out.sum(b_axes, keepdims=False)
+    # out = z
+    elif x.aval.shape != out.shape:
+        b_axes = []
+        for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):
+            if dz > dx and i not in axes:
+                b_axes += [i]
+        out = out.sum(axes=tuple(b_axes), keepdims=True)
     if out.shape != x.aval.shape:
         print(f'not same {out.shape=}, {x.aval.shape=}')
         breakpoint()
@@ -2980,10 +2992,10 @@ def eval_prog_transposed(
 
     list_map(write_primal, prog.in_binders, args)
     list_map(write_cotangent, prog.outs, cotangents)
-    print(len(prog.instrs))
-    for i, instr in enumerate(prog.instrs[::-1]):
-        print(i, instr)
-    # for instr in prog.instrs[::-1]:
+    # print(len(prog.instrs))
+    # for i, instr in enumerate(prog.instrs[::-1]):
+    #     print(i, instr)
+    for instr in prog.instrs[::-1]:
         primals_in = list_map(read_primal, instr.inputs)
         cts_in = list_map(read_cotangent, instr.out_binders)
         x, params = primals_in, instr.params

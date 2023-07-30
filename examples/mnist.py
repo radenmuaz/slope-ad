@@ -121,7 +121,9 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sp.array(train_images[batch_idx]), sp.array(train_labels[batch_idx])
+                yield sp.array(train_images[batch_idx]), sp.array(
+                    train_labels[batch_idx]
+                )
 
     batches = data_stream()
 

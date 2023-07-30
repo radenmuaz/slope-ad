@@ -42,6 +42,7 @@ max_ = max
 zip_ = zip
 map_ = map
 
+
 class IDHashable:
     val: Any
 
@@ -145,8 +146,7 @@ class DType(NamedTuple):
         return f"dtypes.{self.name}"
 
 
-
-class BaseArray():
+class BaseArray:
     bool: Final[DType] = DType(0, 1, "bool", bool)
     float16: Final[DType] = DType(0, 2, "half", np.float16)
     float32: Final[DType] = DType(4, 4, "float", np.float32)
@@ -198,7 +198,7 @@ class ArrayBuffer:
 #             op = getattr(ops, attr)
 #             return op.impl
 #         elif attr in vars(procs):
-            
+
 #             proc = getattr(procs, attr)
 #             assert isinstance(proc, classmethod)
 #             return partial(proc.__wrapped__, cls)
@@ -207,19 +207,16 @@ class ArrayBuffer:
 #         else:
 #             raise AttributeError(f"{cls.__name__} has no attribute {attr}")
 
+
 # class Array(BaseArray, metaclass=ArrayMeta):
 class Array(BaseArray):
     __array_priority__ = 1000
 
-    def __init__(
-        self,
-        val: ArrayBuffer
-    ):
+    def __init__(self, val: ArrayBuffer):
         if not isinstance(val, ArrayBuffer):
             breakpoint()
         assert isinstance(val, ArrayBuffer)
         self.buf = val
-
 
     val = property(lambda self: self.buf.val)
     dtype = property(lambda self: self.buf.val.dtype)
@@ -254,14 +251,17 @@ class Array(BaseArray):
     def __setitem__(self, idx, val):
         raise NotImplementedError
 
+
 def array(
-        val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
-        dtype: Optional[Any] = None,
-    ):
-        return (Array(val)
-            if isinstance(val, ArrayBuffer)
-            else backend.run_impl(constant, val=val, dtype=dtype)
-        )
+    val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
+    dtype: Optional[Any] = None,
+):
+    return (
+        Array(val)
+        if isinstance(val, ArrayBuffer)
+        else backend.run_impl(constant, val=val, dtype=dtype)
+    )
+
 
 class TracerArray(BaseArray):
     TYPES = {
@@ -341,10 +341,9 @@ class TracerArray(BaseArray):
     @property
     def ndim(self):
         return len(self.shape)
-    
+
     def __repr__(self):
         return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
-
 
 
 class Empty:
@@ -377,7 +376,6 @@ class PyTreeDef(NamedTuple):
     child_treedefs: Tuple["PyTreeDef", ...]
 
     # def __repr__(self):
-        
 
 
 class Leaf:
@@ -403,16 +401,17 @@ def tree_flatten(x: Any) -> Any:
     children_iter, treedef = _tree_flatten(x)
     return list(children_iter), treedef
 
+
 def tree_unflatten(treedef: PyTreeDef, xs: List[Any]) -> Any:
     return _tree_unflatten(treedef, iter(xs))
+
+
 def _tree_unflatten(treedef: PyTreeDef, xs: Iterator) -> Any:
     if treedef is leaf:
         return next(xs)
     else:
         children = (_tree_unflatten(t, xs) for t in treedef.child_treedefs)
         return treedef.node_type.from_iterable(treedef.node_metadata, children)
-                
-
 
 
 def flatten_fun(f, in_tree):
@@ -546,25 +545,29 @@ class Backend:
     def set_impl(self, op):
         def set_impl_(fn):
             self.impls[op] = fn
+
         return set_impl_
 
     def run_impl(self, op, *args, **kwargs):
         def process_arg(a):
-            return (a.val if isinstance(a, BaseArray) else
-                      self.dtype_map[a] if isinstance(a, DType) else 
-                      a)
+            return (
+                a.val
+                if isinstance(a, BaseArray)
+                else self.dtype_map[a]
+                if isinstance(a, DType)
+                else a
+            )
+
         args_ = args
         kwargs_ = kwargs
         args = tuple([process_arg(a) for a in args])
         kwargs = {k: process_arg(v) for k, v in kwargs.items()}
         try:
-            val  =self.impls[op](*args, **kwargs)
+            val = self.impls[op](*args, **kwargs)
         except Exception as e:
             print(e)
             breakpoint()
-        return Array(
-            ArrayBuffer(val)
-        ) 
+        return Array(ArrayBuffer(val))
 
     def set_input_handler(self, typ, fn):
         self.input_handlers[typ] = fn
@@ -584,6 +587,7 @@ class JitFn:
 
 
 RT = Runtime()
+
 
 class ArrayShape:
     array_abstraction_level = 1
@@ -648,7 +652,7 @@ class Op:
         self.shape_eval = raise_not_implemented
 
         self.args_fixer = lambda *args, **kwargs: (args, kwargs)
-    
+
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
 
@@ -857,9 +861,11 @@ class Op:
 class OpsDir:
     def register(self, op):
         setattr(self, op.name, op)
+
     def alias(self, op, name):
         assert op.name in vars(self)
         setattr(self, name, getattr(self, op.name))
+
 
 ops = OpsDir()
 
@@ -878,6 +884,7 @@ procs = ProcsDir()
 
 stop_gradient = Op.unary("stop_gradient")
 ops.register(stop_gradient)
+
 
 @stop_gradient.set_eval
 def f(x):
@@ -924,6 +931,7 @@ def f(cts, x):
 sqrt = Op.unary("sqrt")
 ops.register(sqrt)
 
+
 @sqrt.set_eval
 def f(x):
     return [x.sqrt()]
@@ -946,6 +954,7 @@ def f(cts, x):
 sin = Op.unary("sin")
 ops.register(sin)
 
+
 @sin.set_eval
 def f(x):
     return [x.sin()]
@@ -966,6 +975,7 @@ def f(cts, x):
 
 exp = Op.unary("exp")
 ops.register(exp)
+
 
 @exp.set_eval
 def f(x):
@@ -988,6 +998,7 @@ def f(cts, x):
 log = Op.unary("log")
 ops.register(log)
 
+
 @log.set_eval
 def f(x):
     return [x.log()]
@@ -1009,6 +1020,7 @@ def f(cts, x):
 neg = Op.unary("neg")
 ops.register(neg)
 
+
 @neg.set_eval
 def f(x):
     return [-x]
@@ -1028,6 +1040,7 @@ def f(cts, x):
 
 relu = Op.unary("relu")
 ops.register(relu)
+
 
 @relu.set_eval
 def f(x):
@@ -1245,7 +1258,6 @@ def f(cts, x, *, axes, keepdims=False):
     return [z.broadcast(x.aval.shape, None if keepdims else axes)]
 
 
-
 sum = Op.reduce("sum")
 ops.register(sum)
 
@@ -1285,7 +1297,7 @@ def f(x, *, shape, axes):
     elif axes is None:
         axes = ()
     else:
-        axes = tuple(a if a>= 0 else a + len(x.shape) for a in axes)
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
     return (x,), dict(shape=shape, axes=axes)
 
 
@@ -1326,6 +1338,7 @@ def f(primals, tangents, *, shape, axes):
 def f(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
 
+
 @broadcast.set_T
 def f(cts, x, *, shape, axes):
     (z,) = cts
@@ -1340,7 +1353,7 @@ def f(cts, x, *, shape, axes):
             if dim not in x.aval.shape:
                 b_axes += [i]
         out = out.sum(tuple(b_axes), keepdims=False)
-    
+
     elif x.aval.shape != out.shape:
         b_axes = []
         for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):
@@ -1348,7 +1361,7 @@ def f(cts, x, *, shape, axes):
                 b_axes += [i]
         out = out.sum(axes=tuple(b_axes), keepdims=True)
     if out.shape != x.aval.shape:
-        print(f'not same {out.shape=}, {x.aval.shape=}')
+        print(f"not same {out.shape=}, {x.aval.shape=}")
         breakpoint()
     return [out]
 
@@ -1702,7 +1715,7 @@ def f(*, shape, fill_value, dtype=BaseArray.default_dtype):
 
 @full.set_jvp
 def f(primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = backend.run_impl(full, shape,fill_value, dtype)
+    out = backend.run_impl(full, shape, fill_value, dtype)
     out_jvp = ones_like(out)
     return [out], [out_jvp]
 
@@ -1966,10 +1979,10 @@ numpy_backend = Backend("numpy")
 for dtype in [bool, int, float, np.ndarray, np.float64, np.float32]:
     numpy_backend.set_input_handler(dtype, np.asarray)
 numpy_dtype_map = {
-    BaseArray.float32:np.float32,
-    BaseArray.int64:np.int64,
-    BaseArray.int8:np.int8,
-    BaseArray.bool:bool
+    BaseArray.float32: np.float32,
+    BaseArray.int64: np.int64,
+    BaseArray.int8: np.int8,
+    BaseArray.bool: bool,
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
@@ -2123,7 +2136,6 @@ def f(x, y):
 @numpy_backend.set_impl(maximum)
 def f(x, y):
     return np.maximum(x, y)
-
 
 
 @numpy_backend.set_impl(sum)
@@ -2948,7 +2960,7 @@ def vjp(f, *primals_in):
     def f_vjp(*cotangents_out):
         cotangents_out_flat, _ = tree_flatten(cotangents_out)
         cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
-        
+
         return tree_unflatten(in_tree, cotangents_in_flat)
 
     return primals_out, f_vjp
@@ -2993,7 +3005,7 @@ def eval_prog_transposed(
         cts_out = instr.op.T(cts_in, *x, **params)
         # cts_out = instr.op.T(cts_in, *primals_in, **instr.params)
         list_map(write_cotangent, instr.inputs, cts_out)
-    
+
     ret = [
         read_cotangent(v)
         for v, x in list_zip(prog.in_binders, args)
@@ -3031,9 +3043,7 @@ def jit(f):
         nonlocal hashable_consts, hashable_prog
         hashable_consts = tuple(map(IDHashable, consts))
         hashable_prog = IDHashable(prog)
-        outs = jit(
-            *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
-        )
+        outs = jit(*args, hashable_prog=hashable_prog, hashable_consts=hashable_consts)
         return tree_unflatten(out_tree, outs)
 
     f_jitted.get_jit_fn = get_jit_fn

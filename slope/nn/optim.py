@@ -1,4 +1,4 @@
-import slope
+import slope as sp
 from typing import Any, Callable, NamedTuple, Tuple, Union
 import numpy as np
 from collections import namedtuple
@@ -8,7 +8,7 @@ from functools import partial
 OptimizerState = namedtuple(
     "OptimizerState", ["packed_state", "tree_def", "subtree_defs"]
 )
-slope.RT.register_pytree_node(
+sp.RT.register_pytree_node(
     OptimizerState,
     lambda xs: ((xs.packed_state,), (xs.tree_def, xs.subtree_defs)),
     lambda data, xs: OptimizerState(xs[0], data[0], data[1]),
@@ -51,17 +51,17 @@ def optimizer(
 
         @functools.wraps(init)
         def tree_init(x0_tree):
-            x0_flat, tree = slope.tree_flatten(x0_tree)
+            x0_flat, tree = sp.tree_flatten(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = slope.unzip2(
-                slope.list_map(slope.tree_flatten, initial_states)
+            states_flat, subtrees = sp.unzip2(
+                sp.list_map(sp.tree_flatten, initial_states)
             )
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)
         def tree_update(i, grad_tree, opt_state):
             states_flat, tree, subtrees = opt_state
-            grad_flat, tree2 = slope.tree_flatten(grad_tree)
+            grad_flat, tree2 = sp.tree_flatten(grad_tree)
             if tree2 != tree:
                 msg = (
                     "optimizer update function was passed a gradient tree that did "
@@ -69,10 +69,10 @@ def optimizer(
                     "initialized: parameter tree {} and grad tree {}."
                 )
                 raise TypeError(msg.format(tree, tree2))
-            states = slope.list_map(slope.tree_unflatten, subtrees, states_flat)
-            new_states = slope.list_map(partial(update, i), grad_flat, states)
-            new_states_flat, subtrees2 = slope.unzip2(
-                slope.list_map(slope.tree_flatten, new_states)
+            states = sp.list_map(sp.tree_unflatten, subtrees, states_flat)
+            new_states = sp.list_map(partial(update, i), grad_flat, states)
+            new_states_flat, subtrees2 = sp.unzip2(
+                sp.list_map(sp.tree_flatten, new_states)
             )
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
@@ -86,9 +86,9 @@ def optimizer(
         @functools.wraps(get_params)
         def tree_get_params(opt_state):
             states_flat, tree, subtrees = opt_state
-            states = slope.list_map(slope.tree_unflatten, subtrees, states_flat)
-            params = slope.list_map(get_params, states)
-            return slope.tree_unflatten(tree, params)
+            states = sp.list_map(sp.tree_unflatten, subtrees, states_flat)
+            params = sp.list_map(get_params, states)
+            return sp.tree_unflatten(tree, params)
 
         return Optimizer(tree_init, tree_update, tree_get_params)
 
@@ -128,7 +128,7 @@ def sgd_momentum(step_size: Schedule, mass: float):
     step_size = make_schedule(step_size)
 
     def init(x0):
-        v0 = np.zeros_like(x0)
+        v0 = sp.zeros_like(x0)
         return x0, v0
 
     def update(i, g, state):
@@ -295,9 +295,9 @@ def unpack_optimizer_state(opt_state):
       A pytree with JoinPoint leaves that contain a second level of pytrees.
     """
     states_flat, tree_def, subtree_defs = opt_state
-    subtrees = map(slope.tree_unflatten, subtree_defs, states_flat)
+    subtrees = map(sp.tree_unflatten, subtree_defs, states_flat)
     sentinels = [JoinPoint(subtree) for subtree in subtrees]
-    return slope.tree_unflatten(tree_def, sentinels)
+    return sp.tree_unflatten(tree_def, sentinels)
 
 
 def pack_optimizer_state(marked_pytree):
@@ -313,8 +313,8 @@ def pack_optimizer_state(marked_pytree):
     Returns:
       An equivalent OptimizerState to the input argument.
     """
-    sentinels, tree_def = slope.tree_flatten(marked_pytree)
+    sentinels, tree_def = sp.tree_flatten(marked_pytree)
     assert all(isinstance(s, JoinPoint) for s in sentinels)
     subtrees = [s.subtree for s in sentinels]
-    states_flat, subtree_defs = slope.unzip2(map(slope.tree_flatten, subtrees))
+    states_flat, subtree_defs = sp.unzip2(map(sp.tree_flatten, subtrees))
     return OptimizerState(states_flat, tree_def, subtree_defs)

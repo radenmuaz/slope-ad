@@ -1,7 +1,5 @@
-import slope
-from slope import ops
+import slope as sp
 from slope.nn import init, layers, optim
-from slope import Array
 
 import time
 import itertools
@@ -23,7 +21,6 @@ _DATA = "/tmp/slope_data/"
 
 
 def download(url, filename):
-    """Download a url to a file in the JAX data temp directory."""
     if not path.exists(_DATA):
         os.makedirs(_DATA)
     out_file = path.join(_DATA, filename)
@@ -33,13 +30,10 @@ def download(url, filename):
 
 
 def one_hot(x, k, dtype=np.float32):
-    """Create a one-hot encoding of x of size k."""
     return np.array(x[:, None] == np.arange(k), dtype)
 
 
 def mnist_raw():
-    """Download and parse the raw MNIST dataset."""
-    # CVDF mirror of http://yann.lecun.com/exdb/mnist/
     base_url = "https://storage.googleapis.com/cvdf-datasets/mnist/"
 
     def parse_labels(filename):
@@ -71,7 +65,6 @@ def mnist_raw():
 
 
 def mnist(permute_train=False):
-    """Download, parse and process MNIST data to unit scale and one-hot labels."""
     train_images, train_labels, test_images, test_labels = mnist_raw()
 
     train_images = train_images / np.float32(255.0)
@@ -91,12 +84,12 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    return -(preds * targets).sum(axes=(0, 1))
+    return -(preds * targets).sum()
 
 
 def accuracy(params, batch):
     inputs, targets = batch
-    target_class = np.argmax(targets, axis=-1)
+    target_class = np.argmax(targets.val, axis=-1)
     predicted_class = np.argmax(predict(params, inputs).val, axis=-1)
     return np.mean(predicted_class == target_class)
 
@@ -104,12 +97,12 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        layers.Dense(200),
-        layers.Fn(lambda x: x.maximum(Array.zeros_like(x))),
+        # layers.Dense(200),
+        # layers.Fn(lambda x: x.maximum(sp.zeros_like(x))),
         layers.Dense(10),
-        layers.Fn(lambda x: x.log_softmax(axes=-1)),
+        # layers.Fn(lambda x: x.log_softmax(axes=-1)          ),
     )
-    _, init_params = init_random_params((-1, 28 * 28))
+    out_shape, init_params = init_random_params((-1, 28 * 28))
 
     step_size = 0.001
     num_epochs = 30
@@ -128,18 +121,18 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                # yield train_images[batch_idx][0], train_labels[batch_idx][0]
-                yield Array(train_images[batch_idx]), Array(train_labels[batch_idx])
+                yield sp.array(train_images[batch_idx]), sp.array(train_labels[batch_idx])
 
     batches = data_stream()
 
-    opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
+    opt_init, opt_update, get_params = optim.sgd(step_size)
+    # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
     # opt_init, opt_update, get_params = optim.adam(step_size)
     opt_state = opt_init(init_params)
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        loss, (g_params, _) = slope.grad(loss_fn)(params, batch)
+        loss, (g_params, _) = sp.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()
@@ -155,7 +148,7 @@ if __name__ == "__main__":
 
         params = get_params(opt_state)
         # train_acc = accuracy(params, (train_images, train_labels))
-        test_acc = accuracy(params, (Array(test_images), Array(test_labels)))
+        test_acc = accuracy(params, (sp.array(test_images), sp.array(test_labels)))
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         # print(f"Training set accuracy {train_acc}")
         print(f"Test set accuracy {test_acc}")

@@ -5,8 +5,6 @@ from slope import ops
 
 
 def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
-    """Layer constructor function for a dense (fully-connected) layer."""
-
     def init_fun(input_shape):
         output_shape = input_shape[:-1] + (out_dim,)
         W, b = W_init((input_shape[-1], out_dim)), b_init((out_dim,))
@@ -17,22 +15,18 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
         x = inputs
         x = x.dot(W)
         x = x + b.broadcast((1, *b.shape), (0,))
-        # out = ops.mm(x, W)
-        # out = out + ops.broadcast(b, out.shape, (0,))
         return x
 
     return init_fun, apply_fun
 
 
 def Fn(fun, **fun_kwargs):
-    """Layer that applies a scalar function act on its inputs."""
     init_fun = lambda input_shape: (input_shape, ())
     apply_fun = lambda params, inputs, **kwargs: fun(inputs, **fun_kwargs)
     return init_fun, apply_fun
 
 
 def Identity():
-    """Layer construction function for an identity layer."""
     init_fun = lambda input_shape: (input_shape, ())
     apply_fun = lambda params, inputs, **kwargs: inputs
     return init_fun, apply_fun

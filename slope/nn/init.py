@@ -6,7 +6,7 @@ from typing import (
     Callable,
 )
 import math
-from slope import Array
+import slope as sp
 
 
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
@@ -30,7 +30,8 @@ def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
 
 def normal(stddev=1e-2, dtype=np.float32) -> Callable:
     def init(shape, dtype=dtype):
-        return Array(np.random.normal(size=shape).astype(dtype) * stddev)
+        return sp.ops.randn(shape)
+        # return Array(np.random.normal(size=shape).astype(dtype) * stddev)
 
     return init
 
@@ -54,11 +55,11 @@ def variance_scaling(
             denominator = (fan_in + fan_out) / 2
         else:
             raise ValueError(f"invalid mode for variance scaling initializer: {mode}")
-        variance = np.array(scale / denominator, dtype=dtype)
+        variance = sp.array(scale / denominator, dtype=dtype)
         if distribution == "normal":
-            return Array(np.random.normal(size=shape).astype(dtype) * np.sqrt(variance))
+            return sp.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
-            return Array(
+            return sp.array(
                 np.random.uniform(size=shape.astype(dtype)) * np.sqrt(3 * variance)
             )
         else:

@@ -1,7 +1,6 @@
-import slope
+import slope as sp
 import numpy as np
-from slope import Array, ops
-
+from slope import ops
 
 # x = np.ones((1, 3))
 # y = np.ones((3, 1))
@@ -31,19 +30,21 @@ from slope import Array, ops
 # x = np.random.randn(1, 3)
 # y = np.random.randn(2, 3)
 
-x = Array.randn((1, 3))
-y = Array.randn((1, 3))
-
-
-def f(x, y):
-    out = x
-    out = ops.dot(out, ops.T(y))
-    out = ops.softmax(out, axis=(1,))
-    return out
+x = sp.ops.randn((1, 3))
+y = sp.ops.randn((1, 3))
 
 breakpoint()
+def f(x, y):
+    out = x
+    out = out + y
+    out = out.sum()
+    # out = ops.dot(out, ops.T(y))
+    # out = ops.softmax(out, axis=(1,))
+    return out
 
-out, grad_out = slope.grad(f)(x, y)
+
+out, grad_out = sp.grad(f)(x, y)
+breakpoint()
 print(x)
 print(y)
 print(out)

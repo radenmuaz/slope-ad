@@ -39,6 +39,8 @@ import pickle
 import inspect
 
 max_ = max
+sum_ = sum
+slice_ = slice
 zip_ = zip
 map_ = map
 
@@ -163,6 +165,13 @@ class BaseArray:
         return self.dtype is self.uint8
 
     def __getattr__(self, attr):
+        raise NotImplementedError
+
+    def __getitem__(self, idx):
+        if None in idx:
+            self.broadcast(self.shape, idx)
+
+    def __setitem__(self, idx, item):
         raise NotImplementedError
 
     __neg__ = lambda self: self.neg()
@@ -683,7 +692,6 @@ class Op:
                 if k in kwargs.keys():
                     args.insert(i, kwargs[k])
                     del kwargs[k]
-            # breakpoint()
             assert len(args) == len(args_strs)
         return args, kwargs
 
@@ -691,6 +699,7 @@ class Op:
         return backend.run_impl(self, *args, **kwargs)
 
     def __call__(self, *args, **kwargs):
+        args_, kwargs_ = args, kwargs
         args, kwargs = self.pack_args(args, kwargs)
         args, kwargs = self.args_fixer(*args, **kwargs)
         return RT.bind1(self, *args, **kwargs)
@@ -879,6 +888,7 @@ procs = ProcsDir()
 # UnaryOps
 # -----------------------
 
+# TODO: in eval_prog_transposed, try skip eval stop_gradient op
 stop_gradient = Op.unary("stop_gradient")
 ops.register(stop_gradient)
 
@@ -938,14 +948,14 @@ def f(x):
 def f(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     ans = x.sqrt()
-    return [ans], [x_dot * (0.5 / ans)]
+    # return [ans], [x_dot * (0.5 / ans)]
+    return [ans], [x_dot / (ans * 2)]
 
 
-@convert.set_T
+@sqrt.set_T
 def f(cts, x):
     (z,) = cts
-    assert type(x) is UndefPrimal
-    return [zeros_like(z)]
+    return [z / (x.sqrt() * 2)]
 
 
 sin = Op.unary("sin")
@@ -961,13 +971,13 @@ def f(x):
 def f(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     ans = x.sin()
-    return [ans], [x_dot * (1 - ans)]
+    return [ans], [(math.pi / 2) - (x_dot * ans)]
 
 
 @sin.set_T
 def f(cts, x):
     (z,) = cts
-    return [-z * (1 - x.sin())]
+    return [(math.pi / 2) - (z * x.sin())]
 
 
 exp = Op.unary("exp")
@@ -1041,19 +1051,20 @@ ops.register(relu)
 
 @relu.set_eval
 def f(x):
-    return [-x]
+    return [x.maximum(0)]
 
 
 @relu.set_jvp
 def f(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [-x], [-x_dot]
+    return [x.maximum(0)], [-x_dot.maximum(0)]
 
 
 @relu.set_T
 def f(cts, x):
     (z,) = cts
-    return [-z]
+    mask = 1 - (x.maximum(0) == 0)
+    return [mask * z]
 
 
 # -----------------------
@@ -1231,13 +1242,24 @@ max = Op.reduce("max")
 ops.register(max)
 
 
+@max.set_args_fixer
+def f(x, *, axes=None, keepdims=None):
+    if isinstance(axes, int):
+        axes = (axes,)
+    elif axes is None:
+        axes = tuple(range((x.ndim)))
+    else:
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+    return (x,), dict(axes=axes, keepdims=keepdims)
+
+
 @max.set_eval
-def f(x, *, axes, keepdims=False):
+def f(x, *, axes=None, keepdims=False):
     return [x.max(axes, keepdims)]
 
 
 @max.set_jvp
-def f(primals, tangents, *, axes, keepdims=False):
+def f(primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
     eval_out = x.max(axes, keepdims)
     locs = x.equal(eval_out.broadcast(x.shape, None if keepdims else axes))
@@ -1250,7 +1272,7 @@ def f(primals, tangents, *, axes, keepdims=False):
 
 
 @max.set_T
-def f(cts, x, *, axes, keepdims=False):
+def f(cts, x, *, axes=None, keepdims=False):
     (z,) = cts
     return [z.broadcast(x.aval.shape, None if keepdims else axes)]
 
@@ -1259,13 +1281,24 @@ sum = Op.reduce("sum")
 ops.register(sum)
 
 
+@sum.set_args_fixer
+def f(x, *, axes=None, keepdims=False):
+    if isinstance(axes, int):
+        axes = (axes,)
+    elif axes is None:
+        axes = tuple(range((x.ndim)))
+    else:
+        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+    return (x,), dict(axes=axes, keepdims=keepdims)
+
+
 @sum.set_eval
-def f(x, *, axes, keepdims=False):
+def f(x, *, axes=None, keepdims=False):
     return [x.sum(axes, keepdims)]
 
 
 @sum.set_jvp
-def f(primals, tangents, *, axes, keepdims=False):
+def f(primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
     eval_out = x.sum(axes, keepdims)
     jvp_out = x_dot.sum(axes, keepdims)
@@ -1273,7 +1306,7 @@ def f(primals, tangents, *, axes, keepdims=False):
 
 
 @sum.set_T
-def f(cts, x, *, axes, keepdims=False):
+def f(cts, x, *, axes=None, keepdims=False):
     (z,) = cts
     out = z.broadcast(x.aval.shape, None if keepdims else axes)
     return [out]
@@ -1445,19 +1478,19 @@ ops.register(pad)
 
 
 @pad.set_eval
-def f(x, *, lo, hi, interior, value):
+def f(x, *, lo, hi, interior=None, value=0.0):
     return [x.pad(lo, hi, interior, value)]
 
 
 @pad.set_args_fixer
-def f(x, *, lo, hi, interior, value):
+def f(x, *, lo, hi, interior=None, value=0.0):
     if interior is None:
         interior = tuple([0] * len(lo))
     return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
 
 
 @pad.set_vmap
-def f(axis_size, vals_in, dims_in, *, perm):
+def f(axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
     operand, padding_value = batched_args
     operand_bdim, padding_value_bdim = batch_dims
@@ -1479,13 +1512,13 @@ def f(axis_size, vals_in, dims_in, *, perm):
 
 
 @pad.set_jvp
-def f(primals, tangents, *, lo, hi, interior, value):
+def f(primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
     return [x.pad(lo, hi, interior, value)], [x_dot.pad(lo, hi, interior, value)]
 
 
 @pad.set_shape_eval
-def f(x: ArrayShape, *, lo, hi, interior, value) -> List[ArrayShape]:
+def f(x: ArrayShape, *, lo, hi, interior=None, value=0.0) -> List[ArrayShape]:
     op_shape = np.shape(x)
 
     def _dilate_dim(d, dilation):
@@ -1506,7 +1539,7 @@ def f(x: ArrayShape, *, lo, hi, interior, value) -> List[ArrayShape]:
 
 
 @pad.set_T
-def f(cts, x, *, lo, hi, interior, value):
+def f(cts, x, *, lo, hi, interior=None, value=0.0):
     (z,) = cts
 
     def t_op():
@@ -1577,7 +1610,7 @@ def f(x: ArrayShape, *, starts, limits, strides: Sequence[int]) -> List[ArraySha
 
 @slice.set_T
 def T(cts, x, *, starts, limits, strides):
-    # TODO: compute tuple arithmetic numpy
+    # TODO: compute tuple arithmetic without numpy
     (z,) = cts
     x_shape = x.aval.shape
     assert isinstance(x, UndefPrimal)
@@ -1614,7 +1647,7 @@ def f(x, *, axes):
 
 
 @flip.set_vmap
-def f(axis_size, vals_in, dims_in, *, perm):
+def f(axis_size, vals_in, dims_in, *, axes):
     raise NotImplementedError
 
 
@@ -1625,9 +1658,8 @@ def f(primals, tangents, *, axes):
 
 
 @flip.set_shape_eval
-def f(x: ArrayShape, *, padding: Sequence[int]) -> List[ArrayShape]:
-    shape = [x.shape[i] for i in padding]
-    return [ArrayShape(shape, x.dtype)]
+def f(x: ArrayShape, *, axes):
+    return [ArrayShape(x.shape, x.dtype)]
 
 
 @flip.set_T
@@ -1644,30 +1676,68 @@ ops.alias(concatenate, "cat")
 
 @concatenate.set_eval
 def f(xs: Sequence[Any], *, axis):
-    return [Array.concatenate(xs, axis=axis)]
+    return [backend.run_impl(concatenate, xs, axis=axis)]
 
 
 @concatenate.set_vmap
-def f(axis_size, vals_in, dims_in, *, perm):
+def f(axis_size, vals_in, dims_in, *, axis):
     raise NotImplementedError
 
 
 @concatenate.set_jvp
 def jvp(primals, tangents, *, axis):
     (xs,), (xs_dot,) = primals, tangents
-    return [Array.concatenate(xs, axis=axis)], [Array.concatenate(xs_dot, axis=axis)]
+    return [concatenate(xs, axis=axis)], [concatenate(xs_dot, axis=axis)]
 
 
 @concatenate.set_shape_eval
-def f(x: ArrayShape, idx, *, axis: Sequence[int]) -> List[ArrayShape]:
-    shape = [x.shape[i] for i in axis]
-    return [ArrayShape(shape, x.dtype)]
+def f(xs: ArrayShape, *, axis: Sequence[int]) -> List[ArrayShape]:
+    if not xs:
+        msg = "concatenate expects at least one operand, got 0."
+        raise TypeError(msg)
+    if len(set(operand.ndim for operand in xs)) != 1:
+        msg = "Cannot concatenate arrays with different numbers of dimensions: got {}."
+        raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
+    if not 0 <= axis < xs[0].ndim:
+        msg = "concatenate dimension out of bounds: dimension {} for shapes {}."
+        raise TypeError(msg.format(axis, ", ".join([str(o.shape) for o in xs])))
+    shapes = [x.shape[:axis] + x.shape[axis + 1 :] for x in xs]
+    if not shapes[:-1] == shapes[1:]:
+        msg = (
+            "Cannot concatenate arrays with shapes that differ in dimensions "
+            "other than the one being concatenated: concatenating along "
+            "dimension {} for shapes {}."
+        )
+        shapes = [x.shape for x in xs]
+        raise TypeError(msg.format(axis, ", ".join(map(str, shapes))))
+
+    concat_size = sum(x.shape[axis] for x in xs)
+    ex_shape = xs[0].shape
+    return [
+        ArrayShape(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)
+    ]
 
 
 @concatenate.set_T
 def T(cts, xs, *, axis):
-    (zs,) = cts
-    return [zs.slice(x.shape) for x in xs]
+    (z,) = cts
+    x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
+    if type(z) is None:
+        return [None if type(o) is UndefPrimal else None for o in xs]
+    else:  # TODO: replace numpy ops with pure Python
+        limit_points = np.cumsum([shape[axis] for shape in x_shapes]).tolist()
+        starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
+        limits = np.tile(z.shape, (len(xs), 1)).tolist()
+
+    for i, s in enumerate(starts[1:]):
+        s[axis] = limit_points[:-1][i]
+    for i, l in enumerate(limits):
+        l[axis] = limit_points[i]
+
+    return [
+        z.slice(start, limit) if type(o) is UndefPrimal else None
+        for o, start, limit in zip(xs, starts, limits)
+    ]
 
 
 # -----------------------
@@ -1809,11 +1879,11 @@ def f(*, start, stop, stride, dtype=BaseArray.default_dtype) -> List[ArrayShape]
     return [ArrayShape(tuple((stop - start) * stride), dtype)]
 
 
-jit = Op("jit")
-ops.register(jit)
+jit_op = Op("jit")
+ops.register(jit_op)
 
 
-@jit.set_eval
+@jit_op.set_eval
 def f(*args, hashable_prog, hashable_consts):
     jit_fn = RT.backend.callable(hashable_prog, hashable_consts)
     return [jit_fn(*args)]
@@ -1970,8 +2040,6 @@ def sign(self):
 @procs.register
 def reciprocal(self):
     return 1.0 / self
-
-
 
 
 class PPrint:
@@ -2801,7 +2869,9 @@ def jit(f):
         nonlocal hashable_consts, hashable_prog
         hashable_consts = tuple(map(IDHashable, consts))
         hashable_prog = IDHashable(prog)
-        outs = jit(*args, hashable_prog=hashable_prog, hashable_consts=hashable_consts)
+        outs = jit_op(
+            *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
+        )
         return tree_unflatten(out_tree, outs)
 
     f_jitted.get_jit_fn = get_jit_fn
@@ -2822,4 +2892,5 @@ def jit(f):
 # sys.modules[__name__].__hasattr__ = slope_hasattr
 
 import slope.backends
+
 backend = slope.backends.numpy_backend

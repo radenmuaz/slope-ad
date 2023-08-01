@@ -91,16 +91,6 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
     return sp.JitFn(code, fn)
 
 
-# _rng: np.random.Generator = np.random.default_rng()
-
-# @classmethod
-# def manual_seed(cls, seed=None):
-#     cls._rng = np.random.default_rng(seed=seed)
-
-# # control flow
-# choose = select = lambda arr, *vals, idx: Array(np.choose(idx, *vals))
-# where = lambda arr, trueval, falseval: Array(np.where(arr, trueval, falseval))
-
 ### Op Impls
 
 
@@ -175,12 +165,12 @@ def f(x, y):
 
 
 @numpy_backend.set_impl(sp.ops.sum)
-def f(x, axes, keepdims=False):
+def f(x, axes=None, keepdims=False):
     return np.sum(x, axis=axes, keepdims=keepdims)
 
 
 @numpy_backend.set_impl(sp.ops.max)
-def f(x, axes, keepdims=False):
+def f(x, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
 
 
@@ -226,6 +216,7 @@ def f(x, shape):
 
 @numpy_backend.set_impl(sp.ops.pad)
 def f(x, lo, hi, interior, value):
+    # TODO: implement interior pad
     return np.pad({x}, list(zip(lo, hi)), constant_values={value})
 
 
@@ -240,11 +231,10 @@ def f(xs, axes):
 
 
 @numpy_backend.set_impl(sp.ops.transpose)
-def f(x, axes):
+def f(x, axes):  # NOTE: np.transpose is like torch.permute
     return np.transpose(x, axes)
 
 
 @numpy_backend.set_impl(sp.ops.flip)
 def f(x, axes):
     return np.flip(x, axes)
-

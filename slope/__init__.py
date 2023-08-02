@@ -1,4 +1,5 @@
 import types
+from dataclasses import dataclass
 from typing import (
     Callable,
     NamedTuple,
@@ -883,6 +884,21 @@ class ProcsDir:
 
 
 procs = ProcsDir()
+
+class BackendsDir:
+    def __init__(self):
+        self.backends = dict()
+        self.active_backend = None
+    def register(self, name, backend):
+        self.backends[name] = backend
+        if len(self.backends) == 1:
+            self.active_backend = self.backends[name]
+    
+@dataclass
+class Opset:
+    ops: OpsDir
+    procs: ProcsDir
+    backends: BackendsDir
 
 # -----------------------
 # UnaryOps

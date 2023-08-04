@@ -97,6 +97,259 @@ class IDHashable:
         return type(other) is IDHashable and id(self.val) == id(other.val)
 
 
+def raise_not_implemented(self, *args, **kwargs):
+    raise NotImplementedError
+
+
+class OpType(Enum):
+    Unary = auto()
+    Binary = auto()
+    Reduce = auto()
+    Shape = auto()
+    Load = auto()
+    Other = auto()
+
+
+class Op:
+    def __init__(self, name, op_type=OpType.Other):
+        self.name = name
+        self.op_type = op_type
+        self.impls = dict()
+        self.eval = raise_not_implemented
+        self.jvp = raise_not_implemented
+        self.vmap = raise_not_implemented
+        self.T = raise_not_implemented
+        self.shape_eval = raise_not_implemented
+
+        self.args_fixer = lambda *args, **kwargs: (args, kwargs)
+
+    def __repr__(self) -> str:
+        return f"Op <{self.name}>"
+
+    def pack_args(self, args, kwargs):
+        sig = inspect.signature(self.eval)
+        args_strs = [
+            k
+            for k, v in sig.parameters.items()
+            if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwargs_strs = [
+            k
+            for k, v in sig.parameters.items()
+            if v.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        if len(args) > len(args_strs) and len(args) != 0 and len(args_strs) != 0:
+            args_ = args
+            args, rest = args[: len(args_strs)], args[len(args_strs) :]
+            new_kwargs = {}
+            for i, rest_arg in enumerate(rest):
+                k = kwargs_strs[i]
+                try:
+                    assert k not in kwargs.keys()
+                except:
+                    breakpoint()
+                new_kwargs[k] = rest_arg
+            kwargs = {**new_kwargs, **kwargs}
+        elif len(args) <= len(args_strs):
+            args = list(args)
+            for i, k in enumerate(args_strs):
+                if k in kwargs.keys():
+                    args.insert(i, kwargs[k])
+                    del kwargs[k]
+            assert len(args) == len(args_strs)
+        return args, kwargs
+
+    def impl(self, *args, **kwargs):
+        return sp.RT().backend.run_impl(self, *args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        args_, kwargs_ = args, kwargs
+        args, kwargs = self.pack_args(args, kwargs)
+        args, kwargs = self.args_fixer(*args, **kwargs)
+        return sp.RT().bind1(self, *args, **kwargs)
+
+    def set_args_fixer(self, fn):
+        self.args_fixer = fn
+
+    def set_eval(self, fn):
+        self.eval = fn
+
+    def set_jvp(self, fn):
+        self.jvp = fn
+
+    def set_vmap(self, fn):
+        self.vmap = fn
+
+    def set_T(self, fn):
+        self.T = fn
+
+    def set_shape_eval(self, fn):
+        self.shape_eval = fn
+
+    @classmethod
+    def unary(cls, name):
+        op = cls(name, OpType.Unary)
+
+        @op.set_vmap
+        def f(self, axis_size, vals_in, dims_in, **params):
+            (x,), (x_bdim,) = vals_in, dims_in
+            return [self(x, **params)], [x_bdim]
+
+        @op.set_shape_eval
+        def f(self, **params):
+            return [ArrayShape(self.shape, self.dtype)]
+
+        @op.set_jvp
+        def f(self, primals, tangents, **params):
+            (x,), (x_dot,) = primals, tangents
+            return [self(x, **params)], [self(x_dot, **params)]
+
+        return op
+
+    @classmethod
+    def binary(cls, name):
+        op = cls(name, OpType.Binary)
+
+        @op.set_args_fixer
+        def f(x, y, **kwargs):
+            if type(x) is UndefPrimal and type(y) is UndefPrimal:
+                assert x.aval.shape == y.aval.shape
+                return (x, y), kwargs
+            elif type(x) is UndefPrimal:
+                assert x.aval.shape == y.shape
+                return (x, y), kwargs
+            elif type(y) is UndefPrimal:
+                assert y.aval.shape == x.shape
+                return (x, y), kwargs
+            if type(x) in [bool, int, float, Array]:
+                x = y._trace.pure(x)
+            elif type(y) in [bool, int, float, Array]:
+                y = x._trace.pure(y)
+                # try: y = x._trace.pure(y)
+                # except: breakpoint()
+            # try:
+            #     print(f"before, {type(x)}:{x.shape}, {type(y)}:{y.shape}", end="\t")
+            # except:
+            #     print(f"before, {type(x)}:{x.aval.shape}, {type(y)}:{y.aval.shape}", end="\t")
+
+            if getattr(x, "shape", None) == getattr(y, "shape", None):
+                # print("skip")
+                return (x, y), kwargs
+            # if type(x) in [bool, int, float, Array]:
+            #     x = y._trace.pure(x)
+            # elif type(y) in [bool, int, float, Array]:
+            #     y = x._trace.pure(y)
+            bx = list(range((max_(x.ndim, y.ndim) - x.ndim)))
+            by = list(range((max_(x.ndim, y.ndim) - y.ndim)))
+            bx = bx if len(bx) > 0 else None
+            by = by if len(by) > 0 else None
+            shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
+            x = x.broadcast(shape=shape_ret, axes=bx)
+            y = y.broadcast(shape=shape_ret, axes=by)
+            # print(f"after,  {x.shape}, {y.shape}")
+            return (x, y), kwargs
+
+        @op.set_vmap
+        def f(self, axis_size, vals_in, dims_in, **params):
+            (x, y), (x_bdim, y_bdim) = vals_in, dims_in
+            if x_bdim != y_bdim:
+                if x_bdim is None:
+                    x = BatchTrace.move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                    x_bdim = y_bdim
+                else:
+                    y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
+            return [self(x, y, **params)], [x_bdim]
+
+        @op.set_shape_eval
+        def f(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
+            # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
+            if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
+                # breakpoint()
+                raise TypeError
+            if ArrayShape.like(x) != ArrayShape.like(y):
+                breakpoint()
+                raise TypeError(f"{x} != {y}")
+            return [ArrayShape(x.shape, x.dtype)]
+
+        @op.set_jvp
+        def f(self, primals, tangents, **params):
+            (x,), (x_dot,) = primals, tangents
+            return [self(x, **params)], [self(x_dot, **params)]
+
+        return op
+
+    @classmethod
+    def reduce(cls, name):
+        op = cls(name, OpType.Reduce)
+
+        @op.set_args_fixer
+        def f(x, axes=None, keepdims=False):
+            if axes is None:
+                axes = tuple(range(x.ndim))
+            elif isinstance(axes, int):
+                axes = (axes,)
+            axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+            return (x,), dict(axes=axes, keepdims=keepdims)
+
+        @op.set_vmap
+        def f(axis_size, vals_in, dims_in, **params):
+            (x,), (x_bdim,) = vals_in, dims_in
+            axes = list(params["axes"])
+            axes = tuple(a + (x_bdim <= a) for a in axes)
+            out_bdim = x_bdim - sum(a < x_bdim for a in axes)
+            params["axes"] = tuple(axes)
+            return [cls.do(x, **params)], [out_bdim]
+
+        @op.set_shape_eval
+        def f(x: ArrayShape, axes=None, keepdims=False) -> List[ArrayShape]:
+            axes = [a + len(x.shape) if a < 0 else a for a in axes]
+            axes_ = set(axes)
+            if keepdims:
+                new_shape = [d if i not in axes_ else 1 for i, d in enumerate(x.shape)]
+            else:
+                new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
+            return [ArrayShape(tuple(new_shape), x.dtype)]
+
+        return op
+
+    @classmethod
+    def shape(cls, name):
+        op = cls(name, OpType.Shape)
+        return op
+
+    @classmethod
+    def load(cls, name):
+        op = cls(name, OpType.Load)
+        return op
+
+
+# ========================
+# Ops
+# ========================
+
+
+class OpsDir:
+    def register(self, op):
+        setattr(self, op.name, op)
+
+    def alias(self, op, name):
+        assert op.name in vars(self)
+        setattr(self, name, getattr(self, op.name))
+
+
+class ProcsDir:
+    def register(self, fn):
+        setattr(self, fn.__name__, fn)
+        return fn
+
+
+@dataclass
+class Opset:
+    ops: OpsDir
+    procs: ProcsDir
+    backends: dict
+
+
 def unzip2(pairs):
     lst1, lst2 = [], []
     for x1, x2 in pairs:
@@ -143,6 +396,141 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     for b, x in list_zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
+
+
+class ArrayShape:
+    array_abstraction_level = 1
+    shape: Tuple[int, ...]
+    dtype: np.dtype
+
+    @classmethod
+    def like(cls, aval):
+        return cls(aval.shape, aval.dtype)
+
+    def __init__(self, shape, dtype):
+        self.shape = tuple(shape)
+        self.dtype = dtype
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @staticmethod
+    def _bool(tracer):
+        raise Exception("ArrayShape can't be unambiguously converted to bool")
+
+    @staticmethod
+    def _nonzero(tracer):
+        raise Exception("ArrayShape can't be unambiguously converted to bool")
+
+    def str_short(self):
+        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
+
+    def __hash__(self):
+        return hash((self.shape, self.dtype))
+
+    def __eq__(self, other):
+        return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
+
+    def __repr__(self):
+        return f"ArrayShape(shape={self.shape}, dtype={self.dtype})"
+
+
+class Var:
+    val = None
+    aval: ArrayShape
+
+    def __init__(self, aval):
+        self.aval = aval
+
+
+class Lit:
+    val: Any
+    aval: ArrayShape
+
+    def __init__(self, val):
+        self.aval = aval = ArrayShape.like(TracerArray.get_aval(val))
+        self.val = np.array(val, aval.dtype)
+
+
+Atom = Union[Var, Lit]
+
+
+class Instr(NamedTuple):
+    op: Op
+    inputs: List[Atom]
+    params: Dict[str, Any]
+    out_binders: List[Atom]
+
+
+class Prog(NamedTuple):
+    in_binders: Any
+    instrs: List[Instr]
+    outs: Any
+
+    def __hash__(self):
+        return id(self)
+
+    def __eq__(self, other):
+        return self is other
+
+    def __repr__(self):
+        namegen = (
+            "".join(s)
+            for r in itertools.count(1)
+            for s in itertools.permutations(string.ascii_lowercase, r)
+        )
+        names = defaultdict(lambda: next(namegen))
+        in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
+        instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
+        outs = ", ".join(
+            names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
+        )
+        return str(
+            PPrint.pp(f"{{ lambda {in_binders} .")
+            + ((PPrint.pp("let ") >> instrs) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
+        )
+
+    def pp_instr(self, names: DefaultDict[Var, str], instr: Instr) -> PPrint:
+        # rule = instr.op.pprint
+        # if rule() is not None:
+        #     return rule(names, instr)
+        # else:
+        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instr.out_binders))
+        rhs = (
+            PPrint.pp(repr(instr.op.__class__))
+            >> self.pp_params(instr.params)
+            >> PPrint.pp(
+                " ".join(
+                    names[x] if isinstance(x, Var) else str(x.val) for x in instr.inputs
+                )
+            )
+        )
+        return lhs >> PPrint.pp(" = ") >> rhs
+
+    def pp_params(self, params: Dict[str, Any]) -> PPrint:
+        items = sorted(params.items())
+        if items:
+            return (
+                PPrint.pp(" [ ")
+                >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items])
+                >> PPrint.pp(" ] ")
+            )
+        else:
+            return PPrint.pp(" ")
+
+    def var_str(self, names: DefaultDict[Var, str], v) -> str:
+        return f"{names[v]}:{v.aval.str_short()}"
+
+
+class ProgType(NamedTuple):
+    in_types: List[ArrayShape]
+    out_types: List[ArrayShape]
+
+    def __repr__(self):
+        in_types = ", ".join(aval.str_short() for aval in self.in_types)
+        out_types = ", ".join(aval.str_short() for aval in self.out_types)
+        return f"({in_types}) -> ({out_types})"
 
 
 class MainTrace(NamedTuple):
@@ -827,16 +1215,16 @@ class Runtime:
         return primals_out, f_vjp
 
     def vjp(self, f, *primals_in):
-        primals_in_flat, in_tree = tree_flatten(primals_in)
-        f, out_tree = flatten_fun(f, in_tree)
+        primals_in_flat, in_tree = self.tree_flatten(primals_in)
+        f, out_tree = self.flatten_fun(f, in_tree)
         primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat)
-        primals_out = tree_unflatten(out_tree(), primals_out_flat)
+        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
 
         def f_vjp(*cotangents_out):
-            cotangents_out_flat, _ = tree_flatten(cotangents_out)
+            cotangents_out_flat, _ = self.tree_flatten(cotangents_out)
             cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
 
-            return tree_unflatten(in_tree, cotangents_in_flat)
+            return self.tree_unflatten(in_tree, cotangents_in_flat)
 
         return primals_out, f_vjp
 
@@ -1001,297 +1389,6 @@ class JitFn:
         # return [Array(o) if isinstance(o, np.ndarray) else o for o in outs]
 
 
-class ArrayShape:
-    array_abstraction_level = 1
-    shape: Tuple[int, ...]
-    dtype: np.dtype
-
-    @classmethod
-    def like(cls, aval):
-        return cls(aval.shape, aval.dtype)
-
-    def __init__(self, shape, dtype):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    @staticmethod
-    def _bool(tracer):
-        raise Exception("ArrayShape can't be unambiguously converted to bool")
-
-    @staticmethod
-    def _nonzero(tracer):
-        raise Exception("ArrayShape can't be unambiguously converted to bool")
-
-    def str_short(self):
-        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
-
-    def __hash__(self):
-        return hash((self.shape, self.dtype))
-
-    def __eq__(self, other):
-        return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
-
-    def __repr__(self):
-        return f"ArrayShape(shape={self.shape}, dtype={self.dtype})"
-
-
-def raise_not_implemented(self, *args, **kwargs):
-    raise NotImplementedError
-
-
-class OpType(Enum):
-    Unary = auto()
-    Binary = auto()
-    Reduce = auto()
-    Shape = auto()
-    Load = auto()
-    Other = auto()
-
-
-class Op:
-    def __init__(self, name, op_type=OpType.Other):
-        self.name = name
-        self.op_type = op_type
-        self.impls = dict()
-        self.eval = raise_not_implemented
-        self.jvp = raise_not_implemented
-        self.vmap = raise_not_implemented
-        self.T = raise_not_implemented
-        self.shape_eval = raise_not_implemented
-
-        self.args_fixer = lambda *args, **kwargs: (args, kwargs)
-
-    def __repr__(self) -> str:
-        return f"Op <{self.name}>"
-
-    def pack_args(self, args, kwargs):
-        sig = inspect.signature(self.eval)
-        args_strs = [
-            k
-            for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-        ]
-        kwargs_strs = [
-            k
-            for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.KEYWORD_ONLY
-        ]
-        if len(args) > len(args_strs) and len(args) != 0 and len(args_strs) != 0:
-            args_ = args
-            args, rest = args[: len(args_strs)], args[len(args_strs) :]
-            new_kwargs = {}
-            for i, rest_arg in enumerate(rest):
-                k = kwargs_strs[i]
-                try:
-                    assert k not in kwargs.keys()
-                except:
-                    breakpoint()
-                new_kwargs[k] = rest_arg
-            kwargs = {**new_kwargs, **kwargs}
-        elif len(args) <= len(args_strs):
-            args = list(args)
-            for i, k in enumerate(args_strs):
-                if k in kwargs.keys():
-                    args.insert(i, kwargs[k])
-                    del kwargs[k]
-            assert len(args) == len(args_strs)
-        return args, kwargs
-
-    def impl(self, *args, **kwargs):
-        return sp.RT().backend.run_impl(self, *args, **kwargs)
-
-    def __call__(self, *args, **kwargs):
-        args_, kwargs_ = args, kwargs
-        args, kwargs = self.pack_args(args, kwargs)
-        args, kwargs = self.args_fixer(*args, **kwargs)
-        return sp.RT().bind1(self, *args, **kwargs)
-
-    def set_args_fixer(self, fn):
-        self.args_fixer = fn
-
-    def set_eval(self, fn):
-        self.eval = fn
-
-    def set_jvp(self, fn):
-        self.jvp = fn
-
-    def set_vmap(self, fn):
-        self.vmap = fn
-
-    def set_T(self, fn):
-        self.T = fn
-
-    def set_shape_eval(self, fn):
-        self.shape_eval = fn
-
-    @classmethod
-    def unary(cls, name):
-        op = cls(name, OpType.Unary)
-
-        @op.set_vmap
-        def f(self, axis_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            return [self(x, **params)], [x_bdim]
-
-        @op.set_shape_eval
-        def f(self, **params):
-            return [ArrayShape(self.shape, self.dtype)]
-
-        @op.set_jvp
-        def f(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
-
-        return op
-
-    @classmethod
-    def binary(cls, name):
-        op = cls(name, OpType.Binary)
-
-        @op.set_args_fixer
-        def f(x, y, **kwargs):
-            if type(x) is UndefPrimal and type(y) is UndefPrimal:
-                assert x.aval.shape == y.aval.shape
-                return (x, y), kwargs
-            elif type(x) is UndefPrimal:
-                assert x.aval.shape == y.shape
-                return (x, y), kwargs
-            elif type(y) is UndefPrimal:
-                assert y.aval.shape == x.shape
-                return (x, y), kwargs
-            if type(x) in [bool, int, float, Array]:
-                x = y._trace.pure(x)
-            elif type(y) in [bool, int, float, Array]:
-                y = x._trace.pure(y)
-                # try: y = x._trace.pure(y)
-                # except: breakpoint()
-            # try:
-            #     print(f"before, {type(x)}:{x.shape}, {type(y)}:{y.shape}", end="\t")
-            # except:
-            #     print(f"before, {type(x)}:{x.aval.shape}, {type(y)}:{y.aval.shape}", end="\t")
-
-            if getattr(x, "shape", None) == getattr(y, "shape", None):
-                # print("skip")
-                return (x, y), kwargs
-            # if type(x) in [bool, int, float, Array]:
-            #     x = y._trace.pure(x)
-            # elif type(y) in [bool, int, float, Array]:
-            #     y = x._trace.pure(y)
-            bx = list(range((max_(x.ndim, y.ndim) - x.ndim)))
-            by = list(range((max_(x.ndim, y.ndim) - y.ndim)))
-            bx = bx if len(bx) > 0 else None
-            by = by if len(by) > 0 else None
-            shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
-            x = x.broadcast(shape=shape_ret, axes=bx)
-            y = y.broadcast(shape=shape_ret, axes=by)
-            # print(f"after,  {x.shape}, {y.shape}")
-            return (x, y), kwargs
-
-        @op.set_vmap
-        def f(self, axis_size, vals_in, dims_in, **params):
-            (x, y), (x_bdim, y_bdim) = vals_in, dims_in
-            if x_bdim != y_bdim:
-                if x_bdim is None:
-                    x = BatchTrace.move_batch_axis(axis_size, x_bdim, y_bdim, x)
-                    x_bdim = y_bdim
-                else:
-                    y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-            return [self(x, y, **params)], [x_bdim]
-
-        @op.set_shape_eval
-        def f(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
-            # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
-            if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
-                # breakpoint()
-                raise TypeError
-            if ArrayShape.like(x) != ArrayShape.like(y):
-                breakpoint()
-                raise TypeError(f"{x} != {y}")
-            return [ArrayShape(x.shape, x.dtype)]
-
-        @op.set_jvp
-        def f(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
-
-        return op
-
-    @classmethod
-    def reduce(cls, name):
-        op = cls(name, OpType.Reduce)
-
-        @op.set_args_fixer
-        def f(x, axes=None, keepdims=False):
-            if axes is None:
-                axes = tuple(range(x.ndim))
-            elif isinstance(axes, int):
-                axes = (axes,)
-            axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-            return (x,), dict(axes=axes, keepdims=keepdims)
-
-        @op.set_vmap
-        def f(axis_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            axes = list(params["axes"])
-            axes = tuple(a + (x_bdim <= a) for a in axes)
-            out_bdim = x_bdim - sum(a < x_bdim for a in axes)
-            params["axes"] = tuple(axes)
-            return [cls.do(x, **params)], [out_bdim]
-
-        @op.set_shape_eval
-        def f(x: ArrayShape, axes=None, keepdims=False) -> List[ArrayShape]:
-            axes = [a + len(x.shape) if a < 0 else a for a in axes]
-            axes_ = set(axes)
-            if keepdims:
-                new_shape = [d if i not in axes_ else 1 for i, d in enumerate(x.shape)]
-            else:
-                new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
-            return [ArrayShape(tuple(new_shape), x.dtype)]
-
-        return op
-
-    @classmethod
-    def shape(cls, name):
-        op = cls(name, OpType.Shape)
-        return op
-
-    @classmethod
-    def load(cls, name):
-        op = cls(name, OpType.Load)
-        return op
-
-
-# ========================
-# Ops
-# ========================
-
-
-class OpsDir:
-    def register(self, op):
-        setattr(self, op.name, op)
-
-    def alias(self, op, name):
-        assert op.name in vars(self)
-        setattr(self, name, getattr(self, op.name))
-
-
-class ProcsDir:
-    def register(self, fn):
-        setattr(self, fn.__name__, fn)
-        return fn
-
-
-@dataclass
-class Opset:
-    ops: OpsDir
-    procs: ProcsDir
-    backends: dict
-
-
 # def mapped_aval(batch_dim, aval):
 #     shape = list(aval.shape)
 #     del shape[batch_dim]
@@ -1383,103 +1480,6 @@ class JVPTrace(Trace):
         return [
             JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
         ]
-
-
-class Var:
-    val = None
-    aval: ArrayShape
-
-    def __init__(self, aval):
-        self.aval = aval
-
-
-class Lit:
-    val: Any
-    aval: ArrayShape
-
-    def __init__(self, val):
-        self.aval = aval = ArrayShape.like(TracerArray.get_aval(val))
-        self.val = np.array(val, aval.dtype)
-
-
-Atom = Union[Var, Lit]
-
-
-class Instr(NamedTuple):
-    op: Op
-    inputs: List[Atom]
-    params: Dict[str, Any]
-    out_binders: List[Atom]
-
-
-class Prog(NamedTuple):
-    in_binders: Any
-    instrs: List[Instr]
-    outs: Any
-
-    def __hash__(self):
-        return id(self)
-
-    def __eq__(self, other):
-        return self is other
-
-    def __repr__(self):
-        namegen = (
-            "".join(s)
-            for r in itertools.count(1)
-            for s in itertools.permutations(string.ascii_lowercase, r)
-        )
-        names = defaultdict(lambda: next(namegen))
-        in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
-        outs = ", ".join(
-            names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
-        )
-        return str(
-            PPrint.pp(f"{{ lambda {in_binders} .")
-            + ((PPrint.pp("let ") >> instrs) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
-        )
-
-    def pp_instr(self, names: DefaultDict[Var, str], instr: Instr) -> PPrint:
-        # rule = instr.op.pprint
-        # if rule() is not None:
-        #     return rule(names, instr)
-        # else:
-        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instr.out_binders))
-        rhs = (
-            PPrint.pp(repr(instr.op.__class__))
-            >> self.pp_params(instr.params)
-            >> PPrint.pp(
-                " ".join(
-                    names[x] if isinstance(x, Var) else str(x.val) for x in instr.inputs
-                )
-            )
-        )
-        return lhs >> PPrint.pp(" = ") >> rhs
-
-    def pp_params(self, params: Dict[str, Any]) -> PPrint:
-        items = sorted(params.items())
-        if items:
-            return (
-                PPrint.pp(" [ ")
-                >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items])
-                >> PPrint.pp(" ] ")
-            )
-        else:
-            return PPrint.pp(" ")
-
-    def var_str(self, names: DefaultDict[Var, str], v) -> str:
-        return f"{names[v]}:{v.aval.str_short()}"
-
-
-class ProgType(NamedTuple):
-    in_types: List[ArrayShape]
-    out_types: List[ArrayShape]
-
-    def __repr__(self):
-        in_types = ", ".join(aval.str_short() for aval in self.in_types)
-        out_types = ", ".join(aval.str_short() for aval in self.out_types)
-        return f"({in_types}) -> ({out_types})"
 
 
 class ProgTracerArray(TracerArray):

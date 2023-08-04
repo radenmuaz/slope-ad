@@ -1,8 +1,7 @@
 import slope as sp
-import slope.opset.v1 as v1
+from slope.opsets.v1.ops_defs import ops
 import math
 
-ops = v1.ops
 procs = sp.ProcsDir()
 
 # Functions
@@ -156,4 +155,3 @@ def sign(self):
 @procs.register
 def reciprocal(self):
     return 1.0 / self
-

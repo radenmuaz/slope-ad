@@ -1,13 +1,23 @@
 import slope as sp
 
-ops = sp.OpsDir()
+# from slope import sp.Op, sp.ArrayShape, sp.BaseArray
+import math
+import numpy as np
+from typing import (
+    Tuple,
+    List,
+    Any,
+    Optional,
+    Sequence,
+)
 
+ops = sp.OpsDir()
 
 # -----------------------
 # UnaryOps
 # -----------------------
 
-# TODO: in eval_prog_transposed, try skip eval stop_gradient op
+# TODO: in eval_prog_transposed, try skip eval stop_gradient sp.Op
 stop_gradient = sp.Op.unary("stop_gradient")
 ops.register(stop_gradient)
 
@@ -20,17 +30,17 @@ def f(x):
 @stop_gradient.set_jvp
 def f(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x], [zeros_like(x_dot)]
+    return [x], [sp.zeros_like(x_dot)]
 
 
 @stop_gradient.set_T
 def f(cts, x):
     (z,) = cts
-    assert type(x) is UndefPrimal
-    return [zeros_like(z)]
+    assert type(x) is sp.UndefPrimal
+    return [sp.zeros_like(z)]
 
 
-convert = Op.unary("convert")
+convert = sp.Op.unary("convert")
 astype = convert
 ops.register(convert)
 ops.alias(convert, "astype")
@@ -44,17 +54,17 @@ def f(x):
 @convert.set_jvp
 def f(primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x], [zeros_like(x_dot)]
+    return [x], [sp.zeros_like(x_dot)]
 
 
 @convert.set_T
 def f(cts, x):
     (z,) = cts
-    assert type(x) is UndefPrimal
-    return [zeros_like(z)]
+    assert type(x) is sp.UndefPrimal
+    return [sp.zeros_like(z)]
 
 
-sqrt = Op.unary("sqrt")
+sqrt = sp.Op.unary("sqrt")
 ops.register(sqrt)
 
 
@@ -77,7 +87,7 @@ def f(cts, x):
     return [z / (x.sqrt() * 2)]
 
 
-sin = Op.unary("sin")
+sin = sp.Op.unary("sin")
 ops.register(sin)
 
 
@@ -99,7 +109,7 @@ def f(cts, x):
     return [(math.pi / 2) - (z * x.sin())]
 
 
-exp = Op.unary("exp")
+exp = sp.Op.unary("exp")
 ops.register(exp)
 
 
@@ -121,7 +131,7 @@ def f(cts, x):
     return [1 / z]
 
 
-log = Op.unary("log")
+log = sp.Op.unary("log")
 ops.register(log)
 
 
@@ -143,7 +153,7 @@ def f(cts, x):
     return [1 / z]
 
 
-neg = Op.unary("neg")
+neg = sp.Op.unary("neg")
 ops.register(neg)
 
 
@@ -164,7 +174,7 @@ def f(cts, x):
     return [-z]
 
 
-relu = Op.unary("relu")
+relu = sp.Op.unary("relu")
 ops.register(relu)
 
 
@@ -191,7 +201,7 @@ def f(cts, x):
 # -----------------------
 
 
-add = Op.binary("add")
+add = sp.Op.binary("add")
 ops.register(add)
 
 
@@ -212,7 +222,7 @@ def f(cts, x, y):
     return [z_bar, z_bar]
 
 
-sub = Op.binary("sub")
+sub = sp.Op.binary("sub")
 ops.register(sub)
 
 
@@ -233,7 +243,7 @@ def f(cts, x, y):
     return [z_bar, -z_bar]
 
 
-mul = Op.binary("mul")
+mul = sp.Op.binary("mul")
 ops.register(mul)
 
 
@@ -252,14 +262,14 @@ def f(primals, tangents):
 @mul.set_T
 def f(cts, x, y):
     (z_bar,) = cts
-    assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
-    if type(x) is UndefPrimal:
+    assert (type(x) is sp.UndefPrimal) ^ (type(y) is sp.UndefPrimal)
+    if type(x) is sp.UndefPrimal:
         return [z_bar * y, None]
-    elif type(y) is UndefPrimal:
+    elif type(y) is sp.UndefPrimal:
         return [None, x * z_bar]
 
 
-div = Op.binary("div")
+div = sp.Op.binary("div")
 ops.register(div)
 
 
@@ -282,7 +292,7 @@ def f(cts, x, y):
     return [z_bar / y, None]
 
 
-maximum = Op.binary("maximum")
+maximum = sp.Op.binary("maximum")
 ops.register(maximum)
 
 
@@ -313,7 +323,7 @@ def f(cts, x, y):
     return [z_bar, None]
 
 
-equal = Op.binary("equal")
+equal = sp.Op.binary("equal")
 ops.register(equal)
 
 
@@ -335,7 +345,7 @@ def f(cts, x, y):
     return [z_bar, None]
 
 
-not_equal = Op.binary("not_equal")
+not_equal = sp.Op.binary("not_equal")
 ops.register(not_equal)
 
 
@@ -357,7 +367,7 @@ def f(cts, x, y):
     return [z_bar, None]
 
 
-max = Op.reduce("max")
+max = sp.Op.reduce("max")
 ops.register(max)
 
 
@@ -396,7 +406,7 @@ def f(cts, x, *, axes=None, keepdims=False):
     return [z.broadcast(x.aval.shape, None if keepdims else axes)]
 
 
-sum = Op.reduce("sum")
+sum = sp.Op.reduce("sum")
 ops.register(sum)
 
 
@@ -435,7 +445,7 @@ def f(cts, x, *, axes=None, keepdims=False):
 # ShapeOps
 # -----------------------
 
-broadcast = Op.shape("broadcast")
+broadcast = sp.Op.shape("broadcast")
 ops.register(broadcast)
 
 
@@ -484,8 +494,8 @@ def f(primals, tangents, *, shape, axes):
 
 
 @broadcast.set_shape_eval
-def f(x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), x.dtype)]
+def f(x: sp.ArrayShape, *, shape: Sequence[int], axes) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple(shape), x.dtype)]
 
 
 @broadcast.set_T
@@ -515,7 +525,7 @@ def f(cts, x, *, shape, axes):
     return [out]
 
 
-reshape = Op.shape("reshape")
+reshape = sp.Op.shape("reshape")
 ops.register(reshape)
 
 
@@ -540,8 +550,8 @@ def f(primals, tangents, *, shape):
 
 
 @reshape.set_shape_eval
-def f(x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), x.dtype)]
+def f(x: sp.ArrayShape, *, shape: Sequence[int]) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple(shape), x.dtype)]
 
 
 @reshape.set_T
@@ -550,7 +560,7 @@ def f(cts, x, *, shape):
     return [z.reshape(x.aval.shape)]
 
 
-transpose = Op.shape("transpose")
+transpose = sp.Op.shape("transpose")
 ops.register(transpose)
 
 
@@ -581,9 +591,9 @@ def f(primals, tangents, *, perm):
 
 
 @transpose.set_shape_eval
-def f(x: ArrayShape, *, perm: Sequence[int]) -> List[ArrayShape]:
+def f(x: sp.ArrayShape, *, perm: Sequence[int]) -> List[sp.ArrayShape]:
     shape = [x.shape[i] for i in perm]
-    return [ArrayShape(shape, x.dtype)]
+    return [sp.ArrayShape(shape, x.dtype)]
 
 
 @transpose.set_T
@@ -592,7 +602,7 @@ def f(cts, x, *, perm):
     return [z.transpose(perm)]
 
 
-pad = Op.shape("pad")
+pad = sp.Op.shape("pad")
 ops.register(pad)
 
 
@@ -611,23 +621,23 @@ def f(x, *, lo, hi, interior=None, value=0.0):
 @pad.set_vmap
 def f(axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
-    operand, padding_value = batched_args
-    operand_bdim, padding_value_bdim = batch_dims
-    if operand_bdim is None:
-        operand_bdim = 0
-        operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
+    sp.Operand, padding_value = batched_args
+    sp.Operand_bdim, padding_value_bdim = batch_dims
+    if sp.Operand_bdim is None:
+        sp.Operand_bdim = 0
+        sp.Operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
 
     padding_config = list(padding_config)
     padding_config.insert(operand_bdim, (0, 0, 0))
     if padding_value_bdim is None:
-        return pad(operand, padding_value, padding_config), operand_bdim
+        return pad(operand, padding_value, padding_config), sp.Operand_bdim
 
     assert padding_value_bdim == 0, padding_value_bdim
 
     x = pad(operand, _zero(operand), padding_config)
     mask = pad(full_like(operand, True, np.bool_), False, padding_config)
     broadcasted_padding = broadcast_in_dim(padding_value, x.shape, (operand_bdim,))
-    return select(mask, x, broadcasted_padding), operand_bdim
+    return select(mask, x, broadcasted_padding), sp.Operand_bdim
 
 
 @pad.set_jvp
@@ -637,17 +647,17 @@ def f(primals, tangents, *, lo, hi, interior=None, value=0.0):
 
 
 @pad.set_shape_eval
-def f(x: ArrayShape, *, lo, hi, interior=None, value=0.0) -> List[ArrayShape]:
-    op_shape = np.shape(x)
+def f(x: sp.ArrayShape, *, lo, hi, interior=None, value=0.0) -> List[sp.ArrayShape]:
+    sp.Op_shape = np.shape(x)
 
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
     shape = (
         sum([l, h, _dilate_dim(d, r + 1)])
-        for l, h, r, d in list_zip(lo, hi, interior, op_shape)
+        for l, h, r, d in list_zip(lo, hi, interior, sp.Op_shape)
     )
-    res = ArrayShape(shape, x.dtype)
+    res = sp.ArrayShape(shape, x.dtype)
     if not all(d >= 0 for d in res.shape):
         raise ValueError(
             f"Dimension size after padding is not at least 0, "
@@ -671,11 +681,11 @@ def f(cts, x, *, lo, hi, interior=None, value=0.0):
             tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior)
         )
 
-    res = t_op() if isinstance(x, UndefPrimal) else None
+    res = t_op() if isinstance(x, sp.UndefPrimal) else None
     return [res]
 
 
-slice = Op.shape("slice")
+slice = sp.Op.shape("slice")
 ops.register(slice)
 
 
@@ -713,18 +723,20 @@ def f(primals, tangents, *, starts, limits, strides):
 
 
 @slice.set_shape_eval
-def f(x: ArrayShape, *, starts, limits, strides: Sequence[int]) -> List[ArrayShape]:
+def f(
+    x: sp.ArrayShape, *, starts, limits, strides: Sequence[int]
+) -> List[sp.ArrayShape]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
             limit if type(start) is int and start == 0 else limit - start
             for start, limit in list_zip(starts, limits)
         ]
-        return [ArrayShape(shape, x.dtype)]
+        return [sp.ArrayShape(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
         x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-        return [ArrayShape(x.shape, x.dtype)]
+        return [sp.ArrayShape(x.shape, x.dtype)]
 
 
 @slice.set_T
@@ -732,7 +744,7 @@ def T(cts, x, *, starts, limits, strides):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cts
     x_shape = x.aval.shape
-    assert isinstance(x, UndefPrimal)
+    assert isinstance(x, sp.UndefPrimal)
     if strides is None or np.all(np.equal(strides, 1)):
         lo, hi, interior = (
             starts,
@@ -756,7 +768,7 @@ def T(cts, x, *, starts, limits, strides):
     return [res]
 
 
-flip = Op.shape("flip")
+flip = sp.Op.shape("flip")
 ops.register(flip)
 
 
@@ -777,8 +789,8 @@ def f(primals, tangents, *, axes):
 
 
 @flip.set_shape_eval
-def f(x: ArrayShape, *, axes):
-    return [ArrayShape(x.shape, x.dtype)]
+def f(x: sp.ArrayShape, *, axes):
+    return [sp.ArrayShape(x.shape, x.dtype)]
 
 
 @flip.set_T
@@ -787,7 +799,7 @@ def T(cts, *, axes):
     return [z.flip(axes)]
 
 
-concatenate = Op.shape("concatenate")
+concatenate = sp.Op.shape("concatenate")
 cat = concatenate
 ops.register(concatenate)
 ops.alias(concatenate, "cat")
@@ -810,11 +822,11 @@ def jvp(primals, tangents, *, axis):
 
 
 @concatenate.set_shape_eval
-def f(xs: ArrayShape, *, axis: Sequence[int]) -> List[ArrayShape]:
+def f(xs: sp.ArrayShape, *, axis: Sequence[int]) -> List[sp.ArrayShape]:
     if not xs:
-        msg = "concatenate expects at least one operand, got 0."
+        msg = "concatenate expects at least one sp.Operand, got 0."
         raise TypeError(msg)
-    if len(set(operand.ndim for operand in xs)) != 1:
+    if len(set(operand.ndim for sp.Operand in xs)) != 1:
         msg = "Cannot concatenate arrays with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
     if not 0 <= axis < xs[0].ndim:
@@ -833,17 +845,19 @@ def f(xs: ArrayShape, *, axis: Sequence[int]) -> List[ArrayShape]:
     concat_size = sum(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
     return [
-        ArrayShape(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)
+        sp.ArrayShape(
+            ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype
+        )
     ]
 
 
 @concatenate.set_T
 def T(cts, xs, *, axis):
     (z,) = cts
-    x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
+    x_shapes = [o.aval.shape if type(o) is sp.UndefPrimal else o.shape for o in xs]
     if type(z) is None:
-        return [None if type(o) is UndefPrimal else None for o in xs]
-    else:  # TODO: replace numpy ops with pure Python
+        return [None if type(o) is sp.UndefPrimal else None for o in xs]
+    else:  # TODO: replace numpy sp.Ops with pure Python
         limit_points = np.cumsum([shape[axis] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
         limits = np.tile(z.shape, (len(xs), 1)).tolist()
@@ -854,7 +868,7 @@ def T(cts, xs, *, axis):
         l[axis] = limit_points[i]
 
     return [
-        z.slice(start, limit) if type(o) is UndefPrimal else None
+        z.slice(start, limit) if type(o) is sp.UndefPrimal else None
         for o, start, limit in zip(xs, starts, limits)
     ]
 
@@ -863,19 +877,19 @@ def T(cts, xs, *, axis):
 # LoadOps
 # -----------------------
 
-constant = Op.load("constant")
+constant = sp.Op.load("constant")
 ops.register(constant)
 
 
 @constant.set_eval
 def f(*, val, dtype):
-    return [Array(val, dtype)]
+    return [sp.Array(val, dtype)]
 
 
 @constant.set_jvp
 def f(primals, tangents, *, val, dtype):
-    out = Array(val, dtype)
-    out_jvp = ones_like(out)
+    out = sp.Array(val, dtype)
+    out_jvp = sp.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -887,123 +901,122 @@ def f(cts, *, val, dtype):
 @constant.set_shape_eval
 def f(*, val, dtype):
     # TODO: not using numpy to extract shape
-    return [ArrayShape(np.array(val).shape, dtype)]
+    return [sp.ArrayShape(np.array(val).shape, dtype)]
 
 
-full = Op.load("full")
+full = sp.Op.load("full")
 ops.register(full)
 
 
 @full.set_eval
-def f(*, shape, fill_value, dtype=BaseArray.default_dtype):
-    return [backend.run_impl(full, shape, fill_value, dtype)]
+def f(*, shape, fill_value, dtype=sp.BaseArray.default_dtype):
+    return [sp.RT().backend.run_impl(full, shape, fill_value, dtype)]
 
 
 @full.set_jvp
-def f(primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = backend.run_impl(full, shape, fill_value, dtype)
-    out_jvp = ones_like(out)
+def f(primals, tangents, *, shape, fill_value, dtype=sp.BaseArray.default_dtype):
+    out = sp.RT().backend.run_impl(full, shape, fill_value, dtype)
+    out_jvp = sp.RT().ones_like(out)
     return [out], [out_jvp]
 
 
 @full.set_T
-def f(cts, *, shape, fill_value, dtype=BaseArray.default_dtype):
+def f(cts, *, shape, fill_value, dtype=sp.BaseArray.default_dtype):
     return [cts[0]]
 
 
 @full.set_shape_eval
-def f(*, shape, fill_value, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(*, shape, fill_value, dtype=sp.BaseArray.default_dtype) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple(shape), dtype)]
 
 
-random_uniform = Op.load("random_uniform")
+random_uniform = sp.Op.load("random_uniform")
 rand = random_uniform
 ops.register(random_uniform)
 ops.alias(random_uniform, "randn")
 
 
 @random_uniform.set_eval
-def f(*, shape, dtype=BaseArray.default_dtype):
-    return [backend.run_impl(random_uniform, shape, dtype)]
+def f(*, shape, dtype=sp.BaseArray.default_dtype):
+    return [sp.RT().backend.run_impl(random_uniform, shape, dtype)]
 
 
 @random_uniform.set_jvp
-def f(primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = backend.run_impl(random_uniform, shape, dtype)
-    out_jvp = ones_like(out)
+def f(primals, tangents, *, shape, dtype=sp.BaseArray.default_dtype):
+    out = sp.RT().backend.run_impl(random_uniform, shape, dtype)
+    out_jvp = sp.ones_like(out)
     return [out], [out_jvp]
 
 
 @random_uniform.set_T
-def f(cts, *, shape, dtype=BaseArray.default_dtype):
+def f(cts, *, shape, dtype=sp.BaseArray.default_dtype):
     return [cts[0]]
 
 
 @random_uniform.set_shape_eval
-def f(*, shape, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(*, shape, dtype=sp.BaseArray.default_dtype) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple(shape), dtype)]
 
 
-random_normal = Op.load("random_normal")
+random_normal = sp.Op.load("random_normal")
 randn = random_normal
 ops.register(random_normal)
 ops.alias(random_normal, "randn")
 
 
 @random_normal.set_eval
-def f(*, shape, dtype=BaseArray.default_dtype):
+def f(*, shape, dtype=sp.BaseArray.default_dtype):
     return [backend.run_impl(random_normal, shape, dtype)]
 
 
 @random_normal.set_jvp
-def f(primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = backend.run_impl(random_normal, shape, dtype)
-    out_jvp = ones_like(out)
+def f(primals, tangents, *, shape, dtype=sp.BaseArray.default_dtype):
+    out = sp.RT().backend.run_impl(random_normal, shape, dtype)
+    out_jvp = sp.ones_like(out)
     return [out], [out_jvp]
 
 
 @random_normal.set_T
-def f(cts, *, shape, dtype=BaseArray.default_dtype):
+def f(cts, *, shape, dtype=sp.BaseArray.default_dtype):
     return [cts[0]]
 
 
 @random_normal.set_shape_eval
-def f(*, shape, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(*, shape, dtype=sp.BaseArray.default_dtype) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple(shape), dtype)]
 
 
-arange = Op.load("arange")
+arange = sp.Op.load("arange")
 ops.register(arange)
 
 
 @arange.set_eval
-def f(*, start, stop, stride, dtype=BaseArray.default_dtype):
-    return [backend.run_impl(arange, start, stop, stride, dtype)]
+def f(*, start, stop, stride, dtype=sp.BaseArray.default_dtype):
+    return [sp.RT().backend.run_impl(arange, start, stop, stride, dtype)]
 
 
 @arange.set_jvp
-def f(primals, tangents, *, start, stop, stride, dtype=BaseArray.default_dtype):
-    out = backend.run_impl(arange, start, stop, stride, dtype)
-    out_jvp = ones_like(out)
+def f(primals, tangents, *, start, stop, stride, dtype=sp.BaseArray.default_dtype):
+    out = sp.RT().backend.run_impl(arange, start, stop, stride, dtype)
+    out_jvp = sp.ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_T
-def f(cts, *, start, stop, stride, dtype=BaseArray.default_dtype):
+def f(cts, *, start, stop, stride, dtype=sp.BaseArray.default_dtype):
     return [cts[0]]
 
 
 @arange.set_shape_eval
-def f(*, start, stop, stride, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple((stop - start) * stride), dtype)]
+def f(*, start, stop, stride, dtype=sp.BaseArray.default_dtype) -> List[sp.ArrayShape]:
+    return [sp.ArrayShape(tuple((stop - start) * stride), dtype)]
 
 
-jit_op = Op("jit")
+jit_op = sp.Op("jit_op")
 ops.register(jit_op)
 
 
 @jit_op.set_eval
 def f(*args, hashable_prog, hashable_consts):
-    jit_fn = RT.backend.callable(hashable_prog, hashable_consts)
+    jit_fn = sp.RT().backend.callable(hashable_prog, hashable_consts)
     return [jit_fn(*args)]
-

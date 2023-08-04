@@ -1,4 +1,6 @@
 import slope as sp
+from slope.opsets.v1.ops_defs import ops
+from slope.opsets.v1.procs_defs import procs
 import numpy as np
 from typing import (
     List,
@@ -58,7 +60,9 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
         out_vals = sp.list_map(lambda z: env[z], eqn.out_binders)
         assert not len(out_vals) > 1, "Op with >1 output not supported"
         # op_ir = self.op_impls[eqn.op.name].ir(*in_vals, **eqn.params, ret=out_vals[0])
-        impl = sp.RT.ops[eqn.op.name].impls[self.name]
+        # impl = sp.RT().ops[eqn.op.name].impls[self.name]
+        breakpoint()
+        impl = getattr(sp.RT().backend, eqn.op.name)
         op_impl_code_lines = inspect.getsourcelines(impl)
         args_str = ", ".join(in_vals)
         kwargs_str = ", ".join([f"{k}={v}" for k, v in eqn.params.items()])
@@ -94,7 +98,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
 ### Op Impls
 
 
-@numpy_backend.set_impl(sp.ops.convert)
+@numpy_backend.set_impl(ops.convert)
 def f(
     x,
     dtype,
@@ -102,104 +106,104 @@ def f(
     return x.astype(dtype)
 
 
-@numpy_backend.set_impl(sp.ops.stop_gradient)
+@numpy_backend.set_impl(ops.stop_gradient)
 def f(x, dtype):
     return x
 
 
-@numpy_backend.set_impl(sp.ops.neg)
+@numpy_backend.set_impl(ops.neg)
 def f(
     x,
 ):
     return np.negative(x)
 
 
-@numpy_backend.set_impl(sp.ops.sqrt)
+@numpy_backend.set_impl(ops.sqrt)
 def f(x):
     return np.sqrt(x)
 
 
-@numpy_backend.set_impl(sp.ops.exp)
+@numpy_backend.set_impl(ops.exp)
 def f(x):
     return np.exp(x)
 
 
-@numpy_backend.set_impl(sp.ops.log)
+@numpy_backend.set_impl(ops.log)
 def f(x):
     return np.log(x)
 
 
-@numpy_backend.set_impl(sp.ops.add)
+@numpy_backend.set_impl(ops.add)
 def f(x, y):
     return np.add(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.sub)
+@numpy_backend.set_impl(ops.sub)
 def f(x, y):
     return np.subtract(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.mul)
+@numpy_backend.set_impl(ops.mul)
 def f(x, y):
     return np.multiply(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.div)
+@numpy_backend.set_impl(ops.div)
 def f(x, y):
     return np.divide(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.equal)
+@numpy_backend.set_impl(ops.equal)
 def f(x, y):
     return np.equal(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.not_equal)
+@numpy_backend.set_impl(ops.not_equal)
 def f(x, y):
     return np.not_equal(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.maximum)
+@numpy_backend.set_impl(ops.maximum)
 def f(x, y):
     return np.maximum(x, y)
 
 
-@numpy_backend.set_impl(sp.ops.sum)
+@numpy_backend.set_impl(ops.sum)
 def f(x, axes=None, keepdims=False):
     return np.sum(x, axis=axes, keepdims=keepdims)
 
 
-@numpy_backend.set_impl(sp.ops.max)
+@numpy_backend.set_impl(ops.max)
 def f(x, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
 
 
-@numpy_backend.set_impl(sp.ops.constant)
+@numpy_backend.set_impl(ops.constant)
 def f(val, dtype=default_dtype):
     return np.array(val, dtype=dtype)
 
 
-@numpy_backend.set_impl(sp.ops.arange)
+@numpy_backend.set_impl(ops.arange)
 def f(start, stop, stride, dtype=default_dtype):
     return np.arange(start, stop, stride, dtype=dtype)
 
 
-@numpy_backend.set_impl(sp.ops.full)
+@numpy_backend.set_impl(ops.full)
 def f(shape, fill_value, dtype=default_dtype):
     return np.full(shape, fill_value=fill_value, dtype=dtype)
 
 
-@numpy_backend.set_impl(sp.ops.random_uniform)
+@numpy_backend.set_impl(ops.random_uniform)
 def f(shape, dtype=default_dtype):
     return np.random.uniform(size=shape).astype(dtype)
 
 
-@numpy_backend.set_impl(sp.ops.random_normal)
+@numpy_backend.set_impl(ops.random_normal)
 def f(shape, dtype=default_dtype):
     return np.random.normal(loc=np.zeros(shape)).astype(dtype)
 
 
-@numpy_backend.set_impl(sp.ops.broadcast)
+@numpy_backend.set_impl(ops.broadcast)
 def f(x, shape, axes=None):
     ret = x
     if not axes is None:
@@ -209,32 +213,32 @@ def f(x, shape, axes=None):
     return ret
 
 
-@numpy_backend.set_impl(sp.ops.reshape)
+@numpy_backend.set_impl(ops.reshape)
 def f(x, shape):
     return np.reshape(x, shape)
 
 
-@numpy_backend.set_impl(sp.ops.pad)
+@numpy_backend.set_impl(ops.pad)
 def f(x, lo, hi, interior, value):
     # TODO: implement interior pad
     return np.pad({x}, list(zip(lo, hi)), constant_values={value})
 
 
-@numpy_backend.set_impl(sp.ops.slice)
+@numpy_backend.set_impl(ops.slice)
 def f(x, starts, limits, strides):
     return x[[slice(s, l, st) for s, l, st in zip(starts, limits, strides)]]
 
 
-@numpy_backend.set_impl(sp.ops.concatenate)
+@numpy_backend.set_impl(ops.concatenate)
 def f(xs, axes):
     return np.concatenate(xs, axes)
 
 
-@numpy_backend.set_impl(sp.ops.transpose)
+@numpy_backend.set_impl(ops.transpose)
 def f(x, axes):  # NOTE: np.transpose is like torch.permute
     return np.transpose(x, axes)
 
 
-@numpy_backend.set_impl(sp.ops.flip)
+@numpy_backend.set_impl(ops.flip)
 def f(x, axes):
     return np.flip(x, axes)

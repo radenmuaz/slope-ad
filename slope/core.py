@@ -96,11 +96,6 @@ class IDHashable:
     def __eq__(self, other):
         return type(other) is IDHashable and id(self.val) == id(other.val)
 
-
-def raise_not_implemented(self, *args, **kwargs):
-    raise NotImplementedError
-
-
 class OpType(Enum):
     Unary = auto()
     Binary = auto()
@@ -115,13 +110,11 @@ class Op:
         self.name = name
         self.op_type = op_type
         self.impls = dict()
-        self.eval = raise_not_implemented
-        self.jvp = raise_not_implemented
-        self.vmap = raise_not_implemented
-        self.T = raise_not_implemented
-        self.shape_eval = raise_not_implemented
-
+        self.rt = None
         self.args_fixer = lambda *args, **kwargs: (args, kwargs)
+    
+    def set_rt(self, rt):
+        self.rt = rt
 
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
@@ -160,13 +153,28 @@ class Op:
         return args, kwargs
 
     def impl(self, *args, **kwargs):
-        return sp.RT().backend.run_impl(self, *args, **kwargs)
+        return self.rt.backend.run_impl(self, *args, **kwargs)
 
     def __call__(self, *args, **kwargs):
-        args_, kwargs_ = args, kwargs
         args, kwargs = self.pack_args(args, kwargs)
         args, kwargs = self.args_fixer(*args, **kwargs)
-        return sp.RT().bind1(self, *args, **kwargs)
+        return self.rt.bind1(self, *args, **kwargs)
+    
+    def eval(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def jvp(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def T(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def vmap(self, *args, **kwargs):
+        raise NotImplementedError
+    
+    def shape_eval(self, *args, **kwargs):
+        raise NotImplementedError
+    
 
     def set_args_fixer(self, fn):
         self.args_fixer = fn
@@ -345,8 +353,8 @@ class ProcsDir:
 
 @dataclass
 class Opset:
-    ops: OpsDir
-    procs: ProcsDir
+    ops_dir: OpsDir
+    procs_dir: ProcsDir
     backends: dict
 
 
@@ -449,7 +457,7 @@ class Lit:
     aval: ArrayShape
 
     def __init__(self, val):
-        self.aval = aval = ArrayShape.like(TracerArray.get_aval(val))
+        self.aval = aval = ArrayShape.like(self.get_aval(val))
         self.val = np.array(val, aval.dtype)
 
 
@@ -534,6 +542,7 @@ class ProgType(NamedTuple):
 
 
 class MainTrace(NamedTuple):
+    rt: "Runtime"
     level: int
     trace_type: Type["Trace"]
     global_data: Optional[Any]
@@ -542,7 +551,8 @@ class MainTrace(NamedTuple):
 class Trace:
     main: MainTrace
 
-    def __init__(self, main: MainTrace) -> None:
+    def __init__(self, rt, main: MainTrace) -> None:
+        self.rt = rt
         self.main = main
 
     def pure(self, val):
@@ -628,7 +638,8 @@ class ArrayBuffer:
 class Array(BaseArray):
     __array_priority__ = 1000
 
-    def __init__(self, val: ArrayBuffer):
+    def __init__(self, rt, val: ArrayBuffer):
+        self.rt = rt
         if not isinstance(val, ArrayBuffer):
             breakpoint()
         assert isinstance(val, ArrayBuffer)
@@ -642,11 +653,11 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(sp.ops).keys():
-            op = getattr(sp.ops, attr)
+        if attr in vars(self.rt.ops).keys():
+            op = getattr(self.rt.ops, attr)
             return partial(op.impl, self)
-        elif attr in vars(sp.procs).keys():
-            proc = getattr(sp.procs, attr)
+        elif attr in vars(self.rt.procs).keys():
+            proc = getattr(self.rt.procs, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"Access this proc by Array.{attr}"
@@ -668,15 +679,6 @@ class Array(BaseArray):
         raise NotImplementedError
 
 
-def array(
-    val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
-    dtype: Optional[Any] = None,
-):
-    return (
-        Array(val)
-        if isinstance(val, ArrayBuffer)
-        else sp.RT().backend.run_impl(sp.constant, val=val, dtype=dtype)
-    )
 
 
 class TracerArray(BaseArray):
@@ -690,8 +692,8 @@ class TracerArray(BaseArray):
 
     _trace: "Trace"
 
-    def __init__(self):
-        raise NotImplementedError
+    def __init__(self, rt):
+        self.rt = rt
 
     # @property
     # def aval(self):
@@ -711,16 +713,7 @@ class TracerArray(BaseArray):
     def __str__(self):
         return repr(self)
 
-    @staticmethod
-    def get_aval(x):
-        if isinstance(x, TracerArray):
-            return x.aval
-        elif type(x) in TracerArray.TYPES:
-            return array(np.asarray(x))
-        elif isinstance(x, Array):
-            return x
-        else:
-            raise TypeError(x)
+    
 
     def full_lower(self):
         return self
@@ -740,11 +733,11 @@ class TracerArray(BaseArray):
     #     return wrapped_fn
 
     def __getattr__(self, attr):
-        if attr in vars(sp.ops).keys():
-            op = getattr(sp.ops, attr)
+        if attr in vars(self.rt.ops).keys():
+            op = getattr(self.rt.ops, attr)
             return partial(op, self)
-        elif attr in vars(sp.procs).keys():
-            proc = getattr(sp.procs, attr)
+        elif attr in vars(self.rt.procs).keys():
+            proc = getattr(self.rt.procs, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"Access this proc by Array.{attr}"
@@ -804,13 +797,12 @@ leaf = Leaf()
 class Runtime:
     def __init__(
         self,
-        opset=None,
+        opset,
         default_backend="numpy",
-        root_trace=MainTrace(0, EvalTrace, None),
     ):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
-        self.trace_stack += [root_trace]
+        self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
         self.node_types = dict()
         self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
         self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
@@ -820,17 +812,43 @@ class Runtime:
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
         self.opset = opset
+        for op_name in vars(self.ops):
+            getattr(self.ops, op_name).set_rt(self)
+        for _, backend in self.backends.items():
+            backend.set_rt(self)
         self.backend = (
-            self.backends[default_backend] if self.opset is not None else None
+            self.backends[default_backend]
         )
+    
+    def get_aval(self, x):
+        if isinstance(x, TracerArray):
+            return x.aval
+        elif type(x) in TracerArray.TYPES:
+            return self.array(np.asarray(x))
+        elif isinstance(x, Array):
+            return x
+        else:
+            raise TypeError(x)
+    
+
+    def array(
+        self,
+        val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
+        dtype: Optional[Any] = None,
+    ):
+        return (
+        Array(self, val)
+        if isinstance(val, ArrayBuffer)
+        else self.backend.run_impl(self.ops.constant, val=val, dtype=dtype)
+    )
 
     @property
     def ops(self):
-        return self.opset.ops
+        return self.opset.ops_dir
 
     @property
     def procs(self):
-        return self.opset.procs
+        return self.opset.procs_dir
 
     @property
     def backends(self):
@@ -843,7 +861,7 @@ class Runtime:
             if node_type:
                 node_metadata, children = node_type.to_iterable(x)
                 children_flat, child_trees = unzip2(
-                    list_map(self._tree_flatten, children)
+                    list_map(_tree_flatten, children)
                 )
                 flattened = itertools.chain.from_iterable(children_flat)
                 return flattened, PyTreeDef(
@@ -885,7 +903,7 @@ class Runtime:
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
         level = len(self.trace_stack)
-        main = MainTrace(level, trace_type, global_data)
+        main = MainTrace(self, level, trace_type, global_data)
         self.trace_stack.append(main)
 
         try:
@@ -969,7 +987,7 @@ class Runtime:
                 raise TypeError("unbound variable")
             return x.aval
         elif isinstance(x, Lit):
-            return TracerArray.get_aval(x.val)
+            return self.get_aval(x.val)
         else:
             assert False
 
@@ -1000,7 +1018,7 @@ class Runtime:
         with self.new_main(BatchTrace, axis_size) as main:
             trace = BatchTrace(main)
             tracers_in = [
-                BatchTracerArray(trace, x, ax) if ax is not None else x
+                BatchTracerArray(self, trace, x, ax) if ax is not None else x
                 for x, ax in list_zip(args, in_axes)
             ]
             outs = f(*tracers_in)
@@ -1014,13 +1032,13 @@ class Runtime:
 
     def vmap(self, f, in_axes):
         def batched_f(*args):
-            args_flat, in_tree = tree_flatten(args)
-            in_axes_flat, in_tree2 = tree_flatten(in_axes)
+            args_flat, in_tree = self.tree_flatten(args)
+            in_axes_flat, in_tree2 = self.tree_flatten(in_axes)
             if in_tree != in_tree2:
                 raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
-            f_flat, out_tree = flatten_fun(f, in_tree)
+            f_flat, out_tree = self.flatten_fun(f, in_tree)
             outs_flat = self.vmap_flat(f_flat, in_axes_flat, *args_flat)
-            return tree_unflatten(out_tree(), outs_flat)
+            return self.tree_unflatten(out_tree(), outs_flat)
 
         return batched_f
 
@@ -1038,16 +1056,16 @@ class Runtime:
         return primals_out, tangents_out
 
     def jvp(self, f, primals, tangents):
-        primals_flat, in_tree = tree_flatten(primals)
-        tangents_flat, in_tree2 = tree_flatten(tangents)
+        primals_flat, in_tree = self.tree_flatten(primals)
+        tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
-        f, out_tree = flatten_fun(f, in_tree)
+        f, out_tree = self.flatten_fun(f, in_tree)
         primals_out_flat, tangents_out_flat = self.jvp_flat(
             f, primals_flat, tangents_flat
         )
-        primals_out = tree_unflatten(out_tree(), primals_out_flat)
-        tangents_out = tree_unflatten(out_tree(), tangents_out_flat)
+        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
+        tangents_out = self.tree_unflatten(out_tree(), tangents_out_flat)
         return primals_out, tangents_out
 
     def jacfwd(self, f, x):
@@ -1060,13 +1078,13 @@ class Runtime:
         f: Callable,
         *avals_in: ArrayShape,
     ) -> Tuple[Prog, List[Any], PyTreeDef]:
-        avals_in, in_tree = tree_flatten(avals_in)
-        f, out_tree = flatten_fun(f, in_tree)
+        avals_in, in_tree = self.tree_flatten(avals_in)
+        f, out_tree = self.flatten_fun(f, in_tree)
 
-        builder = ProgBuilder()
+        builder = ProgBuilder(self)
         with self.new_main(ProgTrace, builder) as main:
             with self.new_dynamic(main):
-                trace = ProgTrace(main)
+                trace = ProgTrace(self, main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in)
                 tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1075,7 +1093,7 @@ class Runtime:
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(TracerArray.get_aval(x)))
+            PartialVal.unknown(ArrayShape.like(self.get_aval(x)))
             for x in primals_in
         ]
 
@@ -1107,8 +1125,8 @@ class Runtime:
 
     def tracers_to_prog(
         self,
-        tracers_in: List[PartialEvalTracerArray],
-        tracers_out: List[PartialEvalTracerArray],
+        tracers_in: List["PartialEvalTracerArray"],
+        tracers_out: List["PartialEvalTracerArray"],
     ):
         def tracer_parents(t: PartialEvalTracerArray) -> List[PartialEvalTracerArray]:
             return t.proto.tracers_in if isinstance(t.proto, InstrProto) else []
@@ -1135,7 +1153,7 @@ class Runtime:
                 val = t.proto.val
                 var = constid_to_var.get(id(val))
                 if var is None:
-                    aval = ArrayShape.like(TracerArray.get_aval(val))
+                    aval = ArrayShape.like(self.get_aval(val))
                     var = constid_to_var[id(val)] = Var(aval)
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
@@ -1197,7 +1215,7 @@ class Runtime:
 
     def vjp_flat(self, f, *primals_in):
         pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(TracerArray.get_aval(x)))
+            PartialVal.unknown(ArrayShape.like(self.get_aval(x)))
             for x in primals_in
         ]
         primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
@@ -1291,18 +1309,18 @@ class Runtime:
             if hashable_prog is None and hashable_consts is None:
                 print("Run with an input first to get jit_fn")
                 return None
-            return sp.RT().backend.callable(hashable_prog, hashable_consts)
+            return self.backend.callable(hashable_prog, hashable_consts)
 
         def f_jitted(*args):
-            avals_in = [ArrayShape.like(TracerArray.get_aval(x)) for x in args]
-            prog, consts, out_tree = make_prog(f, *avals_in)
+            avals_in = [ArrayShape.like(self.get_aval(x)) for x in args]
+            prog, consts, out_tree = self.make_prog(f, *avals_in)
             nonlocal hashable_consts, hashable_prog
             hashable_consts = tuple(map(IDHashable, consts))
             hashable_prog = IDHashable(prog)
             outs = sp.jit_op(
                 *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
             )
-            return tree_unflatten(out_tree, outs)
+            return self.tree_unflatten(out_tree, outs)
 
         f_jitted.get_jit_fn = get_jit_fn
         return f_jitted
@@ -1316,6 +1334,10 @@ class Backend:
         self.impls = dict()
         self.callable = lru_cache(self.callable)
         self.dtype_map = dict()
+        self.rt = None
+    
+    def set_rt(self, rt):
+        self.rt = rt
 
     def callable(
         self,
@@ -1323,7 +1345,7 @@ class Backend:
         hashable_consts: Tuple[IDHashable, ...],
     ):
         prog: Prog = hashable_prog.val
-        sp.RT().typecheck_prog(prog)
+        # self.rt.typecheck_prog(prog)
         consts = [x.val for x in hashable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
         compiled = self.compile(
@@ -1370,7 +1392,7 @@ class Backend:
         except Exception as e:
             print(e)
             breakpoint()
-        return Array(ArrayBuffer(val))
+        return Array(self.rt, ArrayBuffer(val))
 
     def set_input_handler(self, typ, fn):
         self.input_handlers[typ] = fn
@@ -1398,7 +1420,8 @@ BatchAxis = Union[None, int]
 
 
 class BatchTracerArray(TracerArray):
-    def __init__(self, trace, val, batch_dim: BatchAxis):
+    def __init__(self, rt, trace, val, batch_dim: BatchAxis):
+        self.rt = rt
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1415,7 +1438,7 @@ class BatchTracerArray(TracerArray):
 
     def full_lower(self):
         if self.batch_dim is None:
-            return sp.RT().full_lower(self.val)
+            return self.rt.full_lower(self.val)
         else:
             return self
 
@@ -1455,7 +1478,8 @@ class BatchTrace(Trace):
 
 
 class JVPTracerArray(TracerArray):
-    def __init__(self, trace, primal, tangent):
+    def __init__(self, rt, trace, primal, tangent):
+        self.rt = rt
         self._trace = trace
         self.primal = primal
         self.tangent = tangent
@@ -1467,7 +1491,7 @@ class JVPTracerArray(TracerArray):
 
 class JVPTrace(Trace):
     def pure(self, val):
-        aval = TracerArray.get_aval(val)
+        aval = self.get_aval(val)
         val = aval if not isinstance(aval, TracerArray) else val
 
         return JVPTracerArray(self, val, sp.zeros(aval.shape, aval.dtype))
@@ -1486,7 +1510,8 @@ class ProgTracerArray(TracerArray):
     __slots__ = ["aval"]
     aval: ArrayShape
 
-    def __init__(self, trace, aval):
+    def __init__(self, rt, trace, aval):
+        self.rt
         self._trace = trace
         self.aval = aval
 
@@ -1502,7 +1527,7 @@ class ProgTrace(Trace):
     def get_or_make_const_tracer(self, val: Any) -> ProgTracerArray:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, TracerArray.get_aval(val))
+            tracer = self.builder.new_tracer(self, self.get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
@@ -1529,7 +1554,8 @@ class ProgBuilder:
     constvals: Dict[Var, Any]
     tracers: List[ProgTracerArray]
 
-    def __init__(self):
+    def __init__(self, rt):
+        self.rt = rt
         self.instrs = []
         self.tracer_to_var = {}
         self.const_tracers = {}
@@ -1537,7 +1563,7 @@ class ProgBuilder:
         self.tracers = []
 
     def new_tracer(self, trace: ProgTrace, aval: ArrayShape) -> ProgTracerArray:
-        tracer = ProgTracerArray(trace, aval)
+        tracer = ProgTracerArray(self.rt, trace, aval)
         self.tracers.append(tracer)
         return tracer
 
@@ -1566,14 +1592,14 @@ class ProgBuilder:
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
         prog = Prog(in_binders, self.instrs, out_vars)
-        sp.RT().typecheck_prog(prog)
+        self.rt.typecheck_prog(prog)
         prog, constvals = self._inline_literals(prog, constvals)
         return prog, constvals
 
     def _inline_literals(self, prog: Prog, consts: List[Any]) -> Tuple[Prog, List[Any]]:
         const_binders, other_binders = split_list(prog.in_binders, len(consts))
         scalars = [
-            type(x) in TracerArray.TYPES and not TracerArray.get_aval(x).shape
+            type(x) in TracerArray.TYPES and not self.get_aval(x).shape
             for x in consts
         ]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
@@ -1590,7 +1616,7 @@ class ProgBuilder:
         ]
         new_outs = [literals.get(x, x) for x in prog.outs]
         new_prog = Prog(new_const_binders + other_binders, new_instrs, new_outs)
-        sp.RT().typecheck_prog(new_prog)
+        self.rt.typecheck_prog(new_prog)
         return new_prog, new_consts
 
 
@@ -1604,7 +1630,7 @@ class PartialVal(NamedTuple):
 
     @classmethod
     def known(cls, val: Any):
-        return PartialVal(TracerArray.get_aval(val), val)
+        return PartialVal(self.get_aval(val), val)
 
     @classmethod
     def unknown(cls, aval: ArrayShape):
@@ -1654,7 +1680,8 @@ class PartialEvalTracerArray(TracerArray):
     pval: PartialVal
     proto: Optional[ProgProto]
 
-    def __init__(self, trace, pval, proto):
+    def __init__(self, rt, trace, pval, proto):
+        self.rt = rt
         self._trace = trace
         self.pval = pval
         self.proto = proto
@@ -1663,17 +1690,17 @@ class PartialEvalTracerArray(TracerArray):
 
     def full_lower(self):
         if self.pval.is_known:
-            return RT.full_lower(self.pval.const)
+            return self.rt.full_lower(self.pval.const)
         return self
 
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
+        return PartialEvalTracerArray(self.rt, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
-        val = array(val)
-        return PartialEvalTracerArray(self, PartialVal.known(val), None)
+        val = self.rt.array(val)
+        return PartialEvalTracerArray(self.rt, PartialVal.known(val), None)
 
     pure = lift
 
@@ -1684,11 +1711,11 @@ class PartialEvalTrace(Trace):
             return tracer
         else:
             pval = PartialVal.unknown(ArrayShape.like(tracer.aval))
-            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
+            return PartialEvalTracerArray(self.rt, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return RT.bind(op, *list_map(RT.full_lower, tracers), **params)
+            return self.rt.bind(op, *list_map(RT.full_lower, tracers), **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         try:
@@ -1696,7 +1723,7 @@ class PartialEvalTrace(Trace):
         except:
             breakpoint()
         tracers_out = [
-            PartialEvalTracerArray(self, PartialVal.unknown(aval), None)
+            PartialEvalTracerArray(self.rt, PartialVal.unknown(aval), None)
             for aval in avals_out
         ]
         instr = InstrProto(

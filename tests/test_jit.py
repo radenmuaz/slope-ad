@@ -1,17 +1,19 @@
 import unittest
 
 import slope as sp
+from slope import rt
 import numpy as np
 import os
 from typing import NamedTuple
 from functools import partial
+
 
 DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
 class TestJit(unittest.TestCase):
     def test_add(self):
-        @sp.jit
+        # @rt.jit
         def f(x, **kwargs):
             print("tracing!")
             out = x + x
@@ -20,10 +22,10 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        res = f(sp.array([1.0, 2.0, 3.0]))
+        res = f(rt.array([1.0, 2.0, 3.0]))
         print(res)
         # print(f"{f.get_jit_fn()=}")
-        res = f(sp.array([2.0, 4.0, 6.0]))  # should not print 'tracing!'
+        res = f(rt.array([2.0, 4.0, 6.0]))  # should not print 'tracing!'
         print(res)
         breakpoint()
 

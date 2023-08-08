@@ -96,6 +96,7 @@ class IDHashable:
     def __eq__(self, other):
         return type(other) is IDHashable and id(self.val) == id(other.val)
 
+
 class OpType(Enum):
     Unary = auto()
     Binary = auto()
@@ -110,9 +111,9 @@ class Op:
         self.name = name
         self.op_type = op_type
         self.impls = dict()
-        self.rt = None
+        self.rt: Runtime = None
         self.args_fixer = lambda *args, **kwargs: (args, kwargs)
-    
+
     def set_rt(self, rt):
         self.rt = rt
 
@@ -159,22 +160,21 @@ class Op:
         args, kwargs = self.pack_args(args, kwargs)
         args, kwargs = self.args_fixer(*args, **kwargs)
         return self.rt.bind1(self, *args, **kwargs)
-    
+
     def eval(self, *args, **kwargs):
         raise NotImplementedError
-    
+
     def jvp(self, *args, **kwargs):
         raise NotImplementedError
-    
+
     def T(self, *args, **kwargs):
         raise NotImplementedError
 
     def vmap(self, *args, **kwargs):
         raise NotImplementedError
-    
+
     def shape_eval(self, *args, **kwargs):
         raise NotImplementedError
-    
 
     def set_args_fixer(self, fn):
         self.args_fixer = fn
@@ -640,8 +640,6 @@ class Array(BaseArray):
 
     def __init__(self, rt, val: ArrayBuffer):
         self.rt = rt
-        if not isinstance(val, ArrayBuffer):
-            breakpoint()
         assert isinstance(val, ArrayBuffer)
         self.buf = val
 
@@ -660,7 +658,7 @@ class Array(BaseArray):
             proc = getattr(self.rt.procs, attr)
             assert not isinstance(
                 proc, classmethod
-            ), f"Access this proc by Array.{attr}"
+            ), f"use rt.{attr} instead of Array.{attr}"
             return partial(proc, self)
         breakpoint()
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
@@ -677,8 +675,6 @@ class Array(BaseArray):
 
     def __setitem__(self, idx, val):
         raise NotImplementedError
-
-
 
 
 class TracerArray(BaseArray):
@@ -712,8 +708,6 @@ class TracerArray(BaseArray):
 
     def __str__(self):
         return repr(self)
-
-    
 
     def full_lower(self):
         return self
@@ -816,10 +810,8 @@ class Runtime:
             getattr(self.ops, op_name).set_rt(self)
         for _, backend in self.backends.items():
             backend.set_rt(self)
-        self.backend = (
-            self.backends[default_backend]
-        )
-    
+        self.backend = self.backends[default_backend]
+
     def get_aval(self, x):
         if isinstance(x, TracerArray):
             return x.aval
@@ -829,7 +821,6 @@ class Runtime:
             return x
         else:
             raise TypeError(x)
-    
 
     def array(
         self,
@@ -837,10 +828,10 @@ class Runtime:
         dtype: Optional[Any] = None,
     ):
         return (
-        Array(self, val)
-        if isinstance(val, ArrayBuffer)
-        else self.backend.run_impl(self.ops.constant, val=val, dtype=dtype)
-    )
+            Array(self, val)
+            if isinstance(val, ArrayBuffer)
+            else self.backend.run_impl(self.ops.constant, val=val, dtype=dtype)
+        )
 
     @property
     def ops(self):
@@ -860,9 +851,7 @@ class Runtime:
 
             if node_type:
                 node_metadata, children = node_type.to_iterable(x)
-                children_flat, child_trees = unzip2(
-                    list_map(_tree_flatten, children)
-                )
+                children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
                 flattened = itertools.chain.from_iterable(children_flat)
                 return flattened, PyTreeDef(
                     node_type, node_metadata, tuple(child_trees)
@@ -1093,8 +1082,7 @@ class Runtime:
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(self.get_aval(x)))
-            for x in primals_in
+            PartialVal.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
         ]
 
         def f_jvp(*primals_tangents_in):
@@ -1215,8 +1203,7 @@ class Runtime:
 
     def vjp_flat(self, f, *primals_in):
         pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(self.get_aval(x)))
-            for x in primals_in
+            PartialVal.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
         ]
         primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
 
@@ -1334,8 +1321,8 @@ class Backend:
         self.impls = dict()
         self.callable = lru_cache(self.callable)
         self.dtype_map = dict()
-        self.rt = None
-    
+        self.rt: Runtime = None
+
     def set_rt(self, rt):
         self.rt = rt
 
@@ -1421,7 +1408,7 @@ BatchAxis = Union[None, int]
 
 class BatchTracerArray(TracerArray):
     def __init__(self, rt, trace, val, batch_dim: BatchAxis):
-        self.rt = rt
+        self.rt: Runtime = rt
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1599,8 +1586,7 @@ class ProgBuilder:
     def _inline_literals(self, prog: Prog, consts: List[Any]) -> Tuple[Prog, List[Any]]:
         const_binders, other_binders = split_list(prog.in_binders, len(consts))
         scalars = [
-            type(x) in TracerArray.TYPES and not self.get_aval(x).shape
-            for x in consts
+            type(x) in TracerArray.TYPES and not self.get_aval(x).shape for x in consts
         ]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)

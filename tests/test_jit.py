@@ -13,21 +13,19 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 class TestJit(unittest.TestCase):
     def test_add(self):
-        # @rt.jit
+        @rt.jit
         def f(x, **kwargs):
             print("tracing!")
             out = x + x
             out = out.sum(keepdims=True)
             # out = x + Array([4.0, 5.0, 6.0])
             return out
-
         # print(f"{f.get_jit_fn()=}")
         res = f(rt.array([1.0, 2.0, 3.0]))
         print(res)
         # print(f"{f.get_jit_fn()=}")
         res = f(rt.array([2.0, 4.0, 6.0]))  # should not print 'tracing!'
         print(res)
-        breakpoint()
 
 
 if __name__ == "__main__":

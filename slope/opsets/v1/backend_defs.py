@@ -61,9 +61,9 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
         assert not len(out_vals) > 1, "Op with >1 output not supported"
         # op_ir = self.op_impls[eqn.op.name].ir(*in_vals, **eqn.params, ret=out_vals[0])
         # impl = sp.RT().ops[eqn.op.name].impls[self.name]
-        breakpoint()
-        impl = getattr(sp.RT().backend, eqn.op.name)
+        impl = self.rt.backend.impls[eqn.op]
         op_impl_code_lines = inspect.getsourcelines(impl)
+        breakpoint()
         args_str = ", ".join(in_vals)
         kwargs_str = ", ".join([f"{k}={v}" for k, v in eqn.params.items()])
         if len(op_impl_code_lines) > 2:

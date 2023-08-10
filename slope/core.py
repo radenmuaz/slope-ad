@@ -24,6 +24,7 @@ from typing import (
     Hashable,
     Final,
 )
+import types
 from contextlib import contextmanager
 import itertools
 import weakref
@@ -161,6 +162,9 @@ class Op:
         args, kwargs = self.args_fixer(*args, **kwargs)
         return self.rt.bind1(self, *args, **kwargs)
 
+    def args_fixer(self, *args, **kwargs):
+        raise NotImplementedError
+    
     def eval(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -175,24 +179,24 @@ class Op:
 
     def shape_eval(self, *args, **kwargs):
         raise NotImplementedError
-
+    
     def set_args_fixer(self, fn):
-        self.args_fixer = fn
+        self.args_fixer = types.MethodType(fn, self)
 
     def set_eval(self, fn):
-        self.eval = fn
+        self.eval = types.MethodType(fn, self)
 
     def set_jvp(self, fn):
-        self.jvp = fn
+        self.jvp = types.MethodType(fn, self)
 
     def set_vmap(self, fn):
-        self.vmap = fn
+        self.vmap = types.MethodType(fn, self)
 
     def set_T(self, fn):
-        self.T = fn
+        self.T = types.MethodType(fn, self)
 
     def set_shape_eval(self, fn):
-        self.shape_eval = fn
+        self.shape_eval = types.MethodType(fn, self)
 
     @classmethod
     def unary(cls, name):
@@ -219,7 +223,7 @@ class Op:
         op = cls(name, OpType.Binary)
 
         @op.set_args_fixer
-        def f(x, y, **kwargs):
+        def f(self, x, y, **kwargs):
             if type(x) is UndefPrimal and type(y) is UndefPrimal:
                 assert x.aval.shape == y.aval.shape
                 return (x, y), kwargs
@@ -269,7 +273,7 @@ class Op:
             return [self(x, y, **params)], [x_bdim]
 
         @op.set_shape_eval
-        def f(x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
+        def f(self, x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
             # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
                 # breakpoint()
@@ -291,7 +295,7 @@ class Op:
         op = cls(name, OpType.Reduce)
 
         @op.set_args_fixer
-        def f(x, axes=None, keepdims=False):
+        def f(self, x, axes=None, keepdims=False):
             if axes is None:
                 axes = tuple(range(x.ndim))
             elif isinstance(axes, int):
@@ -300,7 +304,7 @@ class Op:
             return (x,), dict(axes=axes, keepdims=keepdims)
 
         @op.set_vmap
-        def f(axis_size, vals_in, dims_in, **params):
+        def f(self, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             axes = list(params["axes"])
             axes = tuple(a + (x_bdim <= a) for a in axes)
@@ -309,7 +313,7 @@ class Op:
             return [cls.do(x, **params)], [out_bdim]
 
         @op.set_shape_eval
-        def f(x: ArrayShape, axes=None, keepdims=False) -> List[ArrayShape]:
+        def f(self, x: ArrayShape, axes=None, keepdims=False) -> List[ArrayShape]:
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
             axes_ = set(axes)
             if keepdims:
@@ -926,7 +930,7 @@ class Runtime:
         )
         if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
             top_main = self.dynamic_trace
-        return top_main.trace_type(top_main)
+        return top_main.trace_type(self, top_main)
 
     def full_raise(self, trace: Trace, val: Any) -> TracerArray:
         if not isinstance(val, TracerArray):
@@ -1097,17 +1101,17 @@ class Runtime:
         return primals_out, f_lin
 
     def linearize(self, f, *primals_in):
-        primals_in_flat, in_tree = tree_flatten(primals_in)
-        f, out_tree = flatten_fun(f, in_tree)
+        primals_in_flat, in_tree = self.tree_flatten(primals_in)
+        f, out_tree = self.flatten_fun(f, in_tree)
         primals_out_flat, f_lin_flat = self.linearize_flat(f, *primals_in_flat)
-        primals_out = tree_unflatten(out_tree(), primals_out_flat)
+        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
 
         def f_lin(*tangents_in):
-            tangents_in_flat, in_tree2 = tree_flatten(tangents_in)
+            tangents_in_flat, in_tree2 = self.tree_flatten(tangents_in)
             if in_tree != in_tree2:
                 raise TypeError
             tangents_out_flat = f_lin_flat(*tangents_in_flat)
-            return tree_unflatten(out_tree(), tangents_out_flat)
+            return self.tree_unflatten(out_tree(), tangents_out_flat)
 
         return primals_out, f_lin
 
@@ -1278,11 +1282,11 @@ class Runtime:
 
     def grad(self, f):
         def gradfun(x, *xs):
-            y, f_vjp = vjp(f, x, *xs)
+            y, f_vjp = self.vjp(f, x, *xs)
             if np.shape(y) != ():
                 raise TypeError
             # out = f_vjp(ones(np.shape(y)))
-            out = f_vjp(ones(()))
+            out = f_vjp(self.procs.ones(()))
             return y, out
 
         return gradfun
@@ -1304,7 +1308,7 @@ class Runtime:
             nonlocal hashable_consts, hashable_prog
             hashable_consts = tuple(map(IDHashable, consts))
             hashable_prog = IDHashable(prog)
-            outs = sp.jit_op(
+            outs = self.ops.jit_op(
                 *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
             )
             return self.tree_unflatten(out_tree, outs)
@@ -1498,7 +1502,7 @@ class ProgTracerArray(TracerArray):
     aval: ArrayShape
 
     def __init__(self, rt, trace, aval):
-        self.rt
+        self.rt = rt
         self._trace = trace
         self.aval = aval
 

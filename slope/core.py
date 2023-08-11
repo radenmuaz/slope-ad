@@ -24,6 +24,7 @@ from typing import (
     Hashable,
     Final,
 )
+import weakref
 import types
 from contextlib import contextmanager
 import itertools
@@ -112,11 +113,15 @@ class Op:
         self.name = name
         self.op_type = op_type
         self.impls = dict()
-        self.rt: Runtime = None
+        self.rt_ref = None
         self.args_fixer = lambda *args, **kwargs: (args, kwargs)
 
     def set_rt(self, rt):
-        self.rt = rt
+        self.rt_ref = weakref.ref(rt)
+    
+    @property
+    def rt(self):
+        return self.rt_ref()
 
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
@@ -556,8 +561,12 @@ class Trace:
     main: MainTrace
 
     def __init__(self, rt, main: MainTrace) -> None:
-        self.rt = rt
+        self.rt_ref = weakref.ref(rt)
         self.main = main
+    
+    @property
+    def rt(self):
+        return self.rt_ref()
 
     def pure(self, val):
         raise NotImplementedError
@@ -595,6 +604,14 @@ class BaseArray:
     int64: Final[DType] = DType(2, 8, "int64", np.int64)
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
     default_dtype = float32
+
+    def __init__(self, rt):
+        self.rt_ref = weakref.ref(rt)
+    
+    @property
+    def rt(self):
+        return self.rt_ref()
+    
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -643,7 +660,7 @@ class Array(BaseArray):
     __array_priority__ = 1000
 
     def __init__(self, rt, val: ArrayBuffer):
-        self.rt = rt
+        super().__init__(rt)
         assert isinstance(val, ArrayBuffer)
         self.buf = val
 
@@ -691,9 +708,6 @@ class TracerArray(BaseArray):
     __array_priority__ = 2000
 
     _trace: "Trace"
-
-    def __init__(self, rt):
-        self.rt = rt
 
     # @property
     # def aval(self):
@@ -815,6 +829,12 @@ class Runtime:
         for _, backend in self.backends.items():
             backend.set_rt(self)
         self.backend = self.backends[default_backend]
+    
+    def known(self, val: Any):
+        return PartialVal(self.get_aval(val), val)
+
+    def unknown(self, aval: ArrayShape):
+        return PartialVal(aval, None)
 
     def get_aval(self, x):
         if isinstance(x, TracerArray):
@@ -1083,22 +1103,40 @@ class Runtime:
                 tracers_out = [self.full_raise(trace, out) for out in outs]
                 prog, consts = builder.build(tracers_in, tracers_out)
         return prog, consts, out_tree()
+    
+
+    def partial_eval_flat(self,
+        f: Callable, pvals_in: List["PartialVal"]
+    ) -> Tuple[Prog, List["PartialVal"], List[Any]]:
+        with self.new_main(PartialEvalTrace) as main:
+            trace = PartialEvalTrace(main)
+            tracers_in = [trace.new_arg(pval) for pval in pvals_in]
+            outs = f(*tracers_in)
+            tracers_out = [self.full_raise(trace, out) for out in outs]
+            pvals_out = [t.pval for t in tracers_out]
+            unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
+            unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
+            prog, consts = self.tracers_to_prog(unk_tracers_in, unk_tracers_out)
+
+        return prog, pvals_out, consts
+
 
     def linearize_flat(self, f, *primals_in):
-        pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
+        pvals_in = [self.known(x) for x in primals_in] + [
+            self.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
         ]
 
         def f_jvp(*primals_tangents_in):
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        prog, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)
+        prog, pvals_out, consts = self.partial_eval_flat(f_jvp, pvals_in)
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
         f_lin = lambda *tangents: self.eval_prog(prog, [*consts, *tangents])
         return primals_out, f_lin
+
 
     def linearize(self, f, *primals_in):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
@@ -1206,8 +1244,8 @@ class Runtime:
         return sorted_nodes
 
     def vjp_flat(self, f, *primals_in):
-        pvals_in = [PartialVal.known(x) for x in primals_in] + [
-            PartialVal.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
+        pvals_in = [self.known(x) for x in primals_in] + [
+            self.unknown(ArrayShape.like(self.get_aval(x))) for x in primals_in
         ]
         primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
 
@@ -1215,7 +1253,7 @@ class Runtime:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        prog, pvals_out, consts = partial_eval_flat(f_jvp, pvals_in)  # linearize
+        prog, pvals_out, consts = self.partial_eval_flat(f_jvp, pvals_in)  # linearize
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
@@ -1252,7 +1290,7 @@ class Runtime:
                 primal_env[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_env.pop(v, zeros(v.aval.shape, v.aval.dtype))
+            return ct_env.pop(v, self.procs.zeros(v.aval.shape, v.aval.dtype))
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
@@ -1325,10 +1363,14 @@ class Backend:
         self.impls = dict()
         self.callable = lru_cache(self.callable)
         self.dtype_map = dict()
-        self.rt: Runtime = None
+        self.rt_ref: Runtime = None
 
     def set_rt(self, rt):
-        self.rt = rt
+        self.rt_ref = weakref.ref(rt)
+    
+    @property
+    def rt(self):
+        return self.rt_ref()
 
     def callable(
         self,
@@ -1336,7 +1378,7 @@ class Backend:
         hashable_consts: Tuple[IDHashable, ...],
     ):
         prog: Prog = hashable_prog.val
-        # self.rt.typecheck_prog(prog)
+        self.rt.typecheck_prog(prog)
         consts = [x.val for x in hashable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
         compiled = self.compile(
@@ -1356,7 +1398,7 @@ class Backend:
         self.dtype_map = dtype_map
 
     def set_compile(self, fn):
-        self.compile = partial(fn, self)
+        self.compile = types.MethodType(fn, self)
 
     def set_impl(self, op):
         def set_impl_(fn):
@@ -1374,8 +1416,6 @@ class Backend:
                 else a
             )
 
-        args_ = args
-        kwargs_ = kwargs
         args = tuple([process_arg(a) for a in args])
         kwargs = {k: process_arg(v) for k, v in kwargs.items()}
         try:
@@ -1399,20 +1439,13 @@ class JitFn:
         args = [a.val if isinstance(a, Array) else a for a in args]
         outs = self.fn(*args, **kwargs)
         return [Array(o) for o in outs]
-        # return [Array(o) if isinstance(o, np.ndarray) else o for o in outs]
-
-
-# def mapped_aval(batch_dim, aval):
-#     shape = list(aval.shape)
-#     del shape[batch_dim]
-#     return ArrayShape(tuple(shape), aval.dtype)
 
 BatchAxis = Union[None, int]
 
 
 class BatchTracerArray(TracerArray):
     def __init__(self, rt, trace, val, batch_dim: BatchAxis):
-        self.rt: Runtime = rt
+        super().__init__(rt)
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1470,7 +1503,7 @@ class BatchTrace(Trace):
 
 class JVPTracerArray(TracerArray):
     def __init__(self, rt, trace, primal, tangent):
-        self.rt = rt
+        super().__init__(rt)
         self._trace = trace
         self.primal = primal
         self.tangent = tangent
@@ -1502,7 +1535,7 @@ class ProgTracerArray(TracerArray):
     aval: ArrayShape
 
     def __init__(self, rt, trace, aval):
-        self.rt = rt
+        super().__init__(rt)
         self._trace = trace
         self.aval = aval
 
@@ -1546,13 +1579,18 @@ class ProgBuilder:
     tracers: List[ProgTracerArray]
 
     def __init__(self, rt):
-        self.rt = rt
+        
+        self.rt_ref = weakref.ref(rt)
         self.instrs = []
         self.tracer_to_var = {}
         self.const_tracers = {}
         self.constvals = {}
         self.tracers = []
 
+    @property
+    def rt(self):
+        return self.rt_ref()
+    
     def new_tracer(self, trace: ProgTrace, aval: ArrayShape) -> ProgTracerArray:
         tracer = ProgTracerArray(self.rt, trace, aval)
         self.tracers.append(tracer)
@@ -1618,32 +1656,11 @@ class PartialVal(NamedTuple):
     aval: ArrayShape
     const: Optional[Any]
 
-    @classmethod
-    def known(cls, val: Any):
-        return PartialVal(self.get_aval(val), val)
-
-    @classmethod
-    def unknown(cls, aval: ArrayShape):
-        return PartialVal(aval, None)
+    
 
     is_known = property(lambda self: self.const is not None)
     is_unknown = property(lambda self: self.const is None)
 
-
-def partial_eval_flat(
-    f: Callable, pvals_in: List[PartialVal]
-) -> Tuple[Prog, List[PartialVal], List[Any]]:
-    with RT.new_main(PartialEvalTrace) as main:
-        trace = PartialEvalTrace(main)
-        tracers_in = [trace.new_arg(pval) for pval in pvals_in]
-        outs = f(*tracers_in)
-        tracers_out = [RT.full_raise(trace, out) for out in outs]
-        pvals_out = [t.pval for t in tracers_out]
-        unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
-        unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
-        prog, consts = tracers_to_prog(unk_tracers_in, unk_tracers_out)
-
-    return prog, pvals_out, consts
 
 
 class LambdaBindingProto(NamedTuple):
@@ -1671,7 +1688,7 @@ class PartialEvalTracerArray(TracerArray):
     proto: Optional[ProgProto]
 
     def __init__(self, rt, trace, pval, proto):
-        self.rt = rt
+        super().__init__(rt)
         self._trace = trace
         self.pval = pval
         self.proto = proto
@@ -1690,7 +1707,7 @@ class PartialEvalTrace(Trace):
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
         val = self.rt.array(val)
-        return PartialEvalTracerArray(self.rt, PartialVal.known(val), None)
+        return PartialEvalTracerArray(self.rt, self.rt.known(val), None)
 
     pure = lift
 
@@ -1700,12 +1717,12 @@ class PartialEvalTrace(Trace):
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = PartialVal.unknown(ArrayShape.like(tracer.aval))
+            pval = self.rt.unknown(ArrayShape.like(tracer.aval))
             return PartialEvalTracerArray(self.rt, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return self.rt.bind(op, *list_map(RT.full_lower, tracers), **params)
+            return self.rt.bind(op, *list_map(self.rt.full_lower, tracers), **params)
         tracers_in = [self.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         try:
@@ -1713,7 +1730,7 @@ class PartialEvalTrace(Trace):
         except:
             breakpoint()
         tracers_out = [
-            PartialEvalTracerArray(self.rt, PartialVal.unknown(aval), None)
+            PartialEvalTracerArray(self.rt, self.rt.unknown(aval), None)
             for aval in avals_out
         ]
         instr = InstrProto(

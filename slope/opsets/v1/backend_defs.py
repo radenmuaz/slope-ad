@@ -122,7 +122,7 @@ def f(
     *,
     dtype,
 ):
-    return x.astype(dtype)
+    return x.astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.stop_gradient)
@@ -255,8 +255,8 @@ def f(xs, *, axes):
 
 
 @numpy_backend.set_impl(ops.transpose)
-def f(x, *, axes):  # NOTE: np.transpose is like torch.permute
-    return np.transpose(x, axes)
+def f(x, *, perm):  # NOTE: np.transpose is like torch.permute
+    return np.transpose(x, axes=perm)
 
 
 @numpy_backend.set_impl(ops.flip)

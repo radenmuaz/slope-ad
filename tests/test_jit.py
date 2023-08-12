@@ -22,12 +22,31 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        a = rt.array([1.0, 2.0])
-        a = a.pad((0,), (1,), None, 0.0)
-        a = a.slice((0,), (2,), (1,))
+        # a = rt.array([1.0, 2.0])
+        # a = a.pad((0,), (1,), None, 0.0)
+        # a = a.slice((0,), (2,), (1,))
         res = f(rt.array([1.0, 2.0, 3.0]))
         print(res)
+        res = f(rt.array([4.0, 5.0, 6.0]))
+        # print(f"{f.get_jit_fn()=}")
+        print(res)
+
+    def test_conv(self):
+        # @rt.jit
+        def f(x):
+            print("tracing!")
+            out = x + x
+            out = out.sum(keepdims=True)
+            # out = x + Array([4.0, 5.0, 6.0])
+            return out
+
+        # print(f"{f.get_jit_fn()=}")
+        # a = rt.array([1.0, 2.0])
+        # a = a.pad((0,), (1,), None, 0.0)
+        # a = a.slice((0,), (2,), (1,))
         res = f(rt.array([1.0, 2.0, 3.0]))
+        print(res)
+        res = f(rt.array([4.0, 5.0, 6.0]))
         # print(f"{f.get_jit_fn()=}")
         print(res)
 

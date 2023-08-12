@@ -30,7 +30,6 @@ from contextlib import contextmanager
 import itertools
 import weakref
 from functools import lru_cache, reduce, partial, wraps
-# from functools import partial
 from collections import defaultdict
 from enum import Enum, auto
 import operator as operator_py
@@ -157,8 +156,8 @@ class Op:
             args, rest = args[: len(args_strs)], args[len(args_strs) :]
             new_kwargs = {}
             for i, rest_arg in enumerate(rest):
-                k = kwargs_strs[i]
                 try:
+                    k = kwargs_strs[i]
                     assert k not in kwargs.keys()
                 except:
                     breakpoint()
@@ -174,6 +173,7 @@ class Op:
         return args, kwargs
 
     def impl(self, *args, **kwargs):
+        args_ = args; kwargds_ = kwargs
         args, kwargs = self.pack_args(args, kwargs)
         args, kwargs = self.args_fixer(*args, **kwargs)
         return self.rt.backend.run_impl(self, *args, **kwargs)
@@ -254,32 +254,36 @@ class Op:
             elif type(y) is UndefPrimal:
                 assert y.aval.shape == x.shape
                 return (x, y), kwargs
-            if type(x) in [bool, int, float, Array]:
+            
+            if type(x) in [bool, int, float]:
+                x = self.rt.array(x, dtype=y.dtype)
+            elif type(y) in [bool, int, float]:
+                y = self.rt.array(y, dtype=x.dtype)
+
+            if type(x) is Array and isinstance(y, TracerArray):
                 x = y._trace.pure(x)
-            elif type(y) in [bool, int, float, Array]:
+            elif type(y) is Array and isinstance(x, TracerArray):
                 y = x._trace.pure(y)
-                # try: y = x._trace.pure(y)
-                # except: breakpoint()
-            # try:
-            #     print(f"before, {type(x)}:{x.shape}, {type(y)}:{y.shape}", end="\t")
-            # except:
-            #     print(f"before, {type(x)}:{x.aval.shape}, {type(y)}:{y.aval.shape}", end="\t")
 
             if getattr(x, "shape", None) == getattr(y, "shape", None):
-                # print("skip")
                 return (x, y), kwargs
-            # if type(x) in [bool, int, float, Array]:
-            #     x = y._trace.pure(x)
-            # elif type(y) in [bool, int, float, Array]:
-            #     y = x._trace.pure(y)
-            bx = list(range((max_(x.ndim, y.ndim) - x.ndim)))
-            by = list(range((max_(x.ndim, y.ndim) - y.ndim)))
-            bx = bx if len(bx) > 0 else None
-            by = by if len(by) > 0 else None
-            shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
-            x = x.broadcast(shape=shape_ret, axes=bx)
-            y = y.broadcast(shape=shape_ret, axes=by)
-            # print(f"after,  {x.shape}, {y.shape}")
+            if x.ndim == 0:
+                shape_ret = y.shape
+                bx = tuple(range(y.ndim))
+                x = x.broadcast(shape=shape_ret, axes=bx)
+            elif y.ndim == 0:
+                shape_ret = x.shape
+                by = tuple(range(x.ndim))
+                y = y.broadcast(shape=shape_ret, axes=by)
+            else:
+                bx = tuple(range((max_(x.ndim, y.ndim) - x.ndim)))
+                by = tuple(range((max_(x.ndim, y.ndim) - y.ndim)))
+                bx = bx if len(bx) > 0 else None
+                by = by if len(by) > 0 else None
+                shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
+                x = x.broadcast(shape=shape_ret, axes=bx)
+                y = y.broadcast(shape=shape_ret, axes=by)
+            
             return (x, y), kwargs
 
         @op.set_vmap
@@ -295,9 +299,7 @@ class Op:
 
         @op.set_shape_eval
         def f(self, x: ArrayShape, y: ArrayShape, **params) -> List[ArrayShape]:
-            # if not isinstance(x, ArrayShape) or not isinstance(y, ArrayShape):
             if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
-                # breakpoint()
                 raise TypeError
             if ArrayShape.like(x) != ArrayShape.like(y):
                 breakpoint()

@@ -14,28 +14,28 @@ procs = ProcsDir()
 
 
 @procs.register
-def zeros(shape, dtype=BaseArray.default_dtype, **kwargs):
-    return ops.full(shape, 0.0, dtype, **kwargs)
+def zeros(shape, dtype=BaseArray.default_dtype):
+    return ops.full(shape, 0.0, dtype)
 
 
 @procs.register
-def ones(shape, dtype=BaseArray.default_dtype, **kwargs):
-    return ops.full(shape, 1.0, dtype, **kwargs)
+def ones(shape, dtype=BaseArray.default_dtype):
+    return ops.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
 @procs.register
-def full_like(y, fill_value, **kwargs):
-    return ops.full(y.shape, fill_value, dtype=y.dtype, **kwargs)
+def full_like(y, fill_value):
+    return ops.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
 
 @procs.register
-def zeros_like(y, **kwargs):
-    return zeros(y.shape, dtype=y.dtype, **kwargs)
+def zeros_like(y):
+    return zeros(shape=y.shape, dtype=y.dtype)
 
 
 @procs.register
-def ones_like(y, **kwargs):
-    return ops.full(y.shape, fill_value=1.0, dtype=y.dtype, **kwargs)
+def ones_like(y):
+    return ops.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
 
 @procs.register

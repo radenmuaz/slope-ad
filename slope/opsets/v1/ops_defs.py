@@ -56,22 +56,14 @@ ops.alias(convert, "astype")
 
 
 @convert.set_eval
-def f(self, x):
-    return [x]
+def f(self, x, *, dtype):
+    return [x.convert(dtype)]
 
 
 @convert.set_jvp
-def f(self, primals, tangents, **params):
+def f(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
-    return [x], [sp.zeros_like(x_dot)]
-
-
-@convert.set_T
-def f(self, cts, x):
-    (z,) = cts
-    assert type(x) is UndefPrimal
-    return [sp.zeros_like(z)]
-
+    return [x.convert(dtype)], [x_dot]
 
 sqrt = Op.unary("sqrt")
 ops.register(sqrt)
@@ -393,7 +385,7 @@ def f(self, x, *, axes=None, keepdims=None):
 
 @max.set_eval
 def f(self, x, *, axes=None, keepdims=False):
-    return [x.max(axes, keepdims)]
+    return [x.max(axes=axes, keepdims=keepdims)]
 
 
 @max.set_jvp
@@ -459,7 +451,7 @@ ops.register(broadcast)
 
 
 @broadcast.set_args_fixer
-def f(self, x, *, shape, axes):
+def f(self, x, *, shape, axes=None):
     if isinstance(axes, int):
         axes = (axes,)
     elif axes is None:
@@ -470,13 +462,13 @@ def f(self, x, *, shape, axes):
 
 
 @broadcast.set_eval
-def f(self, x, *, shape, axes):
-    out = x.broadcast(shape, axes)
+def f(self, x, *, shape, axes=None):
+    out = x.broadcast(shape, axes=None)
     return [out]
 
 
 @broadcast.set_vmap
-def f(self, axis_size, vals_in, dims_in, *, shape, axes):
+def f(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     (x,), (x_bdim,) = vals_in, dims_in
     # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
     shape_ = list(shape)
@@ -494,7 +486,7 @@ def f(self, axis_size, vals_in, dims_in, *, shape, axes):
 
 
 @broadcast.set_jvp
-def f(self, primals, tangents, *, shape, axes):
+def f(self, primals, tangents, *, shape, axes=None):
     (x,), (x_dot,) = primals, tangents
     return (
         [x.broadcast(shape=shape, axes=axes)],
@@ -503,7 +495,7 @@ def f(self, primals, tangents, *, shape, axes):
 
 
 @broadcast.set_shape_eval
-def f(self, x: ArrayShape, *, shape: Sequence[int], axes) -> List[ArrayShape]:
+def f(self, x: ArrayShape, *, shape: Sequence[int], axes=None) -> List[ArrayShape]:
     return [ArrayShape(tuple(shape), x.dtype)]
 
 
@@ -575,7 +567,7 @@ ops.register(transpose)
 
 @transpose.set_eval
 def f(self, x, *, perm):
-    return [x.transpose(perm)]
+    return [x.transpose(perm=perm)]
 
 
 @transpose.set_vmap
@@ -915,12 +907,12 @@ ops.register(full)
 
 @full.set_eval
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(full, shape, fill_value, dtype)]
+    return [self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)]
 
 
 @full.set_jvp
 def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(full, shape, fill_value, dtype)
+    out = self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
     out_jvp = self.rt.ones_like(out)
     return [out], [out_jvp]
 
@@ -943,12 +935,12 @@ ops.alias(random_uniform, "randn")
 
 @random_uniform.set_eval
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(random_uniform, shape, dtype)]
+    return [self.rt.backend.run_impl(self, shape=shape, dtype=dtype)]
 
 
 @random_uniform.set_jvp
 def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(random_uniform, shape, dtype)
+    out = self.rt.backend.run_impl(self, shape=shape, dtype=dtype)
     out_jvp = sp.rt.ones_like(out)
     return [out], [out_jvp]
 
@@ -971,7 +963,7 @@ ops.alias(random_normal, "randn")
 
 @random_normal.set_eval
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(random_normal, shape, dtype)]
+    return [self.rt.backend.run_impl(random_normal, shape=shape, dtype=dtype)]
 
 
 @random_normal.set_jvp

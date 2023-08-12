@@ -1,4 +1,5 @@
 import slope as sp
+from slope.core import ProcsDir, BaseArray
 from slope.opsets.v1.ops_defs import ops
 import math
 from typing import Tuple, Union, List, Iterator, Optional
@@ -6,18 +7,19 @@ import itertools
 import functools
 import operator
 import math
-procs = sp.ProcsDir()
+
+procs = ProcsDir()
 
 # Functions
 
 
 @procs.register
-def zeros(shape, dtype=sp.Array.default_dtype, **kwargs):
+def zeros(shape, dtype=BaseArray.default_dtype, **kwargs):
     return ops.full(shape, 0.0, dtype, **kwargs)
 
 
 @procs.register
-def ones(shape, dtype=sp.Array.default_dtype, **kwargs):
+def ones(shape, dtype=BaseArray.default_dtype, **kwargs):
     return ops.full(shape, 1.0, dtype, **kwargs)
 
 
@@ -160,27 +162,29 @@ def sign(x):
 def reciprocal(x):
     return 1.0 / x
 
+
 @procs.register
 def getitem(self, val):
     """
-- Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-- A slice i:j returns the elements with indices in [i, j)
-   - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
-   - Negative values for i and j are taken relative to the end of the sequence
-   - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-- Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
-- Empty slices are not allowed (arrays with 0s in shape have to be supported first, for all backends).
-- For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
-- Strides > 1 and < 0 are now allowed!:
-   - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
-   - Idea of stride < 0 support:
-       - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
-   - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
-       - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
-       - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
-         is possible.
-       - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
+    - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+    - A slice i:j returns the elements with indices in [i, j)
+       - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
+       - Negative values for i and j are taken relative to the end of the sequence
+       - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
+    - Indexing with np.newaxis or None on a given axis will add a new dimension of size one before that axis
+    - Empty slices are not allowed (arrays with 0s in shape have to be supported first, for all backends).
+    - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
+    - Strides > 1 and < 0 are now allowed!:
+       - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
+       - Idea of stride < 0 support:
+           - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
+       - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
+           - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
+           - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
+             is possible.
+           - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
     """
+
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
@@ -190,7 +194,9 @@ def getitem(self, val):
 
     val = list(val) if isinstance(val, tuple) else [val]
     if (num_slices := sum(isinstance(v, (slice, int)) for v in val)) > len(self.shape):
-        raise IndexError(f"too many indices for sp.BaseArray of dimension {len(self.shape)}")
+        raise IndexError(
+            f"too many indices for BaseArray of dimension {len(self.shape)}"
+        )
     orig_slices = list(val)
     ellipses_found = [i for i, v in enumerate(val) if v is Ellipsis]
     if len(ellipses_found) > 0:
@@ -253,10 +259,11 @@ def getitem(self, val):
             final_shape.append(1)
     return sliced_array.reshape(tuple(final_shape))  # Reshape
 
+
 @procs.register
 @staticmethod
 def stack(arrays, dim=0):
-    unsqueezed_arrays = [sp.BaseArray.unsqueeze(dim) for sp.BaseArray in arrays[1:]]
+    unsqueezed_arrays = [BaseArray.unsqueeze(dim) for BaseArray in arrays[1:]]
     return ops.concatenate(*unsqueezed_arrays, dim=dim)
 
 
@@ -295,12 +302,14 @@ def pad2d(self, padding: Union[List[int], Tuple[int, ...]]):
     ][::-1]
     return self.slice([(0, s) for s in self.shape[: -(len(padding) // 2)]] + slc)
 
+
 @procs.register
 def flatten(self, start_dim=0):
     return self.reshape(shape=tuple(list(self.shape[0:start_dim]) + [-1]))
 
 
 # ***** reduce ops *****
+
 
 @procs.register
 def min(self, axis=None, keepdim=False):
@@ -323,9 +332,19 @@ def std(self, axis=None, keepdim=False, correction=1):
     ).sqrt()
 
 
-def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__)) # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-def make_pair(x:Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else x
-def flat(l:Iterator): return [item for sublist in l for item in sublist]
+def argsort(x):
+    return type(x)(
+        sorted(range(len(x)), key=x.__getitem__)
+    )  # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
+
+
+def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+    return (x,) * cnt if isinstance(x, int) else x
+
+
+def flat(l: Iterator):
+    return [item for sublist in l for item in sublist]
+
 
 @procs.register
 def _pool(
@@ -334,7 +353,7 @@ def _pool(
     stride: Union[Tuple[int, ...], int] = 1,
     dilation: Union[Tuple[int, ...], int] = 1,
     _insert_dims=tuple(),
-) -> sp.BaseArray:
+) -> BaseArray:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) and len(k_) == len(
@@ -351,9 +370,7 @@ def _pool(
             math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
         ]  # expands such that we don't need padding
         xup = (
-            self.reshape(
-                *prefix, *([1] * len(_insert_dims)), *flat((1, i) for i in i_)
-            )
+            self.reshape(*prefix, *([1] * len(_insert_dims)), *flat((1, i) for i in i_))
             .expand(*prefix, *_insert_dims, *flat((e, i) for e, i in zip(e_, i_)))
             .reshape(*prefix, *_insert_dims, *[e * i for e, i in zip(e_, i_)])
         )
@@ -416,14 +433,14 @@ def max_pool(self, kernel_size=(2, 2), stride=None, dilation=1):
 @procs.register
 def conv_transpose(
     self,
-    weight: sp.BaseArray,
-    bias: Optional[sp.BaseArray] = None,
+    weight: BaseArray,
+    bias: Optional[BaseArray] = None,
     groups=1,
     stride=1,
     dilation=1,
     padding=0,
     output_padding=0,
-) -> sp.BaseArray:
+) -> BaseArray:
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
     x, w = self, weight.reshape(
         groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]
@@ -467,21 +484,21 @@ def conv_transpose(
 @procs.register
 def conv(
     self,
-    weight: sp.BaseArray,
-    bias: Optional[sp.BaseArray] = None,
+    weight: BaseArray,
+    bias: Optional[BaseArray] = None,
     groups=1,
     stride=1,
     dilation=1,
     padding=0,
-) -> sp.BaseArray:
+) -> BaseArray:
     (bs, cin_), (cout, cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups * cin == cin_ and len(self.shape) == len(
         weight.shape
-    ), f"Input sp.BaseArray shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input BaseArray shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for sp.BaseArray of shape {self.shape}"
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for BaseArray of shape {self.shape}"
     padding_ = (
         [padding] * 2 * len(HW)
         if isinstance(padding, int)
@@ -493,9 +510,7 @@ def conv(
     )
 
     # conv is a pooling op (with padding)
-    x = self.pad(padding_)._pool(
-        HW, stride, dilation
-    )  # (bs, groups*cin, oy, ox, H, W)
+    x = self.pad(padding_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
     x = (
         x.reshape(bs, groups, cin, 1, *oyx, *HW)
@@ -529,39 +544,41 @@ def conv(
     )
 
 
-@procs.register
-def dot(self, w: sp.BaseArray) -> sp.BaseArray:
-    if (n1 := len(self.shape)) * (n2 := len(w.shape)) == 0:
-        raise RuntimeError(
-            f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
-        )
-    x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
-    w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
-    r = (x * w).sum(-1)
-    return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
+# @procs.register
+# def dot(self, w: BaseArray) -> BaseArray:
+#     if (n1 := len(self.shape)) * (n2 := len(w.shape)) == 0:
+#         raise RuntimeError(
+#             f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
+#         )
+#     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])
+#     w = w.reshape(*w.shape[0:-2], 1, w.shape[-2], w.shape[-1]).transpose(-1, -2)
+#     r = (x * w).sum(-1)
+#     return r.reshape((*r.shape[:-2], r.shape[-1])) if len(self.shape) == 1 else r
 
 
-@procs.register
-def cumsum(self, axis=0):
-    x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
-    return (
-        x.reshape(1, 1, -1, self.shape[axis])
-        .conv(
-            sp.BaseArray.ones(
-                1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device
-            ),
-            padding=(self.shape[axis] - 1, 0, 0, 0),
-        )
-        .reshape(*x.shape)
-        .permute(*range(axis), self.ndim - 1, *range(axis, self.ndim - 1))
-    )
+# @procs.register
+# def cumsum(self, axis=0):
+#     x = self.permute(*(i for i in range(self.ndim) if i != axis), axis)
+#     return (
+#         x.reshape(1, 1, -1, self.shape[axis])
+#         .conv(
+#             BaseArray.ones(
+#                 1, 1, 1, self.shape[axis], dtype=self.dtype, device=self.device
+#             ),
+#             padding=(self.shape[axis] - 1, 0, 0, 0),
+#         )
+#         .reshape(*x.shape)
+#         .permute(*range(axis), self.ndim - 1, *range(axis, self.ndim - 1))
+#     )
 
 
 # ***** mlops (unary) *****
 
+
 @procs.register
 def cos(self):
     return ((math.pi / 2) - self).sin()
+
 
 @procs.register
 def tan(self):
@@ -569,29 +586,31 @@ def tan(self):
 
 
 # @staticmethod
-# def _tri(r: int, c: int, k: int = 0) -> sp.BaseArray:
-#     return sp.BaseArray.arange(r).unsqueeze(1).expand(r, c) <= sp.BaseArray.arange(
+# def _tri(r: int, c: int, k: int = 0) -> BaseArray:
+#     return BaseArray.arange(r).unsqueeze(1).expand(r, c) <= BaseArray.arange(
 #         c - k, start=-k
 #     ).unsqueeze(0).expand(r, c)
 
 
-# def triu(self, k: int = 0) -> sp.BaseArray:
-#     return sp.BaseArray._tri(self.shape[-2], self.shape[-1], k=k).where(
-#         self, sp.BaseArray.zeros_like(self)
+# def triu(self, k: int = 0) -> BaseArray:
+#     return BaseArray._tri(self.shape[-2], self.shape[-1], k=k).where(
+#         self, BaseArray.zeros_like(self)
 #     )
 
 
-# def tril(self, k: int = 0) -> sp.BaseArray:
-#     return sp.BaseArray._tri(self.shape[-2], self.shape[-1], k=k + 1).where(
-#         sp.BaseArray.zeros_like(self), self
+# def tril(self, k: int = 0) -> BaseArray:
+#     return BaseArray._tri(self.shape[-2], self.shape[-1], k=k + 1).where(
+#         BaseArray.zeros_like(self), self
 #     )
 
 
 # ***** math functions (unary) *****
 
+
 @procs.register
 def clip(self, min_, max_):
     return self.maximum(min_).minimum(max_)
+
 
 @procs.register
 def abs(self):
@@ -681,4 +700,3 @@ def softplus(self, beta=1):
 @procs.register
 def softsign(self):
     return self / (1 + self.abs())
-

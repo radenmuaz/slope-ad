@@ -4,11 +4,12 @@ import numpy as np
 from collections import namedtuple
 import functools
 from functools import partial
+from slope.core import unzip2, list_map
 
 OptimizerState = namedtuple(
     "OptimizerState", ["packed_state", "tree_def", "subtree_defs"]
 )
-sp.RT.register_pytree_node(
+sp.rt.register_pytree_node(
     OptimizerState,
     lambda xs: ((xs.packed_state,), (xs.tree_def, xs.subtree_defs)),
     lambda data, xs: OptimizerState(xs[0], data[0], data[1]),
@@ -51,17 +52,15 @@ def optimizer(
 
         @functools.wraps(init)
         def tree_init(x0_tree):
-            x0_flat, tree = sp.tree_flatten(x0_tree)
+            x0_flat, tree = sp.rt.tree_flatten(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = sp.unzip2(
-                sp.list_map(sp.tree_flatten, initial_states)
-            )
+            states_flat, subtrees = unzip2(list_map(sp.rt.tree_flatten, initial_states))
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)
         def tree_update(i, grad_tree, opt_state):
             states_flat, tree, subtrees = opt_state
-            grad_flat, tree2 = sp.tree_flatten(grad_tree)
+            grad_flat, tree2 = sp.rt.tree_flatten(grad_tree)
             if tree2 != tree:
                 msg = (
                     "optimizer update function was passed a gradient tree that did "
@@ -69,10 +68,10 @@ def optimizer(
                     "initialized: parameter tree {} and grad tree {}."
                 )
                 raise TypeError(msg.format(tree, tree2))
-            states = sp.list_map(sp.tree_unflatten, subtrees, states_flat)
-            new_states = sp.list_map(partial(update, i), grad_flat, states)
-            new_states_flat, subtrees2 = sp.unzip2(
-                sp.list_map(sp.tree_flatten, new_states)
+            states = list_map(sp.rt.tree_unflatten, subtrees, states_flat)
+            new_states = list_map(partial(update, i), grad_flat, states)
+            new_states_flat, subtrees2 = unzip2(
+                list_map(sp.rt.tree_flatten, new_states)
             )
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
@@ -86,9 +85,9 @@ def optimizer(
         @functools.wraps(get_params)
         def tree_get_params(opt_state):
             states_flat, tree, subtrees = opt_state
-            states = sp.list_map(sp.tree_unflatten, subtrees, states_flat)
-            params = sp.list_map(get_params, states)
-            return sp.tree_unflatten(tree, params)
+            states = list_map(sp.rt.tree_unflatten, subtrees, states_flat)
+            params = list_map(get_params, states)
+            return sp.rt.tree_unflatten(tree, params)
 
         return Optimizer(tree_init, tree_update, tree_get_params)
 

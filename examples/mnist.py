@@ -121,7 +121,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sp.array(train_images[batch_idx]), sp.array(
+                yield sp.rt.array(train_images[batch_idx]), sp.rt.array(
                     train_labels[batch_idx]
                 )
 
@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        loss, (g_params, _) = sp.grad(loss_fn)(params, batch)
+        loss, (g_params, _) = sp.rt.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()
@@ -150,7 +150,9 @@ if __name__ == "__main__":
 
         params = get_params(opt_state)
         # train_acc = accuracy(params, (train_images, train_labels))
-        test_acc = accuracy(params, (sp.array(test_images), sp.array(test_labels)))
+        test_acc = accuracy(
+            params, (sp.rt.array(test_images), sp.rt.array(test_labels))
+        )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         # print(f"Training set accuracy {train_acc}")
         print(f"Test set accuracy {test_acc}")

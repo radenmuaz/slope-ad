@@ -29,7 +29,8 @@ import types
 from contextlib import contextmanager
 import itertools
 import weakref
-from functools import lru_cache, reduce, partial
+from functools import lru_cache, reduce, partial, wraps
+# from functools import partial
 from collections import defaultdict
 from enum import Enum, auto
 import operator as operator_py
@@ -46,6 +47,16 @@ slice_ = slice
 zip_ = zip
 map_ = map
 
+def instance_method_lru_cache(*cache_args, **cache_kwargs):
+    def cache_decorator(func):
+        @wraps(func)
+        def cache_factory(self, *args, **kwargs):
+            instance_cache = lru_cache(*cache_args, **cache_kwargs)(func)
+            instance_cache = instance_cache.__get__(self, self.__class__)
+            setattr(self, func.__name__, instance_cache)
+            return instance_cache(*args, **kwargs)
+        return cache_factory
+    return cache_decorator
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -118,7 +129,7 @@ class Op:
 
     def set_rt(self, rt):
         self.rt_ref = weakref.ref(rt)
-    
+
     @property
     def rt(self):
         return self.rt_ref()
@@ -127,18 +138,21 @@ class Op:
         return f"Op <{self.name}>"
 
     def pack_args(self, args, kwargs):
+        # args_ = args; kwargs_ = kwargs
+        # args = args[1:] # assume first is self
         sig = inspect.signature(self.eval)
         args_strs = [
             k
             for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
         ]
         kwargs_strs = [
             k
             for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.KEYWORD_ONLY
+            if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"
         ]
-        if len(args) > len(args_strs) and len(args) != 0 and len(args_strs) != 0:
+
+        if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
             args_ = args
             args, rest = args[: len(args_strs)], args[len(args_strs) :]
             new_kwargs = {}
@@ -160,6 +174,8 @@ class Op:
         return args, kwargs
 
     def impl(self, *args, **kwargs):
+        args, kwargs = self.pack_args(args, kwargs)
+        args, kwargs = self.args_fixer(*args, **kwargs)
         return self.rt.backend.run_impl(self, *args, **kwargs)
 
     def __call__(self, *args, **kwargs):
@@ -169,7 +185,7 @@ class Op:
 
     def args_fixer(self, *args, **kwargs):
         raise NotImplementedError
-    
+
     def eval(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -184,7 +200,7 @@ class Op:
 
     def shape_eval(self, *args, **kwargs):
         raise NotImplementedError
-    
+
     def set_args_fixer(self, fn):
         self.args_fixer = types.MethodType(fn, self)
 
@@ -208,13 +224,13 @@ class Op:
         op = cls(name, OpType.Unary)
 
         @op.set_vmap
-        def f(self, axis_size, vals_in, dims_in, **params):
+        def f(self, x, *, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
 
         @op.set_shape_eval
-        def f(self, **params):
-            return [ArrayShape(self.shape, self.dtype)]
+        def f(self, x, **params):
+            return [ArrayShape(x.shape, x.dtype)]
 
         @op.set_jvp
         def f(self, primals, tangents, **params):
@@ -563,7 +579,7 @@ class Trace:
     def __init__(self, rt, main: MainTrace) -> None:
         self.rt_ref = weakref.ref(rt)
         self.main = main
-    
+
     @property
     def rt(self):
         return self.rt_ref()
@@ -582,6 +598,7 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
     def run_op(self, op, tracers, params):
+        # import inspect; print(inspect.getsource(op.eval))
         return op.eval(*tracers, **params)
 
 
@@ -607,11 +624,10 @@ class BaseArray:
 
     def __init__(self, rt):
         self.rt_ref = weakref.ref(rt)
-    
+
     @property
     def rt(self):
         return self.rt_ref()
-    
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -681,7 +697,6 @@ class Array(BaseArray):
                 proc, classmethod
             ), f"use rt.{attr} instead of Array.{attr}"
             return partial(proc, self)
-        breakpoint()
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
     def __repr__(self):
@@ -729,20 +744,6 @@ class TracerArray(BaseArray):
 
     def full_lower(self):
         return self
-
-    # @staticmethod
-    # def reduceop_patch(op_fn):
-    #     def wrapped_fn(x, axes=None, keepdims=False):
-    #         ret = op_fn(x, axes, keepdims)
-    #         if keepdims:
-    #             if len(ret.shape) == 0:
-    #                 shape = (1,)
-    #             else:
-    #                 shape = tuple(1 if i in axes else d for i, d in enumerate(x.shape))
-    #             ret = ret.reshape(shape)
-    #         return ret
-
-    #     return wrapped_fn
 
     def __getattr__(self, attr):
         if attr in vars(self.rt.ops).keys():
@@ -829,7 +830,7 @@ class Runtime:
         for _, backend in self.backends.items():
             backend.set_rt(self)
         self.backend = self.backends[default_backend]
-    
+
     def known(self, val: Any):
         return PartialVal(self.get_aval(val), val)
 
@@ -1057,9 +1058,10 @@ class Runtime:
 
     def jvp_flat(self, f, primals, tangents):
         with self.new_main(JVPTrace) as main:
-            trace = JVPTrace(main)
+            trace = JVPTrace(self, main)
             tracers_in = [
-                JVPTracerArray(trace, x, t) for x, t in list_zip(primals, tangents)
+                JVPTracerArray(self, trace, x, t)
+                for x, t in list_zip(primals, tangents)
             ]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1086,6 +1088,7 @@ class Runtime:
         vecs_in = self.procs.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
+    @instance_method_lru_cache()
     def make_prog(
         self,
         f: Callable,
@@ -1103,13 +1106,12 @@ class Runtime:
                 tracers_out = [self.full_raise(trace, out) for out in outs]
                 prog, consts = builder.build(tracers_in, tracers_out)
         return prog, consts, out_tree()
-    
 
-    def partial_eval_flat(self,
-        f: Callable, pvals_in: List["PartialVal"]
+    def partial_eval_flat(
+        self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Prog, List["PartialVal"], List[Any]]:
         with self.new_main(PartialEvalTrace) as main:
-            trace = PartialEvalTrace(main)
+            trace = PartialEvalTrace(self, main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1119,7 +1121,6 @@ class Runtime:
             prog, consts = self.tracers_to_prog(unk_tracers_in, unk_tracers_out)
 
         return prog, pvals_out, consts
-
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [self.known(x) for x in primals_in] + [
@@ -1136,7 +1137,6 @@ class Runtime:
         primals_out = [pval.const for pval in primal_pvals]
         f_lin = lambda *tangents: self.eval_prog(prog, [*consts, *tangents])
         return primals_out, f_lin
-
 
     def linearize(self, f, *primals_in):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
@@ -1333,8 +1333,10 @@ class Runtime:
         hashable_prog = None
         hashable_consts = None
 
+
         def get_jit_fn():
             nonlocal hashable_consts, hashable_prog
+
             if hashable_prog is None and hashable_consts is None:
                 print("Run with an input first to get jit_fn")
                 return None
@@ -1344,8 +1346,10 @@ class Runtime:
             avals_in = [ArrayShape.like(self.get_aval(x)) for x in args]
             prog, consts, out_tree = self.make_prog(f, *avals_in)
             nonlocal hashable_consts, hashable_prog
-            hashable_consts = tuple(map(IDHashable, consts))
+
+            hashable_consts = tuple(list_map(IDHashable, consts))
             hashable_prog = IDHashable(prog)
+
             outs = self.ops.jit_op(
                 *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
             )
@@ -1361,29 +1365,34 @@ class Backend:
         self.input_handlers = dict(Array=lambda x: x)
         self.default_dtype = default_dtype
         self.impls = dict()
-        self.callable = lru_cache(self.callable)
         self.dtype_map = dict()
         self.rt_ref: Runtime = None
+        # self.jit_fns = dict()
 
     def set_rt(self, rt):
         self.rt_ref = weakref.ref(rt)
-    
+
     @property
     def rt(self):
         return self.rt_ref()
 
+    @instance_method_lru_cache()
     def callable(
         self,
         hashable_prog: IDHashable,
         hashable_consts: Tuple[IDHashable, ...],
     ):
+        # if (
+        #     compiled := self.jit_fns.get(id((hashable_prog, hashable_consts)), None)
+        #     is not None
+        # ):
+        #     return compiled
         prog: Prog = hashable_prog.val
         self.rt.typecheck_prog(prog)
         consts = [x.val for x in hashable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
-        compiled = self.compile(
-            prog, consts, in_avals, name=f"{self.__class__.__name__.lower()}_fn"
-        )
+        compiled = self.compile(prog, consts, in_avals, name=f"{self.name.lower()}_fn")
+        # self.jit_fns[id((hashable_prog, hashable_consts))] = compiled
         return compiled
 
     def execute_compiled(self, compiled, out_avals, *args):
@@ -1418,11 +1427,7 @@ class Backend:
 
         args = tuple([process_arg(a) for a in args])
         kwargs = {k: process_arg(v) for k, v in kwargs.items()}
-        try:
-            val = self.impls[op](*args, **kwargs)
-        except Exception as e:
-            print(e)
-            breakpoint()
+        val = self.impls[op](*args, **kwargs)
         return Array(self.rt, ArrayBuffer(val))
 
     def set_input_handler(self, typ, fn):
@@ -1430,15 +1435,21 @@ class Backend:
 
 
 class JitFn:
-    def __init__(self, code, fn):
+    def __init__(self, rt, code, fn):
         super().__init__()
+        self.rt_ref = weakref.ref(rt)
         self.code = code
         self.fn = fn
+
+    @property
+    def rt(self):
+        return self.rt_ref()
 
     def __call__(self, *args, **kwargs):
         args = [a.val if isinstance(a, Array) else a for a in args]
         outs = self.fn(*args, **kwargs)
-        return [Array(o) for o in outs]
+        return [self.rt.array(o) for o in outs]
+
 
 BatchAxis = Union[None, int]
 
@@ -1510,7 +1521,7 @@ class JVPTracerArray(TracerArray):
 
     @property
     def aval(self):
-        return self.get_aval(self.primal)
+        return self.rt.get_aval(self.primal)
 
 
 class JVPTrace(Trace):
@@ -1526,7 +1537,8 @@ class JVPTrace(Trace):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self.rt, self, x, t)
+            for x, t in list_zip(primal_outs, tangent_outs)
         ]
 
 
@@ -1579,7 +1591,6 @@ class ProgBuilder:
     tracers: List[ProgTracerArray]
 
     def __init__(self, rt):
-        
         self.rt_ref = weakref.ref(rt)
         self.instrs = []
         self.tracer_to_var = {}
@@ -1590,7 +1601,7 @@ class ProgBuilder:
     @property
     def rt(self):
         return self.rt_ref()
-    
+
     def new_tracer(self, trace: ProgTrace, aval: ArrayShape) -> ProgTracerArray:
         tracer = ProgTracerArray(self.rt, trace, aval)
         self.tracers.append(tracer)
@@ -1656,11 +1667,8 @@ class PartialVal(NamedTuple):
     aval: ArrayShape
     const: Optional[Any]
 
-    
-
     is_known = property(lambda self: self.const is not None)
     is_unknown = property(lambda self: self.const is None)
-
 
 
 class LambdaBindingProto(NamedTuple):
@@ -1703,11 +1711,11 @@ class PartialEvalTracerArray(TracerArray):
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracerArray(self.rt, pval, LambdaBindingProto())
+        return PartialEvalTracerArray(self.rt, self, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
         val = self.rt.array(val)
-        return PartialEvalTracerArray(self.rt, self.rt.known(val), None)
+        return PartialEvalTracerArray(self.rt, self, self.rt.known(val), None)
 
     pure = lift
 
@@ -1718,7 +1726,9 @@ class PartialEvalTrace(Trace):
             return tracer
         else:
             pval = self.rt.unknown(ArrayShape.like(tracer.aval))
-            return PartialEvalTracerArray(self.rt, pval, ConstProto(tracer.pval.const))
+            return PartialEvalTracerArray(
+                self.rt, self, pval, ConstProto(tracer.pval.const)
+            )
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
@@ -1730,7 +1740,7 @@ class PartialEvalTrace(Trace):
         except:
             breakpoint()
         tracers_out = [
-            PartialEvalTracerArray(self.rt, self.rt.unknown(aval), None)
+            PartialEvalTracerArray(self.rt, self, self.rt.unknown(aval), None)
             for aval in avals_out
         ]
         instr = InstrProto(

@@ -29,6 +29,11 @@ numpy_backend.set_dtype_map(numpy_dtype_map)
 
 @numpy_backend.set_compile
 def f(self, prog, consts, in_avals, name) -> List[Any]:
+    def indent(code_line, amount=4):
+        spaces = " " * (len(code_line) - len(code_line.lstrip()))
+        spaces += " " * amount
+        return "\n".join([spaces + line for line in code_line.strip().split("\n")])
+
     safe_builtins = {"math": math, "np": np, "pickle": pickle}
 
     exec_locals = {}
@@ -68,10 +73,16 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
         args_str = ", ".join(in_vals)
         kwargs_str = ", ".join([f"{k}={v}" for k, v in eqn.params.items()])
         if len(op_impl_code_lines) > 2:
+            code_line = ""
             if eqn.op.name not in multiline_op_impl_set:
                 multiline_op_impl_set.add(eqn.op.name)
+                def_str = op_impl_code_lines[0]
+                op_impl_code_lines[
+                    0
+                ] = f"def {eqn.op.name}{def_str[def_str.find('('):]}"
                 multiline_op_impl_defs += [op_impl_code_lines]
-            code_line += f"{out_vals[0]} = {eqn.op.name}({args_str}, {kwargs_str})"
+
+            code_line = f"    {out_vals[0]} = {eqn.op.name}({args_str}, {kwargs_str})"
         else:
             sig = inspect.signature(impl)
             args_strs = [
@@ -97,15 +108,27 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
                     op_str,
                 )
             code_line = f"{out_vals[0]} = {op_str}"
-
-        code_line = "\n".join(["    " + line for line in code_line.strip().split("\n")])
+            code_line = indent(code_line, 4)
         code_lines += [code_line]
         # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
 
     outs = list_map(lambda y: env[y], prog.outs)
     # ops_code += [f"    outs[0]}"]
     code_lines += [f"    return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
-    code_lines = multiline_op_impl_defs + code_lines
+    if len(multiline_op_impl_defs) > 0:
+        a = [
+            indent(line) for impl_lines in multiline_op_impl_defs for line in impl_lines
+        ]
+        code_lines = (
+            code_lines[0:1]
+            + [
+                indent(line)
+                for impl_lines in multiline_op_impl_defs
+                for line in impl_lines
+            ]
+            + code_lines[1:]
+        )
+
     code = "\n".join(code_lines)
     exec(compile(code, "<string>", "exec"), safe_builtins, exec_locals)
     fn = exec_locals[name]

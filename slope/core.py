@@ -21,7 +21,6 @@ from typing import (
     Set,
     DefaultDict,
     Callable,
-    Hashable,
     Final,
 )
 import weakref
@@ -29,7 +28,6 @@ import types
 from contextlib import contextmanager
 import itertools
 import weakref
-from functools import lru_cache, reduce, partial, wraps
 from collections import defaultdict
 from enum import Enum, auto
 import operator as operator_py
@@ -37,6 +35,7 @@ import string
 import numpy as np
 import math
 import inspect
+from functools import partial
 
 import slope as sp
 
@@ -46,16 +45,6 @@ slice_ = slice
 zip_ = zip
 map_ = map
 
-def instance_method_lru_cache(*cache_args, **cache_kwargs):
-    def cache_decorator(func):
-        @wraps(func)
-        def cache_factory(self, *args, **kwargs):
-            instance_cache = lru_cache(*cache_args, **cache_kwargs)(func)
-            instance_cache = instance_cache.__get__(self, self.__class__)
-            setattr(self, func.__name__, instance_cache)
-            return instance_cache(*args, **kwargs)
-        return cache_factory
-    return cache_decorator
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -96,17 +85,21 @@ class PPrint:
         return sum(ps, cls.pp(""))
 
 
-class IDHashable:
+class Hable:
     val: Any
 
     def __init__(self, val):
         self.val = val
 
     def __hash__(self) -> int:
-        return id(self.val)
+        # return hash(id(self.val))
+        return hash((self.val,))
 
     def __eq__(self, other):
-        return type(other) is IDHashable and id(self.val) == id(other.val)
+        if isinstance(other, Hable):
+            return self.data == other.data
+            # return id(self.val) == id(other.val)
+        return False
 
 
 class OpType(Enum):
@@ -173,7 +166,8 @@ class Op:
         return args, kwargs
 
     def impl(self, *args, **kwargs):
-        args_ = args; kwargds_ = kwargs
+        args_ = args
+        kwargds_ = kwargs
         args, kwargs = self.pack_args(args, kwargs)
         args, kwargs = self.args_fixer(*args, **kwargs)
         return self.rt.backend.run_impl(self, *args, **kwargs)
@@ -254,7 +248,7 @@ class Op:
             elif type(y) is UndefPrimal:
                 assert y.aval.shape == x.shape
                 return (x, y), kwargs
-            
+
             if type(x) in [bool, int, float]:
                 x = self.rt.array(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
@@ -283,7 +277,7 @@ class Op:
                 shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
                 x = x.broadcast(shape=shape_ret, axes=bx)
                 y = y.broadcast(shape=shape_ret, axes=by)
-            
+
             return (x, y), kwargs
 
         @op.set_vmap
@@ -500,11 +494,11 @@ class Instr(NamedTuple):
 
 class Prog(NamedTuple):
     in_binders: Any
-    instrs: List[Instr]
+    instrs: Tuple[Instr]
     outs: Any
 
     def __hash__(self):
-        return id(self)
+        return hash(repr(self))
 
     def __eq__(self, other):
         return self is other
@@ -527,13 +521,9 @@ class Prog(NamedTuple):
         )
 
     def pp_instr(self, names: DefaultDict[Var, str], instr: Instr) -> PPrint:
-        # rule = instr.op.pprint
-        # if rule() is not None:
-        #     return rule(names, instr)
-        # else:
         lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instr.out_binders))
         rhs = (
-            PPrint.pp(repr(instr.op.__class__))
+            PPrint.pp(repr(instr.op.name))
             >> self.pp_params(instr.params)
             >> PPrint.pp(
                 " ".join(
@@ -559,8 +549,8 @@ class Prog(NamedTuple):
 
 
 class ProgType(NamedTuple):
-    in_types: List[ArrayShape]
-    out_types: List[ArrayShape]
+    in_types: Tuple[ArrayShape]
+    out_types: Tuple[ArrayShape]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_short() for aval in self.in_types)
@@ -650,6 +640,9 @@ class BaseArray:
     def __setitem__(self, idx, item):
         raise NotImplementedError
 
+    def str_short(self):
+        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
+
     __neg__ = lambda self: self.neg()
     __add__ = lambda self, other: self.add(other)
     __radd__ = lambda self, other: self.add(other)
@@ -681,6 +674,9 @@ class Array(BaseArray):
         super().__init__(rt)
         assert isinstance(val, ArrayBuffer)
         self.buf = val
+
+    def __hash__(self):
+        return id(self.val)
 
     val = property(lambda self: self.buf.val)
     dtype = property(lambda self: self.buf.val.dtype)
@@ -853,7 +849,7 @@ class Runtime:
     def array(
         self,
         val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
-        dtype: Optional[Any] = None,
+        dtype: Optional[Any] = BaseArray.default_dtype,
     ):
         return (
             Array(self, val)
@@ -917,11 +913,9 @@ class Runtime:
     ) -> None:
         self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
 
-    
     def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
         leaves, treedef = self.tree_flatten(tree)
         return self.tree_unflatten(treedef, [f(leaf) for leaf in leaves])
-
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
@@ -1002,7 +996,7 @@ class Runtime:
 
         in_types = [v.aval for v in prog.in_binders]
         out_types = [self.typecheck_atom(env, x) for x in prog.outs]
-        return ProgType(in_types, out_types)
+        return ProgType(tuple(in_types), tuple(out_types))
 
     def typecheck_atom(self, env: Set[Var], x: Atom) -> ArrayShape:
         if isinstance(x, Var):
@@ -1097,7 +1091,6 @@ class Runtime:
         vecs_in = self.procs.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
-    @instance_method_lru_cache()
     def make_prog(
         self,
         f: Callable,
@@ -1206,7 +1199,7 @@ class Runtime:
         constvars, constvals = unzip2(constvar_to_val.items())
         in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
         out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-        prog = Prog(in_binders, instrs, out_vars)
+        prog = Prog(tuple(in_binders), tuple(instrs), tuple(out_vars))
         self.typecheck_prog(prog)
         return prog, constvals
 
@@ -1338,32 +1331,44 @@ class Runtime:
 
         return gradfun
 
-    def jit(self, f):
-        hashable_prog = None
-        hashable_consts = None
+    # def jvp(self, f, primals, tangents):
+    #     primals_flat, in_tree = self.tree_flatten(primals)
+    #     tangents_flat, in_tree2 = self.tree_flatten(tangents)
+    #     if in_tree != in_tree2:
+    #         raise TypeError
+    #     f, out_tree = self.flatten_fun(f, in_tree)
+    #     primals_out_flat, tangents_out_flat = self.jvp_flat(
+    #         f, primals_flat, tangents_flat
+    #     )
+    #     primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
+    #     tangents_out = self.tree_unflatten(out_tree(), tangents_out_flat)
+    #     return primals_out, tangents_out
 
+    def jit(self, f):
+        hable_prog = None
+        hable_consts = None
+        out_tree = None
+        
 
         def get_jit_fn():
-            nonlocal hashable_consts, hashable_prog
-
-            if hashable_prog is None and hashable_consts is None:
-                print("Run with an input first to get jit_fn")
-                return None
-            return self.backend.callable(hashable_prog, hashable_consts)
+            jit_fn = self.backend.jit_fns.get(hash((hable_prog, hable_consts)), None)
+            if jit_fn is None:
+                print(f'jit not run for {f.__name__} yet')
+            return jit_fn
 
         def f_jitted(*args):
-            # avals_in = [ArrayShape.like(self.get_aval(x)) for x in args]
-            def to_ArrayShape(x):
-                return ArrayShape.like(self.get_aval(x))
-            avals_in = self.tree_map(to_ArrayShape, args)
-            prog, consts, out_tree = self.make_prog(f, *avals_in)
-            nonlocal hashable_consts, hashable_prog
+            nonlocal hable_consts, hable_prog, out_tree
+            if hable_prog is None:
+                avals_in = self.tree_map(
+                    lambda x: ArrayShape.like(self.get_aval(x)), args
+                )
+                prog, consts, out_tree = self.make_prog(f, *avals_in)
 
-            hashable_consts = tuple(list_map(IDHashable, consts))
-            hashable_prog = IDHashable(prog)
+                hable_consts = tuple(list_map(Hable, consts))
+                hable_prog = Hable(prog)
 
             outs = self.ops.jit_op(
-                *args, hashable_prog=hashable_prog, hashable_consts=hashable_consts
+                *args, hable_prog=hable_prog, hable_consts=hable_consts
             )
             return self.tree_unflatten(out_tree, outs)
 
@@ -1379,7 +1384,7 @@ class Backend:
         self.impls = dict()
         self.dtype_map = dict()
         self.rt_ref: Runtime = None
-        # self.jit_fns = dict()
+        self.jit_fns = dict()
 
     def set_rt(self, rt):
         self.rt_ref = weakref.ref(rt)
@@ -1388,23 +1393,20 @@ class Backend:
     def rt(self):
         return self.rt_ref()
 
-    @instance_method_lru_cache()
     def callable(
         self,
-        hashable_prog: IDHashable,
-        hashable_consts: Tuple[IDHashable, ...],
+        hable_prog: Hable,
+        hable_consts: Tuple[Hable, ...],
     ):
-        # if (
-        #     compiled := self.jit_fns.get(id((hashable_prog, hashable_consts)), None)
-        #     is not None
-        # ):
-        #     return compiled
-        prog: Prog = hashable_prog.val
+        key = hash((hable_prog, hable_consts))
+        if (compiled := self.jit_fns.get(key, None)) is not None:
+            return compiled
+        prog: Prog = hable_prog.val
         self.rt.typecheck_prog(prog)
-        consts = [x.val for x in hashable_consts]
+        consts = [x.val for x in hable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
         compiled = self.compile(prog, consts, in_avals, name=f"{self.name.lower()}_fn")
-        # self.jit_fns[id((hashable_prog, hashable_consts))] = compiled
+        self.jit_fns[key] = compiled
         return compiled
 
     def execute_compiled(self, compiled, out_avals, *args):
@@ -1458,9 +1460,11 @@ class JitFn:
         return self.rt_ref()
 
     def __call__(self, *args, **kwargs):
-        args = [a.val if isinstance(a, Array) else a for a in args]
+        # args = [a.val if isinstance(a, Array) else a for a in args]
+        args = self.rt.tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
+        args, in_tree = self.rt.tree_flatten(args)
         outs = self.fn(*args, **kwargs)
-        return [self.rt.array(o) for o in outs]
+        return [self.rt.array(ArrayBuffer(o)) for o in outs]
 
 
 BatchAxis = Union[None, int]
@@ -1575,7 +1579,7 @@ class ProgTrace(Trace):
     def get_or_make_const_tracer(self, val: Any) -> ProgTracerArray:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, self.get_aval(val))
+            tracer = self.builder.new_tracer(self, self.rt.get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 

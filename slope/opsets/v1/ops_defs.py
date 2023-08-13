@@ -65,6 +65,7 @@ def f(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
     return [x.convert(dtype)], [x_dot]
 
+
 sqrt = Op.unary("sqrt")
 ops.register(sqrt)
 
@@ -879,24 +880,24 @@ ops.register(constant)
 
 
 @constant.set_eval
-def f(self, *, val, dtype):
-    return [Array(val, dtype)]
+def f(self, *, val, dtype=BaseArray.default_dtype):
+    return [self.rt.array(val, dtype)]
 
 
 @constant.set_jvp
-def f(self, primals, tangents, *, val, dtype):
+def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
     out = sp.rt.array(val, dtype)
     out_jvp = sp.rt.ones_like(out)
     return [out], [out_jvp]
 
 
 @constant.set_T
-def f(self, cts, *, val, dtype):
+def f(self, cts, *, val, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
 @constant.set_shape_eval
-def f(self, *, val, dtype):
+def f(self, *, val, dtype=BaseArray.default_dtype):
     # TODO: not using numpy to extract shape
     return [ArrayShape(np.array(val).shape, dtype)]
 
@@ -907,12 +908,16 @@ ops.register(full)
 
 @full.set_eval
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)]
+    return [
+        self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
+    ]
 
 
 @full.set_jvp
 def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
+    out = self.rt.backend.run_impl(
+        self, shape=shape, fill_value=fill_value, dtype=dtype
+    )
     out_jvp = self.rt.ones_like(out)
     return [out], [out_jvp]
 
@@ -1030,6 +1035,6 @@ jit_op.pack_args = lambda args, kwargs: (args, kwargs)
 
 
 @jit_op.set_eval
-def f(self, *args, hashable_prog, hashable_consts):
-    jit_fn = self.rt.backend.callable(hashable_prog, hashable_consts)
+def f(self, *args, hable_prog, hable_consts):
+    jit_fn = self.rt.backend.callable(hable_prog, hable_consts)
     return [jit_fn(*args)]

@@ -847,6 +847,7 @@ class Runtime:
         elif isinstance(x, Array):
             return x
         else:
+            breakpoint()
             raise TypeError(x)
 
     def array(
@@ -915,6 +916,12 @@ class Runtime:
         self, ty: Type, to_iter: Callable, from_iter: Callable
     ) -> None:
         self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
+
+    
+    def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
+        leaves, treedef = self.tree_flatten(tree)
+        return self.tree_unflatten(treedef, [f(leaf) for leaf in leaves])
+
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
@@ -1345,7 +1352,10 @@ class Runtime:
             return self.backend.callable(hashable_prog, hashable_consts)
 
         def f_jitted(*args):
-            avals_in = [ArrayShape.like(self.get_aval(x)) for x in args]
+            # avals_in = [ArrayShape.like(self.get_aval(x)) for x in args]
+            def to_ArrayShape(x):
+                return ArrayShape.like(self.get_aval(x))
+            avals_in = self.tree_map(to_ArrayShape, args)
             prog, consts, out_tree = self.make_prog(f, *avals_in)
             nonlocal hashable_consts, hashable_prog
 

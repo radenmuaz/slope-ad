@@ -102,6 +102,7 @@ if __name__ == "__main__":
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
+    predict = sp.rt.jit(predict)
     out_shape, init_params = init_random_params((-1, 28 * 28))
 
     step_size = 0.001

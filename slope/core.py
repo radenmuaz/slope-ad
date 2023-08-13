@@ -939,8 +939,10 @@ class Runtime:
     def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
         tracers = [self.full_raise(top_trace, arg) for arg in args]
+        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         outs = top_trace.run_op(op, tracers, params)
         lowered = [self.full_lower(out) for out in outs]
+        # lowered = self.tree_map(self.full_lower, outs)
         return lowered
 
     def bind1(self, *args, **params):
@@ -1366,7 +1368,7 @@ class Runtime:
 
                 hable_consts = tuple(list_map(Hable, consts))
                 hable_prog = Hable(prog)
-
+            args, in_tree = self.tree_flatten(args)
             outs = self.ops.jit_op(
                 *args, hable_prog=hable_prog, hable_consts=hable_consts
             )
@@ -1542,7 +1544,7 @@ class JVPTracerArray(TracerArray):
 
 class JVPTrace(Trace):
     def pure(self, val):
-        aval = self.get_aval(val)
+        aval = self.rt.get_aval(val)
         val = aval if not isinstance(aval, TracerArray) else val
 
         return JVPTracerArray(self, val, sp.zeros(aval.shape, aval.dtype))

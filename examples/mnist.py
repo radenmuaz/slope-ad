@@ -97,8 +97,7 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        # layers.Dense(200),
-        # layers.Fn(lambda x: x.maximum(sp.zeros_like(x))),
+        # layers.Dense(200), layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )

@@ -12,6 +12,21 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
 class TestJit(unittest.TestCase):
+    def test_reshape(self):
+        @rt.jit
+        def f(x):
+            print("tracing")
+            out = x.reshape((-1,))
+            return out
+
+        # print(f"{f.get_jit_fn()=}")
+        x = rt.array([[1.0, 2.0, 3.0],[4.0, 5.0, 6.0]])
+        res = f(x)
+        print(res)
+        res = f(x)
+        print(res)
+        # print(f"{f.get_jit_fn()=}")
+
     def test_add_v1(self):
         @rt.jit
         def f(x, y):
@@ -19,12 +34,13 @@ class TestJit(unittest.TestCase):
             out = x + y
             out = out.sum(keepdims=True)
             return out
+
         print(f"{f.get_jit_fn()=}")
         x = rt.array([1.0, 2.0, 3.0])
         y = rt.array([4.0, 5.0, 6.0])
         res = f(x, y)
         print(res)
-        res = f(y, x+x)
+        res = f(y, x + x)
         print(res)
         print(f"{f.get_jit_fn()=}")
 

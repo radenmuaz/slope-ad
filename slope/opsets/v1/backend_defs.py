@@ -23,7 +23,8 @@ numpy_dtype_map = {
     BaseArray.bool: bool,
 }
 
-default_dtype = numpy_dtype_map[BaseArray.default_dtype]
+# default_dtype = numpy_dtype_map[BaseArray.default_dtype]
+default_dtype = BaseArray.default_dtype
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
 
@@ -59,30 +60,31 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
         code_lines += [f"    {inb_const} = pickle.loads({pickle.dumps(const.val)})"]
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
-    for eqn in prog.instrs:
-        in_vals = list_map(lambda x: env[x], eqn.inputs)
-        for outb in eqn.out_binders:
+    for instr in prog.instrs:
+        in_vals = list_map(lambda x: env[x], instr.inputs)
+        for outb in instr.out_binders:
             env[outb] = f"z{nzs}"
             nzs += 1
-        out_vals = list_map(lambda z: env[z], eqn.out_binders)
+        out_vals = list_map(lambda z: env[z], instr.out_binders)
         assert not len(out_vals) > 1, "Op with >1 output not supported"
-        impl = self.rt.backend.impls[eqn.op]
+        impl = self.rt.backend.impls[instr.op]
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
         if op_impl_code_lines[0][0] == "@":  # skip decorator
             op_impl_code_lines = op_impl_code_lines[1:]
         args_str = ", ".join(in_vals)
-        kwargs_str = ", ".join([f"{k}={v}" for k, v in eqn.params.items()])
+        kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
         if len(op_impl_code_lines) > 2:
             code_line = ""
-            if eqn.op.name not in multiline_op_impl_set:
-                multiline_op_impl_set.add(eqn.op.name)
+            if instr.op.name not in multiline_op_impl_set:
+                multiline_op_impl_set.add(instr.op.name)
                 def_str = op_impl_code_lines[0]
                 op_impl_code_lines[
                     0
-                ] = f"def {eqn.op.name}{def_str[def_str.find('('):]}"
+                ] = f"def {instr.op.name}{def_str[def_str.find('('):]}"
                 multiline_op_impl_defs += [op_impl_code_lines]
+            if instr.op.name == "convert":breakpoint()
 
-            code_line = f"    {out_vals[0]} = {eqn.op.name}({args_str}, {kwargs_str})"
+            code_line = f"    {out_vals[0]} = {instr.op.name}({args_str}, {kwargs_str})"
         else:
             sig = inspect.signature(impl)
             args_strs = [
@@ -100,17 +102,21 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
             for argname, arg in list_zip(args_strs, in_vals):
                 # replace whole word
                 op_str = re.sub(r"\b" + re.escape(argname) + r"\b", arg, op_str)
-            for kwargname, kwarg in eqn.params.items():
+            for kwargname, kwarg in instr.params.items():
                 # replace whole word prepended with '='
+                # NOTE: impl must explicity use argname=arg for params
+                # else this fails
+                old = op_str
                 op_str = re.sub(
                     r"=(\s*)\b" + re.escape(kwargname) + r"\b",
                     "=" + r"\1" + str(kwarg),
                     op_str,
                 )
+
             code_line = f"{out_vals[0]} = {op_str}"
             code_line = indent(code_line, 4)
         code_lines += [code_line]
-        # out_vals = eqn.op.jit(in_avals, in_vals, **eqn.params)
+        # out_vals = instr.op.jit(in_avals, in_vals, **instr.params)
 
     outs = list_map(lambda y: env[y], prog.outs)
     # ops_code += [f"    outs[0]}"]
@@ -227,7 +233,7 @@ def f(val, *, dtype=default_dtype):
 
 @numpy_backend.set_impl(ops.arange)
 def f(*, start, stop, stride, dtype=default_dtype):
-    return np.arange(start, stop, stride, dtype=dtype)
+    return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.full)
@@ -237,12 +243,12 @@ def f(*, shape, fill_value, dtype=default_dtype):
 
 @numpy_backend.set_impl(ops.random_uniform)
 def f(*, shape, dtype=default_dtype):
-    return np.random.uniform(size=shape).astype(dtype)
+    return np.random.uniform(size=shape).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_normal)
 def f(*, shape, dtype=default_dtype):
-    return np.random.normal(loc=np.zeros(shape)).astype(dtype)
+    return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.broadcast)
@@ -257,7 +263,7 @@ def f(x, *, shape, axes=None):
 
 @numpy_backend.set_impl(ops.reshape)
 def f(x, *, shape):
-    return np.reshape(x, shape)
+    return np.reshape(x, newshape=shape)
 
 
 @numpy_backend.set_impl(ops.pad)

@@ -63,7 +63,7 @@ def f(self, x, *, dtype):
 @convert.set_jvp
 def f(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
-    return [x.convert(dtype)], [x_dot]
+    return [x.convert(dtype)], [x_dot.convert(dtype)]
 
 
 sqrt = Op.unary("sqrt")
@@ -306,9 +306,9 @@ def f(self, x, y):
 @maximum.set_jvp
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(self.rt.ones_like(z), self.rt.zeros_like(z))) / (
-            (y == z).where(self.rt.full_like(z, 2), self.rt.ones_like(z))
-        )
+        return (
+            (x == z).where(self.rt.procs.ones_like(z), self.rt.procs.zeros_like(z))
+        ) / ((y == z).where(self.rt.procs.full_like(z, 2), self.rt.procs.ones_like(z)))
 
     (x, y), (x_dot, y_dot) = primals, tangents
     eval_out = x.maximum(y)
@@ -1028,18 +1028,6 @@ def f(
     return [ArrayShape(tuple((stop - start) * stride), dtype)]
 
 
-jit_op = Op("jit_op")
-ops.register(jit_op)
-# TODO: more elegant way than like this
-jit_op.pack_args = lambda args, kwargs: (args, kwargs)
-
-
-@jit_op.set_eval
-def f(self, *args, hable_prog, hable_consts):
-    jit_fn = self.rt.backend.callable(hable_prog, hable_consts)
-    return [jit_fn(*args)]
-
-
 # @jit_op.set_jvp
 # def xla_call_jvp_rule(self, primals, tangents, *, hable_prog, hable_consts):
 #   new_jaxpr, new_consts = jvp_jaxpr(hable_prog.val)
@@ -1104,4 +1092,3 @@ def f(self, *args, hable_prog, hable_consts):
 #               jaxpr=transposed_jaxpr, num_consts=len(new_consts))
 #   outs = iter(outs)
 #   return [next(outs) if undef else None for undef in undef_primals]
-

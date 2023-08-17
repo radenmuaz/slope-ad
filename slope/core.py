@@ -183,6 +183,35 @@ class Op:
     def eval(self, *args, **kwargs):
         raise NotImplementedError
 
+    def partial_eval(self, trace, tracers, **params):
+        tracers_in = [trace.instantiate_const(t) for t in tracers]
+        avals_in = [t.aval for t in tracers_in]
+        avals_out = self.shape_eval(*avals_in, **params)
+        tracers_out = [
+            PartialEvalTracerArray(self.rt, trace, self.rt.unknown(aval), None)
+            for aval in avals_out
+        ]
+        instr = InstrProto(
+            self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out)
+        )
+        for t in tracers_out:
+            t.proto = instr
+        return tracers_out
+
+    def partial_eval_instr(self, instr, read, write, env, residuals, instrs1, instrs2, ):
+        in_unknowns = list_map(partial(read, env), instr.inputs)
+        if any(in_unknowns):
+            def new_res(x: Atom) -> Atom:
+                if type(x) is Var:
+                    residuals.add(x)
+                return x
+            inputs = [v if unk else new_res(v) for unk, v in zip(in_unknowns, instr.inputs)]
+            instrs2 += [Instr(instr.op, inputs, instr.params, instr.out_binders)]
+            list_map(partial(write, env, True), instr.out_binders)
+        else:
+            instrs1 += [instr]
+            list_map(partial(write, env, False), instr.out_binders)
+
     def jvp(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -195,8 +224,14 @@ class Op:
     def shape_eval(self, *args, **kwargs):
         raise NotImplementedError
 
+    def set_partial_eval_instr(self, fn):
+        self.partial_eval_instr = types.MethodType(fn, self)
+
     def set_args_fixer(self, fn):
         self.args_fixer = types.MethodType(fn, self)
+
+    def set_partial_eval(self, fn):
+        self.partial_eval = types.MethodType(fn, self)
 
     def set_eval(self, fn):
         self.eval = types.MethodType(fn, self)
@@ -763,7 +798,7 @@ class TracerArray(BaseArray):
         return len(self.shape)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
+        return f"{self.__class__.__name__}: {repr(self.aval)[6:-1] if self.aval.ndim > 0 else self.aval}"
 
 
 class Empty:
@@ -804,6 +839,102 @@ class Leaf:
 
 leaf = Leaf()
 
+jit_op = Op("jit_op")
+jit_op.pack_args = lambda args, kwargs: (args, kwargs)
+
+
+@jit_op.set_eval
+def f(self, *args, hable_prog, hable_consts):
+    jit_fn = self.rt.backend.callable(hable_prog, hable_consts)
+    return [jit_fn(*args)]
+
+
+@jit_op.set_jvp
+def f(self, primals, tangents, *, hable_prog, hable_consts):
+    new_prog, new_consts = self.rt.jvp_prog(hable_prog.val)
+    outs = self.rt.bind(
+        jit_op,
+        *new_consts,
+        *primals,
+        *tangents,
+        prog=new_prog,
+        num_consts=len(new_consts),
+    )
+    n = len(outs) // 2
+    primals_out, tangents_out = outs[:n], outs[n:]
+    breakpoint()
+    return primals_out, tangents_out
+
+
+@jit_op.set_shape_eval
+def f(self, *in_types, prog, num_consts):
+    del num_consts  # Unused
+    prog_type = self.rt.typecheck_prog(prog)
+    if not all(t1 == t2 for t1, t2 in zip(prog_type.in_types, in_types)):
+        raise TypeError
+    return prog_type.out_types
+
+
+@jit_op.set_T
+def f(self, cts, *invals, prog, num_consts):
+    del num_consts  # Unused
+    undef_primals = [type(x) is UndefPrimal for x in invals]
+    transposed_prog, new_consts = self.rt.transpose_prog(prog, tuple(undef_primals))
+    residuals, _ = partition_list(undef_primals, invals)
+    outs = self.rt.bind(
+        self,
+        *new_consts,
+        *residuals,
+        *cts,
+        prog=transposed_prog,
+        num_consts=len(new_consts),
+    )
+    outs = iter(outs)
+    return [next(outs) if undef else None for undef in undef_primals]
+
+
+@jit_op.set_partial_eval
+def f(self, trace, tracers, *, prog, num_consts):
+    del num_consts  # Unused
+    in_unknowns = [not t.pval.is_known for t in tracers]
+    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(prog, in_unknowns)
+    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+    known_vals = [t.pval.const for t in known_tracers]
+    outs1_res = self.rt.bind(jit_op, *known_vals, hable_prog=Hable(prog1), hable_consts=())
+    outs1, res = split_list(outs1_res, len(prog1.outs) - num_res)
+    res_tracers = [trace.instantiate_const(self.rt.full_raise(trace, x)) for x in res]
+    outs2 = [
+        PartialEvalTracerArray(trace, self.rt.unknown(v.aval), None) for v in prog2.outs
+    ]
+    instr = InstrProto(
+        self,
+        res_tracers + unknown_tracers,
+        dict(prog=prog2, num_consts=0),
+        [v.aval for v in prog2.outs],
+        map(weakref.ref, outs2),
+    )
+    for t in outs2:
+        t.proto = instr
+    return merge_lists(out_unknowns, outs1, outs2)
+
+
+@jit_op.set_partial_eval_instr
+def f(
+    self, instr: Instr, read, write, env, residuals, instrs1, instrs2
+) -> Tuple[Instr, Instr, List[bool], List[Var]]:
+    in_unknowns = list_map(partial(read, env), instr.inputs)
+    prog = instr.params["prog"]
+    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(prog, in_unknowns)
+    ins1, ins2 = partition_list(in_unknowns, instr.inputs)
+    out_binders1, out_binders2 = partition_list(out_unknowns, instr.out_binders)
+    res = [Var(v.aval) for v in prog2.in_binders[:num_res]]
+    instr1 = Instr(self, ins1, dict(prog=prog1, num_consts=0), out_binders1 + res)
+    instr2 = Instr(self, res + ins2, dict(prog=prog2, num_consts=0), out_binders2)
+    instrs1.append(instr1)
+    instrs2.append(instr2)
+    residuals.update(res)
+    list_map(partial(write, env), out_unknowns, instr.out_binders)
+
 
 class Runtime:
     def __init__(
@@ -823,6 +954,7 @@ class Runtime:
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
         self.opset = opset
+        self.ops.register(jit_op)
         for op_name in vars(self.ops):
             getattr(self.ops, op_name).set_rt(self)
         for _, backend in self.backends.items():
@@ -939,10 +1071,8 @@ class Runtime:
     def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
         tracers = [self.full_raise(top_trace, arg) for arg in args]
-        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         outs = top_trace.run_op(op, tracers, params)
         lowered = [self.full_lower(out) for out in outs]
-        # lowered = self.tree_map(self.full_lower, outs)
         return lowered
 
     def bind1(self, *args, **params):
@@ -1111,6 +1241,17 @@ class Runtime:
                 prog, consts = builder.build(tracers_in, tracers_out)
         return prog, consts, out_tree()
 
+    def jvp_prog(self, prog: Prog) -> Tuple[Prog, List[Any]]:
+        def jvp_traceable(*primals_and_tangents):
+            n = len(primals_and_tangents) // 2
+            primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
+            return self.jvp(self.prog_as_fun(prog), primals, tangents)
+
+        in_avals = [v.aval for v in prog.in_binders]
+        # in_avals = self.tree_map(lambda v: v.aval, prog.in_binders)
+        new_prog, new_consts, _ = self.make_prog(jvp_traceable, *in_avals, *in_avals)
+        return new_prog, new_consts
+
     def partial_eval_flat(
         self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Prog, List["PartialVal"], List[Any]]:
@@ -1125,6 +1266,72 @@ class Runtime:
             prog, consts = self.tracers_to_prog(unk_tracers_in, unk_tracers_out)
 
         return prog, pvals_out, consts
+
+    def partial_eval_prog(
+        self,
+        prog: Prog,
+        in_unknowns: List[bool],
+        instantiate: Optional[List[bool]] = None,
+    ) -> Tuple[Prog, Prog, List[bool], int]:
+        env: Dict[Var, bool] = {}
+        residuals: Set[Var] = set()
+
+        def read(env, x: Atom) -> bool:
+            return type(x) is Var and env[x]
+
+        def write(env, unk: bool, v: Var) -> None:
+            env[v] = unk
+
+        instrs1, instrs2 = [], []
+        list_map(partial(write, env), in_unknowns, prog.in_binders)
+
+        for instr in prog.instrs:
+            instr.op.partial_eval_instr(instr, read, write, env, residuals, instrs1, instrs2)
+        out_unknowns = list_map(partial(read, env), prog.outs)
+        if instantiate is not None:
+            for v, uk, inst in zip(prog.outs, out_unknowns, instantiate):
+                if inst and not uk:
+                    if type(v) is Var:
+                        residuals.add(v)
+            out_unknowns = list_map(operator_py.or_, out_unknowns, instantiate)
+
+        residuals, num_res = list(residuals), len(residuals)
+        assert all(type(v) is Var for v in residuals), residuals
+
+        ins1, ins2 = partition_list(in_unknowns, prog.in_binders)
+        outs1, outs2 = partition_list(out_unknowns, prog.outs)
+
+        prog1 = Prog(ins1, instrs1, outs1 + residuals)
+        prog2 = Prog(residuals + ins2, instrs2, outs2)
+        # self.typecheck_partial_eval_prog(prog, in_unknowns, out_unknowns, prog1, prog2)
+
+        return prog1, prog2, out_unknowns, num_res
+
+    def typecheck_partial_eval_prog(self, prog, in_unknowns, out_unknowns, prog1, prog2):
+        progty = self.typecheck_prog(prog)  # (a1,  a2) -> (b1, b2 )
+        prog1ty = self.typecheck_prog(prog1)  #  a1       -> (b1, res)
+        prog2ty = self.typecheck_prog(prog2)  # (res, a2) -> b2
+
+        a1, a2 = partition_list(in_unknowns, progty.in_types)
+        b1, b2 = partition_list(out_unknowns, progty.out_types)
+        b1_, res = split_list(prog1ty.out_types, len(b1))
+        res_, a2_ = split_list(prog2ty.in_types, len(res))
+        b2_ = prog2ty.out_types
+
+        if prog1ty.in_types != a1:
+            breakpoint()
+            raise TypeError
+        if prog2ty.out_types != b2:
+            raise TypeError
+        if b1 != b1_:
+            raise TypeError
+        if res != res_:
+            raise TypeError
+        if a2 != a2_:
+            raise TypeError
+        if b2 != b2_:
+            raise TypeError
+        print('ok')
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [self.known(x) for x in primals_in] + [
@@ -1322,6 +1529,16 @@ class Runtime:
         ]
         return ret
 
+    def transpose_prog(
+        self, prog: Prog, undef_primals: tuple[bool, ...]
+    ) -> tuple[Prog, list[Any]]:
+        avals_in, avals_out = self.typecheck_prog(self.prog)
+        traceable = partial(self.eval_prog_transposed, prog)
+        args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
+        trans_prog, consts, _ = self.make_prog(traceable, tuple(args), tuple(avals_out))
+        self.typecheck_prog(trans_prog)
+        return trans_prog, consts
+
     def grad(self, f):
         def gradfun(x, *xs):
             y, f_vjp = self.vjp(f, x, *xs)
@@ -1333,33 +1550,20 @@ class Runtime:
 
         return gradfun
 
-    # def jvp(self, f, primals, tangents):
-    #     primals_flat, in_tree = self.tree_flatten(primals)
-    #     tangents_flat, in_tree2 = self.tree_flatten(tangents)
-    #     if in_tree != in_tree2:
-    #         raise TypeError
-    #     f, out_tree = self.flatten_fun(f, in_tree)
-    #     primals_out_flat, tangents_out_flat = self.jvp_flat(
-    #         f, primals_flat, tangents_flat
-    #     )
-    #     primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
-    #     tangents_out = self.tree_unflatten(out_tree(), tangents_out_flat)
-    #     return primals_out, tangents_out
-
     def jit(self, f):
         hable_prog = None
         hable_consts = None
+        in_tree = None
         out_tree = None
-        
 
         def get_jit_fn():
             jit_fn = self.backend.jit_fns.get(hash((hable_prog, hable_consts)), None)
             if jit_fn is None:
-                print(f'jit not run for {f.__name__} yet')
+                print(f"jit not run for {f.__name__} yet")
             return jit_fn
 
         def f_jitted(*args):
-            nonlocal hable_consts, hable_prog, out_tree
+            nonlocal hable_consts, hable_prog, in_tree, out_tree
             if hable_prog is None:
                 avals_in = self.tree_map(
                     lambda x: ArrayShape.like(self.get_aval(x)), args
@@ -1369,13 +1573,37 @@ class Runtime:
                 hable_consts = tuple(list_map(Hable, consts))
                 hable_prog = Hable(prog)
             args, in_tree = self.tree_flatten(args)
-            outs = self.ops.jit_op(
-                *args, hable_prog=hable_prog, hable_consts=hable_consts
+            outs = self.bind(
+                jit_op, *args, hable_prog=hable_prog, hable_consts=hable_consts
             )
             return self.tree_unflatten(out_tree, outs)
 
         f_jitted.get_jit_fn = get_jit_fn
         return f_jitted
+
+    def jit_partial_eval(self, trace, tracers, *, prog, num_consts):
+        del num_consts  # Unused
+        in_unknowns = [not t.pval.is_known for t in tracers]
+        prog1, prog2, out_unknowns, num_res = self.partial_eval_prog(prog, in_unknowns)
+        known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+        known_vals = [t.pval.const for t in known_tracers]
+        outs1_res = jit_op(*known_vals, prog=prog1, num_consts=0)
+        outs1, res = split_list(outs1_res, len(prog1.outs) - num_res)
+        res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
+        outs2 = [
+            PartialEvalTracerArray(trace, PartialVal.unknown(v.aval), None)
+            for v in prog2.outs
+        ]
+        proto = InstrProto(
+            jit_op,
+            res_tracers + unknown_tracers,
+            dict(prog=prog2, num_consts=0),
+            [v.aval for v in prog2.outs],
+            map(weakref.ref, outs2),
+        )
+        for t in outs2:
+            t.proto = proto
+        return merge_lists(out_unknowns, outs1, outs2)
 
 
 class Backend:
@@ -1465,7 +1693,12 @@ class JitFn:
         # args = [a.val if isinstance(a, Array) else a for a in args]
         args = self.rt.tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
         args, in_tree = self.rt.tree_flatten(args)
-        outs = self.fn(*args, **kwargs)
+        try:
+            outs = self.fn(*args, **kwargs)
+        except Exception as e:
+            print(e)
+            # print(self.code.split("\n"))
+            breakpoint(); raise
         return [self.rt.array(ArrayBuffer(o)) for o in outs]
 
 
@@ -1547,7 +1780,9 @@ class JVPTrace(Trace):
         aval = self.rt.get_aval(val)
         val = aval if not isinstance(aval, TracerArray) else val
 
-        return JVPTracerArray(self, val, sp.zeros(aval.shape, aval.dtype))
+        return JVPTracerArray(
+            self.rt, self, val, sp.rt.procs.zeros(aval.shape, aval.dtype)
+        )
 
     lift = pure
 
@@ -1702,8 +1937,7 @@ class InstrProto(NamedTuple):
     tracers_in: List["PartialEvalTracerArray"]
     params: Dict[str, Any]
     avals_out: List[ArrayShape]
-    # tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
-    tracer_refs_out: List
+    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
 
 
 ProgProto = Union[LambdaBindingProto, ConstProto, InstrProto]
@@ -1751,19 +1985,4 @@ class PartialEvalTrace(Trace):
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
             return self.rt.bind(op, *list_map(self.rt.full_lower, tracers), **params)
-        tracers_in = [self.instantiate_const(t) for t in tracers]
-        avals_in = [t.aval for t in tracers_in]
-        try:
-            avals_out = op.shape_eval(*avals_in, **params)
-        except:
-            breakpoint()
-        tracers_out = [
-            PartialEvalTracerArray(self.rt, self, self.rt.unknown(aval), None)
-            for aval in avals_out
-        ]
-        instr = InstrProto(
-            op, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out)
-        )
-        for t in tracers_out:
-            t.proto = instr
-        return tracers_out
+        return op.partial_eval(self, tracers, **params)

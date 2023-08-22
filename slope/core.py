@@ -149,11 +149,9 @@ class Op:
             args, rest = args[: len(args_strs)], args[len(args_strs) :]
             new_kwargs = {}
             for i, rest_arg in enumerate(rest):
-                try:
-                    k = kwargs_strs[i]
-                    assert k not in kwargs.keys()
-                except:
-                    breakpoint()
+                k = kwargs_strs[i]
+                assert k not in kwargs.keys()
+                    
                 new_kwargs[k] = rest_arg
             kwargs = {**new_kwargs, **kwargs}
         elif len(args) <= len(args_strs):
@@ -198,14 +196,27 @@ class Op:
             t.proto = instr
         return tracers_out
 
-    def partial_eval_instr(self, instr, read, write, env, residuals, instrs1, instrs2, ):
+    def partial_eval_instr(
+        self,
+        instr,
+        read,
+        write,
+        env,
+        residuals,
+        instrs1,
+        instrs2,
+    ):
         in_unknowns = list_map(partial(read, env), instr.inputs)
         if any(in_unknowns):
+
             def new_res(x: Atom) -> Atom:
                 if type(x) is Var:
                     residuals.add(x)
                 return x
-            inputs = [v if unk else new_res(v) for unk, v in zip(in_unknowns, instr.inputs)]
+
+            inputs = [
+                v if unk else new_res(v) for unk, v in zip(in_unknowns, instr.inputs)
+            ]
             instrs2 += [Instr(instr.op, inputs, instr.params, instr.out_binders)]
             list_map(partial(write, env, True), instr.out_binders)
         else:
@@ -331,7 +342,7 @@ class Op:
             if not type(x) in (Array, ArrayShape) or not type(x) in (Array, ArrayShape):
                 raise TypeError
             if ArrayShape.like(x) != ArrayShape.like(y):
-                breakpoint()
+                
                 raise TypeError(f"{x} != {y}")
             return [ArrayShape(x.shape, x.dtype)]
 
@@ -625,7 +636,6 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
     def run_op(self, op, tracers, params):
-        # import inspect; print(inspect.getsource(op.eval))
         return op.eval(*tracers, **params)
 
 
@@ -829,8 +839,9 @@ class PyTreeDef(NamedTuple):
     node_type: NodeType
     node_metadata: Hashable
     child_treedefs: Tuple["PyTreeDef", ...]
-
+    
     # def __repr__(self):
+        # return f"tree {self.node_type.name})\n\tmetadata:{self.node_metadata}\n\tchildren:{self.child_treedefs}"
 
 
 class Leaf:
@@ -846,75 +857,75 @@ jit_op.pack_args = lambda args, kwargs: (args, kwargs)
 @jit_op.set_eval
 def f(self, *args, hable_prog, hable_consts):
     jit_fn = self.rt.backend.callable(hable_prog, hable_consts)
-    return [jit_fn(*args)]
+    return jit_fn(*args)
 
 
 @jit_op.set_jvp
 def f(self, primals, tangents, *, hable_prog, hable_consts):
     new_prog, new_consts = self.rt.jvp_prog(hable_prog.val)
     outs = self.rt.bind(
-        jit_op,
+        self,
         *new_consts,
         *primals,
         *tangents,
-        prog=new_prog,
-        num_consts=len(new_consts),
+        hable_prog=Hable(new_prog),
+        hable_consts=tuple(list_map(Hable, new_consts)),
     )
     n = len(outs) // 2
     primals_out, tangents_out = outs[:n], outs[n:]
-    breakpoint()
     return primals_out, tangents_out
 
 
 @jit_op.set_shape_eval
-def f(self, *in_types, prog, num_consts):
-    del num_consts  # Unused
-    prog_type = self.rt.typecheck_prog(prog)
+def f(self, *in_types, hable_prog, hable_consts):
+    prog_type = self.rt.typecheck_prog(hable_prog.val)
     if not all(t1 == t2 for t1, t2 in zip(prog_type.in_types, in_types)):
         raise TypeError
     return prog_type.out_types
 
 
 @jit_op.set_T
-def f(self, cts, *invals, prog, num_consts):
-    del num_consts  # Unused
+def f(self, cts, *invals, hable_prog, hable_consts):
     undef_primals = [type(x) is UndefPrimal for x in invals]
-    transposed_prog, new_consts = self.rt.transpose_prog(prog, tuple(undef_primals))
+    transposed_prog, new_consts = self.rt.transpose_prog(hable_prog.val, tuple(undef_primals))
     residuals, _ = partition_list(undef_primals, invals)
     outs = self.rt.bind(
         self,
         *new_consts,
         *residuals,
         *cts,
-        prog=transposed_prog,
-        num_consts=len(new_consts),
+        hable_prog=Hable(transposed_prog),
+        hable_consts=tuple(list_map(Hable, new_consts)),
     )
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
 
 @jit_op.set_partial_eval
-def f(self, trace, tracers, *, prog, num_consts):
-    del num_consts  # Unused
+def f(self, trace, tracers, *, hable_prog, hable_consts):
     in_unknowns = [not t.pval.is_known for t in tracers]
-    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(prog, in_unknowns)
+    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(hable_prog.val, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = self.rt.bind(jit_op, *known_vals, hable_prog=Hable(prog1), hable_consts=())
+    outs1_res = self.rt.bind(
+        jit_op, *known_vals, hable_prog=Hable(prog1), hable_consts=()
+    )
     outs1, res = split_list(outs1_res, len(prog1.outs) - num_res)
     res_tracers = [trace.instantiate_const(self.rt.full_raise(trace, x)) for x in res]
     outs2 = [
-        PartialEvalTracerArray(trace, self.rt.unknown(v.aval), None) for v in prog2.outs
+        PartialEvalTracerArray(self.rt, trace, self.rt.unknown(v.aval), None)
+        for v in prog2.outs
     ]
     instr = InstrProto(
         self,
         res_tracers + unknown_tracers,
-        dict(prog=prog2, num_consts=0),
+        dict(hable_prog=Hable(prog2), hable_consts=()),
         [v.aval for v in prog2.outs],
-        map(weakref.ref, outs2),
+        list_map(weakref.ref, outs2),
     )
     for t in outs2:
         t.proto = instr
+    
     return merge_lists(out_unknowns, outs1, outs2)
 
 
@@ -953,6 +964,10 @@ class Runtime:
             lambda d: list_map(tuple, unzip2(sorted(d.items()))),
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
+        self.register_pytree_node(UndefPrimal,
+                            lambda u: (u.aval, ()),
+                            lambda aval, _: UndefPrimal(aval))
+
         self.opset = opset
         self.ops.register(jit_op)
         for op_name in vars(self.ops):
@@ -975,7 +990,7 @@ class Runtime:
         elif isinstance(x, Array):
             return x
         else:
-            breakpoint()
+            
             raise TypeError(x)
 
     def array(
@@ -1002,29 +1017,29 @@ class Runtime:
         return self.opset.backends
 
     def tree_flatten(self, x: Any) -> Any:
-        def _tree_flatten(x: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
-            node_type = self.node_types.get(type(x))
+        def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
+            node_type = self.node_types.get(type(x_))
 
             if node_type:
-                node_metadata, children = node_type.to_iterable(x)
+                node_metadata, children = node_type.to_iterable(x_)
                 children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
                 flattened = itertools.chain.from_iterable(children_flat)
                 return flattened, PyTreeDef(
                     node_type, node_metadata, tuple(child_trees)
                 )
             else:
-                return [x], leaf
+                return [x_], leaf
 
         children_iter, treedef = _tree_flatten(x)
         return list(children_iter), treedef
 
     def tree_unflatten(self, treedef: PyTreeDef, xs: List[Any]) -> Any:
-        def _tree_unflatten(treedef: PyTreeDef, xs: Iterator) -> Any:
-            if treedef is leaf:
-                return next(xs)
+        def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
+            if treedef_ is leaf:
+                return next(xs_)
             else:
-                children = (_tree_unflatten(t, xs) for t in treedef.child_treedefs)
-                return treedef.node_type.from_iterable(treedef.node_metadata, children)
+                children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
+                return treedef_.node_type.from_iterable(treedef_.node_metadata, children)
 
         return _tree_unflatten(treedef, iter(xs))
 
@@ -1228,6 +1243,7 @@ class Runtime:
         f: Callable,
         *avals_in: ArrayShape,
     ) -> Tuple[Prog, List[Any], PyTreeDef]:
+        oavals_in = avals_in
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree = self.flatten_fun(f, in_tree)
 
@@ -1286,7 +1302,9 @@ class Runtime:
         list_map(partial(write, env), in_unknowns, prog.in_binders)
 
         for instr in prog.instrs:
-            instr.op.partial_eval_instr(instr, read, write, env, residuals, instrs1, instrs2)
+            instr.op.partial_eval_instr(
+                instr, read, write, env, residuals, instrs1, instrs2
+            )
         out_unknowns = list_map(partial(read, env), prog.outs)
         if instantiate is not None:
             for v, uk, inst in zip(prog.outs, out_unknowns, instantiate):
@@ -1303,11 +1321,13 @@ class Runtime:
 
         prog1 = Prog(ins1, instrs1, outs1 + residuals)
         prog2 = Prog(residuals + ins2, instrs2, outs2)
-        # self.typecheck_partial_eval_prog(prog, in_unknowns, out_unknowns, prog1, prog2)
+        self.typecheck_partial_eval_prog(prog, in_unknowns, out_unknowns, prog1, prog2)
 
         return prog1, prog2, out_unknowns, num_res
 
-    def typecheck_partial_eval_prog(self, prog, in_unknowns, out_unknowns, prog1, prog2):
+    def typecheck_partial_eval_prog(
+        self, prog, in_unknowns, out_unknowns, prog1, prog2
+    ):
         progty = self.typecheck_prog(prog)  # (a1,  a2) -> (b1, b2 )
         prog1ty = self.typecheck_prog(prog1)  #  a1       -> (b1, res)
         prog2ty = self.typecheck_prog(prog2)  # (res, a2) -> b2
@@ -1318,8 +1338,13 @@ class Runtime:
         res_, a2_ = split_list(prog2ty.in_types, len(res))
         b2_ = prog2ty.out_types
 
+        a1 = tuple(a1)
+        a2,  a2_ = tuple(a2), tuple(a2_)
+        b1, b1_ = tuple(b1), tuple(b1_)
+        b2, b2_  = tuple(b2), tuple(b2_)
+        res, res_ = tuple(res), tuple(res_)
+
         if prog1ty.in_types != a1:
-            breakpoint()
             raise TypeError
         if prog2ty.out_types != b2:
             raise TypeError
@@ -1331,7 +1356,6 @@ class Runtime:
             raise TypeError
         if b2 != b2_:
             raise TypeError
-        print('ok')
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [self.known(x) for x in primals_in] + [
@@ -1515,11 +1539,10 @@ class Runtime:
         for instr in prog.instrs[::-1]:
             primals_in = list_map(read_primal, instr.inputs)
             cts_in = list_map(read_cotangent, instr.out_binders)
-            x, params = primals_in, instr.params
-            x, params = instr.op.pack_args(x, params)
-            x, params = instr.op.args_fixer(*x, **params)
-            cts_out = instr.op.T(cts_in, *x, **params)
-            # cts_out = instr.op.T(cts_in, *primals_in, **instr.params)
+            inp, params = primals_in, instr.params
+            inp, params = instr.op.pack_args(inp, params)
+            inp, params = instr.op.args_fixer(*inp, **params)
+            cts_out = instr.op.T(cts_in, *inp, **params)
             list_map(write_cotangent, instr.inputs, cts_out)
 
         ret = [
@@ -1527,16 +1550,19 @@ class Runtime:
             for v, x in list_zip(prog.in_binders, args)
             if type(x) is UndefPrimal
         ]
+        
         return ret
 
     def transpose_prog(
         self, prog: Prog, undef_primals: tuple[bool, ...]
     ) -> tuple[Prog, list[Any]]:
-        avals_in, avals_out = self.typecheck_prog(self.prog)
+        avals_in, avals_out = self.typecheck_prog(prog)
         traceable = partial(self.eval_prog_transposed, prog)
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_prog, consts, _ = self.make_prog(traceable, tuple(args), tuple(avals_out))
         self.typecheck_prog(trans_prog)
+        
+
         return trans_prog, consts
 
     def grad(self, f):
@@ -1544,7 +1570,6 @@ class Runtime:
             y, f_vjp = self.vjp(f, x, *xs)
             if np.shape(y) != ():
                 raise TypeError
-            # out = f_vjp(ones(np.shape(y)))
             out = f_vjp(self.procs.ones(()))
             return y, out
 
@@ -1696,9 +1721,10 @@ class JitFn:
         try:
             outs = self.fn(*args, **kwargs)
         except Exception as e:
+            print(self.code)
             print(e)
-            # print(self.code.split("\n"))
-            breakpoint(); raise
+            
+            raise
         return [self.rt.array(ArrayBuffer(o)) for o in outs]
 
 
@@ -1914,6 +1940,14 @@ class ProgBuilder:
 
 class UndefPrimal(NamedTuple):
     aval: ArrayShape
+
+    @property
+    def shape(self):
+        return self.aval.shape
+
+    @property
+    def dtype(self):
+        return self.aval.dtype
 
 
 class PartialVal(NamedTuple):

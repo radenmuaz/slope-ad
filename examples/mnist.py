@@ -84,6 +84,7 @@ def loss_fn(params, batch):
     inputs, targets = batch
 
     preds = predict(params, inputs)
+    # breakpoint()
     return -(preds * targets).sum()
 
 
@@ -106,7 +107,7 @@ if __name__ == "__main__":
 
     step_size = 0.001
     num_epochs = 30
-    batch_size = 64
+    batch_size = 2
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()

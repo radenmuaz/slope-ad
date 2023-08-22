@@ -12,6 +12,23 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
 class TestJit(unittest.TestCase):
+    def test_sum_grad(self):
+        def f(x):
+            @rt.jit
+            def loss(x):
+                out = x.sum()
+                return out
+            # return loss(x)
+            return rt.grad(loss)(x)
+
+        # print(f"{f.get_jit_fn()=}")
+        x = rt.array([1.0, 2.0, 3.0])
+        res = f(x)
+        print(res)
+        res = f(x)
+        print(res)
+        # print(f"{f.get_jit_fn()=}")
+
     def test_reshape(self):
         @rt.jit
         def f(x):
@@ -20,7 +37,7 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = rt.array([[1.0, 2.0, 3.0],[4.0, 5.0, 6.0]])
+        x = rt.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         res = f(x)
         print(res)
         res = f(x)

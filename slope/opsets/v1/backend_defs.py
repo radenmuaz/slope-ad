@@ -16,13 +16,18 @@ import re
 numpy_backend = Backend("numpy")
 for dtype in [bool, int, float, np.ndarray, np.float64, np.float32]:
     numpy_backend.set_input_handler(dtype, np.asarray)
+# numpy_dtype_map = {
+#     BaseArray.float32: np.float32,
+#     BaseArray.int64: np.int64,
+#     BaseArray.int8: np.int8,
+#     BaseArray.bool: bool,
+# }
 numpy_dtype_map = {
-    BaseArray.float32: np.float32,
-    BaseArray.int64: np.int64,
-    BaseArray.int8: np.int8,
+    BaseArray.float32: np.dtype("float32"),
+    BaseArray.int64: np.dtype("int64"),
+    BaseArray.int8: np.dtype("int8"),
     BaseArray.bool: bool,
 }
-
 # default_dtype = numpy_dtype_map[BaseArray.default_dtype]
 default_dtype = BaseArray.default_dtype
 numpy_backend.set_dtype_map(numpy_dtype_map)
@@ -56,6 +61,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
             nxs += 1
     code_lines = []
     code_lines += [f"def {name}({', '.join(inb_args)}):"]
+    code_lines += [f"    float32 = np.float32"]
     for inb_const, const in list_zip(inb_consts, consts):
         code_lines += [f"    {inb_const} = pickle.loads({pickle.dumps(const.val)})"]
     multiline_op_impl_set = set()
@@ -82,7 +88,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
                     0
                 ] = f"def {instr.op.name}{def_str[def_str.find('('):]}"
                 multiline_op_impl_defs += [op_impl_code_lines]
-            if instr.op.name == "convert":breakpoint()
+            # if instr.op.name == "convert":breakpoint()
 
             code_line = f"    {out_vals[0]} = {instr.op.name}({args_str}, {kwargs_str})"
         else:
@@ -99,19 +105,15 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
             ]
             op_str = op_impl_code_lines[1].replace("return", "").strip()
 
+            print(f"orig\t{op_str}")
             for argname, arg in list_zip(args_strs, in_vals):
-                # replace whole word
-                op_str = re.sub(r"\b" + re.escape(argname) + r"\b", arg, op_str)
+                mark = "," if argname != args_strs[-1] or len(instr.params)>0 else ")"
+                op_str = op_str.replace(f"{argname}{mark}", f"{arg}{mark}")
+                print(f"{argname}->{arg}\t{op_str}")
             for kwargname, kwarg in instr.params.items():
-                # replace whole word prepended with '='
-                # NOTE: impl must explicity use argname=arg for params
-                # else this fails
-                old = op_str
-                op_str = re.sub(
-                    r"=(\s*)\b" + re.escape(kwargname) + r"\b",
-                    "=" + r"\1" + str(kwarg),
-                    op_str,
-                )
+                op_str = op_str.replace(f"={kwargname}", f"={kwarg}")
+                print(f"{kwargname}=>{kwarg} {op_str}")
+            print(f"mod\t{op_str}\n")
 
             code_line = f"{out_vals[0]} = {op_str}"
             code_line = indent(code_line, 4)
@@ -138,7 +140,6 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
     code = "\n".join(code_lines)
     exec(compile(code, "<string>", "exec"), safe_builtins, exec_locals)
     fn = exec_locals[name]
-    # exec('\n'.join(ops_code), safe_builtins, exec_locals)
     return sp.core.JitFn(self.rt, code, fn)
 
 
@@ -238,7 +239,7 @@ def f(*, start, stop, stride, dtype=default_dtype):
 
 @numpy_backend.set_impl(ops.full)
 def f(*, shape, fill_value, dtype=default_dtype):
-    return np.full(shape, fill_value=fill_value, dtype=dtype)
+    return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_uniform)

@@ -723,9 +723,7 @@ def f(self, primals, tangents, *, starts, limits, strides):
 
 
 @slice.set_shape_eval
-def f(
-    self, x: VoidArray, *, starts, limits, strides: Sequence[int]
-) -> List[VoidArray]:
+def f(self, x: VoidArray, *, starts, limits, strides: Sequence[int]) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
             limit if type(start) is int and start == 0 else limit - start

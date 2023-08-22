@@ -18,6 +18,7 @@ class TestJit(unittest.TestCase):
             def loss(x):
                 out = x.sum()
                 return out
+
             # return loss(x)
             return rt.grad(loss)(x)
 

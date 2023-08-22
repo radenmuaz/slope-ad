@@ -80,6 +80,7 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
+@sp.rt.jit
 def loss_fn(params, batch):
     inputs, targets = batch
 
@@ -102,12 +103,12 @@ if __name__ == "__main__":
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
-    predict = sp.rt.jit(predict)
+    # predict = sp.rt.jit(predict)
     out_shape, init_params = init_random_params((-1, 28 * 28))
 
     step_size = 0.001
     num_epochs = 30
-    batch_size = 2
+    batch_size = 64
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()

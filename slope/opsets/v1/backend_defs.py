@@ -105,15 +105,15 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
             ]
             op_str = op_impl_code_lines[1].replace("return", "").strip()
 
-            print(f"orig\t{op_str}")
+            # print(f"orig\t{op_str}")
             for argname, arg in list_zip(args_strs, in_vals):
-                mark = "," if argname != args_strs[-1] or len(instr.params)>0 else ")"
+                mark = "," if argname != args_strs[-1] or len(instr.params) > 0 else ")"
                 op_str = op_str.replace(f"{argname}{mark}", f"{arg}{mark}")
-                print(f"{argname}->{arg}\t{op_str}")
+                # print(f"{argname}->{arg}\t{op_str}")
             for kwargname, kwarg in instr.params.items():
                 op_str = op_str.replace(f"={kwargname}", f"={kwarg}")
-                print(f"{kwargname}=>{kwarg} {op_str}")
-            print(f"mod\t{op_str}\n")
+                # print(f"{kwargname}=>{kwarg} {op_str}")
+            # print(f"mod\t{op_str}\n")
 
             code_line = f"{out_vals[0]} = {op_str}"
             code_line = indent(code_line, 4)

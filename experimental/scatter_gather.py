@@ -162,7 +162,7 @@ class Gather(ShapeOp):
 
     @staticmethod
     def shape_eval(
-        x: ArrayShape,
+        x: VoidArray,
         idx,
         *,
         dimension_numbers,
@@ -171,7 +171,7 @@ class Gather(ShapeOp):
         indices_are_sorted,
         mode,
         fill_value,
-    ) -> List[ArrayShape]:
+    ) -> List[VoidArray]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -479,9 +479,9 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def shape_eval(x: ArrayShape, idx, *, axis: Sequence[int]) -> List[ArrayShape]:
+    def shape_eval(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
         shape = [x.shape[i] for i in axis]
-        return [ArrayShape(shape, x.dtype)]
+        return [VoidArray(shape, x.dtype)]
 
     @staticmethod
     def T(

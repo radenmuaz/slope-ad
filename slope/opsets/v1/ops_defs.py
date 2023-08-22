@@ -3,13 +3,13 @@ from slope.core import (
     Op,
     OpsDir,
     BaseArray,
-    ArrayShape,
+    VoidArray,
     UndefPrimal,
     list_zip,
     list_map,
 )
 
-# from slope import Op, ArrayShape, BaseArray
+# from slope import Op, VoidArray, BaseArray
 import math
 import numpy as np
 from typing import (
@@ -496,8 +496,8 @@ def f(self, primals, tangents, *, shape, axes=None):
 
 
 @broadcast.set_shape_eval
-def f(self, x: ArrayShape, *, shape: Sequence[int], axes=None) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), x.dtype)]
+def f(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
+    return [VoidArray(tuple(shape), x.dtype)]
 
 
 @broadcast.set_T
@@ -552,8 +552,8 @@ def f(self, primals, tangents, *, shape):
 
 
 @reshape.set_shape_eval
-def f(self, x: ArrayShape, *, shape: Sequence[int]) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), x.dtype)]
+def f(self, x: VoidArray, *, shape: Sequence[int]) -> List[VoidArray]:
+    return [VoidArray(tuple(shape), x.dtype)]
 
 
 @reshape.set_T
@@ -593,9 +593,9 @@ def f(self, primals, tangents, *, perm):
 
 
 @transpose.set_shape_eval
-def f(self, x: ArrayShape, *, perm: Sequence[int]) -> List[ArrayShape]:
+def f(self, x: VoidArray, *, perm: Sequence[int]) -> List[VoidArray]:
     shape = [x.shape[i] for i in perm]
-    return [ArrayShape(shape, x.dtype)]
+    return [VoidArray(shape, x.dtype)]
 
 
 @transpose.set_T
@@ -649,7 +649,7 @@ def f(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
 
 
 @pad.set_shape_eval
-def f(self, x: ArrayShape, *, lo, hi, interior=None, value=0.0) -> List[ArrayShape]:
+def f(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -663,7 +663,7 @@ def f(self, x: ArrayShape, *, lo, hi, interior=None, value=0.0) -> List[ArraySha
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
-    res = ArrayShape(shape, x.dtype)
+    res = VoidArray(shape, x.dtype)
     return [res]
 
 
@@ -724,19 +724,19 @@ def f(self, primals, tangents, *, starts, limits, strides):
 
 @slice.set_shape_eval
 def f(
-    self, x: ArrayShape, *, starts, limits, strides: Sequence[int]
-) -> List[ArrayShape]:
+    self, x: VoidArray, *, starts, limits, strides: Sequence[int]
+) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
             limit if type(start) is int and start == 0 else limit - start
             for start, limit in list_zip(starts, limits)
         ]
-        return [ArrayShape(shape, x.dtype)]
+        return [VoidArray(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
         x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-        return [ArrayShape(x.shape, x.dtype)]
+        return [VoidArray(x.shape, x.dtype)]
 
 
 @slice.set_T
@@ -789,8 +789,8 @@ def f(self, primals, tangents, *, axes):
 
 
 @flip.set_shape_eval
-def f(self, x: ArrayShape, *, axes):
-    return [ArrayShape(x.shape, x.dtype)]
+def f(self, x: VoidArray, *, axes):
+    return [VoidArray(x.shape, x.dtype)]
 
 
 @flip.set_T
@@ -822,7 +822,7 @@ def jvp(primals, tangents, *, axis):
 
 
 @concatenate.set_shape_eval
-def f(self, xs: ArrayShape, *, axis: Sequence[int]) -> List[ArrayShape]:
+def f(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
         raise TypeError(msg)
@@ -845,7 +845,7 @@ def f(self, xs: ArrayShape, *, axis: Sequence[int]) -> List[ArrayShape]:
     concat_size = sum(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
     return [
-        ArrayShape(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)
+        VoidArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)
     ]
 
 
@@ -899,7 +899,7 @@ def f(self, cts, *, val, dtype=BaseArray.default_dtype):
 @constant.set_shape_eval
 def f(self, *, val, dtype=BaseArray.default_dtype):
     # TODO: not using numpy to extract shape
-    return [ArrayShape(np.array(val).shape, dtype)]
+    return [VoidArray(np.array(val).shape, dtype)]
 
 
 full = Op.load("full")
@@ -928,8 +928,8 @@ def f(self, cts, *, shape, fill_value, dtype=BaseArray.default_dtype):
 
 
 @full.set_shape_eval
-def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+    return [VoidArray(tuple(shape), dtype)]
 
 
 random_uniform = Op.load("random_uniform")
@@ -956,8 +956,8 @@ def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
 
 
 @random_uniform.set_shape_eval
-def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+    return [VoidArray(tuple(shape), dtype)]
 
 
 random_normal = Op.load("random_normal")
@@ -984,8 +984,8 @@ def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
 
 
 @random_normal.set_shape_eval
-def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[ArrayShape]:
-    return [ArrayShape(tuple(shape), dtype)]
+def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+    return [VoidArray(tuple(shape), dtype)]
 
 
 arange = Op.load("arange")
@@ -1024,5 +1024,5 @@ def f(self, cts, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
 @arange.set_shape_eval
 def f(
     self, *, start, stop, stride=None, dtype=BaseArray.default_dtype
-) -> List[ArrayShape]:
-    return [ArrayShape(tuple((stop - start) * stride), dtype)]
+) -> List[VoidArray]:
+    return [VoidArray(tuple((stop - start) * stride), dtype)]

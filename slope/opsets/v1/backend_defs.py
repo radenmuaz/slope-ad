@@ -1,7 +1,7 @@
 import slope as sp
 from slope.opsets.v1.ops_defs import ops
 from slope.opsets.v1.procs_defs import procs
-from slope.core import Backend, BaseArray, ArrayShape, list_zip, list_map
+from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
 import numpy as np
 from typing import (
     List,
@@ -51,7 +51,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
     inb_consts = []
 
     for inb in prog.in_binders:
-        if type(inb.aval) is not ArrayShape:
+        if type(inb.aval) is not VoidArray:
             env[inb] = f"c{ncs}"
             inb_consts += [env[inb]]
             ncs += 1

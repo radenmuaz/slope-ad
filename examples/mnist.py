@@ -79,9 +79,9 @@ def mnist(permute_train=False):
 
     return train_images, train_labels, test_images, test_labels
 
-
 @sp.rt.jit
 def loss_fn(params, batch):
+    print('loss_fn jit, this text should printed only once.')
     inputs, targets = batch
 
     preds = predict(params, inputs)
@@ -104,6 +104,7 @@ if __name__ == "__main__":
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
     # predict = sp.rt.jit(predict)
+    # loss_fn = sp.rt.jit(loss_fn)
     out_shape, init_params = init_random_params((-1, 28 * 28))
 
     step_size = 0.001

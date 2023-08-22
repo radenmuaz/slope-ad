@@ -1,6 +1,6 @@
 import slope
 from slope import base_ops
-from slope.array_shape import ArrayShape
+from slope.array_shape import VoidArray
 import numpy as np
 
 from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple

@@ -16,19 +16,12 @@ import re
 numpy_backend = Backend("numpy")
 for dtype in [bool, int, float, np.ndarray, np.float64, np.float32]:
     numpy_backend.set_input_handler(dtype, np.asarray)
-# numpy_dtype_map = {
-#     BaseArray.float32: np.float32,
-#     BaseArray.int64: np.int64,
-#     BaseArray.int8: np.int8,
-#     BaseArray.bool: bool,
-# }
 numpy_dtype_map = {
     BaseArray.float32: np.dtype("float32"),
     BaseArray.int64: np.dtype("int64"),
     BaseArray.int8: np.dtype("int8"),
     BaseArray.bool: bool,
 }
-# default_dtype = numpy_dtype_map[BaseArray.default_dtype]
 default_dtype = BaseArray.default_dtype
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
@@ -39,6 +32,14 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
         return "\n".join([spaces + line for line in code_line.strip().split("\n")])
+    
+    def process_arg(a):
+        return (
+            self.dtype_map[a]
+            if isinstance(a, sp.core.DType)
+            else a
+        )
+    
 
     safe_builtins = {"math": math, "np": np, "pickle": pickle}
 
@@ -111,6 +112,8 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
                 op_str = op_str.replace(f"{argname}{mark}", f"{arg}{mark}")
                 # print(f"{argname}->{arg}\t{op_str}")
             for kwargname, kwarg in instr.params.items():
+                if isinstance(kwarg, sp.core.DType):
+                    kwarg =  self.dtype_map[kwarg]
                 op_str = op_str.replace(f"={kwargname}", f"={kwarg}")
                 # print(f"{kwargname}=>{kwarg} {op_str}")
             # print(f"mod\t{op_str}\n")

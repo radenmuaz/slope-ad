@@ -151,7 +151,7 @@ class Op:
             for i, rest_arg in enumerate(rest):
                 k = kwargs_strs[i]
                 assert k not in kwargs.keys()
-
+                    
                 new_kwargs[k] = rest_arg
             kwargs = {**new_kwargs, **kwargs}
         elif len(args) <= len(args_strs):
@@ -186,9 +186,7 @@ class Op:
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.shape_eval(*avals_in, **params)
         tracers_out = [
-            PartialEvalTracerArray(
-                self.rt, trace, self.rt.make_unknown_pval(aval), None
-            )
+            PartialEvalTracerArray(self.rt, trace, self.rt.make_unknown_pval(aval), None)
             for aval in avals_out
         ]
         instr = InstrProto(
@@ -344,6 +342,7 @@ class Op:
             if not type(x) in (Array, VoidArray) or not type(x) in (Array, VoidArray):
                 raise TypeError
             if VoidArray.like(x) != VoidArray.like(y):
+                
                 raise TypeError(f"{x} != {y}")
             return [VoidArray(x.shape, x.dtype)]
 
@@ -840,9 +839,9 @@ class PyTreeDef(NamedTuple):
     node_type: NodeType
     node_metadata: Hashable
     child_treedefs: Tuple["PyTreeDef", ...]
-
+    
     # def __repr__(self):
-    # return f"tree {self.node_type.name})\n\tmetadata:{self.node_metadata}\n\tchildren:{self.child_treedefs}"
+        # return f"tree {self.node_type.name})\n\tmetadata:{self.node_metadata}\n\tchildren:{self.child_treedefs}"
 
 
 class Leaf:
@@ -888,9 +887,7 @@ def f(self, *in_types, hable_prog, hable_consts):
 @jit_op.set_T
 def f(self, cts, *invals, hable_prog, hable_consts):
     undef_primals = [type(x) is UndefPrimal for x in invals]
-    transposed_prog, new_consts = self.rt.transpose_prog(
-        hable_prog.val, tuple(undef_primals)
-    )
+    transposed_prog, new_consts = self.rt.transpose_prog(hable_prog.val, tuple(undef_primals))
     residuals, _ = partition_list(undef_primals, invals)
     outs = self.rt.bind(
         self,
@@ -907,9 +904,7 @@ def f(self, cts, *invals, hable_prog, hable_consts):
 @jit_op.set_partial_eval
 def f(self, trace, tracers, *, hable_prog, hable_consts):
     in_unknowns = [not t.pval.is_known for t in tracers]
-    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(
-        hable_prog.val, in_unknowns
-    )
+    prog1, prog2, out_unknowns, num_res = self.rt.partial_eval_prog(hable_prog.val, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
     outs1_res = self.rt.bind(
@@ -930,7 +925,7 @@ def f(self, trace, tracers, *, hable_prog, hable_consts):
     )
     for t in outs2:
         t.proto = instr
-
+    
     return merge_lists(out_unknowns, outs1, outs2)
 
 
@@ -969,9 +964,9 @@ class Runtime:
             lambda d: list_map(tuple, unzip2(sorted(d.items()))),
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
-        self.register_pytree_node(
-            UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval)
-        )
+        self.register_pytree_node(UndefPrimal,
+                            lambda u: (u.aval, ()),
+                            lambda aval, _: UndefPrimal(aval))
 
         self.opset = opset
         self.ops.register(jit_op)
@@ -991,9 +986,13 @@ class Runtime:
         if isinstance(x, TracerArray):
             return x.aval
         elif type(x) in TracerArray.TYPES:
-            return self.array(np.asarray(x))
+            return VoidArray((), BaseArray.default_dtype)
+            # return self.array(x)
         elif isinstance(x, Array):
-            return x
+            return VoidArray.like(x)
+            # return x
+        # elif isinstance(x, VoidArray):
+        #     return x
         else:
             raise TypeError(x)
 
@@ -1002,6 +1001,7 @@ class Runtime:
         val: Union[list, tuple, np.ndarray, ArrayBuffer] = None,
         dtype: Optional[Any] = BaseArray.default_dtype,
     ):
+        
         return (
             Array(self, val)
             if isinstance(val, ArrayBuffer)
@@ -1043,9 +1043,7 @@ class Runtime:
                 return next(xs_)
             else:
                 children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-                return treedef_.node_type.from_iterable(
-                    treedef_.node_metadata, children
-                )
+                return treedef_.node_type.from_iterable(treedef_.node_metadata, children)
 
         return _tree_unflatten(treedef, iter(xs))
 
@@ -1345,9 +1343,9 @@ class Runtime:
         b2_ = prog2ty.out_types
 
         a1 = tuple(a1)
-        a2, a2_ = tuple(a2), tuple(a2_)
+        a2,  a2_ = tuple(a2), tuple(a2_)
         b1, b1_ = tuple(b1), tuple(b1_)
-        b2, b2_ = tuple(b2), tuple(b2_)
+        b2, b2_  = tuple(b2), tuple(b2_)
         res, res_ = tuple(res), tuple(res_)
 
         if prog1ty.in_types != a1:
@@ -1556,7 +1554,7 @@ class Runtime:
             for v, x in list_zip(prog.in_binders, args)
             if type(x) is UndefPrimal
         ]
-
+        
         return ret
 
     def transpose_prog(
@@ -1567,6 +1565,7 @@ class Runtime:
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_prog, consts, _ = self.make_prog(traceable, tuple(args), tuple(avals_out))
         self.typecheck_prog(trans_prog)
+        
 
         return trans_prog, consts
 
@@ -1728,7 +1727,7 @@ class JitFn:
         except Exception as e:
             print(self.code)
             print(e)
-
+            
             raise
         return [self.rt.array(ArrayBuffer(o)) for o in outs]
 
@@ -2005,7 +2004,7 @@ class PartialEvalTrace(Trace):
         return PartialEvalTracerArray(self.rt, self, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
-        val = self.rt.array(val)
+        # val = self.rt.array(val)
         return PartialEvalTracerArray(self.rt, self, self.rt.make_known_pval(val), None)
 
     pure = lift

@@ -285,6 +285,11 @@ class Op:
 
         @op.set_args_fixer
         def f(self, x, y, **kwargs):
+            if type(x) in BaseArray.PYTHON_TYPES:
+                x = self.rt.ops.full(y.shape, x, y.dtype)
+            elif type(y) in BaseArray.PYTHON_TYPES:
+                y = self.rt.ops.full(x.shape, y, x.dtype)
+
             if type(x) is UndefPrimal and type(y) is UndefPrimal:
                 assert x.aval.shape == y.aval.shape
                 return (x, y), kwargs
@@ -323,6 +328,10 @@ class Op:
                 shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
                 x = x.broadcast(shape=shape_ret, axes=bx)
                 y = y.broadcast(shape=shape_ret, axes=by)
+            
+            if x.__array_priority__ > y.__array_priority__:
+                breakpoint()
+                x, y = y, x
 
             return (x, y), kwargs
 
@@ -650,6 +659,7 @@ class DType(NamedTuple):
 
 
 class BaseArray:
+    PYTHON_TYPES = {bool, int, float}
     bool: Final[DType] = DType(0, 1, "bool", bool)
     float16: Final[DType] = DType(0, 2, "half", np.float16)
     float32: Final[DType] = DType(4, 4, "float", np.float32)
@@ -658,6 +668,7 @@ class BaseArray:
     int64: Final[DType] = DType(2, 8, "int64", np.int64)
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
     default_dtype = float32
+    __array_priority__ = 0
 
     def __init__(self, rt):
         self.rt_ref = weakref.ref(rt)
@@ -757,12 +768,6 @@ class Array(BaseArray):
 
 
 class TracerArray(BaseArray):
-    TYPES = {
-        bool,
-        int,
-        float,
-        # Array,
-    }
     __array_priority__ = 2000
 
     _trace: "Trace"
@@ -985,7 +990,7 @@ class Runtime:
     def get_aval(self, x):
         if isinstance(x, TracerArray):
             return x.aval
-        elif type(x) in TracerArray.TYPES:
+        elif type(x) in BaseArray.PYTHON_TYPES:
             return VoidArray((), BaseArray.default_dtype)
             # return self.array(x)
         elif isinstance(x, Array):
@@ -1690,13 +1695,14 @@ class Backend:
 
     def run_impl(self, op, *args, **kwargs):
         def process_arg(a):
-            return (
+            try: return (
                 a.val
                 if isinstance(a, BaseArray)
                 else self.dtype_map[a]
                 if isinstance(a, DType)
                 else a
             )
+            except: breakpoint();raise
 
         args = tuple([process_arg(a) for a in args])
         kwargs = {k: process_arg(v) for k, v in kwargs.items()}

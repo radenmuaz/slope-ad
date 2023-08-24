@@ -80,17 +80,14 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-# @sp.rt.jit
+@sp.rt.jit
 def loss_fn(params, batch):
-    # print("loss_fn jit, this text should printed only once.")
+    print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
 
     preds = predict(params, inputs)
-    # breakpoint()
     return -(preds * targets).sum()
 
-
-# @sp.rt.jit
 def accuracy(params, batch):
     inputs, targets = batch
     target_class = np.argmax(targets.val, axis=-1)
@@ -106,13 +103,10 @@ if __name__ == "__main__":
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
-    # predict = sp.rt.jit(predict)
-    loss_fn = sp.rt.jit(loss_fn)
     out_shape, init_params = init_random_params((-1, 28 * 28))
-
     step_size = 0.001
     num_epochs = 30
-    batch_size = 100
+    batch_size = 100 # TODO: must be multiple of dataset.
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()
@@ -133,9 +127,9 @@ if __name__ == "__main__":
 
     batches = data_stream()
 
-    opt_init, opt_update, get_params = optim.sgd(step_size)
+    # opt_init, opt_update, get_params = optim.sgd(step_size)
     # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
-    # opt_init, opt_update, get_params = optim.adam(step_size)
+    opt_init, opt_update, get_params = optim.adam(step_size)
     opt_state = opt_init(init_params)
 
     def update(i, opt_state, batch):

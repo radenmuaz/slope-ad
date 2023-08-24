@@ -12,12 +12,32 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
 class TestJit(unittest.TestCase):
+    def test_maximum_sum_grad(self):
+        @rt.jit
+        def loss(x):
+            out = x
+            out = out.maximum(rt.procs.zeros_like(out))
+            out = out.sum()
+            return out
+
+        # @rt.jit
+        def f(x):
+            return rt.grad(loss)(x)
+
+        # print(f"{f.get_jit_fn()=}")
+        x = rt.array([1.0, 2.0, 3.0])
+        res = f(x)
+        print(res)
+        res = f(x)
+        print(res)
+        # print(f"{f.get_jit_fn()=}")
+
     def test_sum_grad(self):
         @rt.jit
         def loss(x):
             out = x.sum()
             return out
-        
+
         # @rt.jit
         def f(x):
             return rt.grad(loss)(x)

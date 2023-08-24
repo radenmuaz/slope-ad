@@ -14,8 +14,6 @@ import inspect
 import re
 
 numpy_backend = Backend("numpy")
-for dtype in [bool, int, float, np.ndarray, np.float64, np.float32]:
-    numpy_backend.set_input_handler(dtype, np.asarray)
 numpy_dtype_map = {
     BaseArray.float32: np.dtype("float32"),
     BaseArray.int64: np.dtype("int64"),
@@ -27,19 +25,15 @@ numpy_backend.set_dtype_map(numpy_dtype_map)
 
 
 @numpy_backend.set_compile
-def f(self, prog, consts, in_avals, name) -> List[Any]:
+def f(self, prog, consts, name) -> List[Any]:
+    # def f(self, prog, args, consts, name) -> List[Any]:
     def indent(code_line, amount=4):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
         return "\n".join([spaces + line for line in code_line.strip().split("\n")])
-    
-    def process_arg(a):
-        return (
-            self.dtype_map[a]
-            if isinstance(a, sp.core.DType)
-            else a
-        )
-    
+
+    # def process_arg(a):
+    #     return self.dtype_map[a] if isinstance(a, sp.core.DType) else a
 
     safe_builtins = {"math": math, "np": np, "pickle": pickle}
 
@@ -61,10 +55,12 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
             inb_args += [env[inb]]
             nxs += 1
     code_lines = []
-    code_lines += [f"def {name}({', '.join(inb_args)}):"]
-    code_lines += [f"    float32 = np.float32"]
-    for inb_const, const in list_zip(inb_consts, consts):
-        code_lines += [f"    {inb_const} = pickle.loads({pickle.dumps(const.val)})"]
+    fn_args_strs = f""
+    if inb_consts:
+        fn_args_strs += f"{', '.join(inb_consts)}, "
+    fn_args_strs += f"{', '.join(inb_args)}"
+    code_lines += [f"def {name}({fn_args_strs}):"]
+    code_lines += [f"    float32 = np.float32"]  # TODO: cleanup dtype translation
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
     for instr in prog.instrs:
@@ -99,11 +95,6 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
                 for k, v in sig.parameters.items()
                 if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
             ]
-            kwargs_strs = [
-                k
-                for k, v in sig.parameters.items()
-                if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"
-            ]
             op_str = op_impl_code_lines[1].replace("return", "").strip()
 
             # print(f"orig\t{op_str}")
@@ -113,7 +104,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
                 # print(f"{argname}->{arg}\t{op_str}")
             for kwargname, kwarg in instr.params.items():
                 if isinstance(kwarg, sp.core.DType):
-                    kwarg =  self.dtype_map[kwarg]
+                    kwarg = self.dtype_map[kwarg]
                 op_str = op_str.replace(f"={kwargname}", f"={kwarg}")
                 # print(f"{kwargname}=>{kwarg} {op_str}")
             # print(f"mod\t{op_str}\n")
@@ -143,7 +134,7 @@ def f(self, prog, consts, in_avals, name) -> List[Any]:
     code = "\n".join(code_lines)
     exec(compile(code, "<string>", "exec"), safe_builtins, exec_locals)
     fn = exec_locals[name]
-    return sp.core.JitFn(self.rt, code, fn)
+    return sp.core.JitFn(self.rt, code, fn, consts)
 
 
 ### Op Impls

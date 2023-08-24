@@ -257,8 +257,8 @@ def f(self, x, y):
 @mul.set_jvp
 def f(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
-    # return [x * y], [(x_dot * y) + (y_dot * x)]
-    return [y*x], [(y* x_dot) + (y_dot*x)]
+    return [x * y], [(x_dot * y) + (y_dot * x)]
+    # return [y * x], [(y * x_dot) + (y_dot * x)]
     # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
 
 
@@ -316,7 +316,6 @@ def f(self, primals, tangents):
     jvp_out = x_dot * _balanced_eq(x, eval_out, y) + y_dot * _balanced_eq(
         y, eval_out, x
     )
-
     return [eval_out], [jvp_out]
 
 

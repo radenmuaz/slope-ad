@@ -101,7 +101,8 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        # layers.Dense(200), layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
+        layers.Dense(200),
+        layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
@@ -111,7 +112,7 @@ if __name__ == "__main__":
 
     step_size = 0.001
     num_epochs = 30
-    batch_size = 64
+    batch_size = 100
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()

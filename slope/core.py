@@ -864,7 +864,7 @@ def f(self, *args, prog, num_consts):
     consts, args = args[:num_consts], args[num_consts:]
     hable_consts = tuple(map(Hable, consts))
     jit_fn = self.rt.backend.callable(hable_prog, hable_consts)
-    return jit_fn(*args)
+    return jit_fn(*args, *consts)
 
 
 @jit_op.set_jvp

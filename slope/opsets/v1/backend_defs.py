@@ -176,6 +176,11 @@ def f(x):
     return np.log(x)
 
 
+@numpy_backend.set_impl(ops.sin)
+def f(x):
+    return np.sin(x)
+
+
 @numpy_backend.set_impl(ops.add)
 def f(x, y):
     return np.add(x, y)

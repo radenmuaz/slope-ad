@@ -28,10 +28,9 @@ def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
     return fan_in, fan_out
 
 
-def normal(stddev=1e-2, dtype=np.float32) -> Callable:
+def normal(dtype=np.float32) -> Callable:
     def init(shape, dtype=dtype):
         return sp.rt.ops.randn(shape)
-        # return Array(np.random.normal(size=shape).astype(dtype) * stddev)
 
     return init
 
@@ -60,7 +59,7 @@ def variance_scaling(
             return sp.rt.ops.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
             return sp.rt.array(
-                np.random.uniform(size=shape.astype(dtype)) * np.sqrt(3 * variance)
+                sp.rt.ops.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
             )
         else:
             raise ValueError(
@@ -74,7 +73,7 @@ def glorot_normal(
     in_axis: Union[int, Sequence[int]] = -2,
     out_axis: Union[int, Sequence[int]] = -1,
     batch_axis: Sequence[int] = (),
-    dtype=np.float32,
+    dtype=sp.core.BaseArray.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,
@@ -91,7 +90,7 @@ def glorot_uniform(
     in_axis: Union[int, Sequence[int]] = -2,
     out_axis: Union[int, Sequence[int]] = -1,
     batch_axis: Sequence[int] = (),
-    dtype=None,
+    dtype=sp.core.BaseArray.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,

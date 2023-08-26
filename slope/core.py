@@ -117,7 +117,7 @@ class Op:
         self.op_type = op_type
         self.impls = dict()
         self.rt_ref = None
-        self.args_fixer = lambda *args, **kwargs: (args, kwargs)
+        self.args_fixer = lambda *args, **params: (args, params)
 
     def set_rt(self, rt):
         self.rt_ref = weakref.ref(rt)
@@ -129,16 +129,14 @@ class Op:
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
 
-    def pack_args(self, args, kwargs):
-        # args_ = args; kwargs_ = kwargs
-        # args = args[1:] # assume first is self
+    def pack_args(self, args, params):
         sig = inspect.signature(self.eval)
         args_strs = [
             k
             for k, v in sig.parameters.items()
             if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
         ]
-        kwargs_strs = [
+        params_strs = [
             k
             for k, v in sig.parameters.items()
             if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"
@@ -147,38 +145,36 @@ class Op:
         if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
             args_ = args
             args, rest = args[: len(args_strs)], args[len(args_strs) :]
-            new_kwargs = {}
+            new_params = {}
             for i, rest_arg in enumerate(rest):
-                k = kwargs_strs[i]
-                assert k not in kwargs.keys()
+                k = params_strs[i]
+                assert k not in params.keys()
 
-                new_kwargs[k] = rest_arg
-            kwargs = {**new_kwargs, **kwargs}
+                new_params[k] = rest_arg
+            params = {**new_params, **params}
         elif len(args) <= len(args_strs):
             args = list(args)
             for i, k in enumerate(args_strs):
-                if k in kwargs.keys():
-                    args.insert(i, kwargs[k])
-                    del kwargs[k]
+                if k in params.keys():
+                    args.insert(i, params[k])
+                    del params[k]
             assert len(args) == len(args_strs)
-        return args, kwargs
+        return args, params
 
-    def impl(self, *args, **kwargs):
-        args_ = args
-        kwargds_ = kwargs
-        args, kwargs = self.pack_args(args, kwargs)
-        args, kwargs = self.args_fixer(*args, **kwargs)
-        return self.rt.backend.run_impl(self, *args, **kwargs)
+    def impl(self, *args, **params):
+        args, params = self.pack_args(args, params)
+        args, params = self.args_fixer(*args, **params)
+        return self.rt.backend.run_impl(self, *args, **params)
 
-    def __call__(self, *args, **kwargs):
-        args, kwargs = self.pack_args(args, kwargs)
-        args, kwargs = self.args_fixer(*args, **kwargs)
-        return self.rt.bind1(self, *args, **kwargs)
+    def __call__(self, *args, **params):
+        args, params = self.pack_args(args, params)
+        args, params = self.args_fixer(*args, **params)
+        return self.rt.bind1(self, *args, **params)
 
-    def args_fixer(self, *args, **kwargs):
+    def args_fixer(self, *args, **params):
         raise NotImplementedError
 
-    def eval(self, *args, **kwargs):
+    def eval(self, *args, **params):
         raise NotImplementedError
 
     def partial_eval(self, trace, tracers, **params):
@@ -225,16 +221,16 @@ class Op:
             instrs1 += [instr]
             list_map(partial(write, env, False), instr.out_binders)
 
-    def jvp(self, *args, **kwargs):
+    def jvp(self, *args, **params):
         raise NotImplementedError
 
-    def T(self, *args, **kwargs):
+    def T(self, *args, **params):
         raise NotImplementedError
 
-    def vmap(self, *args, **kwargs):
+    def vmap(self, *args, **params):
         raise NotImplementedError
 
-    def shape_eval(self, *args, **kwargs):
+    def shape_eval(self, *args, **params):
         raise NotImplementedError
 
     def set_partial_eval_instr(self, fn):
@@ -286,16 +282,16 @@ class Op:
         op = cls(name, OpType.Binary)
 
         @op.set_args_fixer
-        def f(self, x, y, **kwargs):
+        def f(self, x, y, **params):
             if type(x) is UndefPrimal and type(y) is UndefPrimal:
                 assert x.aval.shape == y.aval.shape
-                return (x, y), kwargs
+                return (x, y), params
             elif type(x) is UndefPrimal:
                 assert x.aval.shape == y.shape
-                return (x, y), kwargs
+                return (x, y), params
             elif type(y) is UndefPrimal:
                 assert y.aval.shape == x.shape
-                return (x, y), kwargs
+                return (x, y), params
 
             if type(x) in [bool, int, float]:
                 x = self.rt.array(x, dtype=y.dtype)
@@ -308,7 +304,7 @@ class Op:
                 y = x._trace.pure(y)
 
             if getattr(x, "shape", None) == getattr(y, "shape", None):
-                return (x, y), kwargs
+                return (x, y), params
             if x.ndim == 0:
                 shape_ret = y.shape
                 bx = tuple(range(y.ndim))
@@ -326,7 +322,7 @@ class Op:
                 x = x.broadcast(shape=shape_ret, axes=bx)
                 y = y.broadcast(shape=shape_ret, axes=by)
 
-            return (x, y), kwargs
+            return (x, y), params
 
         @op.set_vmap
         def f(self, axis_size, vals_in, dims_in, **params):
@@ -859,7 +855,7 @@ class Leaf:
 leaf = Leaf()
 
 jit_op = Op("jit_op")
-jit_op.pack_args = lambda args, kwargs: (args, kwargs)
+jit_op.pack_args = lambda args, params: (args, params)
 
 
 @jit_op.set_eval
@@ -1276,7 +1272,6 @@ class Runtime:
             primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
             return self.jvp(self.prog_as_fun(prog), primals, tangents)
 
-        # in_avals = [v.aval for v in prog.in_binders]
         in_avals = self.tree_map(lambda v: v.aval, prog.in_binders)
         new_prog, new_consts, _ = self.make_prog(jvp_traceable, *in_avals, *in_avals)
         return new_prog, new_consts
@@ -1523,7 +1518,6 @@ class Runtime:
 
         return primals_out, f_vjp
 
-    # NB: the analogous function in JAX is called 'backward_pass'
     def eval_prog_transposed(
         self, prog: Prog, args: List[Any], cotangents: List[Any]
     ) -> List[Any]:
@@ -1609,9 +1603,11 @@ class Runtime:
 
                 hable_consts = tuple(list_map(Hable, consts))
                 hable_prog = Hable(prog)
+            else:
+                consts = tuple(c.val for c in hable_consts)
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(
-                jit_op, *args, prog=hable_prog.val, num_consts=len(hable_consts)
+                jit_op, *consts, *args, prog=hable_prog.val, num_consts=len(hable_consts)
             )
             return self.tree_unflatten(out_tree, outs)
 
@@ -1696,7 +1692,7 @@ class Backend:
 
         return set_impl_
 
-    def run_impl(self, op, *args, **kwargs):
+    def run_impl(self, op, *args, **params):
         def process_arg(a):
             return (
                 a.val
@@ -1707,8 +1703,8 @@ class Backend:
             )
 
         args = tuple([process_arg(a) for a in args])
-        kwargs = {k: process_arg(v) for k, v in kwargs.items()}
-        val = self.impls[op](*args, **kwargs)
+        params = {k: process_arg(v) for k, v in params.items()}
+        val = self.impls[op](*args, **params)
         return Array(self.rt, ArrayBuffer(val))
 
     def set_input_handler(self, typ, fn):
@@ -1727,13 +1723,13 @@ class JitFn:
     def rt(self):
         return self.rt_ref()
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args, **params):
         # args = [a.val if isinstance(a, Array) else a for a in args]
         args = self.rt.tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
         args, in_tree = self.rt.tree_flatten(args)
         try:
-            # outs = self.fn(*self.consts, *args, **kwargs)
-            outs = self.fn(*args, **kwargs)
+            # outs = self.fn(*self.consts, *args, **params)
+            outs = self.fn(*args, **params)
         except Exception as e:
             print(self.code)
             print(e)

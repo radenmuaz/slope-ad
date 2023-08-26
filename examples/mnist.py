@@ -88,6 +88,7 @@ def loss_fn(params, batch):
     preds = predict(params, inputs)
     return -(preds * targets).sum()
 
+
 def accuracy(params, batch):
     inputs, targets = batch
     target_class = np.argmax(targets.val, axis=-1)
@@ -106,7 +107,7 @@ if __name__ == "__main__":
     out_shape, init_params = init_random_params((-1, 28 * 28))
     step_size = 0.001
     num_epochs = 30
-    batch_size = 100 # TODO: must be multiple of dataset.
+    batch_size = 200  # TODO: must be multiple of dataset.
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()
@@ -149,10 +150,8 @@ if __name__ == "__main__":
         epoch_time = time.time() - start_time
 
         params = get_params(opt_state)
-        # train_acc = accuracy(params, (train_images, train_labels))
         test_acc = accuracy(
             params, (sp.rt.array(test_images), sp.rt.array(test_labels))
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
-        # print(f"Training set accuracy {train_acc}")
         print(f"Test set accuracy {test_acc}")

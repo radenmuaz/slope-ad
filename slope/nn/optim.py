@@ -191,7 +191,7 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-2):
     def update(i, g, state):
         x, m, v = state
         m = (1 - b1) * g + b1 * m  # First  moment estimate.
-        v = (1 - b2) * g*g + b2 * v  # Second moment estimate.
+        v = (1 - b2) * g * g + b2 * v  # Second moment estimate.
         mhat = m / (1 - (b1 ** (i + 1)))  # Bias correction.
         vhat = v / (1 - (b2 ** (i + 1)))
         x = x - step_size(i) * mhat / (vhat.sqrt() + eps)

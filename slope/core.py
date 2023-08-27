@@ -38,6 +38,7 @@ import inspect
 from functools import partial
 
 import slope as sp
+import importlib
 
 max_ = max
 sum_ = sum
@@ -1607,7 +1608,11 @@ class Runtime:
                 consts = tuple(c.val for c in hable_consts)
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(
-                jit_op, *consts, *args, prog=hable_prog.val, num_consts=len(hable_consts)
+                jit_op,
+                *consts,
+                *args,
+                prog=hable_prog.val,
+                num_consts=len(hable_consts),
             )
             return self.tree_unflatten(out_tree, outs)
 
@@ -1640,13 +1645,21 @@ class Runtime:
 
 
 class Backend:
-    def __init__(self, name, default_dtype=BaseArray.float32):
+    def __init__(self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")):
         self.name = name
         self.default_dtype = default_dtype
         self.impls = dict()
         self.dtype_map = dict()
         self.rt_ref: Runtime = None
         self.jit_fns = dict()
+        self.deps_dict = dict()
+        for dep in deps:
+            if " as " in dep:  # e.g. "numpy as np"
+                dep, _, dep_alias = dep.split(" ")
+                self.deps_dict[dep] = importlib.import_module(dep)
+                self.deps_dict[dep_alias] = self.deps_dict[dep]
+            else:
+                self.deps_dict[dep] = importlib.import_module(dep)
 
     def set_rt(self, rt):
         self.rt_ref = weakref.ref(rt)
@@ -1667,22 +1680,33 @@ class Backend:
         self.rt.typecheck_prog(prog)
         consts = [x.val for x in hable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
-        compiled = self.compile(
+        fn_name = f"{self.name.lower()}_fn"
+        code = self.codegen(
             prog,
-            # consts + in_avals,
-            name=f"{self.name.lower()}_fn",
-            consts=tuple([v for v in in_avals if type(v) is not VoidArray])
+            consts + in_avals,
+            name=fn_name,
+            # consts=tuple([v for v in in_avals if type(v) is not VoidArray])
             # in_avals=tuple([v.aval for v in prog.outs])
         )
+        fn = self.compile(code, fn_name)
+        compiled = sp.core.JitFn(self.rt, code, fn, consts)
         self.jit_fns[key] = compiled
         return compiled
 
+    def codegen(self, prog, args, in_avals, name: str):
+        "Returns IR from the Prog"
+        raise NotImplementedError
+    
     def compile(self, prog, args, in_avals, name: str):
+        "Compiles IR to a Python callable function"
         raise NotImplementedError
 
     def set_dtype_map(self, dtype_map):
         self.dtype_map = dtype_map
 
+    def set_codegen(self, fn):
+        self.codegen = types.MethodType(fn, self)
+    
     def set_compile(self, fn):
         self.compile = types.MethodType(fn, self)
 

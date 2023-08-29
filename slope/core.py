@@ -1713,7 +1713,7 @@ class Backend:
 
     def set_impl(self, op):
         def set_impl_(fn):
-            self.impls[op] = fn
+            self.impls[op] = types.MethodType(fn, self)
 
         return set_impl_
 

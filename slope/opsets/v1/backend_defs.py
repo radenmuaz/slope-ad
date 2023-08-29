@@ -87,7 +87,9 @@ def f(self, prog, codegen_out, fn_name):
 
 
 @numpy_backend.set_codegen
-def f(self, prog, args, var_prefix="") -> List[Any]:
+def f(self, prog, args, codegen_idx=0, codegen_depth=0) -> List[Any]:
+    codegen_idx = codegen_idx
+    codegen_depth = codegen_depth
     env: Dict[sp.Var, Any] = {}
     ncs = 0
     nxs = 0
@@ -96,11 +98,11 @@ def f(self, prog, args, var_prefix="") -> List[Any]:
     inb_consts = []
     for inb in prog.in_binders:
         if type(inb.aval) is not VoidArray:
-            env[inb] = f"{var_prefix}c{ncs}"
+            env[inb] = f"c{ncs}"
             inb_consts += [env[inb]]
             ncs += 1
         else:
-            env[inb] = f"{var_prefix}x{nxs}"
+            env[inb] = f"x{nxs}"
             inb_args += [env[inb]]
             nxs += 1
 
@@ -109,13 +111,21 @@ def f(self, prog, args, var_prefix="") -> List[Any]:
         in_vals = list_map(lambda x: env[x], instr.inputs)
         in_avals = [x.aval for x in instr.inputs]
         for outb in instr.out_binders:
-            env[outb] = f"{var_prefix}z{nzs}"
+            env[outb] = f"z{nzs}"
             nzs += 1
         out_vals = list_map(lambda z: env[z], instr.out_binders)
 
         impl = self.rt.backend.impls[instr.op]
         if instr.op is sp.core.jit_op:
-            codegen_out = impl(prog, args, backend=self)
+            # TODO: generalize interface to other than jit_op
+            codegen_idx += 1
+            jit_op_code_lines = impl(
+                args,
+                params=instr.params,
+                backend=self,
+                codegen_idx=codegen_idx,
+                codegen_depth=codegen_depth + 1,
+            )
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
         if op_impl_code_lines[0][0] == "@":  # skip decorator line
             op_impl_code_lines = op_impl_code_lines[1:]
@@ -159,14 +169,23 @@ def f(self, prog, args, var_prefix="") -> List[Any]:
 
 
 @numpy_backend.set_impl(sp.core.jit_op)
-def f(args, *, prog, num_consts, name, backend):
-    del num_consts  # Only used at top-level.
-    codegen_out = backend.codegen(prog, args, name, var_prefix=name)
-    return codegen_out
+def f(self, args, *, params, backend, codegen_idx, codegen_depth):
+    prog = params["prog"]
+    out_vals = prog.out_vals
+    codegen_out = backend.codegen(
+        prog, args, codegen_idx=codegen_idx, codegen_depth=codegen_depth
+    )
+    code_lines = codegen_out["code_lines"]
+    outs = codegen_out["outs"]
+    code_lines += [f"return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
+    lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+
+    return code_lines
 
 
 @numpy_backend.set_impl(ops.convert)
 def f(
+    self,
     x,
     *,
     dtype,
@@ -175,109 +194,110 @@ def f(
 
 
 @numpy_backend.set_impl(ops.stop_gradient)
-def f(x, *, dtype):
+def f(self, x, *, dtype):
     return x
 
 
 @numpy_backend.set_impl(ops.neg)
 def f(
+    self,
     x,
 ):
     return np.negative(x)
 
 
 @numpy_backend.set_impl(ops.sqrt)
-def f(x):
+def f(self, x):
     return np.sqrt(x)
 
 
 @numpy_backend.set_impl(ops.exp)
-def f(x):
+def f(self, x):
     return np.exp(x)
 
 
 @numpy_backend.set_impl(ops.log)
-def f(x):
+def f(self, x):
     return np.log(x)
 
 
 @numpy_backend.set_impl(ops.sin)
-def f(x):
+def f(self, x):
     return np.sin(x)
 
 
 @numpy_backend.set_impl(ops.add)
-def f(x, y):
+def f(self, x, y):
     return np.add(x, y)
 
 
 @numpy_backend.set_impl(ops.sub)
-def f(x, y):
+def f(self, x, y):
     return np.subtract(x, y)
 
 
 @numpy_backend.set_impl(ops.mul)
-def f(x, y):
+def f(self, x, y):
     return np.multiply(x, y)
 
 
 @numpy_backend.set_impl(ops.div)
-def f(x, y):
+def f(self, x, y):
     return np.divide(x, y)
 
 
 @numpy_backend.set_impl(ops.equal)
-def f(x, y):
+def f(self, x, y):
     return np.equal(x, y)
 
 
 @numpy_backend.set_impl(ops.not_equal)
-def f(x, y):
+def f(self, x, y):
     return np.not_equal(x, y)
 
 
 @numpy_backend.set_impl(ops.maximum)
-def f(x, y):
+def f(self, x, y):
     return np.maximum(x, y)
 
 
 @numpy_backend.set_impl(ops.sum)
-def f(x, *, axes=None, keepdims=False):
+def f(self, x, *, axes=None, keepdims=False):
     return np.sum(x, axis=axes, keepdims=keepdims)
 
 
 @numpy_backend.set_impl(ops.max)
-def f(x, *, axes=None, keepdims=False):
+def f(self, x, *, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
 
 
 @numpy_backend.set_impl(ops.constant)
-def f(val, *, dtype=default_dtype):
+def f(self, val, *, dtype=default_dtype):
     return np.array(val, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.arange)
-def f(*, start, stop, stride, dtype=default_dtype):
+def f(self, *, start, stop, stride, dtype=default_dtype):
     return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.full)
-def f(*, shape, fill_value, dtype=default_dtype):
+def f(self, *, shape, fill_value, dtype=default_dtype):
     return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_uniform)
-def f(*, shape, dtype=default_dtype):
+def f(self, *, shape, dtype=default_dtype):
     return np.random.uniform(size=shape).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.random_normal)
-def f(*, shape, dtype=default_dtype):
+def f(self, *, shape, dtype=default_dtype):
     return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.broadcast)
-def f(x, *, shape, axes=None):
+def f(self, x, *, shape, axes=None):
     ret = x
     if not axes is None:
         for a in sorted(axes):
@@ -287,34 +307,34 @@ def f(x, *, shape, axes=None):
 
 
 @numpy_backend.set_impl(ops.reshape)
-def f(x, *, shape):
+def f(self, x, *, shape):
     return np.reshape(x, newshape=shape)
 
 
 @numpy_backend.set_impl(ops.pad)
-def f(x, *, lo, hi, interior, value):
+def f(self, x, *, lo, hi, interior, value):
     # TODO: implement interior pad
     return np.pad(x, list(zip(lo, hi)), constant_values=value)
 
 
 @numpy_backend.set_impl(ops.slice)
-def f(x, *, starts, limits, strides):
+def f(self, x, *, starts, limits, strides):
     slices = tuple(slice(s, l, st) for s, l, st in zip(starts, limits, strides))
     return x[slices]
 
 
 @numpy_backend.set_impl(ops.concatenate)
-def f(xs, *, axes):
+def f(self, xs, *, axes):
     return np.concatenate(xs, axes)
 
 
 @numpy_backend.set_impl(ops.transpose)
-def f(x, *, perm):  # NOTE: np.transpose is like torch.permute
+def f(self, x, *, perm):  # NOTE: np.transpose is like torch.permute
     return np.transpose(x, axes=perm)
 
 
 @numpy_backend.set_impl(ops.flip)
-def f(x, *, axes):
+def f(self, x, *, axes):
     return np.flip(x, axes)
 
 

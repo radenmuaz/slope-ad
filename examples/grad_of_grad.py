@@ -3,7 +3,7 @@ from slope import rt
 
 @rt.jit
 def f(x):
-    y = x * 2.0
+    y = x * 3.0
     z = g(y)
     return z
 

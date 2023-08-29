@@ -1645,7 +1645,9 @@ class Runtime:
 
 
 class Backend:
-    def __init__(self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")):
+    def __init__(
+        self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")
+    ):
         self.name = name
         self.default_dtype = default_dtype
         self.impls = dict()
@@ -1681,22 +1683,21 @@ class Backend:
         consts = [x.val for x in hable_consts]
         in_avals = [v.aval for v in prog.in_binders[len(consts) :]]
         fn_name = f"{self.name.lower()}_fn"
-        code = self.codegen(
+        codegen_out = self.codegen(
             prog,
-            consts + in_avals,
-            name=fn_name,
+            consts + in_avals
             # consts=tuple([v for v in in_avals if type(v) is not VoidArray])
             # in_avals=tuple([v.aval for v in prog.outs])
         )
-        fn = self.compile(code, fn_name)
-        compiled = sp.core.JitFn(self.rt, code, fn, consts)
+        fn = self.compile(prog, codegen_out, fn_name)
+        compiled = sp.core.JitFn(self.rt, codegen_out, fn, consts)
         self.jit_fns[key] = compiled
         return compiled
 
     def codegen(self, prog, args, in_avals, name: str):
         "Returns IR from the Prog"
         raise NotImplementedError
-    
+
     def compile(self, prog, args, in_avals, name: str):
         "Compiles IR to a Python callable function"
         raise NotImplementedError
@@ -1706,7 +1707,7 @@ class Backend:
 
     def set_codegen(self, fn):
         self.codegen = types.MethodType(fn, self)
-    
+
     def set_compile(self, fn):
         self.compile = types.MethodType(fn, self)
 

@@ -51,6 +51,8 @@ def f(self, prog, codegen_out, fn_name):
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
     for instr in prog.instrs:
+        if instr.op == sp.core.jit_op:
+            continue
         impl = self.rt.backend.impls[instr.op]
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
         if op_impl_code_lines[0][0] == "@":  # skip decorator line
@@ -80,29 +82,28 @@ def f(self, prog, codegen_out, fn_name):
 
     exec_locals = {}
     code = "\n".join(code_lines)
-    print(code)
     exec(compile(code, "<string>", "exec"), self.deps_dict, exec_locals)
     fn = exec_locals[fn_name]
     return fn
 
 
 @numpy_backend.set_codegen
-def f(self, prog, args, codegen_idx=0, codegen_depth=0) -> List[Any]:
-    codegen_idx = codegen_idx
-    codegen_depth = codegen_depth
+def f(self, prog, args) -> List[Any]:
+    # codegen is recursive if jit-of-jit happens
     env: Dict[sp.Var, Any] = {}
     ncs = 0
     nxs = 0
     nzs = 0
     inb_args = []
     inb_consts = []
+    affix = f"_d{self.codegen_depth}_i{self.codegen_idx}" if self.codegen_depth != 0 else ""
     for inb in prog.in_binders:
         if type(inb.aval) is not VoidArray:
-            env[inb] = f"c{ncs}"
+            env[inb] = f"c{ncs}{affix}"
             inb_consts += [env[inb]]
             ncs += 1
         else:
-            env[inb] = f"x{nxs}"
+            env[inb] = f"x{nxs}{affix}"
             inb_args += [env[inb]]
             nxs += 1
 
@@ -111,29 +112,32 @@ def f(self, prog, args, codegen_idx=0, codegen_depth=0) -> List[Any]:
         in_vals = list_map(lambda x: env[x], instr.inputs)
         in_avals = [x.aval for x in instr.inputs]
         for outb in instr.out_binders:
-            env[outb] = f"z{nzs}"
+            env[outb] = f"z{nzs}{affix}"
             nzs += 1
         out_vals = list_map(lambda z: env[z], instr.out_binders)
 
         impl = self.rt.backend.impls[instr.op]
-        if instr.op is sp.core.jit_op:
-            # TODO: generalize interface to other than jit_op
-            codegen_idx += 1
-            jit_op_code_lines = impl(
-                args,
-                params=instr.params,
-                backend=self,
-                codegen_idx=codegen_idx,
-                codegen_depth=codegen_depth + 1,
-            )
-        op_impl_code_lines = inspect.getsourcelines(impl)[0]
-        if op_impl_code_lines[0][0] == "@":  # skip decorator line
-            op_impl_code_lines = op_impl_code_lines[1:]
-
         args_str = ", ".join(in_vals)
         lhs = (
             f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
         )
+        if instr.op is sp.core.jit_op:
+            # TODO: generalize interface to other than jit_op
+            op_out = impl(in_vals, in_avals, params=instr.params)
+            co = op_out["codegen_out"]
+            outs = co["outs"]
+            rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
+            op_code_lines = co["code_lines"]
+            input_lhs = ', '.join((co["inb_args"] + co["inb_consts"]))
+            input_code_line = f"{input_lhs} = {args_str}"
+            output_code_line = f"{lhs} = {rhs}"
+            code_lines += [input_code_line] + op_code_lines + [output_code_line]
+            continue
+        op_impl_code_lines = inspect.getsourcelines(impl)[0]
+        if op_impl_code_lines[0][0] == "@":  # skip decorator line
+            op_impl_code_lines = op_impl_code_lines[1:]
+
+        
         if len(op_impl_code_lines) > 2:
             kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
             rhs = f"{instr.op.name}({args_str}, {kwargs_str})"
@@ -169,18 +173,17 @@ def f(self, prog, args, codegen_idx=0, codegen_depth=0) -> List[Any]:
 
 
 @numpy_backend.set_impl(sp.core.jit_op)
-def f(self, args, *, params, backend, codegen_idx, codegen_depth):
-    prog = params["prog"]
-    out_vals = prog.out_vals
-    codegen_out = backend.codegen(
-        prog, args, codegen_idx=codegen_idx, codegen_depth=codegen_depth
-    )
-    code_lines = codegen_out["code_lines"]
-    outs = codegen_out["outs"]
-    code_lines += [f"return {', '.join(outs)}{',' if len(outs)==1 else ''}"]
-    lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+def f(self, in_vals, in_avals, *, params):
 
-    return code_lines
+    prog = params["prog"]
+    self.codegen_depth += 1
+    codegen_out = self.codegen(
+        prog, in_vals + in_avals
+    )
+    self.codegen_idx += 1
+    self.codegen_depth -= 1
+
+    return dict(codegen_out=codegen_out)
 
 
 @numpy_backend.set_impl(ops.convert)

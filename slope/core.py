@@ -1655,6 +1655,8 @@ class Backend:
         self.rt_ref: Runtime = None
         self.jit_fns = dict()
         self.deps_dict = dict()
+        self.codegen_depth = 0
+        self.codegen_idx = 0
         for dep in deps:
             if " as " in dep:  # e.g. "numpy as np"
                 dep, _, dep_alias = dep.split(" ")

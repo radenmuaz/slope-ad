@@ -9,7 +9,7 @@ from slope.core import unzip2, list_map
 OptimizerState = namedtuple(
     "OptimizerState", ["packed_state", "tree_def", "subtree_defs"]
 )
-sp.rt.register_pytree_node(
+sp.machine.register_pytree_node(
     OptimizerState,
     lambda xs: ((xs.packed_state,), (xs.tree_def, xs.subtree_defs)),
     lambda data, xs: OptimizerState(xs[0], data[0], data[1]),
@@ -52,15 +52,15 @@ def optimizer(
 
         @functools.wraps(init)
         def tree_init(x0_tree):
-            x0_flat, tree = sp.rt.tree_flatten(x0_tree)
+            x0_flat, tree = sp.machine.tree_flatten(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = unzip2(list_map(sp.rt.tree_flatten, initial_states))
+            states_flat, subtrees = unzip2(list_map(sp.machine.tree_flatten, initial_states))
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)
         def tree_update(i, grad_tree, opt_state):
             states_flat, tree, subtrees = opt_state
-            grad_flat, tree2 = sp.rt.tree_flatten(grad_tree)
+            grad_flat, tree2 = sp.machine.tree_flatten(grad_tree)
             if tree2 != tree:
                 msg = (
                     "optimizer update function was passed a gradient tree that did "
@@ -68,10 +68,10 @@ def optimizer(
                     "initialized: parameter tree {} and grad tree {}."
                 )
                 raise TypeError(msg.format(tree, tree2))
-            states = list_map(sp.rt.tree_unflatten, subtrees, states_flat)
+            states = list_map(sp.machine.tree_unflatten, subtrees, states_flat)
             new_states = list_map(partial(update, i), grad_flat, states)
             new_states_flat, subtrees2 = unzip2(
-                list_map(sp.rt.tree_flatten, new_states)
+                list_map(sp.machine.tree_flatten, new_states)
             )
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
@@ -85,9 +85,9 @@ def optimizer(
         @functools.wraps(get_params)
         def tree_get_params(opt_state):
             states_flat, tree, subtrees = opt_state
-            states = list_map(sp.rt.tree_unflatten, subtrees, states_flat)
+            states = list_map(sp.machine.tree_unflatten, subtrees, states_flat)
             params = list_map(get_params, states)
-            return sp.rt.tree_unflatten(tree, params)
+            return sp.machine.tree_unflatten(tree, params)
 
         return Optimizer(tree_init, tree_update, tree_get_params)
 
@@ -127,7 +127,7 @@ def sgd_momentum(step_size: Schedule, mass: float):
     step_size = make_schedule(step_size)
 
     def init(x0):
-        v0 = sp.rt.procs.zeros_like(x0)
+        v0 = sp.machine.system.zeros_like(x0)
         return x0, v0
 
     def update(i, g, state):
@@ -184,8 +184,8 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-2):
     step_size = make_schedule(step_size)
 
     def init(x0):
-        m0 = sp.rt.procs.zeros_like(x0)
-        v0 = sp.rt.procs.zeros_like(x0)
+        m0 = sp.machine.system.zeros_like(x0)
+        v0 = sp.machine.system.zeros_like(x0)
         return x0, m0, v0
 
     def update(i, g, state):
@@ -238,7 +238,7 @@ def inverse_time_decay(step_size, decay_steps, decay_rate, staircase=False):
 
 def polynomial_decay(step_size, decay_steps, final_step_size, power=1.0):
     def schedule(step_num):
-        step_num = sp.rt.procs.minimum(step_num, decay_steps)
+        step_num = sp.machine.system.minimum(step_num, decay_steps)
         step_mult = (1 - step_num / decay_steps) ** power
         return step_mult * (step_size - final_step_size) + final_step_size
 
@@ -254,7 +254,7 @@ def piecewise_constant(boundaries: Any, values: Any):
         raise ValueError("boundaries length must be one shorter than values length")
 
     def schedule(i):
-        return values[sp.rt.ops.sum(i > boundaries)]
+        return values[sp.machine.ops.sum(i > boundaries)]
 
     return schedule
 

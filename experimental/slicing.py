@@ -469,7 +469,7 @@ def _index_to_gather(
                 if needs_rev:
                     reversed_y_dims.append(collapsed_y_axis)
                 if stride == 1:
-                    i = start.astype(index_dtype)
+                    i = stamachine.astype(index_dtype)
                     gather_indices.append((i, len(gather_indices_shape)))
                     slice_shape.append(limit - start)
                     gather_slice_shape.append(limit - start)

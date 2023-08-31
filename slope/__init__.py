@@ -1,4 +1,4 @@
-from slope.opsets.v1 import v1_opset
+from slope.systems.v1 import v1_system
 from slope import core
 
-rt = core.Runtime(opset=v1_opset)
+machine = core.Machine(system=v1_system)

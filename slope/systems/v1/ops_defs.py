@@ -39,7 +39,7 @@ def f(self, x):
 @stop_gradient.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x], [sp.rt.zeros_like(x_dot)]
+    return [x], [sp.machine.zeros_like(x_dot)]
 
 
 @stop_gradient.set_T
@@ -308,8 +308,8 @@ def f(self, x, y):
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return (
-            (x == z).where(self.rt.procs.ones_like(z), self.rt.procs.zeros_like(z))
-        ) / ((y == z).where(self.rt.procs.full_like(z, 2), self.rt.procs.ones_like(z)))
+            (x == z).where(self.machine.procs.ones_like(z), self.machine.procs.zeros_like(z))
+        ) / ((y == z).where(self.machine.procs.full_like(z, 2), self.machine.procs.ones_like(z)))
 
     (x, y), (x_dot, y_dot) = primals, tangents
     eval_out = x.maximum(y)
@@ -338,7 +338,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [self.rt.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @equal.set_T
@@ -360,7 +360,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
-    return [out_primal], [self.rt.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @not_equal.set_T
@@ -879,13 +879,13 @@ ops.register(constant)
 
 @constant.set_eval
 def f(self, *, val, dtype=BaseArray.default_dtype):
-    return [self.rt.array(val, dtype)]
+    return [self.machine.system.array(val, dtype)]
 
 
 @constant.set_jvp
 def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
-    out = sp.rt.array(val, dtype)
-    out_jvp = sp.rt.ones_like(out)
+    out = sp.machine.system.array(val, dtype)
+    out_jvp = sp.machine.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -907,16 +907,16 @@ ops.register(full)
 @full.set_eval
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [
-        self.rt.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
+        self.machine.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
     ]
 
 
 @full.set_jvp
 def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(
+    out = self.machine.backend.run_impl(
         self, shape=shape, fill_value=fill_value, dtype=dtype
     )
-    out_jvp = self.rt.ones_like(out)
+    out_jvp = self.machine.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -938,13 +938,13 @@ ops.alias(random_uniform, "randn")
 
 @random_uniform.set_eval
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(self, shape=shape, dtype=dtype)]
+    return [self.machine.backend.run_impl(self, shape=shape, dtype=dtype)]
 
 
 @random_uniform.set_jvp
 def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(self, shape=shape, dtype=dtype)
-    out_jvp = sp.rt.ones_like(out)
+    out = self.machine.backend.run_impl(self, shape=shape, dtype=dtype)
+    out_jvp = sp.machine.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -966,13 +966,13 @@ ops.alias(random_normal, "randn")
 
 @random_normal.set_eval
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(random_normal, shape=shape, dtype=dtype)]
+    return [self.machine.backend.run_impl(random_normal, shape=shape, dtype=dtype)]
 
 
 @random_normal.set_jvp
 def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = self.rt.backend.run_impl(random_normal, shape, dtype)
-    out_jvp = sp.rt.ones_like(out)
+    out = self.machine.backend.run_impl(random_normal, shape, dtype)
+    out_jvp = sp.machine.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -1002,15 +1002,15 @@ def f(self, *, start, stop=None, stride=None, dtype=BaseArray.default_dtype):
 
 @arange.set_eval
 def f(self, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
-    return [self.rt.backend.run_impl(arange, start, stop, stride, dtype)]
+    return [self.machine.backend.run_impl(arange, start, stop, stride, dtype)]
 
 
 @arange.set_jvp
 def f(
     self, primals, tangents, *, start, stop, stride=None, dtype=BaseArray.default_dtype
 ):
-    out = self.rt.backend.run_impl(arange, start, stop, stride, dtype)
-    out_jvp = sp.rt.ones_like(out)
+    out = self.machine.backend.run_impl(arange, start, stop, stride, dtype)
+    out_jvp = sp.machine.ones_like(out)
     return [out], [out_jvp]
 
 

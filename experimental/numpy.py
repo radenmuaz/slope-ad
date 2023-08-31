@@ -571,7 +571,7 @@ class Array(object):
     ):
         # Check order
         if order is not None:
-            raise RuntimeError("Array order parameter is not supported")
+            raise MachineError("Array order parameter is not supported")
         # Check and set shape
         try:
             assert isinstance(shape, Iterable)

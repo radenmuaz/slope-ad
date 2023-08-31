@@ -80,7 +80,7 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-# @sp.rt.jit
+# @sp.machine.jit
 def loss_fn(params, batch):
     # print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
@@ -100,11 +100,11 @@ if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         # layers.Dense(200),
-        # layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
+        # layers.Fn(lambda x: x.maximum(sp.machine.system.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
-    # predict = sp.rt.jit(predict)
+    # predict = sp.machine.jit(predict)
     out_shape, init_params = init_random_params((-1, 28 * 28))
     step_size = 0.001
     num_epochs = 30
@@ -123,7 +123,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sp.rt.array(train_images[batch_idx]), sp.rt.array(
+                yield sp.machine.system.array(train_images[batch_idx]), sp.machine.system.array(
                     train_labels[batch_idx]
                 )
 
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        loss, (g_params, _) = sp.rt.grad(loss_fn)(params, batch)
+        loss, (g_params, _) = sp.machine.grad(loss_fn)(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()
@@ -152,7 +152,7 @@ if __name__ == "__main__":
 
         params = get_params(opt_state)
         test_acc = accuracy(
-            params, (sp.rt.array(test_images), sp.rt.array(test_labels))
+            params, (sp.machine.system.array(test_images), sp.machine.system.array(test_labels))
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         print(f"Test set accuracy {test_acc}")

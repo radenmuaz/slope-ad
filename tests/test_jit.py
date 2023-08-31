@@ -13,19 +13,19 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 class TestJit(unittest.TestCase):
     def test_maximum_sum_grad(self):
-        @rt.jit
+        @machine.jit
         def loss(x):
             out = x
-            out = out.maximum(rt.procs.zeros_like(out))
+            out = out.maximum(machine.procs.zeros_like(out))
             out = out.sum()
             return out
 
-        # @rt.jit
+        # @machine.jit
         def f(x):
-            return rt.grad(loss)(x)
+            return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = rt.array([1.0, 2.0, 3.0])
+        x = machine.system.array([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -33,17 +33,17 @@ class TestJit(unittest.TestCase):
         # print(f"{f.get_jit_fn()=}")
 
     def test_sum_grad(self):
-        @rt.jit
+        @machine.jit
         def loss(x):
             out = x.sum()
             return out
 
-        # @rt.jit
+        # @machine.jit
         def f(x):
-            return rt.grad(loss)(x)
+            return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = rt.array([1.0, 2.0, 3.0])
+        x = machine.system.array([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -51,14 +51,14 @@ class TestJit(unittest.TestCase):
         # print(f"{f.get_jit_fn()=}")
 
     def test_reshape(self):
-        @rt.jit
+        @machine.jit
         def f(x):
             print("tracing")
             out = x.reshape((-1,))
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = rt.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        x = machine.system.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         res = f(x)
         print(res)
         res = f(x)
@@ -66,7 +66,7 @@ class TestJit(unittest.TestCase):
         # print(f"{f.get_jit_fn()=}")
 
     def test_add_v1(self):
-        @rt.jit
+        @machine.jit
         def f(x, y):
             print("tracing")
             out = x + y
@@ -74,8 +74,8 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = rt.array([1.0, 2.0, 3.0])
-        y = rt.array([4.0, 5.0, 6.0])
+        x = machine.system.array([1.0, 2.0, 3.0])
+        y = machine.system.array([4.0, 5.0, 6.0])
         res = f(x, y)
         print(res)
         res = f(y, x + x)
@@ -83,7 +83,7 @@ class TestJit(unittest.TestCase):
         # print(f"{f.get_jit_fn()=}")
 
     def test_add(self):
-        @rt.jit
+        @machine.jit
         def f(args0, args1):
             x, y = args0[0][0], args0[0][1]
             z = args1["s"]
@@ -95,11 +95,11 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = rt.array([1.0, 2.0])
+        # a = machine.system.array([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        x = rt.array([1.0, 2.0, 3.0])
-        y = rt.array([4.0, 5.0, 6.0])
+        x = machine.system.array([1.0, 2.0, 3.0])
+        y = machine.system.array([4.0, 5.0, 6.0])
         args0 = ((x, y),)
         args1 = {"s": 1.0}
         res = f(args0, args1)
@@ -109,7 +109,7 @@ class TestJit(unittest.TestCase):
         print(res)
 
     def test_conv(self):
-        # @rt.jit
+        # @machine.jit
         def f(x):
             print("tracing!")
             out = x + x
@@ -118,12 +118,12 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = rt.array([1.0, 2.0])
+        # a = machine.system.array([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        res = f(rt.array([1.0, 2.0, 3.0]))
+        res = f(machine.system.array([1.0, 2.0, 3.0]))
         print(res)
-        res = f(rt.array([4.0, 5.0, 6.0]))
+        res = f(machine.system.array([4.0, 5.0, 6.0]))
         # print(f"{f.get_jit_fn()=}")
         print(res)
 

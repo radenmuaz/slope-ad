@@ -1,6 +1,6 @@
 import slope as sp
 from slope.core import ProcsDir, BaseArray
-from slope.opsets.v1.ops_defs import ops
+from slope.systems.v1.ops_defs import ops
 import math
 from typing import Tuple, Union, List, Iterator, Optional
 import itertools
@@ -547,7 +547,7 @@ def conv(
 # @procs.register
 # def dot(self, w: BaseArray) -> BaseArray:
 #     if (n1 := len(self.shape)) * (n2 := len(w.shape)) == 0:
-#         raise RuntimeError(
+#         raise MachineError(
 #             f"both arguments to matmul need to be at least 1D, but they are {n1}D and {n2}D"
 #         )
 #     x = self.reshape(*self.shape[0:-1], 1, self.shape[-1])

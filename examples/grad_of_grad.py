@@ -1,24 +1,24 @@
 from slope import rt
 
 
-@rt.jit
+@machine.jit
 def f(x):
     y = x * 3.0
     z = g(y)
     return z
 
 
-@rt.jit
+@machine.jit
 def g(x):
-    #   return x * rt.array(2.)
+    #   return x * machine.system.array(2.)
     return x * 2.0
 
 
 #   return x * x
 
-print(rt.grad(f)(rt.array(3.0)))
-# print(rt.grad(g)(rt.array(3.)))
-# print(g(rt.array(3.)))
+print(machine.grad(f)(machine.system.array(3.0)))
+# print(machine.grad(g)(machine.system.array(3.)))
+# print(g(machine.system.array(3.)))
 
 
 # -

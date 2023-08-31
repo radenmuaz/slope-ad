@@ -80,9 +80,9 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-@sp.rt.jit
+# @sp.rt.jit
 def loss_fn(params, batch):
-    print("loss_fn jit, this text should be printed only once.")
+    # print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
 
     preds = predict(params, inputs)
@@ -99,15 +99,16 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        layers.Dense(200),
-        layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
+        # layers.Dense(200),
+        # layers.Fn(lambda x: x.maximum(sp.rt.procs.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
+    # predict = sp.rt.jit(predict)
     out_shape, init_params = init_random_params((-1, 28 * 28))
     step_size = 0.001
     num_epochs = 30
-    batch_size = 200  # TODO: must be multiple of dataset.
+    batch_size = 1  # TODO: must be multiple of dataset.
     momentum_mass = 0.9
 
     train_images, train_labels, test_images, test_labels = mnist()

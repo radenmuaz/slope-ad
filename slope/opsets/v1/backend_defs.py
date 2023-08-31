@@ -81,7 +81,7 @@ def f(self, prog, codegen_out, fn_name):
         )
 
     exec_locals = {}
-    code = "\n".join(code_lines)
+    code = "\n".join(code_lines).replace("self, ", "")
     exec(compile(code, "<string>", "exec"), self.deps_dict, exec_locals)
     fn = exec_locals[fn_name]
     return fn
@@ -96,7 +96,9 @@ def f(self, prog, args) -> List[Any]:
     nzs = 0
     inb_args = []
     inb_consts = []
-    affix = f"_d{self.codegen_depth}_i{self.codegen_idx}" if self.codegen_depth != 0 else ""
+    affix = (
+        f"_d{self.codegen_depth}_i{self.codegen_idx}" if self.codegen_depth != 0 else ""
+    )
     for inb in prog.in_binders:
         if type(inb.aval) is not VoidArray:
             env[inb] = f"c{ncs}{affix}"
@@ -128,7 +130,7 @@ def f(self, prog, args) -> List[Any]:
             outs = co["outs"]
             rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
             op_code_lines = co["code_lines"]
-            input_lhs = ', '.join((co["inb_args"] + co["inb_consts"]))
+            input_lhs = ", ".join((co["inb_args"] + co["inb_consts"]))
             input_code_line = f"{input_lhs} = {args_str}"
             output_code_line = f"{lhs} = {rhs}"
             code_lines += [input_code_line] + op_code_lines + [output_code_line]
@@ -137,7 +139,6 @@ def f(self, prog, args) -> List[Any]:
         if op_impl_code_lines[0][0] == "@":  # skip decorator line
             op_impl_code_lines = op_impl_code_lines[1:]
 
-        
         if len(op_impl_code_lines) > 2:
             kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
             rhs = f"{instr.op.name}({args_str}, {kwargs_str})"
@@ -174,12 +175,9 @@ def f(self, prog, args) -> List[Any]:
 
 @numpy_backend.set_impl(sp.core.jit_op)
 def f(self, in_vals, in_avals, *, params):
-
     prog = params["prog"]
     self.codegen_depth += 1
-    codegen_out = self.codegen(
-        prog, in_vals + in_avals
-    )
+    codegen_out = self.codegen(prog, in_vals + in_avals)
     self.codegen_idx += 1
     self.codegen_depth -= 1
 
@@ -187,13 +185,9 @@ def f(self, in_vals, in_avals, *, params):
 
 
 @numpy_backend.set_impl(ops.convert)
-def f(
-    self,
-    x,
-    *,
-    dtype,
-):
-    return x.astype(dtype=dtype)
+def f(self, x, *, dtype):
+    ret = x
+    return ret.astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(ops.stop_gradient)
@@ -202,10 +196,7 @@ def f(self, x, *, dtype):
 
 
 @numpy_backend.set_impl(ops.neg)
-def f(
-    self,
-    x,
-):
+def f(self, x):
     return np.negative(x)
 
 

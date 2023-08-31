@@ -93,13 +93,14 @@ class Hable:
         self.val = val
 
     def __hash__(self) -> int:
+        # print(type(self.val))
+        return hash(self.val)
         # return hash(id(self.val))
         return hash((self.val,))
 
     def __eq__(self, other):
         if isinstance(other, Hable):
-            return self.data == other.data
-            # return id(self.val) == id(other.val)
+            return self.val == other.val
         return False
 
 
@@ -422,6 +423,20 @@ class Opset:
     procs_dir: ProcsDir
     backends: dict
 
+    def __getattr__(self, attr):
+        try:
+            print(f"looking {attr} in ops_dir")
+            return getattr(self.ops_dir, attr)
+        except:
+            pass
+        try:
+            print(f"looking {attr} in procs_dir")
+            return getattr(self.procs_dir, attr)
+        except:
+            pass
+        print(f"fallback to default getattribute")
+        super().__getattribute__(attr)
+
 
 def unzip2(pairs):
     lst1, lst2 = [], []
@@ -549,6 +564,7 @@ class Prog(NamedTuple):
     outs: Any
 
     def __hash__(self):
+        # return id(self)
         return hash(repr(self))
 
     def __eq__(self, other):
@@ -556,6 +572,8 @@ class Prog(NamedTuple):
 
     def __repr__(self):
         namegen = (
+            # "z"+repr(r)
+            # for r in itertools.count()
             "".join(s)
             for r in itertools.count(1)
             for s in itertools.permutations(string.ascii_lowercase, r)
@@ -563,9 +581,10 @@ class Prog(NamedTuple):
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
         instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
-        outs = ", ".join(
-            names[v] if isinstance(v, Var) else str(v.val) for v in self.outs
-        )
+        outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
+        print(outs)
+        # outs = ", ".join(outs)
+        # outs = ', '.join(sorted(outs))
         return str(
             PPrint.pp(f"{{ lambda {in_binders} .")
             + ((PPrint.pp("let ") >> instrs) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
@@ -1253,7 +1272,6 @@ class Runtime:
         f: Callable,
         *avals_in: VoidArray,
     ) -> Tuple[Prog, List[Any], PyTreeDef]:
-        oavals_in = avals_in
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree = self.flatten_fun(f, in_tree)
 
@@ -1678,7 +1696,10 @@ class Backend:
         hable_consts: Tuple[Hable, ...],
     ):
         key = hash((hable_prog, hable_consts))
+        print(key)
+        # breakpoint()
         if (compiled := self.jit_fns.get(key, None)) is not None:
+            breakpoint()
             return compiled
         prog: Prog = hable_prog.val
         self.rt.typecheck_prog(prog)

@@ -308,8 +308,8 @@ def f(self, x, y):
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return (
-            (x == z).where(self.machine.procs.ones_like(z), self.machine.procs.zeros_like(z))
-        ) / ((y == z).where(self.machine.procs.full_like(z, 2), self.machine.procs.ones_like(z)))
+            (x == z).where(self.machine.system.ones_like(z), self.machine.system.zeros_like(z))
+        ) / ((y == z).where(self.machine.system.full_like(z, 2), self.machine.system.ones_like(z)))
 
     (x, y), (x_dot, y_dot) = primals, tangents
     eval_out = x.maximum(y)

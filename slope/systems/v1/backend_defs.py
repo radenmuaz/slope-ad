@@ -84,7 +84,7 @@ def f(self, prog, codegen_out, fn_name):
     code = "\n".join(code_lines).replace("self, ", "")
     exec(compile(code, "<string>", "exec"), self.deps_dict, exec_locals)
     fn = exec_locals[fn_name]
-    return fn
+    return fn, code
 
 
 @numpy_backend.set_codegen

@@ -123,9 +123,8 @@ class Op:
     def set_machine(self, rt):
         self.machine_ref = weakref.ref(rt)
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
@@ -438,9 +437,8 @@ class BaseArray:
     def __init__(self, rt):
         self.machine_ref = weakref.ref(rt)
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -494,9 +492,8 @@ class System:
     def set_machine(self, rt):
         self.machine_ref = weakref.ref(rt)
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def array(
         self,
@@ -504,7 +501,7 @@ class System:
         dtype: Optional[Any] = BaseArray.default_dtype,
     ):
         return (
-            Array(self, val)
+            Array(self.machine, val)
             if isinstance(val, ArrayBuffer)
             else self.machine.backend.run_impl(self.ops_dir.constant, val=val, dtype=dtype)
         )
@@ -668,7 +665,7 @@ class Prog(NamedTuple):
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
         instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
-        print(outs)
+        print('prog outs', outs)
         # outs = ", ".join(outs)
         # outs = ', '.join(sorted(outs))
         return str(
@@ -728,9 +725,8 @@ class Trace:
         self.machine_ref = weakref.ref(rt)
         self.main = main
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def pure(self, val):
         raise NotImplementedError
@@ -903,7 +899,8 @@ def f(self, *args, prog, num_consts):
     consts, args = args[:num_consts], args[num_consts:]
     hable_consts = tuple(map(Hable, consts))
     jit_fn = self.machine.backend.callable(hable_prog, hable_consts)
-    return jit_fn(*args, *consts)
+    return jit_fn(*consts, *args)
+    # return jit_fn(*args, *consts)
 
 
 @jit_op.set_jvp
@@ -1275,7 +1272,7 @@ class Machine:
 
     def jacfwd(self, f, x):
         pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
-        vecs_in = self.procs.eye(math.prod(x.shape)).reshape(x.shape * 2)
+        vecs_in = self.system.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
     def make_prog(
@@ -1697,9 +1694,8 @@ class Backend:
     def set_machine(self, rt):
         self.machine_ref = weakref.ref(rt)
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def callable(
         self,
@@ -1707,11 +1703,11 @@ class Backend:
         hable_consts: Tuple[Hable, ...],
     ):
         key = hash((hable_prog, hable_consts))
-        print(key)
         # breakpoint()
         if (compiled := self.jit_fns.get(key, None)) is not None:
             breakpoint()
             return compiled
+        print(key)
         prog: Prog = hable_prog.val
         self.machine.typecheck_prog(prog)
         consts = [x.val for x in hable_consts]
@@ -1723,8 +1719,8 @@ class Backend:
             # consts=tuple([v for v in in_avals if type(v) is not VoidArray])
             # in_avals=tuple([v.aval for v in prog.outs])
         )
-        fn = self.compile(prog, codegen_out, fn_name)
-        compiled = sp.core.JitFn(self.machine, codegen_out, fn, consts)
+        fn, code = self.compile(prog, codegen_out, fn_name)
+        compiled = sp.core.JitFn(self.machine, code, fn, consts)
         self.jit_fns[key] = compiled
         return compiled
 
@@ -1771,16 +1767,14 @@ class Backend:
 
 
 class JitFn:
-    def __init__(self, rt, code, fn, consts):
+    def __init__(self, machine, code, fn, consts):
         super().__init__()
-        self.machine_ref = weakref.ref(rt)
+        self.machine_ref = weakref.ref(machine)
         self.code = code
         self.fn = fn
         self.consts = consts
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
 
     def __call__(self, *args, **params):
         # args = [a.val if isinstance(a, Array) else a for a in args]
@@ -1791,8 +1785,7 @@ class JitFn:
             outs = self.fn(*args, **params)
         except Exception as e:
             print(self.code)
-            print(e)
-
+            breakpoint()
             raise
         return [self.machine.system.array(ArrayBuffer(o)) for o in outs]
 
@@ -1872,7 +1865,7 @@ class JVPTracerArray(TracerArray):
 
 class JVPTrace(Trace):
     pure = lift = lambda self, val: JVPTracerArray(
-        self.machine, self, val, self.machine.procs.zeros_like(val)
+        self.machine, self, val, self.machine.system.zeros_like(val)
     )
     # def pure(self, val):
     #     aval = self.machine.get_aval(val)
@@ -1949,9 +1942,8 @@ class ProgBuilder:
         self.constvals = {}
         self.tracers = []
 
-    @property
-    def machine(self):
-        return self.machine_ref()
+    machine = property(lambda self : self.machine_ref())
+
 
     def new_tracer(self, trace: ProgTrace, aval: VoidArray) -> ProgTracerArray:
         tracer = ProgTracerArray(self.machine, trace, aval)

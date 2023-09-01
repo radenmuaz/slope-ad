@@ -99,12 +99,12 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        # layers.Dense(200),
-        # layers.Fn(lambda x: x.maximum(sp.machine.system.zeros_like(x))),
+        layers.Dense(200),
+        layers.Fn(lambda x: x.maximum(sp.machine.system.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
-    # predict = sp.machine.jit(predict)
+    predict = sp.machine.jit(predict)
     out_shape, init_params = init_random_params((-1, 28 * 28))
     step_size = 0.001
     num_epochs = 30

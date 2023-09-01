@@ -57,7 +57,7 @@ ops.alias(convert, "astype")
 
 @convert.set_run
 def f(self, x, *, dtype):
-    return [x.convert(dtype)]
+    return [x.convert(self.machine.backend.dtype_map[dtype])]
 
 
 @convert.set_jvp

@@ -1,4 +1,4 @@
-import slope as sp
+import slope
 from slope.systems.v1.ops_defs import ops
 from slope.systems.v1.procs_defs import procs
 from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
@@ -18,7 +18,7 @@ numpy_dtype_map = {
     BaseArray.float32: np.dtype("float32"),
     BaseArray.int64: np.dtype("int64"),
     BaseArray.int8: np.dtype("int8"),
-    BaseArray.bool: bool,
+    BaseArray.bool: np.dtype("bool"),
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
 default_dtype = numpy_dtype_map[BaseArray.default_dtype]
@@ -51,7 +51,7 @@ def f(self, program, codegen_out, fn_name):
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
     for instr in program.instrs:
-        if instr.op == sp.core.jit_op:
+        if instr.op == slope.core.jit_op:
             continue
         impl = self.machine.backend.impls[instr.op]
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
@@ -90,7 +90,7 @@ def f(self, program, codegen_out, fn_name):
 @numpy_backend.set_codegen
 def f(self, program, args) -> List[Any]:
     # codegen is recursive if jit-of-jit happens
-    env: Dict[sp.Var, Any] = {}
+    env: Dict[slope.Var, Any] = {}
     ncs = 0
     nxs = 0
     nzs = 0
@@ -123,7 +123,7 @@ def f(self, program, args) -> List[Any]:
         lhs = (
             f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
         )
-        if instr.op is sp.core.jit_op:
+        if instr.op is slope.core.jit_op:
             # TODO: generalize interface to other than jit_op
             op_out = impl(in_vals, in_avals, params=instr.params)
             co = op_out["codegen_out"]
@@ -140,7 +140,10 @@ def f(self, program, args) -> List[Any]:
             op_impl_code_lines = op_impl_code_lines[1:]
 
         if len(op_impl_code_lines) > 2:
-            kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
+            # kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
+            params = {k: v if not isinstance(v, slope.core.DType)
+                    else self.dtype_map[v] for k, v in instr.params.items()}
+            kwargs_str = ", ".join([f"{k}={v}" for k, v in params.items()])
             rhs = f"{instr.op.name}({args_str}, {kwargs_str})"
             code_line = f"{lhs} = {rhs}"
         else:
@@ -156,7 +159,7 @@ def f(self, program, args) -> List[Any]:
                 mark = "," if argname != args_strs[-1] or len(instr.params) > 0 else ")"
                 rhs = rhs.replace(f"{argname}{mark}", f"{arg}{mark}")
             for kwargname, kwarg in instr.params.items():
-                if isinstance(kwarg, sp.core.DType):
+                if isinstance(kwarg, slope.core.DType):
                     kwarg = self.dtype_map[kwarg]
                 rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
             code_line = f"{lhs} = {rhs}"
@@ -171,7 +174,7 @@ def f(self, program, args) -> List[Any]:
 ### Op Impls
 
 
-@numpy_backend.set_impl(sp.core.jit_op)
+@numpy_backend.set_impl(slope.core.jit_op)
 def f(self, in_vals, in_avals, *, params):
     program = params["program"]
     self.codegen_depth += 1

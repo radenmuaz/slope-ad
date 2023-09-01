@@ -80,7 +80,6 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-@slope.jit
 def loss_fn(params, batch):
     # print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
@@ -133,10 +132,12 @@ if __name__ == "__main__":
     # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
     opt_init, opt_update, get_params = optim.adam(step_size)
     opt_state = opt_init(init_params)
-
+    # g_loss_fn = slope.grad(loss_fn)
+    g_loss_fn = slope.jit(slope.grad(loss_fn))
+    # g_loss_fn = slope.grad(slope.jit(loss_fn)) # TODO: cache miss
     def update(i, opt_state, batch):
         params = get_params(opt_state)
-        loss, (g_params, _) = slope.machine.grad(loss_fn)(params, batch)
+        loss, (g_params, _) = g_loss_fn(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()
@@ -144,7 +145,9 @@ if __name__ == "__main__":
     print("\nStarting training...")
     for epoch in range(num_epochs):
         start_time = time.time()
+
         for i in tqdm(range(num_batches)):
+            # print(slope.machine.backend.callable.cache_info())
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
                 print(f"loss: {loss.val:.2f}")

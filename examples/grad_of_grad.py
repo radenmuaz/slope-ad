@@ -15,8 +15,9 @@ def g(x):
 
 
 x = snp.array(1)
-gg = slope.jit(g)
-for i in range(2):
+gg = slope.jit(slope.grad(g))
+# gg = slope.grad(slope.jit(g))
+for i in range(3):
     # print(f(snp.array(float(i+1))))
     # print(slope.machine.backend.callable.cache_info())
     # print()

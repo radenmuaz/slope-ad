@@ -912,8 +912,8 @@ def f(self, *args, program, num_consts):
     hashed_program = Hashed(program)
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    print(args, hash(hashed_program), hash(hashed_consts))
-    print([o.aval for o in program.outs])
+    # print(args, hash(hashed_program), hash(hashed_consts))
+    # print([o.aval for o in program.outs])
     jit_fn = self.machine.backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
     # return jit_fn(*args, *consts)
@@ -923,7 +923,6 @@ def f(self, *args, program, num_consts):
 def f(self, primals, tangents, *, program, num_consts):
     del num_consts
     new_program, new_consts = self.machine.jvp_program(program)
-    print('jit_op jvp', hash(new_program))
     outs = self.machine.bind(
         self,
         *new_consts,

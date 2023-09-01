@@ -26,12 +26,12 @@ ops = OpsDir()
 # UnaryOps
 # -----------------------
 
-# TODO: in eval_program_transposed, try skip eval stop_gradient Op
+# TODO: in run_program_transposed, try skip run stop_gradient Op
 stop_gradient = Op.unary("stop_gradient")
 ops.register(stop_gradient)
 
 
-@stop_gradient.set_eval
+@stop_gradient.set_run
 def f(self, x):
     return [x]
 
@@ -55,7 +55,7 @@ ops.register(convert)
 ops.alias(convert, "astype")
 
 
-@convert.set_eval
+@convert.set_run
 def f(self, x, *, dtype):
     return [x.convert(dtype)]
 
@@ -70,7 +70,7 @@ sqrt = Op.unary("sqrt")
 ops.register(sqrt)
 
 
-@sqrt.set_eval
+@sqrt.set_run
 def f(self, x):
     return [x.sqrt()]
 
@@ -93,7 +93,7 @@ sin = Op.unary("sin")
 ops.register(sin)
 
 
-@sin.set_eval
+@sin.set_run
 def f(self, x):
     return [x.sin()]
 
@@ -115,7 +115,7 @@ exp = Op.unary("exp")
 ops.register(exp)
 
 
-@exp.set_eval
+@exp.set_run
 def f(self, x):
     return [x.exp()]
 
@@ -137,7 +137,7 @@ log = Op.unary("log")
 ops.register(log)
 
 
-@log.set_eval
+@log.set_run
 def f(self, x):
     return [x.log()]
 
@@ -159,7 +159,7 @@ neg = Op.unary("neg")
 ops.register(neg)
 
 
-@neg.set_eval
+@neg.set_run
 def f(self, x):
     return [-x]
 
@@ -180,7 +180,7 @@ relu = Op.unary("relu")
 ops.register(relu)
 
 
-@relu.set_eval
+@relu.set_run
 def f(self, x):
     return [x.maximum(0)]
 
@@ -207,7 +207,7 @@ add = Op.binary("add")
 ops.register(add)
 
 
-@add.set_eval
+@add.set_run
 def f(self, x, y):
     return [x + y]
 
@@ -228,7 +228,7 @@ sub = Op.binary("sub")
 ops.register(sub)
 
 
-@sub.set_eval
+@sub.set_run
 def f(self, x, y):
     return [x - y]
 
@@ -249,7 +249,7 @@ mul = Op.binary("mul")
 ops.register(mul)
 
 
-@mul.set_eval
+@mul.set_run
 def f(self, x, y):
     return [x * y]
 
@@ -276,7 +276,7 @@ div = Op.binary("div")
 ops.register(div)
 
 
-@div.set_eval
+@div.set_run
 def f(self, x, y):
     return [x / y]
 
@@ -299,7 +299,7 @@ maximum = Op.binary("maximum")
 ops.register(maximum)
 
 
-@maximum.set_eval
+@maximum.set_run
 def f(self, x, y):
     return [x.maximum(y)]
 
@@ -318,11 +318,9 @@ def f(self, primals, tangents):
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
-    eval_out = x.maximum(y)
-    jvp_out = x_dot * _balanced_eq(x, eval_out, y) + y_dot * _balanced_eq(
-        y, eval_out, x
-    )
-    return [eval_out], [jvp_out]
+    run_out = x.maximum(y)
+    jvp_out = x_dot * _balanced_eq(x, run_out, y) + y_dot * _balanced_eq(y, run_out, x)
+    return [run_out], [jvp_out]
 
 
 @maximum.set_T
@@ -335,7 +333,7 @@ equal = Op.binary("equal")
 ops.register(equal)
 
 
-@equal.set_eval
+@equal.set_run
 def f(self, x, y):
     return [x.equal(y)]
 
@@ -357,7 +355,7 @@ not_equal = Op.binary("not_equal")
 ops.register(not_equal)
 
 
-@not_equal.set_eval
+@not_equal.set_run
 def f(self, x, y):
     return [x.not_equal(y)]
 
@@ -390,7 +388,7 @@ def f(self, x, *, axes=None, keepdims=None):
     return (x,), dict(axes=axes, keepdims=keepdims)
 
 
-@max.set_eval
+@max.set_run
 def f(self, x, *, axes=None, keepdims=False):
     return [x.max(axes=axes, keepdims=keepdims)]
 
@@ -398,14 +396,14 @@ def f(self, x, *, axes=None, keepdims=False):
 @max.set_jvp
 def f(self, primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
-    eval_out = x.max(axes, keepdims)
-    locs = x.equal(eval_out.broadcast(x.shape, None if keepdims else axes))
+    run_out = x.max(axes, keepdims)
+    locs = x.equal(run_out.broadcast(x.shape, None if keepdims else axes))
     locs = locs.convert(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
     jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
 
-    return [eval_out], [jvp_out]
+    return [run_out], [jvp_out]
 
 
 @max.set_T
@@ -429,7 +427,7 @@ def f(self, x, *, axes=None, keepdims=False):
     return (x,), dict(axes=axes, keepdims=keepdims)
 
 
-@sum.set_eval
+@sum.set_run
 def f(self, x, *, axes=None, keepdims=False):
     return [x.sum(axes, keepdims)]
 
@@ -437,9 +435,9 @@ def f(self, x, *, axes=None, keepdims=False):
 @sum.set_jvp
 def f(self, primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
-    eval_out = x.sum(axes, keepdims)
+    run_out = x.sum(axes, keepdims)
     jvp_out = x_dot.sum(axes, keepdims)
-    return [eval_out], [jvp_out]
+    return [run_out], [jvp_out]
 
 
 @sum.set_T
@@ -468,7 +466,7 @@ def f(self, x, *, shape, axes=None):
     return (x,), dict(shape=shape, axes=axes)
 
 
-@broadcast.set_eval
+@broadcast.set_run
 def f(self, x, *, shape, axes=None):
     out = x.broadcast(shape, axes=None)
     return [out]
@@ -501,7 +499,7 @@ def f(self, primals, tangents, *, shape, axes=None):
     )
 
 
-@broadcast.set_shape_eval
+@broadcast.set_shape_run
 def f(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
@@ -546,7 +544,7 @@ def f(self, x, *, shape):
     return (x,), dict(shape=shape)
 
 
-@reshape.set_eval
+@reshape.set_run
 def f(self, x, *, shape):
     return [x.reshape(shape)]
 
@@ -557,7 +555,7 @@ def f(self, primals, tangents, *, shape):
     return [x.reshape(shape)], [x_dot.reshape(shape)]
 
 
-@reshape.set_shape_eval
+@reshape.set_shape_run
 def f(self, x: VoidArray, *, shape: Sequence[int]) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
@@ -572,7 +570,7 @@ transpose = Op.shape("transpose")
 ops.register(transpose)
 
 
-@transpose.set_eval
+@transpose.set_run
 def f(self, x, *, perm):
     return [x.transpose(perm=perm)]
 
@@ -598,7 +596,7 @@ def f(self, primals, tangents, *, perm):
     return [x.transpose(perm)], [x_dot.transpose(perm)]
 
 
-@transpose.set_shape_eval
+@transpose.set_shape_run
 def f(self, x: VoidArray, *, perm: Sequence[int]) -> List[VoidArray]:
     shape = [x.shape[i] for i in perm]
     return [VoidArray(shape, x.dtype)]
@@ -614,7 +612,7 @@ pad = Op.shape("pad")
 ops.register(pad)
 
 
-@pad.set_eval
+@pad.set_run
 def f(self, x, *, lo, hi, interior=None, value=0.0):
     return [x.pad(lo, hi, interior, value)]
 
@@ -654,7 +652,7 @@ def f(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     return [x.pad(lo, hi, interior, value)], [x_dot.pad(lo, hi, interior, value)]
 
 
-@pad.set_shape_eval
+@pad.set_shape_run
 def f(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
@@ -695,7 +693,7 @@ slice = Op.shape("slice")
 ops.register(slice)
 
 
-@slice.set_eval
+@slice.set_run
 def f(self, x, *, starts, limits, strides):
     return [x.slice(starts, limits, strides)]
 
@@ -728,7 +726,7 @@ def f(self, primals, tangents, *, starts, limits, strides):
     return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
 
 
-@slice.set_shape_eval
+@slice.set_shape_run
 def f(self, x: VoidArray, *, starts, limits, strides: Sequence[int]) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
@@ -776,7 +774,7 @@ flip = Op.shape("flip")
 ops.register(flip)
 
 
-@flip.set_eval
+@flip.set_run
 def f(self, x, *, axes):
     return [x.flip(axes)]
 
@@ -792,7 +790,7 @@ def f(self, primals, tangents, *, axes):
     return [x.flip(axes)], [x_dot.flip(axes)]
 
 
-@flip.set_shape_eval
+@flip.set_shape_run
 def f(self, x: VoidArray, *, axes):
     return [VoidArray(x.shape, x.dtype)]
 
@@ -809,7 +807,7 @@ ops.register(concatenate)
 ops.alias(concatenate, "cat")
 
 
-@concatenate.set_eval
+@concatenate.set_run
 def f(self, xs: Sequence[Any], *, axis):
     return [backend.run_impl(concatenate, xs, axis=axis)]
 
@@ -825,7 +823,7 @@ def jvp(primals, tangents, *, axis):
     return [concatenate(xs, axis=axis)], [concatenate(xs_dot, axis=axis)]
 
 
-@concatenate.set_shape_eval
+@concatenate.set_shape_run
 def f(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
@@ -883,7 +881,7 @@ constant = Op.load("constant")
 ops.register(constant)
 
 
-@constant.set_eval
+@constant.set_run
 def f(self, *, val, dtype=BaseArray.default_dtype):
     return [self.machine.system.array(val, dtype)]
 
@@ -900,7 +898,7 @@ def f(self, cts, *, val, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
-@constant.set_shape_eval
+@constant.set_shape_run
 def f(self, *, val, dtype=BaseArray.default_dtype):
     # TODO: not using numpy to extract shape
     return [VoidArray(np.array(val).shape, dtype)]
@@ -910,7 +908,7 @@ full = Op.load("full")
 ops.register(full)
 
 
-@full.set_eval
+@full.set_run
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [
         self.machine.backend.run_impl(
@@ -933,7 +931,7 @@ def f(self, cts, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
-@full.set_shape_eval
+@full.set_shape_run
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -944,7 +942,7 @@ ops.register(random_uniform)
 ops.alias(random_uniform, "randn")
 
 
-@random_uniform.set_eval
+@random_uniform.set_run
 def f(self, *, shape, dtype=BaseArray.default_dtype):
     return [self.machine.backend.run_impl(self, shape=shape, dtype=dtype)]
 
@@ -961,7 +959,7 @@ def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
-@random_uniform.set_shape_eval
+@random_uniform.set_shape_run
 def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -972,7 +970,7 @@ ops.register(random_normal)
 ops.alias(random_normal, "randn")
 
 
-@random_normal.set_eval
+@random_normal.set_run
 def f(self, *, shape, dtype=BaseArray.default_dtype):
     return [self.machine.backend.run_impl(random_normal, shape=shape, dtype=dtype)]
 
@@ -989,7 +987,7 @@ def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
-@random_normal.set_shape_eval
+@random_normal.set_shape_run
 def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -1008,7 +1006,7 @@ def f(self, *, start, stop=None, stride=None, dtype=BaseArray.default_dtype):
     return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
-@arange.set_eval
+@arange.set_run
 def f(self, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
     return [self.machine.backend.run_impl(arange, start, stop, stride, dtype)]
 
@@ -1027,7 +1025,7 @@ def f(self, cts, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
     return [cts[0]]
 
 
-@arange.set_shape_eval
+@arange.set_shape_run
 def f(
     self, *, start, stop, stride=None, dtype=BaseArray.default_dtype
 ) -> List[VoidArray]:

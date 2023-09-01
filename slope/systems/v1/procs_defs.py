@@ -39,10 +39,10 @@ def ones_like(y):
 
 
 @procs.register
-def where(x, trueval, falseval):
+def where(x, trurun, falsrun):
     cond = x != 0.0
-    cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
-    return cond * trueval + (1.0 - cond) * falseval
+    cond = cond.convert(trurun.dtype)  # TODO: type promotion logic
+    return cond * trurun + (1.0 - cond) * falsrun
 
 
 @procs.register

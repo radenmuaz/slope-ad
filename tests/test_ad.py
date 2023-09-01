@@ -13,7 +13,7 @@ DEBUG = os.environ.get("SLOPE_DEBUG", 0)
 
 
 class ADResult(NamedTuple):
-    eval_out: BaseArray
+    run_out: BaseArray
     jvp_out: BaseArray
     loss: BaseArray
     grads: BaseArray
@@ -23,17 +23,17 @@ class TestGrad(unittest.TestCase):
     @staticmethod
     def run_ad_fns(f, *args):
         args_dot = [Array.ones_like(x) for x in args]
-        eval_out, f_lin = slope.ad.linearize(f, *args)
+        run_out, f_lin = slope.ad.linearize(f, *args)
         jvp_out = f_lin(*args_dot)
         loss_fn = ad.grad(lambda *args,: f(*args).sum())
         loss, grads = loss_fn(*args)
         if DEBUG:
             print(f"{args=}")
-            print(f"{eval_out=}")
+            print(f"{run_out=}")
             print(f"{jvp_out=}")
             print(f"{loss=}")
             print(f"{grads=}")
-        return ADResult(eval_out, jvp_out, loss, grads)
+        return ADResult(run_out, jvp_out, loss, grads)
 
     def test_maximum(self):
         def f(x, **kwargs):

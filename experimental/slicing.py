@@ -120,7 +120,7 @@ def _split_index_for_jit(idx, shape):
         if x is Ellipsis:
             static[i] = x
         elif isinstance(x, slice):
-            # slice objects aren't hashable.
+            # slice objects aren't hashashed.
             static[i] = (x.start, x.stop, x.step)
         else:
             dynamic[i] = x

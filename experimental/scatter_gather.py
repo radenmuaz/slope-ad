@@ -2,7 +2,7 @@ class Gather(ShapeOp):
     get_impl = lambda: slope.RT.backend.GatherImpl
 
     @staticmethod
-    def eval(x, idx, *, axis):
+    def run(x, idx, *, axis):
         return [x.gather(idx)]
 
     @staticmethod
@@ -161,7 +161,7 @@ class Gather(ShapeOp):
         )
 
     @staticmethod
-    def shape_eval(
+    def shape_run(
         x: VoidArray,
         idx,
         *,
@@ -339,7 +339,7 @@ class Scatter(ShapeOp):
     get_impl = lambda: slope.RT.backend.ScatterImpl
 
     @staticmethod
-    def eval(x, idx, *, axis):
+    def run(x, idx, *, axis):
         return [x.gatter(idx)]
 
     @staticmethod
@@ -479,7 +479,7 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def shape_eval(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
+    def shape_run(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
         shape = [x.shape[i] for i in axis]
         return [VoidArray(shape, x.dtype)]
 
@@ -556,7 +556,7 @@ def fn(
     ret,
 ):
     return """
-# SmallVector<Tensor> evalScatterOp(
+# SmallVector<Tensor> runScatterOp(
 #     ArrayRef<Tensor> inputs, const Tensor &scatterIndices,
 #     ArrayRef<Tensor> updates, const Axes &updateWindowDims,
 #     const Axes &insertedWindowDims, const Axes &scatterDimsToOperandDims,
@@ -581,7 +581,7 @@ def fn(
 #     if (indexVectorDim < scatterIndices.getRank())
 #       startIndicesIndex.insert(startIndicesIndex.begin() + indexVectorDim,
 #                                kColon);
-#     auto startIndex = evalIndex(evalSliceOp(scatterIndices, startIndicesIndex));
+#     auto startIndex = runIndex(runSliceOp(scatterIndices, startIndicesIndex));
 
 #     Index fullStartIndex(inputs[0].getRank(), 0);
 #     for (auto dInput : inputs[0].getAxes()) {
@@ -614,7 +614,7 @@ def fn(
 #           Tensor(RankedTensorType::get({}, update.getElementType()),
 #                  update.get(updateIndex)));
 
-#     auto updatedValues = eval(updateComputation, updateComputationArgs, &scope);
+#     auto updatedValues = run(updateComputation, updateComputationArgs, &scope);
 #     for (auto [result, updatedValue] : llvm::zip(results, updatedValues))
 #       result.set(resultIndex, updatedValue.getTensor().get({}));
 #   }

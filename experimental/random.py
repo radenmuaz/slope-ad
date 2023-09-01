@@ -11,10 +11,10 @@ import numpy as np
 
 class RandomBitGenerator(base_ops.Op):
     @staticmethod
-    def eval(key, *, shape, dtype, algorithm):
+    def run(key, *, shape, dtype, algorithm):
         return []
 
-    def shape_eval(key, *, shape, dtype, algorithm):
+    def shape_run(key, *, shape, dtype, algorithm):
         return [key.shape, key.shape]
 
 

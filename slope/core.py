@@ -86,22 +86,35 @@ class PPrint:
         return sum(ps, cls.pp(""))
 
 
-class Hable:
+class Hashed:
     val: Any
 
     def __init__(self, val):
         self.val = val
 
     def __hash__(self) -> int:
-        # print(type(self.val))
-        # return hash(self.val)
-        # return hash(id(self.val))
-        return hash((self.val,))
+        return id(self.val)
 
     def __eq__(self, other):
-        if isinstance(other, Hable):
-            return self.val == other.val
-        return False
+        return type(other) is Hashed and id(self.val) == id(other.val)
+
+
+# class Hashed:
+#     val: Any
+
+#     def __init__(self, val):
+#         self.val = val
+
+#     def __hash__(self) -> int:
+#         # print(type(self.val))
+#         # return hash(self.val)
+#         # return hash(id(self.val))
+#         return hash((self.val,))
+
+#     def __eq__(self, other):
+#         if isinstance(other, Hashed):
+#             return self.val == other.val
+#         return False
 
 
 class OpType(Enum):
@@ -130,7 +143,7 @@ class Op:
         return f"Op <{self.name}>"
 
     def pack_args(self, args, params):
-        sig = inspect.signature(self.eval)
+        sig = inspect.signature(self.run)
         args_strs = [
             k
             for k, v in sig.parameters.items()
@@ -174,13 +187,13 @@ class Op:
     def args_fixer(self, *args, **params):
         raise NotImplementedError
 
-    def eval(self, *args, **params):
+    def run(self, *args, **params):
         raise NotImplementedError
 
-    def partial_eval(self, trace, tracers, **params):
+    def partial_run(self, trace, tracers, **params):
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = self.shape_eval(*avals_in, **params)
+        avals_out = self.shape_run(*avals_in, **params)
         tracers_out = [
             PartialEvalTracerArray(
                 self.machine, trace, self.machine.make_unknown_pval(aval), None
@@ -194,32 +207,23 @@ class Op:
             t.proto = instr
         return tracers_out
 
-    def partial_eval_instr(
-        self,
-        instr,
-        read,
-        write,
-        env,
-        residuals,
-        instrs1,
-        instrs2,
-    ):
-        in_unknowns = list_map(partial(read, env), instr.inputs)
-        if any(in_unknowns):
-
-            def new_res(x: Atom) -> Atom:
-                if type(x) is Var:
-                    residuals.add(x)
-                return x
-
-            inputs = [
-                v if unk else new_res(v) for unk, v in zip(in_unknowns, instr.inputs)
+    def partial_run_instr(self, unks_in, instr):
+        if any(unks_in):
+            instr1 = None
+            instr2 = Instr(instr.op, instr.inputs, instr.params, instr.out_binders)
+            unks_out = [True for i in instr.out_binders]
+            res = [
+                v
+                for unk, v in zip(unks_in, instr.inputs)
+                if ((not unk) and type(v) is Var)
             ]
-            instrs2 += [Instr(instr.op, inputs, instr.params, instr.out_binders)]
-            list_map(partial(write, env, True), instr.out_binders)
         else:
-            instrs1 += [instr]
-            list_map(partial(write, env, False), instr.out_binders)
+            instr1 = instr
+            instr2 = None
+            unks_out = [False for i in instr.out_binders]
+            res = None
+
+        return instr1, instr2, unks_out, res
 
     def jvp(self, *args, **params):
         raise NotImplementedError
@@ -230,20 +234,20 @@ class Op:
     def vmap(self, *args, **params):
         raise NotImplementedError
 
-    def shape_eval(self, *args, **params):
+    def shape_run(self, *args, **params):
         raise NotImplementedError
 
-    def set_partial_eval_instr(self, fn):
-        self.partial_eval_instr = types.MethodType(fn, self)
+    def set_partial_run_instr(self, fn):
+        self.partial_run_instr = types.MethodType(fn, self)
 
     def set_args_fixer(self, fn):
         self.args_fixer = types.MethodType(fn, self)
 
-    def set_partial_eval(self, fn):
-        self.partial_eval = types.MethodType(fn, self)
+    def set_partial_run(self, fn):
+        self.partial_run = types.MethodType(fn, self)
 
-    def set_eval(self, fn):
-        self.eval = types.MethodType(fn, self)
+    def set_run(self, fn):
+        self.run = types.MethodType(fn, self)
 
     def set_jvp(self, fn):
         self.jvp = types.MethodType(fn, self)
@@ -254,8 +258,8 @@ class Op:
     def set_T(self, fn):
         self.T = types.MethodType(fn, self)
 
-    def set_shape_eval(self, fn):
-        self.shape_eval = types.MethodType(fn, self)
+    def set_shape_run(self, fn):
+        self.shape_run = types.MethodType(fn, self)
 
     @classmethod
     def unary(cls, name):
@@ -266,7 +270,7 @@ class Op:
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
 
-        @op.set_shape_eval
+        @op.set_shape_run
         def f(self, x, **params):
             return [VoidArray(x.shape, x.dtype)]
 
@@ -335,7 +339,7 @@ class Op:
                     y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
             return [self(x, y, **params)], [x_bdim]
 
-        @op.set_shape_eval
+        @op.set_shape_run
         def f(self, x: VoidArray, y: VoidArray, **params) -> List[VoidArray]:
             if not type(x) in (Array, VoidArray) or not type(x) in (Array, VoidArray):
                 raise TypeError
@@ -372,7 +376,7 @@ class Op:
             params["axes"] = tuple(axes)
             return [cls.do(x, **params)], [out_bdim]
 
-        @op.set_shape_eval
+        @op.set_shape_run
         def f(self, x: VoidArray, axes=None, keepdims=False) -> List[VoidArray]:
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
             axes_ = set(axes)
@@ -577,7 +581,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
 class VoidArray:
     array_abstraction_level = 1
     shape: Tuple[int, ...]
-    dtype: np.dtype
+    dtype: DType
 
     @classmethod
     def like(cls, aval):
@@ -646,12 +650,17 @@ class Program(NamedTuple):
     instrs: Tuple[Instr]
     outs: Any
 
-    def __hash__(self):
-        # return id(self)
-        return hash(repr(self))
+    # def __hash__(self):
+    #     # return id(self)
+    #     return hash(repr(self))
+    # def __eq__(self, other):
+    #     return self is other
 
-    def __eq__(self, other):
-        return self is other
+    def __hash__(self):
+        return id(self)
+
+    # def __hash__(self): return repr(self)
+    __eq__ = operator_py.is_
 
     def __repr__(self):
         namegen = (
@@ -665,14 +674,14 @@ class Program(NamedTuple):
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
         instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
-        # print('program outs', outs)
-        # outs = ", ".join(outs)
+        outs = ", ".join(outs)
         # outs = ', '.join(sorted(outs))
         ret = str(
             PPrint.pp(f"{{ lambda {in_binders} .")
             + ((PPrint.pp("let ") >> instrs) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
         )
         # print(ret)
+        # print('program outs: ', outs)
         return ret
 
     def pp_instr(self, names: DefaultDict[Var, str], instr: Instr) -> PPrint:
@@ -743,7 +752,7 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
     def run_op(self, op, tracers, params):
-        return op.eval(*tracers, **params)
+        return op.run(*tracers, **params)
 
 
 class ArrayBuffer:
@@ -893,19 +902,24 @@ jit_op = Op("jit_op")
 jit_op.pack_args = lambda args, params: (args, params)
 
 
-@jit_op.set_eval
+@jit_op.set_run
 def f(self, *args, program, num_consts):
-    hable_program = Hable(program)
+    hashed_program = Hashed(program)
     consts, args = args[:num_consts], args[num_consts:]
-    hable_consts = tuple(map(Hable, consts))
-    jit_fn = self.machine.backend.callable(hable_program, hable_consts)
+    hashed_consts = tuple(map(Hashed, consts))
+    # print(args, hash(hashed_program), hash(hashed_consts))
+    # print(program)
+    # breakpoint()
+    jit_fn = self.machine.backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
     # return jit_fn(*args, *consts)
 
 
 @jit_op.set_jvp
 def f(self, primals, tangents, *, program, num_consts):
+    del num_consts
     new_program, new_consts = self.machine.jvp_program(program)
+    # print('jit_op jvp', hash(program), hash(new_program))
     outs = self.machine.bind(
         self,
         *new_consts,
@@ -919,7 +933,7 @@ def f(self, primals, tangents, *, program, num_consts):
     return primals_out, tangents_out
 
 
-@jit_op.set_shape_eval
+@jit_op.set_shape_run
 def f(self, *in_types, program, num_consts):
     program_type = self.machine.typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
@@ -946,10 +960,10 @@ def f(self, cts, *invals, program, num_consts):
     return [next(outs) if undef else None for undef in undef_primals]
 
 
-@jit_op.set_partial_eval
+@jit_op.set_partial_run
 def f(self, trace, tracers, *, program, num_consts):
     in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = self.machine.partial_eval_program(
+    program1, program2, out_unknowns, num_res = self.machine.partial_run_program(
         program, in_unknowns
     )
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
@@ -978,24 +992,18 @@ def f(self, trace, tracers, *, program, num_consts):
     return merge_lists(out_unknowns, outs1, outs2)
 
 
-@jit_op.set_partial_eval_instr
-def f(
-    self, instr: Instr, read, write, env, residuals, instrs1, instrs2
-) -> Tuple[Instr, Instr, List[bool], List[Var]]:
-    in_unknowns = list_map(partial(read, env), instr.inputs)
+@jit_op.set_partial_run_instr
+def f(self, unks_in, instr) -> Tuple[Instr, Instr, List[bool], List[Var]]:
     program = instr.params["program"]
-    program1, program2, out_unknowns, num_res = self.machine.partial_eval_program(
-        program, in_unknowns
+    program1, program2, out_unknowns, num_res = self.machine.partial_run_program(
+        program, unks_in
     )
-    ins1, ins2 = partition_list(in_unknowns, instr.inputs)
+    ins1, ins2 = partition_list(unks_in, instr.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instr.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
     instr1 = Instr(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
     instr2 = Instr(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
-    instrs1.append(instr1)
-    instrs2.append(instr2)
-    residuals.update(res)
-    list_map(partial(write, env), out_unknowns, instr.out_binders)
+    return instr1, instr2, out_unknowns, res
 
 
 class Machine:
@@ -1027,6 +1035,10 @@ class Machine:
         for _, backend in self.system.backends.items():
             backend.set_machine(self)
         self.backend = self.system.backends[default_backend]
+
+    def pprint_trace_stack(self):
+        for trace in self.trace_stack:
+            print(f"{trace.level}: {trace.trace_type.__name__}\t{trace.global_data=}")
 
     def make_known_pval(self, val: Any):
         return PartialVal(self.get_aval(val), val)
@@ -1177,7 +1189,7 @@ class Machine:
 
         for instr in program.instrs:
             in_types = [self.typecheck_atom(env, x) for x in instr.inputs]
-            out_types = instr.op.shape_eval(*in_types, **instr.params)
+            out_types = instr.op.shape_run(*in_types, **instr.params)
             for out_binder, out_type in list_zip(instr.out_binders, out_types):
                 if not out_type == out_binder.aval:
                     raise TypeError
@@ -1200,7 +1212,7 @@ class Machine:
         else:
             assert False
 
-    def eval_program(self, program: Program, args: List[Any]) -> List[Any]:
+    def run_program(self, program: Program, args: List[Any]) -> List[Any]:
         env: Dict[Var, Any] = {}
 
         def read(x: Atom) -> Any:
@@ -1218,7 +1230,7 @@ class Machine:
         return list_map(read, program.outs)
 
     def program_as_fun(self, program: Program):
-        return lambda *args: self.eval_program(program, args)
+        return lambda *args: self.run_program(program, args)
 
     def vmap_flat(self, f, in_axes, *args):
         axis_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
@@ -1315,7 +1327,7 @@ class Machine:
         )
         return new_program, new_consts
 
-    def partial_eval_flat(
+    def partial_run_flat(
         self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Program, List["PartialVal"], List[Any]]:
         with self.new_main(PartialEvalTrace) as main:
@@ -1330,7 +1342,7 @@ class Machine:
 
         return program, pvals_out, consts
 
-    def partial_eval_program(
+    def partial_run_program(
         self,
         program: Program,
         in_unknowns: List[bool],
@@ -1339,20 +1351,39 @@ class Machine:
         env: Dict[Var, bool] = {}
         residuals: Set[Var] = set()
 
-        def read(env, x: Atom) -> bool:
+        def read(x: Atom) -> bool:
             return type(x) is Var and env[x]
 
-        def write(env, unk: bool, v: Var) -> None:
+        def write(unk: bool, v: Var) -> None:
             env[v] = unk
 
+        def new_res(x: Atom) -> Atom:
+            if type(x) is Var:
+                residuals.add(x)
+            return x
+
         instrs1, instrs2 = [], []
-        list_map(partial(write, env), in_unknowns, program.in_binders)
+        list_map(write, in_unknowns, program.in_binders)
 
         for instr in program.instrs:
-            instr.op.partial_eval_instr(
-                instr, read, write, env, residuals, instrs1, instrs2
-            )
-        out_unknowns = list_map(partial(read, env), program.outs)
+            unks_in = list_map(read, instr.inputs)
+            instr1, instr2, unks_out, res = instr.op.partial_run_instr(unks_in, instr)
+            if instr1 is not None:
+                instrs1.append(instr1)
+            if instr2 is not None:
+                instrs2.append(instr2)
+            if res is not None:
+                residuals.update(res)
+            list_map(write, unks_out, instr.out_binders)
+            # if any(unks_in):
+            #     inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, instr.inputs)]
+            #     instrs2.append(InstrProto(instr.primitive, inputs, instr.params, instr.out_binders))
+            #     map(partial(write, True), instr.out_binders)
+            # else:
+            #     instrs1.append(instr)
+            #     map(partial(write, False), instr.out_binders)
+
+        out_unknowns = list_map(read, program.outs)
         if instantiate is not None:
             for v, uk, inst in zip(program.outs, out_unknowns, instantiate):
                 if inst and not uk:
@@ -1368,13 +1399,13 @@ class Machine:
 
         program1 = Program(ins1, instrs1, outs1 + residuals)
         program2 = Program(residuals + ins2, instrs2, outs2)
-        self.typecheck_partial_eval_program(
+        self.typecheck_partial_run_program(
             program, in_unknowns, out_unknowns, program1, program2
         )
 
         return program1, program2, out_unknowns, num_res
 
-    def typecheck_partial_eval_program(
+    def typecheck_partial_run_program(
         self, program, in_unknowns, out_unknowns, program1, program2
     ):
         programty = self.typecheck_program(program)  # (a1,  a2) -> (b1, b2 )
@@ -1415,11 +1446,11 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_eval_flat(f_jvp, pvals_in)
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
-        f_lin = lambda *tangents: self.eval_program(program, [*consts, *tangents])
+        f_lin = lambda *tangents: self.run_program(program, [*consts, *tangents])
         return primals_out, f_lin
 
     def linearize(self, f, *primals_in):
@@ -1537,16 +1568,12 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_eval_flat(
-            f_jvp, pvals_in
-        )  # linearize
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)  # linearize
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
         transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
-        f_vjp = lambda *cts: self.eval_program_transposed(
-            program, transpose_inputs, cts
-        )
+        f_vjp = lambda *cts: self.run_program_transposed(program, transpose_inputs, cts)
         return primals_out, f_vjp
 
     def vjp(self, f, *primals_in):
@@ -1563,7 +1590,7 @@ class Machine:
 
         return primals_out, f_vjp
 
-    def eval_program_transposed(
+    def run_program_transposed(
         self, program: Program, args: List[Any], cotangents: List[Any]
     ) -> List[Any]:
         primal_env: Dict[Var, Any] = {}
@@ -1610,7 +1637,7 @@ class Machine:
         self, program: Program, undef_primals: tuple[bool, ...]
     ) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
-        traceable = partial(self.eval_program_transposed, program)
+        traceable = partial(self.run_program_transposed, program)
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
             traceable, tuple(args), tuple(avals_out)
@@ -1634,24 +1661,22 @@ class Machine:
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in)
 
-            hable_consts = tuple(list_map(Hable, consts))
-            hable_program = Hable(program)
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(
                 jit_op,
                 *consts,
                 *args,
-                program=hable_program.val,
-                num_consts=len(hable_consts),
+                program=program,
+                num_consts=len(consts),
             )
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted
 
-    def jit_partial_eval(self, trace, tracers, *, program, num_consts):
+    def jit_partial_run(self, trace, tracers, *, program, num_consts):
         del num_consts  # Unused
         in_unknowns = [not t.pval.is_known for t in tracers]
-        program1, program2, out_unknowns, num_res = self.partial_eval_program(
+        program1, program2, out_unknowns, num_res = self.partial_run_program(
             program, in_unknowns
         )
         known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
@@ -1703,12 +1728,12 @@ class Backend:
     @lru_cache
     def callable(
         self,
-        hable_program: Hable,
-        hable_consts: Tuple[Hable, ...],
+        hashed_program: Hashed,
+        hashed_consts: Tuple[Hashed, ...],
     ):
-        program: Program = hable_program.val
+        program: Program = hashed_program.val
         self.machine.typecheck_program(program)
-        consts = [x.val for x in hable_consts]
+        consts = [x.val for x in hashed_consts]
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         fn_name = f"{self.name.lower()}_fn"
         codegen_out = self.codegen(
@@ -1914,7 +1939,7 @@ class ProgramTrace(Trace):
 
     def run_op(self, op, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = op.shape_eval(*avals_in, **params)
+        avals_out = op.shape_run(*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
@@ -1999,7 +2024,7 @@ class ProgramBuilder:
         new_outs = [literals.get(x, x) for x in program.outs]
         new_program = Program(new_const_binders + other_binders, new_instrs, new_outs)
         self.machine.typecheck_program(new_program)
-        return new_program, new_consts
+        return new_program, tuple(new_consts)
 
 
 class UndefPrimal(NamedTuple):
@@ -2086,4 +2111,4 @@ class PartialEvalTrace(Trace):
             return self.machine.bind(
                 op, *list_map(self.machine.full_lower, tracers), **params
             )
-        return op.partial_eval(self, tracers, **params)
+        return op.partial_run(self, tracers, **params)

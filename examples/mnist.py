@@ -1,4 +1,5 @@
-import slope as slope
+import slope
+from slope import numpy as snp
 from slope.nn import init, layers, optim
 
 import time
@@ -99,7 +100,7 @@ if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         layers.Dense(200),
-        layers.Fn(lambda x: x.maximum(slope.machine.system.zeros_like(x))),
+        layers.Fn(lambda x: x.maximum(snp.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
@@ -122,9 +123,9 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield slope.machine.system.array(
+                yield snp.array(
                     train_images[batch_idx]
-                ), slope.machine.system.array(train_labels[batch_idx])
+                ), snp.array(train_labels[batch_idx])
 
     batches = data_stream()
 
@@ -147,7 +148,7 @@ if __name__ == "__main__":
         start_time = time.time()
 
         for i in tqdm(range(num_batches)):
-            # print(slope.machine.backend.callable.cache_info())
+            print(slope.machine.backend.callable.cache_info())
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
                 print(f"loss: {loss.val:.2f}")
@@ -157,8 +158,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                slope.machine.system.array(test_images),
-                slope.machine.system.array(test_labels),
+                snp.array(test_images),
+                snp.array(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

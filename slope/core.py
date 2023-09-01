@@ -93,28 +93,12 @@ class Hashed:
         self.val = val
 
     def __hash__(self) -> int:
-        return id(self.val)
+        return hash((self.val,))
 
     def __eq__(self, other):
-        return type(other) is Hashed and id(self.val) == id(other.val)
-
-
-# class Hashed:
-#     val: Any
-
-#     def __init__(self, val):
-#         self.val = val
-
-#     def __hash__(self) -> int:
-#         # print(type(self.val))
-#         # return hash(self.val)
-#         # return hash(id(self.val))
-#         return hash((self.val,))
-
-#     def __eq__(self, other):
-#         if isinstance(other, Hashed):
-#             return self.val == other.val
-#         return False
+        if isinstance(other, Hashed):
+            return self.val == other.val
+        return False
 
 
 class OpType(Enum):
@@ -656,17 +640,10 @@ class Program(NamedTuple):
     instrs: Tuple[Instr]
     outs: Any
 
-    # def __hash__(self):
-    #     # return id(self)
-    #     return hash(repr(self))
-    # def __eq__(self, other):
-    #     return self is other
-
     def __hash__(self):
-        return id(self)
-
-    # def __hash__(self): return repr(self)
-    __eq__ = operator_py.is_
+        return hash(repr(self))
+    def __eq__(self, other):
+        return self is other
 
     def __repr__(self):
         namegen = (

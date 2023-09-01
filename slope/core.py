@@ -344,6 +344,7 @@ class Op:
             if not type(x) in (Array, VoidArray) or not type(x) in (Array, VoidArray):
                 raise TypeError
             if VoidArray.like(x) != VoidArray.like(y):
+                breakpoint()
                 raise TypeError(f"{x} != {y}")
             return [VoidArray(x.shape, x.dtype)]
 
@@ -585,7 +586,12 @@ class VoidArray:
 
     @classmethod
     def like(cls, aval):
-        return cls(aval.shape, aval.dtype)
+        shape = aval.shape
+        if isinstance(aval, Array):
+            dtype = aval.machine.backend.dtype_map_inv[aval.buf.val.dtype]
+        else:
+            dtype = aval.dtype
+        return cls(shape, dtype)
 
     def __init__(self, shape, dtype):
         self.shape = tuple(shape)
@@ -772,7 +778,10 @@ class Array(BaseArray):
         return id(self.val)
 
     val = property(lambda self: self.buf.val)
-    dtype = property(lambda self: self.buf.val.dtype)
+    @property
+    def dtype(self):
+        return self.machine.backend.dtype_map_inv[self.buf.val.dtype]
+    
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
 
@@ -907,8 +916,8 @@ def f(self, *args, program, num_consts):
     hashed_program = Hashed(program)
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    # print(args, hash(hashed_program), hash(hashed_consts))
-    # print(program)
+    print(args, hash(hashed_program), hash(hashed_consts))
+    print(program)
     # breakpoint()
     jit_fn = self.machine.backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
@@ -919,7 +928,7 @@ def f(self, *args, program, num_consts):
 def f(self, primals, tangents, *, program, num_consts):
     del num_consts
     new_program, new_consts = self.machine.jvp_program(program)
-    # print('jit_op jvp', hash(program), hash(new_program))
+    print('jit_op jvp', hash(new_program))
     outs = self.machine.bind(
         self,
         *new_consts,
@@ -1708,6 +1717,7 @@ class Backend:
         self.default_dtype = default_dtype
         self.impls = dict()
         self.dtype_map = dict()
+        self.dtype_map_inv = dict()
         self.machine_ref: Machine = None
         self.deps_dict = dict()
         self.codegen_depth = 0
@@ -1756,6 +1766,7 @@ class Backend:
 
     def set_dtype_map(self, dtype_map):
         self.dtype_map = dtype_map
+        self.dtype_map_inv = {v:k for k,v in dtype_map.items()}
 
     def set_codegen(self, fn):
         self.codegen = types.MethodType(fn, self)

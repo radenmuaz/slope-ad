@@ -9,7 +9,6 @@ def f(x):
     return z
 
 
-@slope.jit
 def g(x):
     #   return x * machine.system.array(2.)
     return x * 2.0
@@ -21,7 +20,8 @@ for i in range(2):
     # print(slope.machine.backend.callable.cache_info())
     # print()
     # continue
-    gg = slope.grad(g)
+    gg = slope.jit(slope.grad(g))
+    # gg = slope.grad(g)
     print(gg(x))
     # print(gg(snp.array(float(i+1))))
     print(slope.machine.backend.callable.cache_info())

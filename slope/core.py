@@ -427,7 +427,7 @@ class DType(NamedTuple):
     np: type
 
     def __repr__(self):
-        return f"dtypes.{self.name}"
+        return f"DType<{self.name}>"
 
 
 class BaseArray:
@@ -913,8 +913,7 @@ def f(self, *args, program, num_consts):
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
     print(args, hash(hashed_program), hash(hashed_consts))
-    print(program)
-    # breakpoint()
+    print([o.aval for o in program.outs])
     jit_fn = self.machine.backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
     # return jit_fn(*args, *consts)

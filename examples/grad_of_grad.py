@@ -15,15 +15,13 @@ def g(x):
 
 
 x = snp.array(1)
+gg = slope.jit(g)
 for i in range(2):
     # print(f(snp.array(float(i+1))))
     # print(slope.machine.backend.callable.cache_info())
     # print()
     # continue
-    gg = slope.jit(slope.grad(g))
-    # gg = slope.grad(g)
-    print(gg(x))
-    # print(gg(snp.array(float(i+1))))
+    print(gg(snp.array(float(i+1))))
     print(slope.machine.backend.callable.cache_info())
     print()
 # print(gg(snp.array(4.0)))

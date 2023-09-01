@@ -39,7 +39,7 @@ def serial(*layers):
         for init_fun in init_funs:
             input_shape, param = init_fun(input_shape)
             params.append(param)
-        return input_shape, params
+        return input_shape, tuple(params)
 
     def apply_fun(params, inputs, **kwargs):
         for fun, param in zip(apply_funs, params):

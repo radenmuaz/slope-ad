@@ -25,7 +25,7 @@ default_dtype = numpy_dtype_map[BaseArray.default_dtype]
 
 
 @numpy_backend.set_compile
-def f(self, prog, codegen_out, fn_name):
+def f(self, program, codegen_out, fn_name):
     def indent(code_line, amount=4):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
@@ -50,7 +50,7 @@ def f(self, prog, codegen_out, fn_name):
 
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
-    for instr in prog.instrs:
+    for instr in program.instrs:
         if instr.op == sp.core.jit_op:
             continue
         impl = self.machine.backend.impls[instr.op]
@@ -88,7 +88,7 @@ def f(self, prog, codegen_out, fn_name):
 
 
 @numpy_backend.set_codegen
-def f(self, prog, args) -> List[Any]:
+def f(self, program, args) -> List[Any]:
     # codegen is recursive if jit-of-jit happens
     env: Dict[sp.Var, Any] = {}
     ncs = 0
@@ -99,7 +99,7 @@ def f(self, prog, args) -> List[Any]:
     affix = (
         f"_d{self.codegen_depth}_i{self.codegen_idx}" if self.codegen_depth != 0 else ""
     )
-    for inb in prog.in_binders:
+    for inb in program.in_binders:
         if type(inb.aval) is not VoidArray:
             env[inb] = f"c{ncs}{affix}"
             inb_consts += [env[inb]]
@@ -110,7 +110,7 @@ def f(self, prog, args) -> List[Any]:
             nxs += 1
 
     code_lines = []
-    for instr in prog.instrs:
+    for instr in program.instrs:
         in_vals = list_map(lambda x: env[x], instr.inputs)
         in_avals = [x.aval for x in instr.inputs]
         for outb in instr.out_binders:
@@ -161,10 +161,8 @@ def f(self, prog, args) -> List[Any]:
                 rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
             code_line = f"{lhs} = {rhs}"
         code_lines += [code_line]
-        # out_vals = instr.op.jit(in_avals, in_vals, **instr.params)
 
-    outs = list_map(lambda y: env[y], prog.outs)
-    # code_lines += [f"out = ({', '.join(outs)}{',' if len(outs)==1 else ''})"]
+    outs = list_map(lambda y: env[y], program.outs)
     return dict(
         code_lines=code_lines, inb_args=inb_args, inb_consts=inb_consts, outs=outs
     )
@@ -175,9 +173,9 @@ def f(self, prog, args) -> List[Any]:
 
 @numpy_backend.set_impl(sp.core.jit_op)
 def f(self, in_vals, in_avals, *, params):
-    prog = params["prog"]
+    program = params["program"]
     self.codegen_depth += 1
-    codegen_out = self.codegen(prog, in_vals + in_avals)
+    codegen_out = self.codegen(program, in_vals + in_avals)
     self.codegen_idx += 1
     self.codegen_depth -= 1
 

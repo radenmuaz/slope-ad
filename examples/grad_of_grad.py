@@ -1,8 +1,10 @@
 import slope
 from slope import numpy as snp
 
+
 @slope.jit
 def f(x):
+    print("hi")
     y = x * 3.0
     z = g(y)
     return z
@@ -10,13 +12,22 @@ def f(x):
 
 @slope.jit
 def g(x):
+    print("yo")
     #   return x * machine.system.array(2.)
     return x * 2.0
 
 
-#   return x * x
-
 print(slope.grad(f)(snp.array(3.0)))
+print(slope.grad(f)(snp.array(4.0)))
+print(slope.grad(f)(snp.array(4.0)))
+
+# print(f(snp.array(3.0)))
+# print(f(snp.array(4.0)))
+# print(f(snp.array(5.0)))
+# print(f(snp.array(3.0)))
+# print(slope.grad(f)(snp.array(3.0)))
+# print(slope.grad(f)(snp.array(3.0)))
+
 # print(machine.grad(g)(machine.system.array(3.)))
 # print(g(machine.system.array(3.)))
 

@@ -26,7 +26,7 @@ ops = OpsDir()
 # UnaryOps
 # -----------------------
 
-# TODO: in eval_prog_transposed, try skip eval stop_gradient Op
+# TODO: in eval_program_transposed, try skip eval stop_gradient Op
 stop_gradient = Op.unary("stop_gradient")
 ops.register(stop_gradient)
 
@@ -308,8 +308,14 @@ def f(self, x, y):
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return (
-            (x == z).where(self.machine.system.ones_like(z), self.machine.system.zeros_like(z))
-        ) / ((y == z).where(self.machine.system.full_like(z, 2), self.machine.system.ones_like(z)))
+            (x == z).where(
+                self.machine.system.ones_like(z), self.machine.system.zeros_like(z)
+            )
+        ) / (
+            (y == z).where(
+                self.machine.system.full_like(z, 2), self.machine.system.ones_like(z)
+            )
+        )
 
     (x, y), (x_dot, y_dot) = primals, tangents
     eval_out = x.maximum(y)
@@ -338,7 +344,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [self.machine.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.system.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @equal.set_T
@@ -360,7 +366,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
-    return [out_primal], [self.machine.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.system.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @not_equal.set_T
@@ -884,8 +890,8 @@ def f(self, *, val, dtype=BaseArray.default_dtype):
 
 @constant.set_jvp
 def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
-    out = sp.machine.system.array(val, dtype)
-    out_jvp = sp.machine.ones_like(out)
+    out = self.machine.system.array(val, dtype)
+    out_jvp = self.machine.system.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -907,7 +913,9 @@ ops.register(full)
 @full.set_eval
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [
-        self.machine.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
+        self.machine.backend.run_impl(
+            self, shape=shape, fill_value=fill_value, dtype=dtype
+        )
     ]
 
 

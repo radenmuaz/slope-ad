@@ -58,8 +58,11 @@ def variance_scaling(
         if distribution == "normal":
             return sp.machine.system.ops_dir.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
-            return  sp.machine.system.ops_dir.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
-            
+            return (
+                sp.machine.system.ops_dir.rand(size=shape.astype(dtype))
+                * (3 * variance).sqrt()
+            )
+
         else:
             raise ValueError(
                 f"invalid distribution for variance scaling initializer: {distribution}"

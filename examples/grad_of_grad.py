@@ -4,7 +4,6 @@ from slope import numpy as snp
 
 @slope.jit
 def f(x):
-    print("hi")
     y = x * 3.0
     z = g(y)
     return z
@@ -12,14 +11,16 @@ def f(x):
 
 @slope.jit
 def g(x):
-    print("yo")
     #   return x * machine.system.array(2.)
     return x * 2.0
 
 
 print(slope.grad(f)(snp.array(3.0)))
+print(slope.machine.backend.callable.cache_info())
 print(slope.grad(f)(snp.array(4.0)))
+print(slope.machine.backend.callable.cache_info())
 print(slope.grad(f)(snp.array(4.0)))
+print(slope.machine.backend.callable.cache_info())
 
 # print(f(snp.array(3.0)))
 # print(f(snp.array(4.0)))

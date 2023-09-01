@@ -82,7 +82,7 @@ def mnist(permute_train=False):
 
 @slope.jit
 def loss_fn(params, batch):
-    print("loss_fn jit, this text should be printed only once.")
+    # print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
 
     preds = predict(params, inputs)

@@ -95,7 +95,7 @@ class Hable:
     def __hash__(self) -> int:
         # print(type(self.val))
         # return hash(self.val)
-        return hash(id(self.val))
+        # return hash(id(self.val))
         return hash((self.val,))
 
     def __eq__(self, other):

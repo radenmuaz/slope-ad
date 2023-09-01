@@ -767,8 +767,6 @@ class ArrayBuffer:
 
 
 class Array(BaseArray):
-    __array_priority__ = 1000
-
     def __init__(self, rt, val: ArrayBuffer):
         super().__init__(rt)
         assert isinstance(val, ArrayBuffer)
@@ -820,8 +818,6 @@ class TracerArray(BaseArray):
         float,
         # Array,
     }
-    __array_priority__ = 2000
-
     _trace: "Trace"
 
     # @property

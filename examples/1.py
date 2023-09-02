@@ -2,7 +2,6 @@ import slope
 from slope import numpy as snp
 
 
-@slope.jit
 def f(x):
     y = x * 3.0
     z = g(y)
@@ -15,5 +14,7 @@ def g(x):
 
 
 x = snp.ones(3)
-out = f(x)
-print(out)
+print(f(x))
+print(slope.machine.backend.callable.cache_info())
+print(f(x))
+print(slope.machine.backend.callable.cache_info())

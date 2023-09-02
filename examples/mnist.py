@@ -81,10 +81,9 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
+@slope.jit
 def loss_fn(params, batch):
-    # print("loss_fn jit, this text should be printed only once.")
     inputs, targets = batch
-
     preds = predict(params, inputs)
     return -(preds * targets).sum()
 
@@ -123,9 +122,9 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield snp.array(
-                    train_images[batch_idx]
-                ), snp.array(train_labels[batch_idx])
+                yield snp.array(train_images[batch_idx]), snp.array(
+                    train_labels[batch_idx]
+                )
 
     batches = data_stream()
 
@@ -133,9 +132,8 @@ if __name__ == "__main__":
     # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
     opt_init, opt_update, get_params = optim.adam(step_size)
     opt_state = opt_init(init_params)
-    # g_loss_fn = slope.grad(loss_fn)
-    g_loss_fn = slope.jit(slope.grad(loss_fn))
-    # g_loss_fn = slope.grad(slope.jit(loss_fn)) # TODO: cache miss
+    g_loss_fn = slope.grad(loss_fn)
+
     def update(i, opt_state, batch):
         params = get_params(opt_state)
         loss, (g_params, _) = g_loss_fn(params, batch)
@@ -148,7 +146,7 @@ if __name__ == "__main__":
         start_time = time.time()
 
         for i in tqdm(range(num_batches)):
-            print(slope.machine.backend.callable.cache_info())
+            # print(slope.machine.backend.callable.cache_info())
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
                 print(f"loss: {loss.val:.2f}")

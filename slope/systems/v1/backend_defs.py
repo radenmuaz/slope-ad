@@ -141,8 +141,10 @@ def f(self, program, args) -> List[Any]:
 
         if len(op_impl_code_lines) > 2:
             # kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
-            params = {k: v if not isinstance(v, slope.core.DType)
-                    else self.dtype_map[v] for k, v in instr.params.items()}
+            params = {
+                k: v if not isinstance(v, slope.core.DType) else self.dtype_map[v]
+                for k, v in instr.params.items()
+            }
             kwargs_str = ", ".join([f"{k}={v}" for k, v in params.items()])
             rhs = f"{instr.op.name}({args_str}, {kwargs_str})"
             code_line = f"{lhs} = {rhs}"

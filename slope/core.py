@@ -642,6 +642,7 @@ class Program(NamedTuple):
 
     def __hash__(self):
         return hash(repr(self))
+
     def __eq__(self, other):
         return self is other
 
@@ -753,10 +754,11 @@ class Array(BaseArray):
         return id(self.val)
 
     val = property(lambda self: self.buf.val)
+
     @property
     def dtype(self):
         return self.machine.backend.dtype_map_inv[self.buf.val.dtype]
-    
+
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
 
@@ -1030,7 +1032,7 @@ class Machine:
         if isinstance(x, TracerArray):
             return x.aval
         elif type(x) in TracerArray.TYPES:
-            return self.array(np.asarray(x))
+            return self.system.array(x)
         elif isinstance(x, Array):
             return x
         elif isinstance(x, VoidArray):
@@ -1629,12 +1631,19 @@ class Machine:
     def grad(self, f):
         def gradfun(x, *xs):
             y, f_vjp = self.vjp(f, x, *xs)
+
+            #     f_vjp = self.jit(f_vjp)
             if np.shape(y) != ():
                 raise TypeError
             out = f_vjp(self.system.ones(()))
             return y, out
 
-        return gradfun
+        if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
+            # unjit then jit back
+            f = f.__closure__[0].cell_contents
+            return self.jit(gradfun)
+        else:
+            return gradfun
 
     def jit(self, f):
         def f_jitted(*args):
@@ -1737,7 +1746,7 @@ class Backend:
 
     def set_dtype_map(self, dtype_map):
         self.dtype_map = dtype_map
-        self.dtype_map_inv = {v:k for k,v in dtype_map.items()}
+        self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
 
     def set_codegen(self, fn):
         self.codegen = types.MethodType(fn, self)
@@ -1989,7 +1998,8 @@ class ProgramBuilder:
     ) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
         scalars = [
-            type(x) in TracerArray.TYPES and not self.get_aval(x).shape for x in consts
+            type(x) in TracerArray.TYPES and not self.machine.get_aval(x).shape
+            for x in consts
         ]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)

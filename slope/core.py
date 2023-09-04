@@ -282,9 +282,9 @@ class Op:
                 return (x, y), params
 
             if type(x) in [bool, int, float]:
-                x = self.machine.system.array(x, dtype=y.dtype)
+                x = self.machine.env.array(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
-                y = self.machine.system.array(y, dtype=x.dtype)
+                y = self.machine.env.array(y, dtype=x.dtype)
 
             if type(x) is Array and isinstance(y, TracerArray):
                 x = y._trace.pure(x)
@@ -402,6 +402,10 @@ class ProcsDir:
     def register(self, fn):
         setattr(self, fn.__name__, fn)
         return fn
+    
+    def alias(self, fn, name):
+        assert fn in vars(self)
+        setattr(self, name, fn)
 
 
 class DType(NamedTuple):
@@ -471,7 +475,7 @@ class BaseArray:
 
 
 @dataclass
-class System:
+class Env:
     ops_dir: OpsDir
     procs_dir: ProcsDir
     backends: dict
@@ -765,11 +769,11 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(self.machine.system.ops_dir).keys():
-            op = getattr(self.machine.system.ops_dir, attr)
+        if attr in vars(self.machine.env.ops_dir).keys():
+            op = getattr(self.machine.env.ops_dir, attr)
             return partial(op.impl, self)
-        elif attr in vars(self.machine.system.procs_dir).keys():
-            proc = getattr(self.machine.system.procs_dir, attr)
+        elif attr in vars(self.machine.env.procs_dir).keys():
+            proc = getattr(self.machine.env.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"use machine.{attr} instead of Array.{attr}"
@@ -821,11 +825,11 @@ class TracerArray(BaseArray):
         return self
 
     def __getattr__(self, attr):
-        if attr in vars(self.machine.system.ops_dir).keys():
-            op = getattr(self.machine.system.ops_dir, attr)
+        if attr in vars(self.machine.env.ops_dir).keys():
+            op = getattr(self.machine.env.ops_dir, attr)
             return partial(op, self)
-        elif attr in vars(self.machine.system.procs_dir).keys():
-            proc = getattr(self.machine.system.procs_dir, attr)
+        elif attr in vars(self.machine.env.procs_dir).keys():
+            proc = getattr(self.machine.env.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"Access this proc by Array.{attr}"
@@ -991,7 +995,7 @@ def f(self, unks_in, instr) -> Tuple[Instr, Instr, List[bool], List[Var]]:
 class Machine:
     def __init__(
         self,
-        system,
+        env,
         default_backend="numpy",
     ):
         self.trace_stack: List[MainTrace] = []
@@ -1009,14 +1013,14 @@ class Machine:
             UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval)
         )
 
-        self.system = system
-        self.system.set_machine(self)
-        self.system.ops_dir.register(jit_op)
-        for op_name in vars(self.system.ops_dir):
-            getattr(self.system.ops_dir, op_name).set_machine(self)
-        for _, backend in self.system.backends.items():
+        self.env = env
+        self.env.set_machine(self)
+        self.env.ops_dir.register(jit_op)
+        for op_name in vars(self.env.ops_dir):
+            getattr(self.env.ops_dir, op_name).set_machine(self)
+        for _, backend in self.env.backends.items():
             backend.set_machine(self)
-        self.backend = self.system.backends[default_backend]
+        self.backend = self.env.backends[default_backend]
 
     def pprint_trace_stack(self):
         for trace in self.trace_stack:
@@ -1032,7 +1036,7 @@ class Machine:
         if isinstance(x, TracerArray):
             return x.aval
         elif type(x) in TracerArray.TYPES:
-            return self.system.array(x)
+            return self.env.array(x)
         elif isinstance(x, Array):
             return x
         elif isinstance(x, VoidArray):
@@ -1043,15 +1047,15 @@ class Machine:
 
     # @property
     # def ops(self):
-    #     return self.system.ops_dir
+    #     return self.env.ops_dir
 
     # @property
     # def procs(self):
-    #     return self.system.procs_dir
+    #     return self.env.procs_dir
 
     # @property
     # def backends(self):
-    #     return self.system.backends
+    #     return self.env.backends
 
     def tree_flatten(self, x: Any) -> Any:
         def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
@@ -1274,7 +1278,7 @@ class Machine:
 
     def jacfwd(self, f, x):
         pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
-        vecs_in = self.system.eye(math.prod(x.shape)).reshape(x.shape * 2)
+        vecs_in = self.env.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
     @lru_cache
@@ -1586,7 +1590,7 @@ class Machine:
                 primal_env[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_env.pop(v, self.system.zeros(v.aval.shape, v.aval.dtype))
+            return ct_env.pop(v, self.env.zeros(v.aval.shape, v.aval.dtype))
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
@@ -1635,7 +1639,7 @@ class Machine:
             #     f_vjp = self.jit(f_vjp)
             if np.shape(y) != ():
                 raise TypeError
-            out = f_vjp(self.system.ones(()))
+            out = f_vjp(self.env.ones(()))
             return y, out
 
         if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
@@ -1802,7 +1806,7 @@ class JitFn:
             print(self.code)
             breakpoint()
             raise
-        return [self.machine.system.array(ArrayBuffer(o)) for o in outs]
+        return [self.machine.env.array(ArrayBuffer(o)) for o in outs]
 
 
 BatchAxis = Union[None, int]
@@ -1880,14 +1884,14 @@ class JVPTracerArray(TracerArray):
 
 class JVPTrace(Trace):
     pure = lift = lambda self, val: JVPTracerArray(
-        self.machine, self, val, self.machine.system.zeros_like(val)
+        self.machine, self, val, self.machine.env.zeros_like(val)
     )
     # def pure(self, val):
     #     aval = self.machine.get_aval(val)
     #     val = aval if not isinstance(aval, TracerArray) else val
 
     #     return JVPTracerArray(
-    #         self.machine, self, val, sp.machine.system.zeros(aval.shape, aval.dtype)
+    #         self.machine, self, val, sp.machine.env.zeros(aval.shape, aval.dtype)
     #     )
 
     # lift = pure

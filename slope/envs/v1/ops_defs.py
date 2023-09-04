@@ -309,11 +309,11 @@ def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return (
             (x == z).where(
-                self.machine.system.ones_like(z), self.machine.system.zeros_like(z)
+                self.machine.env.ones_like(z), self.machine.env.zeros_like(z)
             )
         ) / (
             (y == z).where(
-                self.machine.system.full_like(z, 2), self.machine.system.ones_like(z)
+                self.machine.env.full_like(z, 2), self.machine.env.ones_like(z)
             )
         )
 
@@ -342,7 +342,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [self.machine.system.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.env.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @equal.set_T
@@ -364,7 +364,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
-    return [out_primal], [self.machine.system.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [self.machine.env.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @not_equal.set_T
@@ -883,13 +883,13 @@ ops.register(constant)
 
 @constant.set_run
 def f(self, *, val, dtype=BaseArray.default_dtype):
-    return [self.machine.system.array(val, dtype)]
+    return [self.machine.env.array(val, dtype)]
 
 
 @constant.set_jvp
 def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
-    out = self.machine.system.array(val, dtype)
-    out_jvp = self.machine.system.ones_like(out)
+    out = self.machine.env.array(val, dtype)
+    out_jvp = self.machine.env.ones_like(out)
     return [out], [out_jvp]
 
 

@@ -1,6 +1,6 @@
 import slope
-from slope.systems.v1.ops_defs import ops
-from slope.systems.v1.procs_defs import procs
+from slope.envs.v1.ops_defs import ops
+from slope.envs.v1.procs_defs import procs
 from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
 import numpy as np
 from typing import (

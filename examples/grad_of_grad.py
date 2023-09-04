@@ -10,7 +10,7 @@ def f(x):
 
 
 def g(x):
-    #   return x * machine.system.array(2.)
+    #   return x * machine.env.array(2.)
     return x * 2.0
 
 
@@ -35,8 +35,8 @@ for i in range(3):
 # print(slope.grad(f)(snp.array(3.0)))
 # print(slope.grad(f)(snp.array(3.0)))
 
-# print(machine.grad(g)(machine.system.array(3.)))
-# print(g(machine.system.array(3.)))
+# print(machine.grad(g)(machine.env.array(3.)))
+# print(g(machine.env.array(3.)))
 
 
 # -

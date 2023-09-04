@@ -1,7 +1,7 @@
-from slope.systems.v1 import v1_system
+from slope.envs.v1 import v1_env
 from slope import core
 
-machine = core.Machine(system=v1_system)
+machine = core.Machine(env=v1_env)
 
 jvp = machine.jvp
 vmap = machine.vmap
@@ -14,5 +14,5 @@ register_pytree_node = machine.register_pytree_node
 tree_flatten = machine.tree_flatten
 tree_unflatten = machine.tree_unflatten
 
-system = machine.system
-numpy = system
+env = machine.env
+numpy = env

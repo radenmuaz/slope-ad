@@ -39,14 +39,14 @@ def f(self, x):
 @stop_gradient.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x], [slope.M().zeros_like(x_dot)]
+    return [x], [slope.M.zeros_like(x_dot)]
 
 
 @stop_gradient.set_T
 def f(self, cts, x):
     (z,) = cts
     assert type(x) is UndefPrimal
-    return [sp.zeros_like(z)]
+    return [slope.env.zeros_like(z)]
 
 
 convert = Op.unary("convert")
@@ -57,7 +57,7 @@ ops.alias(convert, "astype")
 
 @convert.set_run
 def f(self, x, *, dtype):
-    return [x.convert(slope.M().backend.dtype_map[dtype])]
+    return [x.convert(slope.M.backend.dtype_map[dtype])]
 
 
 @convert.set_jvp
@@ -101,14 +101,13 @@ def f(self, x):
 @sin.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    ans = x.sin()
-    return [ans], [(math.pi / 2) - (x_dot * ans)]
+    return [x.sin()], [(x_dot * ((math.pi/2)-x).sin())]
 
 
 @sin.set_T
 def f(self, cts, x):
     (z,) = cts
-    return [(math.pi / 2) - (z * x.sin())]
+    return [(z * ((math.pi/2)-x).sin())]
 
 
 exp = Op.unary("exp")
@@ -911,7 +910,7 @@ ops.register(full)
 @full.set_run
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [
-        slope.M().backend.run_impl(
+        slope.M.backend.run_impl(
             self, shape=shape, fill_value=fill_value, dtype=dtype
         )
     ]
@@ -919,10 +918,10 @@ def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
 
 @full.set_jvp
 def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
-    out = slope.M().backend.run_impl(
+    out = slope.M.backend.run_impl(
         self, shape=shape, fill_value=fill_value, dtype=dtype
     )
-    out_jvp = slope.M().ones_like(out)
+    out_jvp = slope.M.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -944,13 +943,13 @@ ops.alias(random_uniform, "randn")
 
 @random_uniform.set_run
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [slope.M().backend.run_impl(self, shape=shape, dtype=dtype)]
+    return [slope.M.backend.run_impl(self, shape=shape, dtype=dtype)]
 
 
 @random_uniform.set_jvp
 def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = slope.M().backend.run_impl(self, shape=shape, dtype=dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = slope.M.backend.run_impl(self, shape=shape, dtype=dtype)
+    out_jvp = slope.M.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -972,13 +971,13 @@ ops.alias(random_normal, "randn")
 
 @random_normal.set_run
 def f(self, *, shape, dtype=BaseArray.default_dtype):
-    return [slope.M().backend.run_impl(random_normal, shape=shape, dtype=dtype)]
+    return [slope.M.backend.run_impl(random_normal, shape=shape, dtype=dtype)]
 
 
 @random_normal.set_jvp
 def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
-    out = slope.M().backend.run_impl(random_normal, shape, dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = slope.M.backend.run_impl(random_normal, shape, dtype)
+    out_jvp = slope.M.ones_like(out)
     return [out], [out_jvp]
 
 
@@ -1008,15 +1007,15 @@ def f(self, *, start, stop=None, stride=None, dtype=BaseArray.default_dtype):
 
 @arange.set_run
 def f(self, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
-    return [slope.M().backend.run_impl(arange, start, stop, stride, dtype)]
+    return [slope.M.backend.run_impl(arange, start, stop, stride, dtype)]
 
 
 @arange.set_jvp
 def f(
     self, primals, tangents, *, start, stop, stride=None, dtype=BaseArray.default_dtype
 ):
-    out = slope.M().backend.run_impl(arange, start, stop, stride, dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = slope.M.backend.run_impl(arange, start, stop, stride, dtype)
+    out_jvp = slope.M.ones_like(out)
     return [out], [out_jvp]
 
 

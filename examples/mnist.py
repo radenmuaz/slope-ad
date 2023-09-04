@@ -132,7 +132,7 @@ if __name__ == "__main__":
     # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
     opt_init, opt_update, get_params = optim.adam(step_size)
     opt_state = opt_init(init_params)
-    g_loss_fn = slope.grad(loss_fn)
+    g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)

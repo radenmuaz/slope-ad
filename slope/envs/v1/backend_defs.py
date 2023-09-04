@@ -53,7 +53,7 @@ def f(self, program, codegen_out, fn_name):
     for instr in program.instrs:
         if instr.op == slope.core.jit_op:
             continue
-        impl = slope.M().backend.impls[instr.op]
+        impl = slope.M.backend.impls[instr.op]
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
         if op_impl_code_lines[0][0] == "@":  # skip decorator line
             op_impl_code_lines = op_impl_code_lines[1:]
@@ -118,7 +118,7 @@ def f(self, program, args) -> List[Any]:
             nzs += 1
         out_vals = list_map(lambda z: env[z], instr.out_binders)
 
-        impl = slope.M().backend.impls[instr.op]
+        impl = slope.M.backend.impls[instr.op]
         args_str = ", ".join(in_vals)
         lhs = (
             f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"

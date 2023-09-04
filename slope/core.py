@@ -37,7 +37,7 @@ import math
 import inspect
 from functools import partial, lru_cache
 
-import slope as sp
+import slope
 import importlib
 
 max_ = max
@@ -115,13 +115,8 @@ class Op:
         self.name = name
         self.op_type = op_type
         self.impls = dict()
-        self.machine_ref = None
         self.args_fixer = lambda *args, **params: (args, params)
 
-    def set_machine(self, rt):
-        self.machine_ref = weakref.ref(rt)
-
-    machine = property(lambda self: self.machine_ref())
 
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
@@ -161,12 +156,12 @@ class Op:
     def impl(self, *args, **params):
         args, params = self.pack_args(args, params)
         args, params = self.args_fixer(*args, **params)
-        return self.machine.backend.run_impl(self, *args, **params)
+        return slope.M().backend.run_impl(self, *args, **params)
 
     def __call__(self, *args, **params):
         args, params = self.pack_args(args, params)
         args, params = self.args_fixer(*args, **params)
-        return self.machine.bind1(self, *args, **params)
+        return slope.M().bind1(self, *args, **params)
 
     def args_fixer(self, *args, **params):
         raise NotImplementedError
@@ -179,8 +174,7 @@ class Op:
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.shape_run(*avals_in, **params)
         tracers_out = [
-            PartialEvalTracerArray(
-                self.machine, trace, self.machine.make_unknown_pval(aval), None
+            PartialEvalTracerArray(trace, slope.M().make_unknown_pval(aval), None
             )
             for aval in avals_out
         ]
@@ -282,9 +276,9 @@ class Op:
                 return (x, y), params
 
             if type(x) in [bool, int, float]:
-                x = self.machine.env.array(x, dtype=y.dtype)
+                x = slope.env.array(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
-                y = self.machine.env.array(y, dtype=x.dtype)
+                y = slope.env.array(y, dtype=x.dtype)
 
             if type(x) is Array and isinstance(y, TracerArray):
                 x = y._trace.pure(x)
@@ -428,11 +422,6 @@ class BaseArray:
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
     default_dtype = float32
 
-    def __init__(self, rt):
-        self.machine_ref = weakref.ref(rt)
-
-    machine = property(lambda self: self.machine_ref())
-
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
 
@@ -479,12 +468,6 @@ class Env:
     ops_dir: OpsDir
     procs_dir: ProcsDir
     backends: dict
-    machine_ref: weakref.ref = None
-
-    def set_machine(self, rt):
-        self.machine_ref = weakref.ref(rt)
-
-    machine = property(lambda self: self.machine_ref())
 
     def array(
         self,
@@ -492,9 +475,9 @@ class Env:
         dtype: Optional[Any] = BaseArray.default_dtype,
     ):
         return (
-            Array(self.machine, val)
+            Array( val)
             if isinstance(val, ArrayBuffer)
-            else self.machine.backend.run_impl(
+            else slope.M().backend.run_impl(
                 self.ops_dir.constant, val=val, dtype=dtype
             )
         )
@@ -576,7 +559,7 @@ class VoidArray:
     def like(cls, aval):
         shape = aval.shape
         if isinstance(aval, Array):
-            dtype = aval.machine.backend.dtype_map_inv[aval.buf.val.dtype]
+            dtype = slope.M().backend.dtype_map_inv[aval.buf.val.dtype]
         else:
             dtype = aval.dtype
         return cls(shape, dtype)
@@ -720,11 +703,8 @@ class MainTrace(NamedTuple):
 class Trace:
     main: MainTrace
 
-    def __init__(self, rt, main: MainTrace) -> None:
-        self.machine_ref = weakref.ref(rt)
+    def __init__(self, main: MainTrace) -> None:
         self.main = main
-
-    machine = property(lambda self: self.machine_ref())
 
     def pure(self, val):
         raise NotImplementedError
@@ -749,8 +729,7 @@ class ArrayBuffer:
 
 
 class Array(BaseArray):
-    def __init__(self, rt, val: ArrayBuffer):
-        super().__init__(rt)
+    def __init__(self, val: ArrayBuffer):
         assert isinstance(val, ArrayBuffer)
         self.buf = val
 
@@ -761,7 +740,7 @@ class Array(BaseArray):
 
     @property
     def dtype(self):
-        return self.machine.backend.dtype_map_inv[self.buf.val.dtype]
+        return slope.M().backend.dtype_map_inv[self.buf.val.dtype]
 
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
@@ -769,11 +748,11 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(self.machine.env.ops_dir).keys():
-            op = getattr(self.machine.env.ops_dir, attr)
+        if attr in vars(slope.env.ops_dir).keys():
+            op = getattr(slope.env.ops_dir, attr)
             return partial(op.impl, self)
-        elif attr in vars(self.machine.env.procs_dir).keys():
-            proc = getattr(self.machine.env.procs_dir, attr)
+        elif attr in vars(slope.env.procs_dir).keys():
+            proc = getattr(slope.env.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"use machine.{attr} instead of Array.{attr}"
@@ -825,11 +804,11 @@ class TracerArray(BaseArray):
         return self
 
     def __getattr__(self, attr):
-        if attr in vars(self.machine.env.ops_dir).keys():
-            op = getattr(self.machine.env.ops_dir, attr)
+        if attr in vars(slope.env.ops_dir).keys():
+            op = getattr(slope.env.ops_dir, attr)
             return partial(op, self)
-        elif attr in vars(self.machine.env.procs_dir).keys():
-            proc = getattr(self.machine.env.procs_dir, attr)
+        elif attr in vars(slope.env.procs_dir).keys():
+            proc = getattr(slope.env.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"Access this proc by Array.{attr}"
@@ -897,7 +876,7 @@ def f(self, *args, program, num_consts):
     hashed_consts = tuple(map(Hashed, consts))
     # print(args, hash(hashed_program), hash(hashed_consts))
     # print([o.aval for o in program.outs])
-    jit_fn = self.machine.backend.callable(hashed_program, hashed_consts)
+    jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
     # return jit_fn(*args, *consts)
 
@@ -905,8 +884,8 @@ def f(self, *args, program, num_consts):
 @jit_op.set_jvp
 def f(self, primals, tangents, *, program, num_consts):
     del num_consts
-    new_program, new_consts = self.machine.jvp_program(program)
-    outs = self.machine.bind(
+    new_program, new_consts = slope.M().jvp_program(program)
+    outs = slope.M().bind(
         self,
         *new_consts,
         *primals,
@@ -921,7 +900,7 @@ def f(self, primals, tangents, *, program, num_consts):
 
 @jit_op.set_shape_run
 def f(self, *in_types, program, num_consts):
-    program_type = self.machine.typecheck_program(program)
+    program_type = slope.M().typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
         raise TypeError
     return program_type.out_types
@@ -930,11 +909,11 @@ def f(self, *in_types, program, num_consts):
 @jit_op.set_T
 def f(self, cts, *invals, program, num_consts):
     undef_primals = [type(x) is UndefPrimal for x in invals]
-    transposed_program, new_consts = self.machine.transpose_program(
+    transposed_program, new_consts = slope.M().transpose_program(
         program, tuple(undef_primals)
     )
     residuals, _ = partition_list(undef_primals, invals)
-    outs = self.machine.bind(
+    outs = slope.M().bind(
         self,
         *new_consts,
         *residuals,
@@ -949,19 +928,19 @@ def f(self, cts, *invals, program, num_consts):
 @jit_op.set_partial_run
 def f(self, trace, tracers, *, program, num_consts):
     in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = self.machine.partial_run_program(
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
         program, in_unknowns
     )
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = self.machine.bind(jit_op, *known_vals, program=program1, num_consts=0)
+    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1, num_consts=0)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [
-        trace.instantiate_const(self.machine.full_raise(trace, x)) for x in res
+        trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res
     ]
     outs2 = [
         PartialEvalTracerArray(
-            self.machine, trace, self.machine.make_unknown_pval(v.aval), None
+            slope.M(), trace, slope.M().make_unknown_pval(v.aval), None
         )
         for v in program2.outs
     ]
@@ -981,7 +960,7 @@ def f(self, trace, tracers, *, program, num_consts):
 @jit_op.set_partial_run_instr
 def f(self, unks_in, instr) -> Tuple[Instr, Instr, List[bool], List[Var]]:
     program = instr.params["program"]
-    program1, program2, out_unknowns, num_res = self.machine.partial_run_program(
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
         program, unks_in
     )
     ins1, ins2 = partition_list(unks_in, instr.inputs)
@@ -1014,12 +993,7 @@ class Machine:
         )
 
         self.env = env
-        self.env.set_machine(self)
         self.env.ops_dir.register(jit_op)
-        for op_name in vars(self.env.ops_dir):
-            getattr(self.env.ops_dir, op_name).set_machine(self)
-        for _, backend in self.env.backends.items():
-            backend.set_machine(self)
         self.backend = self.env.backends[default_backend]
 
     def pprint_trace_stack(self):
@@ -1144,7 +1118,7 @@ class Machine:
         )
         if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
             top_main = self.dynamic_trace
-        return top_main.trace_type(self, top_main)
+        return top_main.trace_type(top_main)
 
     def full_raise(self, trace: Trace, val: Any) -> TracerArray:
         if not isinstance(val, TracerArray):
@@ -1225,7 +1199,7 @@ class Machine:
         with self.new_main(BatchTrace, axis_size) as main:
             trace = BatchTrace(main)
             tracers_in = [
-                BatchTracerArray(self, trace, x, ax) if ax is not None else x
+                BatchTracerArray(trace, x, ax) if ax is not None else x
                 for x, ax in list_zip(args, in_axes)
             ]
             outs = f(*tracers_in)
@@ -1251,9 +1225,9 @@ class Machine:
 
     def jvp_flat(self, f, primals, tangents):
         with self.new_main(JVPTrace) as main:
-            trace = JVPTrace(self, main)
+            trace = JVPTrace(main)
             tracers_in = [
-                JVPTracerArray(self, trace, x, t)
+                JVPTracerArray(trace, x, t)
                 for x, t in list_zip(primals, tangents)
             ]
             outs = f(*tracers_in)
@@ -1290,10 +1264,10 @@ class Machine:
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree = self.flatten_fun(f, in_tree)
 
-        builder = ProgramBuilder(self)
+        builder = ProgramBuilder()
         with self.new_main(ProgramTrace, builder) as main:
             with self.new_dynamic(main):
-                trace = ProgramTrace(self, main)
+                trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in)
                 tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1317,7 +1291,7 @@ class Machine:
         self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Program, List["PartialVal"], List[Any]]:
         with self.new_main(PartialEvalTrace) as main:
-            trace = PartialEvalTrace(self, main)
+            trace = PartialEvalTrace(main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1702,7 +1676,6 @@ class Backend:
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()
-        self.machine_ref: Machine = None
         self.deps_dict = dict()
         self.codegen_depth = 0
         self.codegen_idx = 0
@@ -1714,11 +1687,6 @@ class Backend:
             else:
                 self.deps_dict[dep] = importlib.import_module(dep)
 
-    def set_machine(self, rt):
-        self.machine_ref = weakref.ref(rt)
-
-    machine = property(lambda self: self.machine_ref())
-
     @lru_cache
     def callable(
         self,
@@ -1726,7 +1694,7 @@ class Backend:
         hashed_consts: Tuple[Hashed, ...],
     ):
         program: Program = hashed_program.val
-        self.machine.typecheck_program(program)
+        slope.M().typecheck_program(program)
         consts = [x.val for x in hashed_consts]
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         fn_name = f"{self.name.lower()}_fn"
@@ -1737,7 +1705,7 @@ class Backend:
             # in_avals=tuple([v.aval for v in program.outs])
         )
         fn, code = self.compile(program, codegen_out, fn_name)
-        compiled = sp.core.JitFn(self.machine, code, fn, consts)
+        compiled = JitFn( code, fn, consts)
         return compiled
 
     def codegen(self, program, args, in_avals, name: str):
@@ -1777,28 +1745,25 @@ class Backend:
         args = tuple([process_arg(a) for a in args])
         params = {k: process_arg(v) for k, v in params.items()}
         val = self.impls[op](*args, **params)
-        return Array(self.machine, ArrayBuffer(val))
+        return Array(ArrayBuffer(val))
 
     def set_input_handler(self, typ, fn):
         self.input_handlers[typ] = fn
 
 
 class JitFn:
-    def __init__(self, machine, code, fn, consts):
+    def __init__(self, code, fn, consts):
         super().__init__()
-        self.machine_ref = weakref.ref(machine)
         self.code = code
         self.fn = fn
         self.consts = consts
 
-    machine = property(lambda self: self.machine_ref())
-
     def __call__(self, *args, **params):
         # args = [a.val if isinstance(a, Array) else a for a in args]
-        args = self.machine.tree_map(
+        args = slope.M().tree_map(
             lambda a: a.val if isinstance(a, Array) else a, args
         )
-        args, in_tree = self.machine.tree_flatten(args)
+        args, in_tree = slope.M().tree_flatten(args)
         try:
             # outs = self.fn(*self.consts, *args, **params)
             outs = self.fn(*args, **params)
@@ -1806,15 +1771,15 @@ class JitFn:
             print(self.code)
             breakpoint()
             raise
-        return [self.machine.env.array(ArrayBuffer(o)) for o in outs]
+        return [slope.env.array(ArrayBuffer(o)) for o in outs]
 
 
 BatchAxis = Union[None, int]
 
 
 class BatchTracerArray(TracerArray):
-    def __init__(self, rt, trace, val, batch_dim: BatchAxis):
-        super().__init__(rt)
+    def __init__(self,  trace, val, batch_dim: BatchAxis):
+
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1831,7 +1796,7 @@ class BatchTracerArray(TracerArray):
 
     def full_lower(self):
         if self.batch_dim is None:
-            return self.machine.full_lower(self.val)
+            return slope.M().full_lower(self.val)
         else:
             return self
 
@@ -1871,27 +1836,26 @@ class BatchTrace(Trace):
 
 
 class JVPTracerArray(TracerArray):
-    def __init__(self, rt, trace, primal, tangent):
-        super().__init__(rt)
+    def __init__(self,  trace, primal, tangent):
+
         self._trace = trace
         self.primal = primal
         self.tangent = tangent
 
     @property
     def aval(self):
-        return self.machine.get_aval(self.primal)
+        return slope.M().get_aval(self.primal)
 
 
 class JVPTrace(Trace):
-    pure = lift = lambda self, val: JVPTracerArray(
-        self.machine, self, val, self.machine.env.zeros_like(val)
+    pure = lift = lambda self, val: JVPTracerArray( self, val, slope.env.zeros_like(val)
     )
     # def pure(self, val):
-    #     aval = self.machine.get_aval(val)
+    #     aval = slope.M().get_aval(val)
     #     val = aval if not isinstance(aval, TracerArray) else val
 
     #     return JVPTracerArray(
-    #         self.machine, self, val, sp.machine.env.zeros(aval.shape, aval.dtype)
+    #         slope.M(), self, val, sp.machine.env.zeros(aval.shape, aval.dtype)
     #     )
 
     # lift = pure
@@ -1900,7 +1864,7 @@ class JVPTrace(Trace):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray(self.machine, self, x, t)
+            JVPTracerArray( self, x, t)
             for x, t in list_zip(primal_outs, tangent_outs)
         ]
 
@@ -1909,8 +1873,8 @@ class ProgramTracerArray(TracerArray):
     __slots__ = ["aval"]
     aval: VoidArray
 
-    def __init__(self, rt, trace, aval):
-        super().__init__(rt)
+    def __init__(self,  trace, aval):
+
         self._trace = trace
         self.aval = aval
 
@@ -1926,7 +1890,7 @@ class ProgramTrace(Trace):
     def get_or_make_const_tracer(self, val: Any) -> ProgramTracerArray:
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, self.machine.get_aval(val))
+            tracer = self.builder.new_tracer(self, slope.M().get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
@@ -1953,18 +1917,15 @@ class ProgramBuilder:
     constvals: Dict[Var, Any]
     tracers: List[ProgramTracerArray]
 
-    def __init__(self, rt):
-        self.machine_ref = weakref.ref(rt)
+    def __init__(self):
         self.instrs = []
         self.tracer_to_var = {}
         self.const_tracers = {}
         self.constvals = {}
         self.tracers = []
 
-    machine = property(lambda self: self.machine_ref())
-
     def new_tracer(self, trace: ProgramTrace, aval: VoidArray) -> ProgramTracerArray:
-        tracer = ProgramTracerArray(self.machine, trace, aval)
+        tracer = ProgramTracerArray(trace, aval)
         self.tracers.append(tracer)
         return tracer
 
@@ -1993,7 +1954,7 @@ class ProgramBuilder:
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
         program = Program(in_binders, self.instrs, out_vars)
-        self.machine.typecheck_program(program)
+        slope.M().typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals
 
@@ -2002,7 +1963,7 @@ class ProgramBuilder:
     ) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
         scalars = [
-            type(x) in TracerArray.TYPES and not self.machine.get_aval(x).shape
+            type(x) in TracerArray.TYPES and not slope.M().get_aval(x).shape
             for x in consts
         ]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
@@ -2019,7 +1980,7 @@ class ProgramBuilder:
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
         new_program = Program(new_const_binders + other_binders, new_instrs, new_outs)
-        self.machine.typecheck_program(new_program)
+        slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
 
 
@@ -2066,8 +2027,8 @@ class PartialEvalTracerArray(TracerArray):
     pval: PartialVal
     proto: Optional[ProgramProto]
 
-    def __init__(self, rt, trace, pval, proto):
-        super().__init__(rt)
+    def __init__(self,  trace, pval, proto):
+
         self._trace = trace
         self.pval = pval
         self.proto = proto
@@ -2076,17 +2037,16 @@ class PartialEvalTracerArray(TracerArray):
 
     def full_lower(self):
         if self.pval.is_known:
-            return self.machine.full_lower(self.pval.const)
+            return slope.M().full_lower(self.pval.const)
         return self
 
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracerArray(self.machine, self, pval, LambdaBindingProto())
+        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
-        return PartialEvalTracerArray(
-            self.machine, self, self.machine.make_known_pval(val), None
+        return PartialEvalTracerArray(self, slope.M().make_known_pval(val), None
         )
 
     pure = lift
@@ -2097,14 +2057,13 @@ class PartialEvalTrace(Trace):
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = self.machine.make_unknown_pval(VoidArray.like(tracer.aval))
-            return PartialEvalTracerArray(
-                self.machine, self, pval, ConstProto(tracer.pval.const)
+            pval = slope.M().make_unknown_pval(VoidArray.like(tracer.aval))
+            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const)
             )
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return self.machine.bind(
-                op, *list_map(self.machine.full_lower, tracers), **params
+            return slope.M().bind(
+                op, *list_map(slope.M().full_lower, tracers), **params
             )
         return op.partial_run(self, tracers, **params)

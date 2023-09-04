@@ -1,18 +1,20 @@
 from slope.envs.v1 import v1_env
 from slope import core
+import weakref
 
 machine = core.Machine(env=v1_env)
+M = weakref.ref(machine)
 
-jvp = machine.jvp
-vmap = machine.vmap
-jit = machine.jit
-linearize = machine.linearize
-vjp = machine.vjp
-grad = machine.grad
+# shortcuts
+jvp = M().jvp
+vmap = M().vmap
+jit = M().jit
+linearize = M().linearize
+vjp = M().vjp
+grad = M().grad
+register_pytree_node = M().register_pytree_node
+tree_flatten = M().tree_flatten
+tree_unflatten = M().tree_unflatten
 
-register_pytree_node = machine.register_pytree_node
-tree_flatten = machine.tree_flatten
-tree_unflatten = machine.tree_unflatten
-
-env = machine.env
+env = M().env
 numpy = env

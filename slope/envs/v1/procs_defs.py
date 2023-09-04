@@ -332,12 +332,6 @@ def std(self, axis=None, keepdim=False, correction=1):
     ).sqrt()
 
 
-def argsort(x):
-    return type(x)(
-        sorted(range(len(x)), key=x.__getitem__)
-    )  # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
-
-
 def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
     return (x,) * cnt if isinstance(x, int) else x
 

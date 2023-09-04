@@ -1,15 +1,16 @@
 import slope
 from slope import numpy as snp
 from slope import jit, jvp, grad
-# @jit
-def f(x):
-  y = x * 2.
-  z = g(y)
-  return z
 
-# @jit
+
+def f(x):
+    y = x * 2.0
+    z = g(y)
+    return z
+
+
 def g(x):
-  return x.cos() * 2.
+    return x.cos() * 2.0
 
 
 # print(f(3.))
@@ -32,15 +33,15 @@ def g(x):
 # ans3, _ = jvp(f, (3.,), (5.,))
 # ans4, _ = jvp(jit(f), (3.,), (5.,))
 # print(ans1, ans2, ans3, ans4)
+x = snp.array(3.0)
+x_dot = snp.array(1.0)
 
-# deriv1 = grad(f)(3.)
-# deriv2 = grad(jit(f))(3.)
-# deriv3 = jit(grad(jit(f)))(3.)
-# _, deriv4 = jvp(f, (3.,), (1.,))
-# _, deriv5 = jvp(jit(f), (3.,), (1.,))
-# print(deriv1, deriv2, deriv3, deriv4, deriv5)
-x = snp.array(3.)
-x_dot = snp.array(1.)
+deriv1 = grad(f)(x)
+deriv2 = grad(jit(f))(x)
+deriv3 = jit(grad(jit(f)))(x)
+_, deriv4 = jvp(f, (x,), (x_dot,))
+_, deriv5 = jvp(jit(f), (x,), (x_dot,))
+print(deriv1, deriv2, deriv3, deriv4, deriv5)
 hess1 = grad(grad(f))(x)
 hess2 = grad(grad(jit(f)))(x)
 hess3 = grad(jit(grad(f)))(x)

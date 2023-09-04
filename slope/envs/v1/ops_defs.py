@@ -101,13 +101,13 @@ def f(self, x):
 @sin.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x.sin()], [(x_dot * ((math.pi/2)-x).sin())]
+    return [x.sin()], [(x_dot * ((math.pi / 2) - x).sin())]
 
 
 @sin.set_T
 def f(self, cts, x):
     (z,) = cts
-    return [(z * ((math.pi/2)-x).sin())]
+    return [(z * ((math.pi / 2) - x).sin())]
 
 
 exp = Op.unary("exp")
@@ -306,14 +306,8 @@ def f(self, x, y):
 @maximum.set_jvp
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return (
-            (x == z).where(
-                slope.env.ones_like(z), slope.env.zeros_like(z)
-            )
-        ) / (
-            (y == z).where(
-                slope.env.full_like(z, 2), slope.env.ones_like(z)
-            )
+        return ((x == z).where(slope.env.ones_like(z), slope.env.zeros_like(z))) / (
+            (y == z).where(slope.env.full_like(z, 2), slope.env.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -910,9 +904,7 @@ ops.register(full)
 @full.set_run
 def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
     return [
-        slope.M.backend.run_impl(
-            self, shape=shape, fill_value=fill_value, dtype=dtype
-        )
+        slope.M.backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
     ]
 
 

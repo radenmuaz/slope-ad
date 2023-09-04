@@ -117,7 +117,6 @@ class Op:
         self.impls = dict()
         self.args_fixer = lambda *args, **params: (args, params)
 
-
     def __repr__(self) -> str:
         return f"Op <{self.name}>"
 
@@ -174,8 +173,7 @@ class Op:
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.shape_run(*avals_in, **params)
         tracers_out = [
-            PartialEvalTracerArray(trace, slope.M.make_unknown_pval(aval), None
-            )
+            PartialEvalTracerArray(trace, slope.M.make_unknown_pval(aval), None)
             for aval in avals_out
         ]
         instr = InstrProto(
@@ -273,7 +271,7 @@ class Op:
                 args, params = self.pack_args(args, params)
                 args, params = self.args_fixer(*args, **params)
                 return slope.M.backend.run_impl(self, *args, **params)
-        
+
         op.impl = types.MethodType(impl, op)
 
         @op.set_args_fixer
@@ -292,7 +290,6 @@ class Op:
                 x = slope.env.array(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
                 y = slope.env.array(y, dtype=x.dtype)
-            
 
             if type(x) is Array and isinstance(y, TracerArray):
                 x = y._trace.pure(x)
@@ -411,7 +408,7 @@ class ProcsDir:
     def register(self, fn):
         setattr(self, fn.__name__, fn)
         return fn
-    
+
     def alias(self, fn, name):
         assert fn in vars(self)
         setattr(self, name, fn)
@@ -492,9 +489,7 @@ class Env:
         return (
             Array(val)
             if isinstance(val, ArrayBuffer)
-            else slope.M.backend.run_impl(
-                self.ops_dir.constant, val=val, dtype=dtype
-            )
+            else slope.M.backend.run_impl(self.ops_dir.constant, val=val, dtype=dtype)
         )
 
     def __getattr__(self, attr):
@@ -945,13 +940,9 @@ def f(self, trace, tracers, *, program, num_consts):
     known_vals = [t.pval.const for t in known_tracers]
     outs1_res = slope.M.bind(jit_op, *known_vals, program=program1, num_consts=0)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-    res_tracers = [
-        trace.instantiate_const(slope.M.full_raise(trace, x)) for x in res
-    ]
+    res_tracers = [trace.instantiate_const(slope.M.full_raise(trace, x)) for x in res]
     outs2 = [
-        PartialEvalTracerArray(
-            slope.M, trace, slope.M.make_unknown_pval(v.aval), None
-        )
+        PartialEvalTracerArray(slope.M, trace, slope.M.make_unknown_pval(v.aval), None)
         for v in program2.outs
     ]
     instr = InstrProto(
@@ -1237,8 +1228,7 @@ class Machine:
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
             tracers_in = [
-                JVPTracerArray(trace, x, t)
-                for x, t in list_zip(primals, tangents)
+                JVPTracerArray(trace, x, t) for x, t in list_zip(primals, tangents)
             ]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1717,7 +1707,7 @@ class Backend:
             # in_avals=tuple([v.aval for v in program.outs])
         )
         fn, code = self.compile(program, codegen_out, fn_name)
-        compiled = JitFn( code, fn, consts)
+        compiled = JitFn(code, fn, consts)
         return compiled
 
     def codegen(self, program, args, in_avals, name: str):
@@ -1772,9 +1762,7 @@ class JitFn:
 
     def __call__(self, *args, **params):
         # args = [a.val if isinstance(a, Array) else a for a in args]
-        args = slope.M.tree_map(
-            lambda a: a.val if isinstance(a, Array) else a, args
-        )
+        args = slope.M.tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
         args, in_tree = slope.M.tree_flatten(args)
         try:
             # outs = self.fn(*self.consts, *args, **params)
@@ -1790,8 +1778,7 @@ BatchAxis = Union[None, int]
 
 
 class BatchTracerArray(TracerArray):
-    def __init__(self,  trace, val, batch_dim: BatchAxis):
-
+    def __init__(self, trace, val, batch_dim: BatchAxis):
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1848,8 +1835,7 @@ class BatchTrace(Trace):
 
 
 class JVPTracerArray(TracerArray):
-    def __init__(self,  trace, primal, tangent):
-
+    def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
         self.tangent = tangent
@@ -1857,11 +1843,11 @@ class JVPTracerArray(TracerArray):
     @property
     def aval(self):
         return slope.M.get_aval(self.primal)
-    
+
     @property
     def val(self):
         return self.primal
-    
+
     @property
     def dtype(self):
         return self.primal.dtype
@@ -1873,27 +1859,27 @@ class JVPTrace(Trace):
         if isinstance(val, PartialEvalTrace):
             val = val.pval.const
         # elif isinstance(val, Array):
-            # val = val
+        # val = val
         return JVPTracerArray(self, val, slope.env.zeros_like(val))
-    lift = pure
 
+    lift = pure
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray( self, x, t)
-            for x, t in list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
         ]
 
 
 class ProgramTracerArray(TracerArray):
-    __slots__ = ['aval']
+    __slots__ = ["aval"]
     aval: VoidArray
 
     def __init__(self, trace, aval):
         self._trace = trace
         self.aval = aval
+
 
 class ProgramTrace(Trace):
     def new_arg(self, aval) -> ProgramTracerArray:
@@ -2040,15 +2026,13 @@ ProgramProto = Union[LambdaBindingProto, ConstProto, InstrProto]
 
 
 class PartialEvalTracerArray(TracerArray):
-    def __init__(self,  trace, pval, proto):
+    def __init__(self, trace, pval, proto):
         self._trace = trace
         self.pval = pval
         self.proto = proto
 
     aval = property(lambda self: self.pval.aval)
     val = property(lambda self: self.pval.const)
-
-    
 
     def full_lower(self):
         if self.pval.is_known:
@@ -2061,8 +2045,7 @@ class PartialEvalTrace(Trace):
         return PartialEvalTracerArray(self, pval, LambdaBindingProto())
 
     def lift(self, val: Any) -> PartialEvalTracerArray:
-        return PartialEvalTracerArray(self, slope.M.make_known_pval(val), None
-        )
+        return PartialEvalTracerArray(self, slope.M.make_known_pval(val), None)
 
     pure = lift
 
@@ -2073,12 +2056,9 @@ class PartialEvalTrace(Trace):
             return tracer
         else:
             pval = slope.M.make_unknown_pval(VoidArray.like(tracer.aval))
-            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const)
-            )
+            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         if all(t.pval.is_known for t in tracers):
-            return slope.M.bind(
-                op, *list_map(slope.M.full_lower, tracers), **params
-            )
+            return slope.M.bind(op, *list_map(slope.M.full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)

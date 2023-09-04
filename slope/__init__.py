@@ -3,7 +3,7 @@ from slope import core
 import weakref
 
 machine = core.Machine(env=v1_env)
-M = weakref.ref(machine)() # to avoid circular import
+M = weakref.ref(machine)()  # to avoid circular import
 
 # shortcuts
 jvp = M.jvp

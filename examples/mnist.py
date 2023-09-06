@@ -1,4 +1,14 @@
 import slope
+
+
+def mnist_slope_init():
+    from slope.envs.v1 import v1_env
+
+    return slope.core.Machine(env=v1_env)
+
+
+slope.set_slope_init(mnist_slope_init)
+
 from slope import numpy as snp
 from slope.nn import init, layers, optim
 

@@ -8,6 +8,7 @@ class LazyInitMachine:
 
 machine = LazyInitMachine()
 
+
 class LazyInitEnv:
     def __getattr__(self, attr):
         return getattr(M().env, attr)
@@ -17,10 +18,13 @@ env = LazyInitEnv()
 sev = env
 numpy = env
 torch = env
+
+
 def M():
     global machine, env
     if type(machine) is LazyInitMachine:
         import inspect
+
         print("Initializing slope.machine with")
         print(inspect.getsource(slope_init))
         breakpoint()

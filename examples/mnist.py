@@ -2,9 +2,9 @@ import slope
 
 
 def mnist_slope_init():
-    from slope.envs.v1 import v1_env
+    from slope.environments.v1 import v1_environment
 
-    return slope.core.Machine(env=v1_env)
+    return slope.core.Machine(environment=v1_environment)
 
 
 slope.set_slope_init(mnist_slope_init)

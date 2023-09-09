@@ -176,30 +176,30 @@ class Op:
             PartialEvalTracerArray(trace, slope.M().make_unknown_pval(aval), None)
             for aval in avals_out
         ]
-        instr = InstrProto(
+        instruction = InstructionProto(
             self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out)
         )
         for t in tracers_out:
-            t.proto = instr
+            t.proto = instruction
         return tracers_out
 
-    def partial_run_instr(self, unks_in, instr):
+    def partial_run_instruction(self, unks_in, instruction):
         if any(unks_in):
-            instr1 = None
-            instr2 = Instr(instr.op, instr.inputs, instr.params, instr.out_binders)
-            unks_out = [True for i in instr.out_binders]
+            instruction1 = None
+            instruction2 = Instruction(instruction.op, instruction.inputs, instruction.params, instruction.out_binders)
+            unks_out = [True for i in instruction.out_binders]
             res = [
                 v
-                for unk, v in zip(unks_in, instr.inputs)
+                for unk, v in zip(unks_in, instruction.inputs)
                 if ((not unk) and type(v) is Var)
             ]
         else:
-            instr1 = instr
-            instr2 = None
-            unks_out = [False for i in instr.out_binders]
+            instruction1 = instruction
+            instruction2 = None
+            unks_out = [False for i in instruction.out_binders]
             res = None
 
-        return instr1, instr2, unks_out, res
+        return instruction1, instruction2, unks_out, res
 
     def jvp(self, *args, **params):
         raise NotImplementedError
@@ -213,8 +213,8 @@ class Op:
     def shape_run(self, *args, **params):
         raise NotImplementedError
 
-    def set_partial_run_instr(self, fn):
-        self.partial_run_instr = types.MethodType(fn, self)
+    def set_partial_run_instruction(self, fn):
+        self.partial_run_instruction = types.MethodType(fn, self)
 
     def set_args_fixer(self, fn):
         self.args_fixer = types.MethodType(fn, self)
@@ -287,9 +287,9 @@ class Op:
                 return (x, y), params
 
             if type(x) in [bool, int, float]:
-                x = slope.env.array(x, dtype=y.dtype)
+                x = slope.environment.array(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
-                y = slope.env.array(y, dtype=x.dtype)
+                y = slope.environment.array(y, dtype=x.dtype)
 
             if type(x) is Array and isinstance(y, TracerArray):
                 x = y._trace.pure(x)
@@ -476,7 +476,7 @@ class BaseArray:
 
 
 @dataclass
-class Env:
+class Environment:
     ops_dir: OpsDir
     procs_dir: ProcsDir
     backends: dict
@@ -625,7 +625,7 @@ class Lit:
 Atom = Union[Var, Lit]
 
 
-class Instr(NamedTuple):
+class Instruction(NamedTuple):
     op: Op
     inputs: List[Atom]
     params: Dict[str, Any]
@@ -634,7 +634,7 @@ class Instr(NamedTuple):
 
 class Program(NamedTuple):
     in_binders: Any
-    instrs: Tuple[Instr]
+    instructions: Tuple[Instruction]
     outs: Any
 
     def __hash__(self):
@@ -653,26 +653,26 @@ class Program(NamedTuple):
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instrs = PPrint.vcat([self.pp_instr(names, e) for e in self.instrs])
+        instructions = PPrint.vcat([self.pp_instruction(names, e) for e in self.instructions])
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
         outs = ", ".join(outs)
         # outs = ', '.join(sorted(outs))
         ret = str(
             PPrint.pp(f"{{ lambda {in_binders} .")
-            + ((PPrint.pp("let ") >> instrs) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
+            + ((PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
         )
         # print(ret)
         # print('program outs: ', outs)
         return ret
 
-    def pp_instr(self, names: DefaultDict[Var, str], instr: Instr) -> PPrint:
-        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instr.out_binders))
+    def pp_instruction(self, names: DefaultDict[Var, str], instruction: Instruction) -> PPrint:
+        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instruction.out_binders))
         rhs = (
-            PPrint.pp(repr(instr.op.name))
-            >> self.pp_params(instr.params)
+            PPrint.pp(repr(instruction.op.name))
+            >> self.pp_params(instruction.params)
             >> PPrint.pp(
                 " ".join(
-                    names[x] if isinstance(x, Var) else str(x.val) for x in instr.inputs
+                    names[x] if isinstance(x, Var) else str(x.val) for x in instruction.inputs
                 )
             )
         )
@@ -762,11 +762,11 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(slope.env.ops_dir).keys():
-            op = getattr(slope.env.ops_dir, attr)
+        if attr in vars(slope.environment.ops_dir).keys():
+            op = getattr(slope.environment.ops_dir, attr)
             return partial(op.impl, self)
-        elif attr in vars(slope.env.procs_dir).keys():
-            proc = getattr(slope.env.procs_dir, attr)
+        elif attr in vars(slope.environment.procs_dir).keys():
+            proc = getattr(slope.environment.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"use machine.{attr} instead of Array.{attr}"
@@ -813,11 +813,11 @@ class TracerArray(BaseArray):
         return self
 
     def __getattr__(self, attr):
-        if attr in vars(slope.env.ops_dir).keys():
-            op = getattr(slope.env.ops_dir, attr)
+        if attr in vars(slope.environment.ops_dir).keys():
+            op = getattr(slope.environment.ops_dir, attr)
             return partial(op, self)
-        elif attr in vars(slope.env.procs_dir).keys():
-            proc = getattr(slope.env.procs_dir, attr)
+        elif attr in vars(slope.environment.procs_dir).keys():
+            proc = getattr(slope.environment.procs_dir, attr)
             assert not isinstance(
                 proc, classmethod
             ), f"Access this proc by Array.{attr}"
@@ -951,7 +951,7 @@ def f(self, trace, tracers, *, program, num_consts):
         )
         for v in program2.outs
     ]
-    instr = InstrProto(
+    instruction = InstructionProto(
         self,
         res_tracers + unknown_tracers,
         dict(program=program2, num_consts=0),
@@ -959,29 +959,29 @@ def f(self, trace, tracers, *, program, num_consts):
         list_map(weakref.ref, outs2),
     )
     for t in outs2:
-        t.proto = instr
+        t.proto = instruction
 
     return merge_lists(out_unknowns, outs1, outs2)
 
 
-@jit_op.set_partial_run_instr
-def f(self, unks_in, instr) -> Tuple[Instr, Instr, List[bool], List[Var]]:
-    program = instr.params["program"]
+@jit_op.set_partial_run_instruction
+def f(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
+    program = instruction.params["program"]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
         program, unks_in
     )
-    ins1, ins2 = partition_list(unks_in, instr.inputs)
-    out_binders1, out_binders2 = partition_list(out_unknowns, instr.out_binders)
+    ins1, ins2 = partition_list(unks_in, instruction.inputs)
+    out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instr1 = Instr(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
-    instr2 = Instr(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
-    return instr1, instr2, out_unknowns, res
+    instruction1 = Instruction(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
+    instruction2 = Instruction(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
+    return instruction1, instruction2, out_unknowns, res
 
 
 class Machine:
     def __init__(
         self,
-        env,
+        environment,
         default_backend="numpy",
     ):
         self.trace_stack: List[MainTrace] = []
@@ -999,9 +999,9 @@ class Machine:
             UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval)
         )
 
-        self.env = env
-        self.env.ops_dir.register(jit_op)
-        self.backend = self.env.backends[default_backend]
+        self.environment = environment
+        self.environment.ops_dir.register(jit_op)
+        self.backend = self.environment.backends[default_backend]
 
     def pprint_trace_stack(self):
         for trace in self.trace_stack:
@@ -1017,7 +1017,7 @@ class Machine:
         if isinstance(x, TracerArray):
             return x.aval
         elif type(x) in TracerArray.TYPES:
-            return self.env.array(x)
+            return self.environment.array(x)
         elif isinstance(x, Array):
             return x
         elif isinstance(x, VoidArray):
@@ -1028,15 +1028,15 @@ class Machine:
 
     # @property
     # def ops(self):
-    #     return self.env.ops_dir
+    #     return self.environment.ops_dir
 
     # @property
     # def procs(self):
-    #     return self.env.procs_dir
+    #     return self.environment.procs_dir
 
     # @property
     # def backends(self):
-    #     return self.env.backends
+    #     return self.environment.backends
 
     def tree_flatten(self, x: Any) -> Any:
         def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
@@ -1147,31 +1147,31 @@ class Machine:
             return val
 
     def typecheck_program(self, program: Program) -> ProgramType:
-        env: Set[Var] = set()
+        environment: Set[Var] = set()
 
         for v in program.in_binders:
-            if v in env:
+            if v in environment:
                 raise TypeError
-            env.add(v)
+            environment.add(v)
 
-        for instr in program.instrs:
-            in_types = [self.typecheck_atom(env, x) for x in instr.inputs]
-            out_types = instr.op.shape_run(*in_types, **instr.params)
-            for out_binder, out_type in list_zip(instr.out_binders, out_types):
+        for instruction in program.instructions:
+            in_types = [self.typecheck_atom(environment, x) for x in instruction.inputs]
+            out_types = instruction.op.shape_run(*in_types, **instruction.params)
+            for out_binder, out_type in list_zip(instruction.out_binders, out_types):
                 if not out_type == out_binder.aval:
                     raise TypeError
-            for out_binder in instr.out_binders:
-                if out_binder in env:
+            for out_binder in instruction.out_binders:
+                if out_binder in environment:
                     raise TypeError
-                env.add(out_binder)
+                environment.add(out_binder)
 
         in_types = [v.aval for v in program.in_binders]
-        out_types = [self.typecheck_atom(env, x) for x in program.outs]
+        out_types = [self.typecheck_atom(environment, x) for x in program.outs]
         return ProgramType(tuple(in_types), tuple(out_types))
 
-    def typecheck_atom(self, env: Set[Var], x: Atom) -> VoidArray:
+    def typecheck_atom(self, environment: Set[Var], x: Atom) -> VoidArray:
         if isinstance(x, Var):
-            if x not in env:
+            if x not in environment:
                 raise TypeError("unbound variable")
             return x.aval
         elif isinstance(x, Lit):
@@ -1180,20 +1180,20 @@ class Machine:
             assert False
 
     def run_program(self, program: Program, args: List[Any]) -> List[Any]:
-        env: Dict[Var, Any] = {}
+        environment: Dict[Var, Any] = {}
 
         def read(x: Atom) -> Any:
-            return env[x] if type(x) is Var else x.val
+            return environment[x] if type(x) is Var else x.val
 
         def write(v: Var, val: Any) -> None:
-            assert v not in env  # single-assignment
-            env[v] = val
+            assert v not in environment  # single-assignment
+            environment[v] = val
 
         list_map(write, program.in_binders, args)
-        for instr in program.instrs:
-            in_vals = list_map(read, instr.inputs)
-            outs = self.bind(instr.op, *in_vals, **instr.params)
-            list_map(write, instr.out_binders, outs)
+        for instruction in program.instructions:
+            in_vals = list_map(read, instruction.inputs)
+            outs = self.bind(instruction.op, *in_vals, **instruction.params)
+            list_map(write, instruction.out_binders, outs)
         return list_map(read, program.outs)
 
     def program_as_fun(self, program: Program):
@@ -1258,7 +1258,7 @@ class Machine:
 
     def jacfwd(self, f, x):
         pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
-        vecs_in = self.env.eye(math.prod(x.shape)).reshape(x.shape * 2)
+        vecs_in = self.environment.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
     @lru_cache
@@ -1314,40 +1314,40 @@ class Machine:
         in_unknowns: List[bool],
         instantiate: Optional[List[bool]] = None,
     ) -> Tuple[Program, Program, List[bool], int]:
-        env: Dict[Var, bool] = {}
+        environment: Dict[Var, bool] = {}
         residuals: Set[Var] = set()
 
         def read(x: Atom) -> bool:
-            return type(x) is Var and env[x]
+            return type(x) is Var and environment[x]
 
         def write(unk: bool, v: Var) -> None:
-            env[v] = unk
+            environment[v] = unk
 
         def new_res(x: Atom) -> Atom:
             if type(x) is Var:
                 residuals.add(x)
             return x
 
-        instrs1, instrs2 = [], []
+        instructions1, instructions2 = [], []
         list_map(write, in_unknowns, program.in_binders)
 
-        for instr in program.instrs:
-            unks_in = list_map(read, instr.inputs)
-            instr1, instr2, unks_out, res = instr.op.partial_run_instr(unks_in, instr)
-            if instr1 is not None:
-                instrs1.append(instr1)
-            if instr2 is not None:
-                instrs2.append(instr2)
+        for instruction in program.instructions:
+            unks_in = list_map(read, instruction.inputs)
+            instruction1, instruction2, unks_out, res = instruction.op.partial_run_instruction(unks_in, instruction)
+            if instruction1 is not None:
+                instructions1.append(instruction1)
+            if instruction2 is not None:
+                instructions2.append(instruction2)
             if res is not None:
                 residuals.update(res)
-            list_map(write, unks_out, instr.out_binders)
+            list_map(write, unks_out, instruction.out_binders)
             # if any(unks_in):
-            #     inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, instr.inputs)]
-            #     instrs2.append(InstrProto(instr.primitive, inputs, instr.params, instr.out_binders))
-            #     map(partial(write, True), instr.out_binders)
+            #     inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, instruction.inputs)]
+            #     instructions2.append(InstructionProto(instruction.primitive, inputs, instruction.params, instruction.out_binders))
+            #     map(partial(write, True), instruction.out_binders)
             # else:
-            #     instrs1.append(instr)
-            #     map(partial(write, False), instr.out_binders)
+            #     instructions1.append(instruction)
+            #     map(partial(write, False), instruction.out_binders)
 
         out_unknowns = list_map(read, program.outs)
         if instantiate is not None:
@@ -1363,8 +1363,8 @@ class Machine:
         ins1, ins2 = partition_list(in_unknowns, program.in_binders)
         outs1, outs2 = partition_list(out_unknowns, program.outs)
 
-        program1 = Program(ins1, instrs1, outs1 + residuals)
-        program2 = Program(residuals + ins2, instrs2, outs2)
+        program1 = Program(ins1, instructions1, outs1 + residuals)
+        program2 = Program(residuals + ins2, instructions2, outs2)
         self.typecheck_partial_run_program(
             program, in_unknowns, out_unknowns, program1, program2
         )
@@ -1440,23 +1440,23 @@ class Machine:
         tracers_out: List["PartialEvalTracerArray"],
     ):
         def tracer_parents(t: PartialEvalTracerArray) -> List[PartialEvalTracerArray]:
-            return t.proto.tracers_in if isinstance(t.proto, InstrProto) else []
+            return t.proto.tracers_in if isinstance(t.proto, InstructionProto) else []
 
-        def proto_to_instr(tracer_to_var: Dict[int, Var], proto: InstrProto) -> Instr:
+        def proto_to_instruction(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
             inputs = [tracer_to_var[id(t)] for t in proto.tracers_in]
             out_binders = [Var(aval) for aval in proto.avals_out]
             for t_ref, var in list_zip(proto.tracer_refs_out, out_binders):
                 if t_ref() is not None:
                     tracer_to_var[id(t_ref())] = var
-            return Instr(proto.prim, inputs, proto.params, out_binders)
+            return Instruction(proto.prim, inputs, proto.params, out_binders)
 
         tracer_to_var: Dict[int, Var] = {
             id(t): Var(VoidArray.like(t.aval)) for t in tracers_in
         }
         constvar_to_val: Dict[int, Any] = {}
         constid_to_var: Dict[int, Var] = {}
-        processed_instrs: Set[int] = set()
-        instrs: List[Instr] = []
+        processed_instructions: Set[int] = set()
+        instructions: List[Instruction] = []
         for t in self.toposort(tracers_out, tracer_parents):
             if isinstance(t.proto, LambdaBindingProto):
                 assert id(t) in set(list_map(id, tracers_in))
@@ -1468,17 +1468,17 @@ class Machine:
                     var = constid_to_var[id(val)] = Var(aval)
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
-            elif isinstance(t.proto, InstrProto):
-                if id(t.proto) not in processed_instrs:
-                    instrs.append(proto_to_instr(tracer_to_var, t.proto))
-                    processed_instrs.add(id(t.proto))
+            elif isinstance(t.proto, InstructionProto):
+                if id(t.proto) not in processed_instructions:
+                    instructions.append(proto_to_instruction(tracer_to_var, t.proto))
+                    processed_instructions.add(id(t.proto))
             else:
                 raise TypeError(t.proto)
 
         constvars, constvals = unzip2(constvar_to_val.items())
         in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
         out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-        program = Program(tuple(in_binders), tuple(instrs), tuple(out_vars))
+        program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
         self.typecheck_program(program)
         return program, constvals
 
@@ -1559,36 +1559,36 @@ class Machine:
     def run_program_transposed(
         self, program: Program, args: List[Any], cotangents: List[Any]
     ) -> List[Any]:
-        primal_env: Dict[Var, Any] = {}
-        ct_env: Dict[Var, Any] = {}
+        primal_environment: Dict[Var, Any] = {}
+        ct_environment: Dict[Var, Any] = {}
 
         def read_primal(x: Atom) -> Any:
-            return primal_env.get(x, UndefPrimal(x.aval)) if type(x) is Var else x.val
+            return primal_environment.get(x, UndefPrimal(x.aval)) if type(x) is Var else x.val
 
         def write_primal(v: Var, val: Any) -> None:
             if type(val) is not UndefPrimal:
-                primal_env[v] = val
+                primal_environment[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_env.pop(v, self.env.zeros(v.aval.shape, v.aval.dtype))
+            return ct_environment.pop(v, self.environment.zeros(v.aval.shape, v.aval.dtype))
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
-                ct_env[x] = ct_env[x] + val if x in ct_env else val
+                ct_environment[x] = ct_environment[x] + val if x in ct_environment else val
 
         list_map(write_primal, program.in_binders, args)
         list_map(write_cotangent, program.outs, cotangents)
-        # print(len(program.instrs))
-        # for i, instr in enumerate(program.instrs[::-1]):
-        #     print(i, instr)
-        for instr in program.instrs[::-1]:
-            primals_in = list_map(read_primal, instr.inputs)
-            cts_in = list_map(read_cotangent, instr.out_binders)
-            inp, params = primals_in, instr.params
-            inp, params = instr.op.pack_args(inp, params)
-            inp, params = instr.op.args_fixer(*inp, **params)
-            cts_out = instr.op.T(cts_in, *inp, **params)
-            list_map(write_cotangent, instr.inputs, cts_out)
+        # print(len(program.instructions))
+        # for i, instruction in enumerate(program.instructions[::-1]):
+        #     print(i, instruction)
+        for instruction in program.instructions[::-1]:
+            primals_in = list_map(read_primal, instruction.inputs)
+            cts_in = list_map(read_cotangent, instruction.out_binders)
+            inp, params = primals_in, instruction.params
+            inp, params = instruction.op.pack_args(inp, params)
+            inp, params = instruction.op.args_fixer(*inp, **params)
+            cts_out = instruction.op.T(cts_in, *inp, **params)
+            list_map(write_cotangent, instruction.inputs, cts_out)
 
         ret = [
             read_cotangent(v)
@@ -1618,10 +1618,10 @@ class Machine:
             if np.shape(y) != ():
                 raise TypeError
             if ret_fval:
-                out = f_vjp(self.env.ones(()))
+                out = f_vjp(self.environment.ones(()))
                 return y, out
             else:
-                x_bar, *_ = f_vjp(self.env.ones(()))
+                x_bar, *_ = f_vjp(self.environment.ones(()))
                 return x_bar
 
         if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
@@ -1663,7 +1663,7 @@ class Machine:
             PartialEvalTracerArray(trace, PartialVal.unknown(v.aval), None)
             for v in program2.outs
         ]
-        proto = InstrProto(
+        proto = InstructionProto(
             jit_op,
             res_tracers + unknown_tracers,
             dict(program=program2, num_consts=0),
@@ -1783,7 +1783,7 @@ class JitFn:
             print(self.code)
             breakpoint()
             raise
-        return [slope.env.array(ArrayBuffer(o)) for o in outs]
+        return [slope.environment.array(ArrayBuffer(o)) for o in outs]
 
 
 BatchAxis = Union[None, int]
@@ -1866,13 +1866,13 @@ class JVPTracerArray(TracerArray):
 
 
 class JVPTrace(Trace):
-    # pure = lift = lambda self, val: JVPTracerArray(self, val, slope.env.zeros_like(val))
+    # pure = lift = lambda self, val: JVPTracerArray(self, val, slope.environment.zeros_like(val))
     def pure(self, val):
         if isinstance(val, PartialEvalTrace):
             val = val.pval.const
         # elif isinstance(val, Array):
         # val = val
-        return JVPTracerArray(self, val, slope.env.zeros_like(val))
+        return JVPTracerArray(self, val, slope.environment.zeros_like(val))
 
     lift = pure
 
@@ -1916,7 +1916,7 @@ class ProgramTrace(Trace):
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_instr(Instr(op, inputs, params, outvars))
+        self.builder.add_instruction(Instruction(op, inputs, params, outvars))
         return out_tracers
 
     @property
@@ -1925,14 +1925,14 @@ class ProgramTrace(Trace):
 
 
 class ProgramBuilder:
-    instrs: List[Instr]
+    instructions: List[Instruction]
     tracer_to_var: Dict[int, Var]
     const_tracers: Dict[int, TracerArray]
     constvals: Dict[Var, Any]
     tracers: List[ProgramTracerArray]
 
     def __init__(self):
-        self.instrs = []
+        self.instructions = []
         self.tracer_to_var = {}
         self.const_tracers = {}
         self.constvals = {}
@@ -1943,8 +1943,8 @@ class ProgramBuilder:
         self.tracers.append(tracer)
         return tracer
 
-    def add_instr(self, instr: Instr) -> None:
-        self.instrs.append(instr)
+    def add_instruction(self, instruction: Instruction) -> None:
+        self.instructions.append(instruction)
 
     def add_var(self, tracer: ProgramTracerArray) -> Var:
         assert id(tracer) not in self.tracer_to_var
@@ -1967,7 +1967,7 @@ class ProgramBuilder:
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
-        program = Program(in_binders, self.instrs, out_vars)
+        program = Program(in_binders, self.instructions, out_vars)
         slope.M().typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals
@@ -1983,17 +1983,17 @@ class ProgramBuilder:
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
-        new_instrs = [
-            Instr(
-                instr.op,
-                [literals.get(x, x) for x in instr.inputs],
-                instr.params,
-                instr.out_binders,
+        new_instructions = [
+            Instruction(
+                instruction.op,
+                [literals.get(x, x) for x in instruction.inputs],
+                instruction.params,
+                instruction.out_binders,
             )
-            for instr in program.instrs
+            for instruction in program.instructions
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = Program(new_const_binders + other_binders, new_instrs, new_outs)
+        new_program = Program(new_const_binders + other_binders, new_instructions, new_outs)
         slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
 
@@ -2026,7 +2026,7 @@ class ConstProto(NamedTuple):
     val: Any
 
 
-class InstrProto(NamedTuple):
+class InstructionProto(NamedTuple):
     prim: Op
     tracers_in: List["PartialEvalTracerArray"]
     params: Dict[str, Any]
@@ -2034,7 +2034,7 @@ class InstrProto(NamedTuple):
     tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
 
 
-ProgramProto = Union[LambdaBindingProto, ConstProto, InstrProto]
+ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
 
 
 class PartialEvalTracerArray(TracerArray):

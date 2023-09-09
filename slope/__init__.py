@@ -1,4 +1,7 @@
 from slope import core
+import os
+
+SLOPE_DEBUG = os.environ.get("SLOPE_DEBUG", False)
 
 
 class LazyInitMachine:
@@ -9,34 +12,35 @@ class LazyInitMachine:
 machine = LazyInitMachine()
 
 
-class LazyInitEnv:
+class LazyInitEnvironment:
     def __getattr__(self, attr):
-        return getattr(M().env, attr)
+        return getattr(M().environment, attr)
 
 
-env = LazyInitEnv()
-sev = env
-numpy = env
-torch = env
+environment = LazyInitEnvironment()
+sev = environment  # Slope EnVironment
+numpy = environment
+torch = environment
 
 
 def M():
-    global machine, env
+    global machine
     if type(machine) is LazyInitMachine:
-        import inspect
+        if SLOPE_DEBUG:
+            import inspect
 
-        print("Initializing slope.machine with")
-        print(inspect.getsource(slope_init))
-        breakpoint()
+            print("Initializing slope.machine with")
+            print(inspect.getsource(slope_init))
         machine = slope_init()
-        env = machine.env
+        global environment
+        environment = machine.environment
     return machine
 
 
 def default_slope_init():
-    from slope.envs.v1 import v1_env
+    from slope.environments.v1 import v1_environment
 
-    return core.Machine(env=v1_env)
+    return core.Machine(environment=v1_environment)
 
 
 slope_init = default_slope_init
@@ -48,11 +52,16 @@ def set_slope_init(fn):
 
 
 def __getattr__(attr):
-    if (
-        attr
-        in "jvp vmap jit linearize vjp grad register_pytree_node tree_flatten tree_unflatten".split(
-            " "
-        )
+    if attr in (
+        "jvp",
+        "vmap",
+        "jit",
+        "linearize",
+        "vjp",
+        "grad",
+        "register_pytree_node",
+        "tree_flatten",
+        "tree_unflatten",
     ):
         return getattr(machine, attr)
     else:

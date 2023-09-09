@@ -1,6 +1,6 @@
 import slope as sp
 from slope.core import ProcsDir, BaseArray
-from slope.envs.v1.ops_defs import ops
+from slope.environments.v1.ops_defs import ops
 import math
 from typing import Tuple, Union, List, Iterator, Optional
 import itertools

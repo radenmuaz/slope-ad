@@ -9,7 +9,7 @@ import os
 from typing import NamedTuple
 from functools import partial
 
-DEBUG = os.environ.get("SLOPE_DEBUG", 0)
+DEBUG = os.environmentiron.get("SLOPE_DEBUG", 0)
 
 
 class ADResult(NamedTuple):

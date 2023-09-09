@@ -20,6 +20,8 @@ from typing import (
     Sequence,
 )
 
+sum_py = sum
+
 ops = OpsDir()
 
 # -----------------------
@@ -46,7 +48,7 @@ def f(self, primals, tangents, **params):
 def f(self, cts, x):
     (z,) = cts
     assert type(x) is UndefPrimal
-    return [slope.env.zeros_like(z)]
+    return [slope.environment.zeros_like(z)]
 
 
 convert = Op.unary("convert")
@@ -306,8 +308,8 @@ def f(self, x, y):
 @maximum.set_jvp
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(slope.env.ones_like(z), slope.env.zeros_like(z))) / (
-            (y == z).where(slope.env.full_like(z, 2), slope.env.ones_like(z))
+        return ((x == z).where(slope.environment.ones_like(z), slope.environment.zeros_like(z))) / (
+            (y == z).where(slope.environment.full_like(z, 2), slope.environment.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -335,7 +337,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [slope.env.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @equal.set_T
@@ -357,7 +359,7 @@ def f(self, x, y):
 def f(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
-    return [out_primal], [slope.env.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @not_equal.set_T
@@ -436,6 +438,7 @@ def f(self, primals, tangents, *, axes=None, keepdims=False):
 @sum.set_T
 def f(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
+    # if z.shape != x.aval.shape and keepdims:
     out = z.broadcast(x.aval.shape, None if keepdims else axes)
     return [out]
 
@@ -601,23 +604,87 @@ def f(self, cts, x, *, perm):
     return [z.transpose(perm)]
 
 
-pad = Op.shape("pad")
-ops.register(pad)
+# pad = Op.shape("pad")
+# ops.register(pad)
 
 
-@pad.set_run
+# @pad.set_run
+# def f(self, x, *, pad_width, mode="constant", constant_values=0.0):
+#     return [x.pad(pad_width=pad_width, mode=mode, constant_values=constant_values)]
+
+
+# @pad.set_args_fixer
+# def f(self, x, *, pad_width, mode="constant", constant_values=0.0):
+#     return (x,), dict(pad_width=pad_width, mode=mode, constant_values=constant_values)
+
+
+# @pad.set_vmap
+# def f(self, axis_size, vals_in, dims_in, *,pad_width, mode="constant", constant_values=0.0):
+#     raise NotImplementedError
+
+
+# @pad.set_jvp
+# def f(self, primals, tangents, *, pad_width, mode="constant", constant_values=0.0):
+#     (x,), (x_dot,) = primals, tangents
+#     return ([x.pad(pad_width=pad_width, mode=mode, constant_values=constant_values)], 
+#             [x_dot.pad(pad_width=pad_width, mode=mode, constant_values=constant_values)])
+
+
+# @pad.set_shape_run
+# def f(self, x: VoidArray, *, pad_width, mode="constant", constant_values=0.0) -> List[VoidArray]:
+#     lo, hi = slope.core.unzip2(pad_width)
+#     shape = tuple(
+#         sum_py([l, h, d])
+#         for l, h, d in list_zip(lo, hi, x.shape)
+#     )
+
+#     if not all(d >= 0 for d in shape):
+#         raise ValueError(
+#             f"Dimension size after padding is not at least 0, "
+#             f"got result shape {res}, for {lo=} {hi=}"
+#             f"{shape=}"
+#         )
+#     res = VoidArray(shape, x.dtype)
+#     return [res]
+
+
+# @pad.set_T
+# def f(self, cts, x, *, pad_width, mode="constant", constant_values=0.0):
+#     (z,) = cts
+#     lo, hi = slope.core.unzip2(pad_width)
+
+#     def t_op():
+#         unpadded = z.slice_hlo(
+#             lo,
+#             tuple(s - h for s, h in list_zip(z.shape, hi)),
+#             tuple([1] * len(lo)),
+#         )
+#         return unpadded.slice_hlo(
+#             tuple([0] * len(lo)), unpadded.shape, tuple((1,) * len(lo))
+#         )
+
+#     res = t_op() if isinstance(x, UndefPrimal) else None
+#     return [res]
+
+
+
+pad_hlo = Op.shape("pad_hlo")
+ops.register(pad_hlo)
+
+
+@pad_hlo.set_run
 def f(self, x, *, lo, hi, interior=None, value=0.0):
-    return [x.pad(lo, hi, interior, value)]
+    return [x.pad_hlo(lo, hi, interior, value)]
 
 
-@pad.set_args_fixer
+@pad_hlo.set_args_fixer
 def f(self, x, *, lo, hi, interior=None, value=0.0):
     if interior is None:
         interior = tuple([0] * len(lo))
     return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
 
 
-@pad.set_vmap
+@pad_hlo.set_vmap
 def f(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
     Operand, padding_value = batched_args
@@ -639,19 +706,19 @@ def f(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     return select(mask, x, broadcasted_padding), Operand_bdim
 
 
-@pad.set_jvp
+@pad_hlo.set_jvp
 def f(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
-    return [x.pad(lo, hi, interior, value)], [x_dot.pad(lo, hi, interior, value)]
+    return [x.pad_hlo(lo, hi, interior, value)], [x_dot.pad_hlo(lo, hi, interior, value)]
 
 
-@pad.set_shape_run
+@pad_hlo.set_shape_run
 def f(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
-    shape = (
-        sum([l, h, _dilate_dim(d, r + 1)])
+    shape = tuple(
+        sum_py([l, h, _dilate_dim(d, r + 1)])
         for l, h, r, d in list_zip(lo, hi, interior, x.shape)
     )
     if not all(d >= 0 for d in shape):
@@ -664,17 +731,17 @@ def f(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray
     return [res]
 
 
-@pad.set_T
+@pad_hlo.set_T
 def f(self, cts, x, *, lo, hi, interior=None, value=0.0):
     (z,) = cts
 
     def t_op():
-        unpadded = z.slice(
+        unpadded = z.slice_hlo(
             lo,
             tuple(s - h for s, h in list_zip(z.shape, hi)),
             tuple([1] * len(interior)),
         )
-        return unpadded.slice(
+        return unpadded.slice_hlo(
             tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior)
         )
 
@@ -682,17 +749,26 @@ def f(self, cts, x, *, lo, hi, interior=None, value=0.0):
     return [res]
 
 
-slice = Op.shape("slice")
-ops.register(slice)
+slice_hlo = Op.shape("slice_hlo")
+ops.register(slice_hlo)
 
 
-@slice.set_run
-def f(self, x, *, starts, limits, strides):
-    return [x.slice(starts, limits, strides)]
+@slice_hlo.set_run
+def f(self, x, *, starts, limits, strides=None):
+    return [x.slice_hlo(starts, limits, strides)]
 
 
-@slice.set_vmap
-def f(self, axis_size, vals_in, dims_in, *, starts, limits, strides):
+@slice_hlo.set_args_fixer
+def f(self, x, *, starts, limits, strides=None):
+    if strides is None:
+        strides = (1,) * len(starts)
+    return (x,), dict(starts=starts, limits=limits, strides=strides)
+
+
+
+
+@slice_hlo.set_vmap
+def f(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
     (x,) = vals_in
     (x_bdim,) = dims_in
@@ -709,18 +785,18 @@ def f(self, axis_size, vals_in, dims_in, *, starts, limits, strides):
         new_strides = list(strides)
         new_strides.insert(x_bdim, 1)
 
-    out = x.slice(new_start_indices, new_limit_indices, new_strides)
+    out = x.slice_hlo(new_start_indices, new_limit_indices, new_strides)
     return out, x_bdim
 
 
-@slice.set_jvp
-def f(self, primals, tangents, *, starts, limits, strides):
+@slice_hlo.set_jvp
+def f(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
+    return [x.slice_hlo(starts, limits, strides)], [x_dot.slice_hlo(starts, limits, strides)]
 
 
-@slice.set_shape_run
-def f(self, x: VoidArray, *, starts, limits, strides: Sequence[int]) -> List[VoidArray]:
+@slice_hlo.set_shape_run
+def f(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
             limit if type(start) is int and start == 0 else limit - start
@@ -730,12 +806,12 @@ def f(self, x: VoidArray, *, starts, limits, strides: Sequence[int]) -> List[Voi
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
-        x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
+        x = x[tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
         return [VoidArray(x.shape, x.dtype)]
 
 
-@slice.set_T
-def T(cts, x, *, starts, limits, strides):
+@slice_hlo.set_T
+def T(cts, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cts
     x_shape = x.aval.shape
@@ -802,7 +878,7 @@ ops.alias(concatenate, "cat")
 
 @concatenate.set_run
 def f(self, xs: Sequence[Any], *, axis):
-    return [backend.run_impl(concatenate, xs, axis=axis)]
+    return [slope.M().backend.run_impl(concatenate, xs, axis=axis)]
 
 
 @concatenate.set_vmap
@@ -821,7 +897,7 @@ def f(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
         raise TypeError(msg)
-    if len(set(operand.ndim for Operand in xs)) != 1:
+    if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot concatenate arrays with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
     if not 0 <= axis < xs[0].ndim:
@@ -861,7 +937,7 @@ def T(cts, xs, *, axis):
         l[axis] = limit_points[i]
 
     return [
-        z.slice(start, limit) if type(o) is UndefPrimal else None
+        z.slice_hlo(start, limit) if type(o) is UndefPrimal else None
         for o, start, limit in zip(xs, starts, limits)
     ]
 
@@ -876,13 +952,13 @@ ops.register(constant)
 
 @constant.set_run
 def f(self, *, val, dtype=BaseArray.default_dtype):
-    return [slope.env.array(val, dtype)]
+    return [slope.environment.array(val, dtype)]
 
 
 @constant.set_jvp
 def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
-    out = slope.env.array(val, dtype)
-    out_jvp = slope.env.ones_like(out)
+    out = slope.environment.array(val, dtype)
+    out_jvp = slope.environment.ones_like(out)
     return [out], [out_jvp]
 
 

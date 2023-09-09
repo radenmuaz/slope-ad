@@ -1,6 +1,6 @@
 import slope
-from slope.envs.v1.ops_defs import ops
-from slope.envs.v1.procs_defs import procs
+from slope.environments.v1.ops_defs import ops
+from slope.environments.v1.procs_defs import procs
 from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
 import numpy as np
 from typing import (
@@ -50,20 +50,20 @@ def f(self, program, codegen_out, fn_name):
 
     multiline_op_impl_set = set()
     multiline_op_impl_defs = []
-    for instr in program.instrs:
-        if instr.op == slope.core.jit_op:
+    for instruction in program.instructions:
+        if instruction.op == slope.core.jit_op:
             continue
-        impl = slope.M().backend.impls[instr.op]
+        impl = slope.M().backend.impls[instruction.op]
         op_impl_code_lines = inspect.getsourcelines(impl)[0]
         if op_impl_code_lines[0][0] == "@":  # skip decorator line
             op_impl_code_lines = op_impl_code_lines[1:]
         if len(op_impl_code_lines) > 2:
-            if instr.op.name not in multiline_op_impl_set:
-                multiline_op_impl_set.add(instr.op.name)
+            if instruction.op.name not in multiline_op_impl_set:
+                multiline_op_impl_set.add(instruction.op.name)
                 def_str = op_impl_code_lines[0]
                 op_impl_code_lines[
                     0
-                ] = f"def {instr.op.name}{def_str[def_str.find('('):]}"
+                ] = f"def {instruction.op.name}{def_str[def_str.find('('):]}"
                 multiline_op_impl_defs += [op_impl_code_lines]
 
     if len(multiline_op_impl_defs) > 0:
@@ -90,7 +90,7 @@ def f(self, program, codegen_out, fn_name):
 @numpy_backend.set_codegen
 def f(self, program, args) -> List[Any]:
     # codegen is recursive if jit-of-jit happens
-    env: Dict[slope.Var, Any] = {}
+    environment: Dict[slope.Var, Any] = {}
     ncs = 0
     nxs = 0
     nzs = 0
@@ -101,31 +101,31 @@ def f(self, program, args) -> List[Any]:
     )
     for inb in program.in_binders:
         if type(inb.aval) is not VoidArray:
-            env[inb] = f"c{ncs}{affix}"
-            inb_consts += [env[inb]]
+            environment[inb] = f"c{ncs}{affix}"
+            inb_consts += [environment[inb]]
             ncs += 1
         else:
-            env[inb] = f"x{nxs}{affix}"
-            inb_args += [env[inb]]
+            environment[inb] = f"x{nxs}{affix}"
+            inb_args += [environment[inb]]
             nxs += 1
 
     code_lines = []
-    for instr in program.instrs:
-        in_vals = list_map(lambda x: env[x], instr.inputs)
-        in_avals = [x.aval for x in instr.inputs]
-        for outb in instr.out_binders:
-            env[outb] = f"z{nzs}{affix}"
+    for instruction in program.instructions:
+        in_vals = list_map(lambda x: environment[x], instruction.inputs)
+        in_avals = [x.aval for x in instruction.inputs]
+        for outb in instruction.out_binders:
+            environment[outb] = f"z{nzs}{affix}"
             nzs += 1
-        out_vals = list_map(lambda z: env[z], instr.out_binders)
+        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
 
-        impl = slope.M().backend.impls[instr.op]
+        impl = slope.M().backend.impls[instruction.op]
         args_str = ", ".join(in_vals)
         lhs = (
             f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
         )
-        if instr.op is slope.core.jit_op:
+        if instruction.op is slope.core.jit_op:
             # TODO: generalize interface to other than jit_op
-            op_out = impl(in_vals, in_avals, params=instr.params)
+            op_out = impl(in_vals, in_avals, params=instruction.params)
             co = op_out["codegen_out"]
             outs = co["outs"]
             rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
@@ -140,13 +140,13 @@ def f(self, program, args) -> List[Any]:
             op_impl_code_lines = op_impl_code_lines[1:]
 
         if len(op_impl_code_lines) > 2:
-            # kwargs_str = ", ".join([f"{k}={v}" for k, v in instr.params.items()])
+            # kwargs_str = ", ".join([f"{k}={v}" for k, v in instruction.params.items()])
             params = {
                 k: v if not isinstance(v, slope.core.DType) else self.dtype_map[v]
-                for k, v in instr.params.items()
+                for k, v in instruction.params.items()
             }
             kwargs_str = ", ".join([f"{k}={v}" for k, v in params.items()])
-            rhs = f"{instr.op.name}({args_str}, {kwargs_str})"
+            rhs = f"{instruction.op.name}({args_str}, {kwargs_str})"
             code_line = f"{lhs} = {rhs}"
         else:
             sig = inspect.signature(impl)
@@ -158,16 +158,16 @@ def f(self, program, args) -> List[Any]:
             rhs = op_impl_code_lines[1].replace("return", "").strip()
 
             for argname, arg in list_zip(args_strs, in_vals):
-                mark = "," if argname != args_strs[-1] or len(instr.params) > 0 else ")"
+                mark = "," if argname != args_strs[-1] or len(instruction.params) > 0 else ")"
                 rhs = rhs.replace(f"{argname}{mark}", f"{arg}{mark}")
-            for kwargname, kwarg in instr.params.items():
+            for kwargname, kwarg in instruction.params.items():
                 if isinstance(kwarg, slope.core.DType):
                     kwarg = self.dtype_map[kwarg]
                 rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
             code_line = f"{lhs} = {rhs}"
         code_lines += [code_line]
 
-    outs = list_map(lambda y: env[y], program.outs)
+    outs = list_map(lambda y: environment[y], program.outs)
     return dict(
         code_lines=code_lines, inb_args=inb_args, inb_consts=inb_consts, outs=outs
     )
@@ -308,13 +308,20 @@ def f(self, x, *, shape):
     return np.reshape(x, newshape=shape)
 
 
-@numpy_backend.set_impl(ops.pad)
+
+# @numpy_backend.set_impl(ops.pad)
+# def f(self, x, *,  pad_width, mode="constant", constant_values=0.0):
+#     # TODO: implement interior pad
+#     return np.pad(x, pad_width=pad_width, mode=mode, constant_values=constant_values)
+
+
+@numpy_backend.set_impl(ops.pad_hlo)
 def f(self, x, *, lo, hi, interior, value):
     # TODO: implement interior pad
     return np.pad(x, list(zip(lo, hi)), constant_values=value)
 
 
-@numpy_backend.set_impl(ops.slice)
+@numpy_backend.set_impl(ops.slice_hlo)
 def f(self, x, *, starts, limits, strides):
     slices = tuple(slice(s, l, st) for s, l, st in zip(starts, limits, strides))
     return x[slices]

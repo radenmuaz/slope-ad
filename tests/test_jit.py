@@ -8,7 +8,7 @@ from typing import NamedTuple
 from functools import partial
 
 
-DEBUG = os.environ.get("SLOPE_DEBUG", 0)
+DEBUG = os.environmentiron.get("SLOPE_DEBUG", 0)
 
 
 class TestJit(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestJit(unittest.TestCase):
             return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.env.array([1.0, 2.0, 3.0])
+        x = machine.environment.array([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -43,7 +43,7 @@ class TestJit(unittest.TestCase):
             return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.env.array([1.0, 2.0, 3.0])
+        x = machine.environment.array([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -58,7 +58,7 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.env.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        x = machine.environment.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         res = f(x)
         print(res)
         res = f(x)
@@ -74,8 +74,8 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.env.array([1.0, 2.0, 3.0])
-        y = machine.env.array([4.0, 5.0, 6.0])
+        x = machine.environment.array([1.0, 2.0, 3.0])
+        y = machine.environment.array([4.0, 5.0, 6.0])
         res = f(x, y)
         print(res)
         res = f(y, x + x)
@@ -95,11 +95,11 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = machine.env.array([1.0, 2.0])
+        # a = machine.environment.array([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        x = machine.env.array([1.0, 2.0, 3.0])
-        y = machine.env.array([4.0, 5.0, 6.0])
+        x = machine.environment.array([1.0, 2.0, 3.0])
+        y = machine.environment.array([4.0, 5.0, 6.0])
         args0 = ((x, y),)
         args1 = {"s": 1.0}
         res = f(args0, args1)
@@ -118,12 +118,12 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = machine.env.array([1.0, 2.0])
+        # a = machine.environment.array([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        res = f(machine.env.array([1.0, 2.0, 3.0]))
+        res = f(machine.environment.array([1.0, 2.0, 3.0]))
         print(res)
-        res = f(machine.env.array([4.0, 5.0, 6.0]))
+        res = f(machine.environment.array([4.0, 5.0, 6.0]))
         # print(f"{f.get_jit_fn()=}")
         print(res)
 

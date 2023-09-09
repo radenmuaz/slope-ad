@@ -30,7 +30,7 @@ def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
 
 def normal(dtype=np.float32) -> Callable:
     def init(shape, dtype=dtype):
-        return sp.machine.env.ops_dir.randn(shape)
+        return sp.machine.environment.ops_dir.randn(shape)
 
     return init
 
@@ -54,12 +54,12 @@ def variance_scaling(
             denominator = (fan_in + fan_out) / 2
         else:
             raise ValueError(f"invalid mode for variance scaling initializer: {mode}")
-        variance = sp.machine.env.array(scale / denominator, dtype=dtype)
+        variance = sp.machine.environment.array(scale / denominator, dtype=dtype)
         if distribution == "normal":
-            return sp.machine.env.ops_dir.randn(shape) * variance.sqrt()
+            return sp.machine.environment.ops_dir.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
             return (
-                sp.machine.env.ops_dir.rand(size=shape.astype(dtype))
+                sp.machine.environment.ops_dir.rand(size=shape.astype(dtype))
                 * (3 * variance).sqrt()
             )
 

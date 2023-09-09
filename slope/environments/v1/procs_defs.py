@@ -73,15 +73,24 @@ def min(x, axes=None, keepdims=False):
 @procs.register
 def argmax(self, axis=None, keepdim=False):
     if axis is None:
-      idx = (self == self.max(axis)) * sev.arange(math.prod(self.shape)-1,-1,-1, dtype=slope.int32,).reshape(self.shape)
-      return math.prod(self.shape) - idx.max() - 1
+        idx = (self == self.max(axis)) * sev.arange(
+            math.prod(self.shape) - 1,
+            -1,
+            -1,
+            dtype=slope.int32,
+        ).reshape(self.shape)
+        return math.prod(self.shape) - idx.max() - 1
     axis = axis + len(self.shape) if axis < 0 else axis
     m = self == self.max(axis=axis, keepdim=True)
-    idx = m * sev.arange(self.shape[axis]-1,-1,-1, dtype=slope.int32).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
-    return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
+    idx = m * sev.arange(self.shape[axis] - 1, -1, -1, dtype=slope.int32).reshape(
+        self.shape[axis], *[1] * (self.ndim - axis - 1)
+    )
+    return self.shape[axis] - idx.max(axis=axis, keepdim=keepdim) - 1
+
 
 @procs.register
-def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+def argmin(self, axis=None, keepdim=False):
+    return (-self).argmax(axis=axis, keepdim=keepdim)
 
 
 @procs.register
@@ -133,9 +142,7 @@ def __getitem__(
     for i, v in enumerate(orig_slices):
         count[type(v)].append(i)
 
-    if (num_slices := len(count[int]) + len(count[slice]) + len(count)) > len(
-        x.shape
-    ):
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count)) > len(x.shape):
         raise IndexError(f"too many indices for tensor of dimension {len(x.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
@@ -258,22 +265,24 @@ def __getitem__(
 def pad(x, pad_width, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
     if type(pad_width) is int:
-        pad_width = ((pad_width, pad_width, 0)*x.ndim)
+        pad_width = (pad_width, pad_width, 0) * x.ndim
     elif all(type(pw) is int for pw in pad_width):
         assert len(pad_width) == x.ndim
         pad_width = tuple((pw, pw, 0) for pw in pad_width)
     elif len(pad_width) == 2 and all(type(item) is int for item in pad_width):
-        pad_width = ((*pad_width, 0)*x.ndim)
+        pad_width = (*pad_width, 0) * x.ndim
     elif len(pad_width) == 3 and all(type(item) is int for item in pad_width):
-        pad_width = (pad_width,)*x.ndim
+        pad_width = (pad_width,) * x.ndim
     else:
+        assert all(2 <= len(pw) <= 3 for pw in pad_width)
         pad_width = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad_width)
     lo, hi, interior = tuple(zip(*pad_width))
-    return x.pad_hlo(lo, hi, interior)
+    return x.pad_hlo(lo, hi, interior, value=constant_values)
 
 
 @procs.register
 def slice(x, arg):
+    assert all(2 <= len(a) <= 3 for a in arg)
     arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
     starts, limits, strides = tuple(zip(*arg))
     return x.slice_hlo(starts, limits, strides)
@@ -285,13 +294,12 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     padding = tuple(
         [(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)]
     )
-    ret = x
-    ret = ret.pad(padding, constant_values=value)
+    x = x.pad(padding, constant_values=value)
     slc = tuple(
         [(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)]
     )
-    ret = ret.slice(slc)
-    return ret
+    x = x.slice(slc)
+    return x
 
 
 @procs.register
@@ -351,8 +359,7 @@ def repeat(x, repeats):
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
     slice_params = [
-        [slice(None)] * dim + [slice(k, k + step)]
-        for k in range(0, x.shape[dim], step)
+        [slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)
     ]
     return [x[tuple(sl)] for sl in slice_params]
 
@@ -607,9 +614,7 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     )
 
     # x = x.pad2d(padding_)._pool(
-    x = x.pad(padding_)._pool(
-        HW, stride, dilation
-    )  # (bs, groups*cin, oy, ox, H, W)
+    x = x.pad(padding_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308

@@ -308,8 +308,14 @@ def f(self, x, y):
 @maximum.set_jvp
 def f(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(slope.environment.ones_like(z), slope.environment.zeros_like(z))) / (
-            (y == z).where(slope.environment.full_like(z, 2), slope.environment.ones_like(z))
+        return (
+            (x == z).where(
+                slope.environment.ones_like(z), slope.environment.zeros_like(z)
+            )
+        ) / (
+            (y == z).where(
+                slope.environment.full_like(z, 2), slope.environment.ones_like(z)
+            )
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -392,11 +398,11 @@ def f(self, x, *, axes=None, keepdims=False):
 def f(self, primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
     run_out = x.max(axes, keepdims)
-    locs = x.equal(run_out.broadcast(x.shape, None if keepdims else axes))
+    locs = x.equal(run_out.broadcast_in_dim(x.shape, None if keepdims else axes))
     locs = locs.convert(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
-    jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
+    jvp_out = jvp_out / counts.broadcast_in_dim(jvp_out.shape)
 
     return [run_out], [jvp_out]
 
@@ -404,7 +410,7 @@ def f(self, primals, tangents, *, axes=None, keepdims=False):
 @max.set_T
 def f(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
-    return [z.broadcast(x.aval.shape, None if keepdims else axes)]
+    return [z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)]
 
 
 sum = Op.reduce("sum")
@@ -439,7 +445,7 @@ def f(self, primals, tangents, *, axes=None, keepdims=False):
 def f(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
     # if z.shape != x.aval.shape and keepdims:
-    out = z.broadcast(x.aval.shape, None if keepdims else axes)
+    out = z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)
     return [out]
 
 
@@ -447,11 +453,11 @@ def f(self, cts, x, *, axes=None, keepdims=False):
 # ShapeOps
 # -----------------------
 
-broadcast = Op.shape("broadcast")
-ops.register(broadcast)
+broadcast_in_dim = Op.shape("broadcast_in_dim")
+ops.register(broadcast_in_dim)
 
 
-@broadcast.set_args_fixer
+@broadcast_in_dim.set_args_fixer
 def f(self, x, *, shape, axes=None):
     if isinstance(axes, int):
         axes = (axes,)
@@ -462,13 +468,13 @@ def f(self, x, *, shape, axes=None):
     return (x,), dict(shape=shape, axes=axes)
 
 
-@broadcast.set_run
+@broadcast_in_dim.set_run
 def f(self, x, *, shape, axes=None):
-    out = x.broadcast(shape, axes=None)
+    out = x.broadcast_in_dim(shape, axes=None)
     return [out]
 
 
-@broadcast.set_vmap
+@broadcast_in_dim.set_vmap
 def f(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     (x,), (x_bdim,) = vals_in, dims_in
     # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
@@ -483,24 +489,24 @@ def f(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     # if sum(int(a<x_bdim) for a in axes) != 0:
     #     breakpoint()
 
-    return [x.broadcast(shape, axes)], [x_bdim]
+    return [x.broadcast_in_dim(shape, axes)], [x_bdim]
 
 
-@broadcast.set_jvp
+@broadcast_in_dim.set_jvp
 def f(self, primals, tangents, *, shape, axes=None):
     (x,), (x_dot,) = primals, tangents
     return (
-        [x.broadcast(shape=shape, axes=axes)],
-        [x_dot.broadcast(shape=shape, axes=axes)],
+        [x.broadcast_in_dim(shape=shape, axes=axes)],
+        [x_dot.broadcast_in_dim(shape=shape, axes=axes)],
     )
 
 
-@broadcast.set_shape_run
+@broadcast_in_dim.set_shape_run
 def f(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
 
-@broadcast.set_T
+@broadcast_in_dim.set_T
 def f(self, cts, x, *, shape, axes):
     (z,) = cts
     out = z
@@ -627,7 +633,7 @@ def f(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     Operand_bdim, padding_value_bdim = batch_dims
     if Operand_bdim is None:
         Operand_bdim = 0
-        Operand = broadcast(operand, (padding_value.shape[padding_value_bdim],))
+        Operand = broadcast_in_dim(operand, (padding_value.shape[padding_value_bdim],))
 
     padding_config = list(padding_config)
     padding_config.insert(operand_bdim, (0, 0, 0))
@@ -638,14 +644,16 @@ def f(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
 
     x = pad(operand, _zero(operand), padding_config)
     mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-    broadcasted_padding = broadcast_in_dim(padding_value, x.shape, (operand_bdim,))
-    return select(mask, x, broadcasted_padding), Operand_bdim
+    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
+    return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 
 @pad_hlo.set_jvp
 def f(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
-    return [x.pad_hlo(lo, hi, interior, value)], [x_dot.pad_hlo(lo, hi, interior, value)]
+    return [x.pad_hlo(lo, hi, interior, value)], [
+        x_dot.pad_hlo(lo, hi, interior, value)
+    ]
 
 
 @pad_hlo.set_shape_run
@@ -701,8 +709,6 @@ def f(self, x, *, starts, limits, strides=None):
     return (x,), dict(starts=starts, limits=limits, strides=strides)
 
 
-
-
 @slice_hlo.set_vmap
 def f(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
@@ -728,7 +734,9 @@ def f(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
 @slice_hlo.set_jvp
 def f(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice_hlo(starts, limits, strides)], [x_dot.slice_hlo(starts, limits, strides)]
+    return [x.slice_hlo(starts, limits, strides)], [
+        x_dot.slice_hlo(starts, limits, strides)
+    ]
 
 
 @slice_hlo.set_shape_run
@@ -742,7 +750,9 @@ def f(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
-        x = x[tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
+        x = x[
+            tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))
+        ]
         return [VoidArray(x.shape, x.dtype)]
 
 

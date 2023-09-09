@@ -158,7 +158,11 @@ def f(self, program, args) -> List[Any]:
             rhs = op_impl_code_lines[1].replace("return", "").strip()
 
             for argname, arg in list_zip(args_strs, in_vals):
-                mark = "," if argname != args_strs[-1] or len(instruction.params) > 0 else ")"
+                mark = (
+                    ","
+                    if argname != args_strs[-1] or len(instruction.params) > 0
+                    else ")"
+                )
                 rhs = rhs.replace(f"{argname}{mark}", f"{arg}{mark}")
             for kwargname, kwarg in instruction.params.items():
                 if isinstance(kwarg, slope.core.DType):
@@ -293,7 +297,7 @@ def f(self, *, shape, dtype=default_dtype):
     return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 
-@numpy_backend.set_impl(ops.broadcast)
+@numpy_backend.set_impl(ops.broadcast_in_dim)
 def f(self, x, *, shape, axes=None):
     ret = x
     if not axes is None:
@@ -306,7 +310,6 @@ def f(self, x, *, shape, axes=None):
 @numpy_backend.set_impl(ops.reshape)
 def f(self, x, *, shape):
     return np.reshape(x, newshape=shape)
-
 
 
 # @numpy_backend.set_impl(ops.pad)

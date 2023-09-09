@@ -1,12 +1,14 @@
 import slope
 from slope import environment as sev
 
+
 def f(x):
     out = x
-    out = out.pad(((1,0),))
+    out = out.pad(((1, 0),))
     # out = out.pad_xla( (1,), (0,))
     out = out.sum()
     return out
+
 
 x = sev.ones(3)
 x_dot = sev.ones(3)

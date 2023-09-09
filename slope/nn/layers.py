@@ -13,7 +13,7 @@ def Dense(out_dim, W_init=glorot_normal(), b_init=normal()):
         W, b = params
         x = inputs
         x = x.dot(W)
-        x = x + b.broadcast((1, *b.shape), (0,))
+        x = x + b.broadcast_in_dim((1, *b.shape), (0,))
         return x
 
     return init_fun, apply_fun

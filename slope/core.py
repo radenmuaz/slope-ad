@@ -186,7 +186,12 @@ class Op:
     def partial_run_instruction(self, unks_in, instruction):
         if any(unks_in):
             instruction1 = None
-            instruction2 = Instruction(instruction.op, instruction.inputs, instruction.params, instruction.out_binders)
+            instruction2 = Instruction(
+                instruction.op,
+                instruction.inputs,
+                instruction.params,
+                instruction.out_binders,
+            )
             unks_out = [True for i in instruction.out_binders]
             res = [
                 v
@@ -301,19 +306,19 @@ class Op:
             if x.ndim == 0:
                 shape_ret = y.shape
                 bx = tuple(range(y.ndim))
-                x = x.broadcast(shape=shape_ret, axes=bx)
+                x = x.broadcast_in_dim(shape=shape_ret, axes=bx)
             elif y.ndim == 0:
                 shape_ret = x.shape
                 by = tuple(range(x.ndim))
-                y = y.broadcast(shape=shape_ret, axes=by)
+                y = y.broadcast_in_dim(shape=shape_ret, axes=by)
             else:
                 bx = tuple(range((max_(x.ndim, y.ndim) - x.ndim)))
                 by = tuple(range((max_(x.ndim, y.ndim) - y.ndim)))
                 bx = bx if len(bx) > 0 else None
                 by = by if len(by) > 0 else None
                 shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
-                x = x.broadcast(shape=shape_ret, axes=bx)
-                y = y.broadcast(shape=shape_ret, axes=by)
+                x = x.broadcast_in_dim(shape=shape_ret, axes=bx)
+                y = y.broadcast_in_dim(shape=shape_ret, axes=by)
 
             return (x, y), params
 
@@ -447,7 +452,7 @@ class BaseArray:
 
     def __getitem__(self, idx):
         # if None in idx:
-        #     self = self.broadcast(self.shape, idx)
+        #     self = self.broadcast_in_dim(self.shape, idx)
         self.getitem(idx)
 
     def __setitem__(self, idx, item):
@@ -653,26 +658,35 @@ class Program(NamedTuple):
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instructions = PPrint.vcat([self.pp_instruction(names, e) for e in self.instructions])
+        instructions = PPrint.vcat(
+            [self.pp_instruction(names, e) for e in self.instructions]
+        )
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
         outs = ", ".join(outs)
         # outs = ', '.join(sorted(outs))
         ret = str(
             PPrint.pp(f"{{ lambda {in_binders} .")
-            + ((PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
+            + (
+                (PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")
+            ).indent(2)
         )
         # print(ret)
         # print('program outs: ', outs)
         return ret
 
-    def pp_instruction(self, names: DefaultDict[Var, str], instruction: Instruction) -> PPrint:
-        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instruction.out_binders))
+    def pp_instruction(
+        self, names: DefaultDict[Var, str], instruction: Instruction
+    ) -> PPrint:
+        lhs = PPrint.pp(
+            " ".join(self.var_str(names, v) for v in instruction.out_binders)
+        )
         rhs = (
             PPrint.pp(repr(instruction.op.name))
             >> self.pp_params(instruction.params)
             >> PPrint.pp(
                 " ".join(
-                    names[x] if isinstance(x, Var) else str(x.val) for x in instruction.inputs
+                    names[x] if isinstance(x, Var) else str(x.val)
+                    for x in instruction.inputs
                 )
             )
         )
@@ -965,7 +979,9 @@ def f(self, trace, tracers, *, program, num_consts):
 
 
 @jit_op.set_partial_run_instruction
-def f(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
+def f(
+    self, unks_in, instruction
+) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
     program = instruction.params["program"]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
         program, unks_in
@@ -973,8 +989,12 @@ def f(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool],
     ins1, ins2 = partition_list(unks_in, instruction.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instruction1 = Instruction(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
-    instruction2 = Instruction(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
+    instruction1 = Instruction(
+        self, ins1, dict(program=program1, num_consts=0), out_binders1 + res
+    )
+    instruction2 = Instruction(
+        self, res + ins2, dict(program=program2, num_consts=0), out_binders2
+    )
     return instruction1, instruction2, out_unknowns, res
 
 
@@ -1333,7 +1353,12 @@ class Machine:
 
         for instruction in program.instructions:
             unks_in = list_map(read, instruction.inputs)
-            instruction1, instruction2, unks_out, res = instruction.op.partial_run_instruction(unks_in, instruction)
+            (
+                instruction1,
+                instruction2,
+                unks_out,
+                res,
+            ) = instruction.op.partial_run_instruction(unks_in, instruction)
             if instruction1 is not None:
                 instructions1.append(instruction1)
             if instruction2 is not None:
@@ -1442,7 +1467,9 @@ class Machine:
         def tracer_parents(t: PartialEvalTracerArray) -> List[PartialEvalTracerArray]:
             return t.proto.tracers_in if isinstance(t.proto, InstructionProto) else []
 
-        def proto_to_instruction(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
+        def proto_to_instruction(
+            tracer_to_var: Dict[int, Var], proto: InstructionProto
+        ) -> Instruction:
             inputs = [tracer_to_var[id(t)] for t in proto.tracers_in]
             out_binders = [Var(aval) for aval in proto.avals_out]
             for t_ref, var in list_zip(proto.tracer_refs_out, out_binders):
@@ -1563,18 +1590,26 @@ class Machine:
         ct_environment: Dict[Var, Any] = {}
 
         def read_primal(x: Atom) -> Any:
-            return primal_environment.get(x, UndefPrimal(x.aval)) if type(x) is Var else x.val
+            return (
+                primal_environment.get(x, UndefPrimal(x.aval))
+                if type(x) is Var
+                else x.val
+            )
 
         def write_primal(v: Var, val: Any) -> None:
             if type(val) is not UndefPrimal:
                 primal_environment[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_environment.pop(v, self.environment.zeros(v.aval.shape, v.aval.dtype))
+            return ct_environment.pop(
+                v, self.environment.zeros(v.aval.shape, v.aval.dtype)
+            )
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
-                ct_environment[x] = ct_environment[x] + val if x in ct_environment else val
+                ct_environment[x] = (
+                    ct_environment[x] + val if x in ct_environment else val
+                )
 
         list_map(write_primal, program.in_binders, args)
         list_map(write_cotangent, program.outs, cotangents)
@@ -1836,7 +1871,7 @@ class BatchTrace(Trace):
                 out_ndim += 1
             reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
             x = x.reshape(reshape_shape)
-            x = x.broadcast(target_shape)
+            x = x.broadcast_in_dim(target_shape)
             return x
         elif src == dst:
             return x
@@ -1993,7 +2028,9 @@ class ProgramBuilder:
             for instruction in program.instructions
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = Program(new_const_binders + other_binders, new_instructions, new_outs)
+        new_program = Program(
+            new_const_binders + other_binders, new_instructions, new_outs
+        )
         slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
 

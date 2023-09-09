@@ -59,10 +59,7 @@ def variance_scaling(
         if distribution == "normal":
             return sev.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
-            return (
-                sev.rand(size=shape.astype(dtype))
-                * (3 * variance).sqrt()
-            )
+            return sev.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
 
         else:
             raise ValueError(

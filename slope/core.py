@@ -494,7 +494,9 @@ class Environment:
         return (
             Array(val)
             if isinstance(val, ArrayBuffer)
-            else slope.M().backend.run_impl(self.operators_set.constant, val=val, dtype=dtype)
+            else slope.M().backend.run_impl(
+                self.operators_set.constant, val=val, dtype=dtype
+            )
         )
 
     def __getattr__(self, attr):

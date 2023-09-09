@@ -1,7 +1,7 @@
 import slope
 from slope.core import (
-    Op,
-    OpsDir,
+    Operator,
+    OperatorsSet,
     BaseArray,
     VoidArray,
     UndefPrimal,
@@ -9,7 +9,7 @@ from slope.core import (
     list_map,
 )
 
-# from slope import Op, VoidArray, BaseArray
+# from slope import Operator, VoidArray, BaseArray
 import math
 import numpy as np
 from typing import (
@@ -22,15 +22,15 @@ from typing import (
 
 sum_py = sum
 
-ops = OpsDir()
+operators_set = OperatorsSet()
 
 # -----------------------
 # UnaryOps
 # -----------------------
 
-# TODO: in run_program_transposed, try skip run stop_gradient Op
-stop_gradient = Op.unary("stop_gradient")
-ops.register(stop_gradient)
+# TODO: in run_program_transposed, try skip run stop_gradient Operator
+stop_gradient = Operator.unary("stop_gradient")
+operators_set.register(stop_gradient)
 
 
 @stop_gradient.set_run
@@ -51,10 +51,10 @@ def f(self, cts, x):
     return [slope.environment.zeros_like(z)]
 
 
-convert = Op.unary("convert")
+convert = Operator.unary("convert")
 astype = convert
-ops.register(convert)
-ops.alias(convert, "astype")
+operators_set.register(convert)
+operators_set.alias(convert, "astype")
 
 
 @convert.set_run
@@ -68,8 +68,8 @@ def f(self, primals, tangents, *, dtype):
     return [x.convert(dtype)], [x_dot.convert(dtype)]
 
 
-sqrt = Op.unary("sqrt")
-ops.register(sqrt)
+sqrt = Operator.unary("sqrt")
+operators_set.register(sqrt)
 
 
 @sqrt.set_run
@@ -91,8 +91,8 @@ def f(self, cts, x):
     return [z / (x.sqrt() * 2)]
 
 
-sin = Op.unary("sin")
-ops.register(sin)
+sin = Operator.unary("sin")
+operators_set.register(sin)
 
 
 @sin.set_run
@@ -112,8 +112,8 @@ def f(self, cts, x):
     return [(z * ((math.pi / 2) - x).sin())]
 
 
-exp = Op.unary("exp")
-ops.register(exp)
+exp = Operator.unary("exp")
+operators_set.register(exp)
 
 
 @exp.set_run
@@ -134,8 +134,8 @@ def f(self, cts, x):
     return [1 / z]
 
 
-log = Op.unary("log")
-ops.register(log)
+log = Operator.unary("log")
+operators_set.register(log)
 
 
 @log.set_run
@@ -156,8 +156,8 @@ def f(self, cts, x):
     return [1 / z]
 
 
-neg = Op.unary("neg")
-ops.register(neg)
+neg = Operator.unary("neg")
+operators_set.register(neg)
 
 
 @neg.set_run
@@ -177,8 +177,8 @@ def f(self, cts, x):
     return [-z]
 
 
-relu = Op.unary("relu")
-ops.register(relu)
+relu = Operator.unary("relu")
+operators_set.register(relu)
 
 
 @relu.set_run
@@ -204,8 +204,8 @@ def f(self, cts, x):
 # -----------------------
 
 
-add = Op.binary("add")
-ops.register(add)
+add = Operator.binary("add")
+operators_set.register(add)
 
 
 @add.set_run
@@ -225,8 +225,8 @@ def f(self, cts, x, y):
     return [z_bar, z_bar]
 
 
-sub = Op.binary("sub")
-ops.register(sub)
+sub = Operator.binary("sub")
+operators_set.register(sub)
 
 
 @sub.set_run
@@ -246,8 +246,8 @@ def f(self, cts, x, y):
     return [z_bar, -z_bar]
 
 
-mul = Op.binary("mul")
-ops.register(mul)
+mul = Operator.binary("mul")
+operators_set.register(mul)
 
 
 @mul.set_run
@@ -273,8 +273,8 @@ def f(self, cts, x, y):
         return [None, x * z_bar]
 
 
-div = Op.binary("div")
-ops.register(div)
+div = Operator.binary("div")
+operators_set.register(div)
 
 
 @div.set_run
@@ -296,8 +296,8 @@ def f(self, cts, x, y):
     return [z_bar / y, None]
 
 
-maximum = Op.binary("maximum")
-ops.register(maximum)
+maximum = Operator.binary("maximum")
+operators_set.register(maximum)
 
 
 @maximum.set_run
@@ -330,8 +330,8 @@ def f(self, cts, x, y):
     return [z_bar, None]
 
 
-equal = Op.binary("equal")
-ops.register(equal)
+equal = Operator.binary("equal")
+operators_set.register(equal)
 
 
 @equal.set_run
@@ -352,8 +352,8 @@ def f(self, cts, x, y):
     return [z_bar, None]
 
 
-not_equal = Op.binary("not_equal")
-ops.register(not_equal)
+not_equal = Operator.binary("not_equal")
+operators_set.register(not_equal)
 
 
 @not_equal.set_run
@@ -374,8 +374,8 @@ def f(self, cts, x, y):
     return [z_bar, None]
 
 
-max = Op.reduce("max")
-ops.register(max)
+max = Operator.reduce("max")
+operators_set.register(max)
 
 
 @max.set_args_fixer
@@ -413,8 +413,8 @@ def f(self, cts, x, *, axes=None, keepdims=False):
     return [z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)]
 
 
-sum = Op.reduce("sum")
-ops.register(sum)
+sum = Operator.reduce("sum")
+operators_set.register(sum)
 
 
 @sum.set_args_fixer
@@ -453,8 +453,8 @@ def f(self, cts, x, *, axes=None, keepdims=False):
 # ShapeOps
 # -----------------------
 
-broadcast_in_dim = Op.shape("broadcast_in_dim")
-ops.register(broadcast_in_dim)
+broadcast_in_dim = Operator.shape("broadcast_in_dim")
+operators_set.register(broadcast_in_dim)
 
 
 @broadcast_in_dim.set_args_fixer
@@ -533,8 +533,8 @@ def f(self, cts, x, *, shape, axes):
     return [out]
 
 
-reshape = Op.shape("reshape")
-ops.register(reshape)
+reshape = Operator.shape("reshape")
+operators_set.register(reshape)
 
 
 @reshape.set_args_fixer
@@ -568,8 +568,8 @@ def f(self, cts, x, *, shape):
     return [z.reshape(x.aval.shape)]
 
 
-transpose = Op.shape("transpose")
-ops.register(transpose)
+transpose = Operator.shape("transpose")
+operators_set.register(transpose)
 
 
 @transpose.set_run
@@ -610,8 +610,8 @@ def f(self, cts, x, *, perm):
     return [z.transpose(perm)]
 
 
-pad_hlo = Op.shape("pad_hlo")
-ops.register(pad_hlo)
+pad_hlo = Operator.shape("pad_hlo")
+operators_set.register(pad_hlo)
 
 
 @pad_hlo.set_run
@@ -695,8 +695,8 @@ def f(self, cts, x, *, lo, hi, interior=None, value=0.0):
     return [res]
 
 
-slice_hlo = Op.shape("slice_hlo")
-ops.register(slice_hlo)
+slice_hlo = Operator.shape("slice_hlo")
+operators_set.register(slice_hlo)
 
 
 @slice_hlo.set_run
@@ -787,8 +787,8 @@ def T(cts, x, *, starts, limits, strides=None):
     return [res]
 
 
-flip = Op.shape("flip")
-ops.register(flip)
+flip = Operator.shape("flip")
+operators_set.register(flip)
 
 
 @flip.set_run
@@ -818,10 +818,10 @@ def T(cts, *, axes):
     return [z.flip(axes)]
 
 
-concatenate = Op.shape("concatenate")
+concatenate = Operator.shape("concatenate")
 cat = concatenate
-ops.register(concatenate)
-ops.alias(concatenate, "cat")
+operators_set.register(concatenate)
+operators_set.alias(concatenate, "cat")
 
 
 @concatenate.set_run
@@ -894,8 +894,8 @@ def T(cts, xs, *, axis):
 # LoadOps
 # -----------------------
 
-constant = Op.load("constant")
-ops.register(constant)
+constant = Operator.load("constant")
+operators_set.register(constant)
 
 
 @constant.set_run
@@ -921,8 +921,8 @@ def f(self, *, val, dtype=BaseArray.default_dtype):
     return [VoidArray(np.array(val).shape, dtype)]
 
 
-full = Op.load("full")
-ops.register(full)
+full = Operator.load("full")
+operators_set.register(full)
 
 
 @full.set_run
@@ -953,10 +953,10 @@ def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype) -> List[VoidArr
     return [VoidArray(tuple(shape), dtype)]
 
 
-random_uniform = Op.load("random_uniform")
+random_uniform = Operator.load("random_uniform")
 rand = random_uniform
-ops.register(random_uniform)
-ops.alias(random_uniform, "randn")
+operators_set.register(random_uniform)
+operators_set.alias(random_uniform, "randn")
 
 
 @random_uniform.set_run
@@ -981,10 +981,10 @@ def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
 
-random_normal = Op.load("random_normal")
+random_normal = Operator.load("random_normal")
 randn = random_normal
-ops.register(random_normal)
-ops.alias(random_normal, "randn")
+operators_set.register(random_normal)
+operators_set.alias(random_normal, "randn")
 
 
 @random_normal.set_run
@@ -1009,8 +1009,8 @@ def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
 
-arange = Op.load("arange")
-ops.register(arange)
+arange = Operator.load("arange")
+operators_set.register(arange)
 
 
 @arange.set_args_fixer

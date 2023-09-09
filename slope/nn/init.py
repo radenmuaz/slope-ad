@@ -6,7 +6,8 @@ from typing import (
     Callable,
 )
 import math
-import slope as sp
+import slope
+from slope import environment as sev
 
 
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
@@ -30,7 +31,7 @@ def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
 
 def normal(dtype=np.float32) -> Callable:
     def init(shape, dtype=dtype):
-        return sp.machine.environment.ops_dir.randn(shape)
+        return sev.randn(shape)
 
     return init
 
@@ -54,12 +55,12 @@ def variance_scaling(
             denominator = (fan_in + fan_out) / 2
         else:
             raise ValueError(f"invalid mode for variance scaling initializer: {mode}")
-        variance = sp.machine.environment.array(scale / denominator, dtype=dtype)
+        variance = sev.array(scale / denominator, dtype=dtype)
         if distribution == "normal":
-            return sp.machine.environment.ops_dir.randn(shape) * variance.sqrt()
+            return sev.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
             return (
-                sp.machine.environment.ops_dir.rand(size=shape.astype(dtype))
+                sev.rand(size=shape.astype(dtype))
                 * (3 * variance).sqrt()
             )
 
@@ -75,7 +76,7 @@ def glorot_normal(
     in_axis: Union[int, Sequence[int]] = -2,
     out_axis: Union[int, Sequence[int]] = -1,
     batch_axis: Sequence[int] = (),
-    dtype=sp.core.BaseArray.float32,
+    dtype=slope.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,
@@ -92,7 +93,7 @@ def glorot_uniform(
     in_axis: Union[int, Sequence[int]] = -2,
     out_axis: Union[int, Sequence[int]] = -1,
     batch_axis: Sequence[int] = (),
-    dtype=sp.core.BaseArray.float32,
+    dtype=slope.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,

@@ -101,7 +101,7 @@ class Hashed:
         return False
 
 
-class OpType(Enum):
+class OperatorType(Enum):
     Unary = auto()
     Binary = auto()
     Reduce = auto()
@@ -110,15 +110,15 @@ class OpType(Enum):
     Other = auto()
 
 
-class Op:
-    def __init__(self, name, op_type=OpType.Other):
+class Operator:
+    def __init__(self, name, op_type=OperatorType.Other):
         self.name = name
         self.op_type = op_type
         self.impls = dict()
         self.args_fixer = lambda *args, **params: (args, params)
 
     def __repr__(self) -> str:
-        return f"Op <{self.name}>"
+        return f"Operator <{self.name}>"
 
     def pack_args(self, args, params):
         sig = inspect.signature(self.run)
@@ -244,7 +244,7 @@ class Op:
 
     @classmethod
     def unary(cls, name):
-        op = cls(name, OpType.Unary)
+        op = cls(name, OperatorType.Unary)
 
         @op.set_vmap
         def f(self, x, *, axis_size, vals_in, dims_in, **params):
@@ -264,7 +264,7 @@ class Op:
 
     @classmethod
     def binary(cls, name):
-        op = cls(name, OpType.Binary)
+        op = cls(name, OperatorType.Binary)
 
         # binary op has many edge cases
         def impl(self, *args, **params):
@@ -351,7 +351,7 @@ class Op:
 
     @classmethod
     def reduce(cls, name):
-        op = cls(name, OpType.Reduce)
+        op = cls(name, OperatorType.Reduce)
 
         @op.set_args_fixer
         def f(self, x, axes=None, keepdims=False):
@@ -385,12 +385,12 @@ class Op:
 
     @classmethod
     def shape(cls, name):
-        op = cls(name, OpType.Shape)
+        op = cls(name, OperatorType.Shape)
         return op
 
     @classmethod
     def load(cls, name):
-        op = cls(name, OpType.Load)
+        op = cls(name, OperatorType.Load)
         return op
 
 
@@ -399,7 +399,7 @@ class Op:
 # ========================
 
 
-class OpsDir:
+class OperatorsSet:
     def register(self, op):
         setattr(self, op.name, op)
 
@@ -408,7 +408,7 @@ class OpsDir:
         setattr(self, name, getattr(self, op.name))
 
 
-class ProcsDir:
+class ProceduresSet:
     def register(self, fn):
         setattr(self, fn.__name__, fn)
         return fn
@@ -482,8 +482,8 @@ class BaseArray:
 
 @dataclass
 class Environment:
-    ops_dir: OpsDir
-    procs_dir: ProcsDir
+    operators_set: OperatorsSet
+    procedures_set: ProceduresSet
     backends: dict
 
     def array(
@@ -494,18 +494,18 @@ class Environment:
         return (
             Array(val)
             if isinstance(val, ArrayBuffer)
-            else slope.M().backend.run_impl(self.ops_dir.constant, val=val, dtype=dtype)
+            else slope.M().backend.run_impl(self.operators_set.constant, val=val, dtype=dtype)
         )
 
     def __getattr__(self, attr):
         try:
-            # print(f"looking {attr} in ops_dir")
-            return getattr(self.ops_dir, attr)
+            # print(f"looking {attr} in operators_set")
+            return getattr(self.operators_set, attr)
         except:
             pass
         try:
-            # print(f"looking {attr} in procs_dir")
-            return getattr(self.procs_dir, attr)
+            # print(f"looking {attr} in procedures_set")
+            return getattr(self.procedures_set, attr)
         except:
             pass
         # print(f"fallback to default getattribute")
@@ -631,7 +631,7 @@ Atom = Union[Var, Lit]
 
 
 class Instruction(NamedTuple):
-    op: Op
+    op: Operator
     inputs: List[Atom]
     params: Dict[str, Any]
     out_binders: List[Atom]
@@ -776,15 +776,15 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(slope.environment.ops_dir).keys():
-            op = getattr(slope.environment.ops_dir, attr)
+        if attr in vars(slope.environment.operators_set).keys():
+            op = getattr(slope.environment.operators_set, attr)
             return partial(op.impl, self)
-        elif attr in vars(slope.environment.procs_dir).keys():
-            proc = getattr(slope.environment.procs_dir, attr)
+        elif attr in vars(slope.environment.procedures_set).keys():
+            procedure = getattr(slope.environment.procedures_set, attr)
             assert not isinstance(
-                proc, classmethod
+                procedure, classmethod
             ), f"use machine.{attr} instead of Array.{attr}"
-            return partial(proc, self)
+            return partial(procedure, self)
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
     def __repr__(self):
@@ -827,15 +827,15 @@ class TracerArray(BaseArray):
         return self
 
     def __getattr__(self, attr):
-        if attr in vars(slope.environment.ops_dir).keys():
-            op = getattr(slope.environment.ops_dir, attr)
+        if attr in vars(slope.environment.operators_set).keys():
+            op = getattr(slope.environment.operators_set, attr)
             return partial(op, self)
-        elif attr in vars(slope.environment.procs_dir).keys():
-            proc = getattr(slope.environment.procs_dir, attr)
+        elif attr in vars(slope.environment.procedures_set).keys():
+            procedure = getattr(slope.environment.procedures_set, attr)
             assert not isinstance(
-                proc, classmethod
-            ), f"Access this proc by Array.{attr}"
-            return partial(proc, self)
+                procedure, classmethod
+            ), f"Access this procedure by Array.{attr}"
+            return partial(procedure, self)
         try:
             return getattr(self.aval, attr)
         except AttributeError:
@@ -888,7 +888,7 @@ class Leaf:
 
 leaf = Leaf()
 
-jit_op = Op("jit_op")
+jit_op = Operator("jit_op")
 jit_op.pack_args = lambda args, params: (args, params)
 
 
@@ -1020,7 +1020,7 @@ class Machine:
         )
 
         self.environment = environment
-        self.environment.ops_dir.register(jit_op)
+        self.environment.operators_set.register(jit_op)
         self.backend = self.environment.backends[default_backend]
 
     def pprint_trace_stack(self):
@@ -1048,11 +1048,11 @@ class Machine:
 
     # @property
     # def ops(self):
-    #     return self.environment.ops_dir
+    #     return self.environment.operators_set
 
     # @property
-    # def procs(self):
-    #     return self.environment.procs_dir
+    # def procedures(self):
+    #     return self.environment.procedures_set
 
     # @property
     # def backends(self):
@@ -1482,7 +1482,7 @@ class Machine:
         }
         constvar_to_val: Dict[int, Any] = {}
         constid_to_var: Dict[int, Var] = {}
-        processed_instructions: Set[int] = set()
+        procedureessed_instructions: Set[int] = set()
         instructions: List[Instruction] = []
         for t in self.toposort(tracers_out, tracer_parents):
             if isinstance(t.proto, LambdaBindingProto):
@@ -1496,9 +1496,9 @@ class Machine:
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
             elif isinstance(t.proto, InstructionProto):
-                if id(t.proto) not in processed_instructions:
+                if id(t.proto) not in procedureessed_instructions:
                     instructions.append(proto_to_instruction(tracer_to_var, t.proto))
-                    processed_instructions.add(id(t.proto))
+                    procedureessed_instructions.add(id(t.proto))
             else:
                 raise TypeError(t.proto)
 
@@ -1782,7 +1782,7 @@ class Backend:
         return set_impl_
 
     def run_impl(self, op, *args, **params):
-        def process_arg(a):
+        def procedureess_arg(a):
             return (
                 a.val
                 if isinstance(a, Array)
@@ -1791,8 +1791,8 @@ class Backend:
                 else a
             )
 
-        args = tuple([process_arg(a) for a in args])
-        params = {k: process_arg(v) for k, v in params.items()}
+        args = tuple([procedureess_arg(a) for a in args])
+        params = {k: procedureess_arg(v) for k, v in params.items()}
         val = self.impls[op](*args, **params)
         return Array(ArrayBuffer(val))
 
@@ -2064,7 +2064,7 @@ class ConstProto(NamedTuple):
 
 
 class InstructionProto(NamedTuple):
-    prim: Op
+    prim: Operator
     tracers_in: List["PartialEvalTracerArray"]
     params: Dict[str, Any]
     avals_out: List[VoidArray]

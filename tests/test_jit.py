@@ -16,7 +16,7 @@ class TestJit(unittest.TestCase):
         @machine.jit
         def loss(x):
             out = x
-            out = out.maximum(machine.procs.zeros_like(out))
+            out = out.maximum(machine.procedures.zeros_like(out))
             out = out.sum()
             return out
 

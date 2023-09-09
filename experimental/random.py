@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 
 
-class RandomBitGenerator(base_ops.Op):
+class RandomBitGenerator(base_ops.Operator):
     @staticmethod
     def run(key, *, shape, dtype, algorithm):
         return []

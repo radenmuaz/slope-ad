@@ -644,7 +644,9 @@ def f(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
 
     x = pad(operand, _zero(operand), padding_config)
     mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
+    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(
+        padding_value, x.shape, (operand_bdim,)
+    )
     return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 

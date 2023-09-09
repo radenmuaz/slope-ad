@@ -1,4 +1,5 @@
 import slope
+from slope import environment as sev
 from slope.core import ProcsDir, BaseArray
 from slope.environments.v1.ops_defs import ops
 import math
@@ -11,7 +12,14 @@ from collections import defaultdict
 
 procs = ProcsDir()
 
-# Functions
+
+# Utils
+def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+    return (x,) * cnt if isinstance(x, int) else x
+
+
+def flatten_seq(l: Iterator):
+    return [item for sublist in l for item in sublist]
 
 
 @procs.register
@@ -63,6 +71,20 @@ def min(x, axes=None, keepdims=False):
 
 
 @procs.register
+def argmax(self, axis=None, keepdim=False):
+    if axis is None:
+      idx = (self == self.max(axis)) * sev.arange(math.prod(self.shape)-1,-1,-1, dtype=slope.int32,).reshape(self.shape)
+      return math.prod(self.shape) - idx.max() - 1
+    axis = axis + len(self.shape) if axis < 0 else axis
+    m = self == self.max(axis=axis, keepdim=True)
+    idx = m * sev.arange(self.shape[axis]-1,-1,-1, dtype=slope.int32).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
+    return self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)-1
+
+@procs.register
+def argmin(self, axis=None, keepdim=False): return (-self).argmax(axis=axis, keepdim=keepdim)
+
+
+@procs.register
 def T(x):
     perm = list(range(x.ndim))
     perm[-2], perm[-1] = perm[-1], perm[-2]
@@ -97,13 +119,13 @@ def dot(x, w):
 
 @procs.register
 def __getitem__(
-    self, val
+    x, val
 ):  # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
         raise IndexError(
-            f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}"
+            f"index {e} is out of bounds for dimension {i} with size {x.shape[i]}"
         )
 
     orig_slices = list(val) if isinstance(val, tuple) else [val]
@@ -112,15 +134,15 @@ def __getitem__(
         count[type(v)].append(i)
 
     if (num_slices := len(count[int]) + len(count[slice]) + len(count)) > len(
-        self.shape
+        x.shape
     ):
-        raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+        raise IndexError(f"too many indices for tensor of dimension {len(x.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
 
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
     orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice(None)] * (
-        len(self.shape) - num_slices
+        len(x.shape) - num_slices
     )
 
     valid_slices = [v for v in orig_slices if v is not None]
@@ -130,18 +152,18 @@ def __getitem__(
         else slice(y_ := normalize_int(v, i, dim_sz), y_ + 1)
         if isinstance(v, int)
         else slice(None)
-        for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))
+        for i, (v, dim_sz) in enumerate(zip(valid_slices, x.shape))
     ]
 
     start, stop, strides = (
         zip(*y)
-        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)])
+        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)])
         else ((), (), ())
     )
     new_slice = tuple(
         (s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides)
     )
-    sliced_tensor = self.slice(new_slice).flip(
+    sliced_tensor = x.slice(new_slice).flip(
         axis=[i for i, s in enumerate(strides) if s < 0]
     )
     new_shape = sliced_tensor.shape
@@ -193,7 +215,7 @@ def __getitem__(
                 ret.shape[d],
                 dtype=dtypes.int32,
                 requires_grad=False,
-                device=self.device,
+                device=x.device,
             ).reshape(*[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1))
             for n, (sd, d) in enumerate(zip(sum_dim, dim))
         ]
@@ -233,42 +255,37 @@ def __getitem__(
 
 
 @procs.register
-def pad(self, pad_width, mode="constant", constant_values=0.0):
+def pad(x, pad_width, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
-    if len(pad_width) == len(self.shape):
-        assert all(len(pw) == len(pad_width[0]) for pw in pad_width)
-        lo, hi, interior = [], [], []
-        for pw in pad_width:
-            lo += [pw[0]]
-            hi += [pw[1]]
-            if len(pw) == 3:
-                interior += [pw[2]]
-    lo, hi = tuple(lo), tuple(hi)
-    interior = None if len(interior) == 0 else tuple(interior)
-    return self.pad_hlo(lo, hi, interior)
+    if type(pad_width) is int:
+        pad_width = ((pad_width, pad_width, 0)*x.ndim)
+    elif all(type(pw) is int for pw in pad_width):
+        assert len(pad_width) == x.ndim
+        pad_width = tuple((pw, pw, 0) for pw in pad_width)
+    elif len(pad_width) == 2 and all(type(item) is int for item in pad_width):
+        pad_width = ((*pad_width, 0)*x.ndim)
+    elif len(pad_width) == 3 and all(type(item) is int for item in pad_width):
+        pad_width = (pad_width,)*x.ndim
+    else:
+        pad_width = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad_width)
+    lo, hi, interior = tuple(zip(*pad_width))
+    return x.pad_hlo(lo, hi, interior)
 
 
 @procs.register
-def slice(self, arg):
-    starts, limits, strides = [], [], []
-    assert all(len(a) == len(arg[0]) for a in arg)
-    for a in arg:
-        starts += [a[0]]
-        limits += [a[1]]
-        if len(a) == 3:
-            strides += [a[2]]
-    starts, limits = tuple(starts), tuple(limits)
-    strides = None if len(strides) == 0 else tuple(strides)
-    return self.slice_hlo(starts, limits, strides)
+def slice(x, arg):
+    arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
+    starts, limits, strides = tuple(zip(*arg))
+    return x.slice_hlo(starts, limits, strides)
 
 
 @procs.register
-def padslice(self, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
-    arg_ = tuple([a if a is not None else (0, s) for s, a in zip(self.shape, arg)])
+def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
+    arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple(
-        [(max(0, -p[0]), max(0, p[1] - self.shape[i])) for i, p in enumerate(arg_)]
+        [(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)]
     )
-    ret = self
+    ret = x
     ret = ret.pad(padding, constant_values=value)
     slc = tuple(
         [(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)]
@@ -277,22 +294,16 @@ def padslice(self, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     return ret
 
 
-# def shrink(self, arg:Tuple[Tuple[int, int], ...]) -> Tensor: return mlops.Shrink.apply(self, arg=arg) if any(x != (0,s) for x,s in zip(arg, self.shape)) else self
-#   def pad(self, arg: Tuple[Tuple[int, int], ...], value:float=0) -> Tensor:
-#     ret = mlops.Pad.apply(self, arg=arg) if any(x != (0, 0) for x in arg) else self
-#     return ret if 0 == value else ret + mlops.Pad.apply(Tensor.ones_like(self), arg=arg).where(0, value)
-
-
 @procs.register
-def gather(self, idx, dim: int):
-    assert idx.ndim == self.ndim, "self.ndim must equal idx.ndim"
+def gather(x, idx, dim: int):
+    assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(
-        s >= i for s, i in zip(self.shape, idx.shape)
-    ), "all dim of idx.shape must be smaller than self.shape"
+        s >= i for s, i in zip(x.shape, idx.shape)
+    ), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
-        dim += self.ndim
+        dim += x.ndim
     idx = idx.swapaxes(ax1=dim, ax2=0).expand_dims(-1)
-    permarg = list(range(self.ndim))
+    permarg = list(range(x.ndim))
     permarg = (
         permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
         if dim != 0
@@ -303,32 +314,19 @@ def gather(self, idx, dim: int):
             (
                 idx
                 == ops.arange(
-                    self.shape[dim],
+                    x.shape[dim],
                     dtype=slope.int32,
                     requires_grad=False,
-                    device=self.device,
+                    device=x.device,
                 )
             )
-            * self.transpose(*permarg)
-            .slice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, self.shape[dim])]))
+            * x.transpose(*permarg)
+            .slice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
             .expand_dims(0)
         )
         .sum(-1)
         .swapaxes(ax1=0, ax2=dim)
     )
-
-
-#   def cat(self, *args, dim=0):
-#     dim = (dim + len(self.shape)) if dim < 0 else dim
-#     assert all(len(y.shape) == len(self.shape) and all(y.shape[i] == s for i,s in enumerate(self.shape) if i != dim) for y in args)
-#     catargs = [self, *args]
-#     assert all(t.shape for t in catargs), "zero-dimensional tensor cannot be concatenated"
-#     shapes = [s.shape[dim] for s in catargs]
-#     shape_cumsum = [0, *accumulate(shapes)]
-#     slc = [[(0, 0) for _ in self.shape] for _ in catargs]
-#     for shp,k,s in zip(shapes, shape_cumsum[:-1], slc):
-#       s[dim] = (k, shape_cumsum[-1] - k - shp)
-#     return reduce(Tensor.__add__, [arg.pad(tuple(s)) for arg,s in zip(catargs, slc)])
 
 
 @procs.register
@@ -337,117 +335,110 @@ def stack(tensors, dim=0):
     first = tensors[0].expand_dims(dim)
     expand_dimsd_tensors = [tensor.expand_dims(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
-    return first.cat(*expand_dimsd_tensors, dim=dim)
+    return first.concatenate(*expand_dimsd_tensors, dim=dim)
 
 
 @procs.register
-def repeat(self, repeats):
-    base_shape = (1,) * (len(repeats) - self.ndim) + self.shape
+def repeat(x, repeats):
+    base_shape = (1,) * (len(repeats) - x.ndim) + x.shape
     new_shape = [x for b in base_shape for x in [1, b]]
     expand_shape = [x for rs in zip(repeats, base_shape) for x in rs]
     final_shape = [r * s for r, s in zip(repeats, base_shape)]
-    return self.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
+    return x.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
 
 
 @procs.register
-def chunk(self, num: int, dim: int):
-    dim, step = dim + self.ndim if dim < 0 else dim, math.ceil(self.shape[dim] / num)
+def split(x, num: int, dim: int):
+    dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
     slice_params = [
         [slice(None)] * dim + [slice(k, k + step)]
-        for k in range(0, self.shape[dim], step)
+        for k in range(0, x.shape[dim], step)
     ]
-    return [self[tuple(sl)] for sl in slice_params]
+    return [x[tuple(sl)] for sl in slice_params]
 
 
 @procs.register
-def squeeze(self, dim=None):
+def squeeze(x, dim=None):
     if dim is None:
         return (
-            self
-            if 1 not in self.shape
-            else self.reshape(*[size for size in self.shape if size != 1])
+            x
+            if 1 not in x.shape
+            else x.reshape(*[size for size in x.shape if size != 1])
         )
-    if dim <= 0 and self.ndim == 0:
-        return self  # This is to match PyTorch behavior
-    if not -self.ndim <= dim < self.ndim:
+    if dim <= 0 and x.ndim == 0:
+        return x  # This is to match PyTorch behavior
+    if not -x.ndim <= dim < x.ndim:
         raise IndexError(
-            f"Dimension out of range (expected to be in range of [{-self.ndim if self.ndim > 0 else self.ndim-1}, {self.ndim-1 if self.ndim > 0 else self.ndim}], but got {dim})"
+            f"Dimension out of range (expected to be in range of [{-x.ndim if x.ndim > 0 else x.ndim-1}, {x.ndim-1 if x.ndim > 0 else x.ndim}], but got {dim})"
         )
     if dim < 0:
-        dim += self.ndim
+        dim += x.ndim
     return (
-        self
-        if self.shape[dim] != 1
-        else self.reshape(*[size for idx, size in enumerate(self.shape) if idx != dim])
+        x
+        if x.shape[dim] != 1
+        else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
     )
 
 
 @procs.register
-def expand_dims(self, dim):
+def expand_dims(x, dim):
     if dim < 0:
-        dim = len(self.shape) + dim + 1
-    return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
+        dim = len(x.shape) + dim + 1
+    return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
 
 
 # (padding_left, padding_right, paddingp, padding_bottom)
-@procs.register
-def pad2d(self, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
-    slc = [
-        (-p0, s + p1)
-        for p0, p1, s in zip(padding[::2], padding[1::2], self.shape[::-1])
-    ][::-1]
-    slc_ = [(0, s) for s in self.shape[: -(len(padding) // 2)]] + slc
-    ret = self.padslice(slc_, value=value)
-    return ret
+# @procs.register
+# def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
+#     slc = [
+#         (-p0, s + p1)
+#         for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])
+#     ][::-1]
+#     slc_ = [(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc
+#     ret = x.padslice(slc_, value=value)
+#     return ret
 
 
 @procs.register
-def swapaxes(self, ax1=1, ax2=0):
-    order = list(range(len(self.shape)))
+def swapaxes(x, ax1=1, ax2=0):
+    order = list(range(len(x.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
-    return self.transpose(order)
+    return x.transpose(order)
 
 
 @procs.register
-def flatten(self, start_dim=0):
-    return self.reshape(shape=self.shape[:start_dim] + (-1,))
+def flatten(x, start_dim=0):
+    return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
-
-
-def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
-    return (x,) * cnt if isinstance(x, int) else x
-
-
-def flatten_seq(l: Iterator):
-    return [item for sublist in l for item in sublist]
 
 @procs.register
-def broadcast(self, shape):
-    return self.broadcast_in_dim(shape=shape, axes=None)
+def broadcast(x, shape):
+    return x.broadcast_in_dim(shape=shape, axes=None)
+
 
 @procs.register
 def _pool(
-    self,
+    x,
     k_: Tuple[int, ...],
     stride: Union[Tuple[int, ...], int] = 1,
     dilation: Union[Tuple[int, ...], int] = 1,
 ):
-    assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
+    assert len(x.shape) >= len(k_), f"can't pool {x.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
     assert len(k_) == len(s_) and len(k_) == len(
         d_
     ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     slc_prefix, prefix, i_ = (
-        [(0, x) for x in self.shape[0 : -len(k_)]],
-        self.shape[0 : -len(k_)],
-        self.shape[-len(k_) :],
+        [(0, x) for x in x.shape[0 : -len(k_)]],
+        x.shape[0 : -len(k_)],
+        x.shape[-len(k_) :],
     )
     if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
         o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
         e_ = [
             math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
         ]  # expands such that we don't need padding
-        xup = self
+        xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
         xup = xup.broadcast((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
@@ -455,54 +446,65 @@ def _pool(
         xup = xup.padslice(
             slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)]
         )
-        xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
+        xup = xup.reshape(
+            (*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_)))
+        )
         xup = xup.padslice(
-            slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
+            slc_prefix
+            + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
         )
         # handle stride, and permute to move reduce to the end
-        xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
+        xup = xup.reshape(
+            (*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_)))
+        )
         xup = xup.padslice(
             slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
         )
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
-        return xup.transpose((
-            *range(len(prefix)),
-            *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-            *[len(prefix) + i * 2 for i in range(len(k_))],)
+        return xup.transpose(
+            (
+                *range(len(prefix)),
+                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+                *[len(prefix) + i * 2 for i in range(len(k_))],
+            )
         )
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
-    xup = self.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
+    xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
-    xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
-    return xup.transpose((
-        *range(len(prefix)),
-        *[len(prefix) + i * 2 for i in range(len(k_))],
-        *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-    ))
+    xup = xup.padslice(
+        (slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_)))
+    )
+    return xup.transpose(
+        (
+            *range(len(prefix)),
+            *[len(prefix) + i * 2 for i in range(len(k_))],
+            *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+        )
+    )
 
 
 # NOTE: these work for more than 2D
 @procs.register
-def avg_pool2d(self, kernel_size=(2, 2), stride=None):
-    return self._pool(
+def avg_pool2d(x, kernel_size=(2, 2), stride=None):
+    return x._pool(
         make_pair(kernel_size), stride if stride is not None else kernel_size
     ).mean(axis=tuple(range(0 - len(make_pair(kernel_size)), 0)))
 
 
 @procs.register
-def max_pool2d(self, kernel_size=(2, 2), stride=None, dilation=1):
-    return self._pool(
+def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
+    return x._pool(
         make_pair(kernel_size), stride if stride is not None else kernel_size, dilation
     ).max(axis=tuple(range(0 - len(make_pair(kernel_size)), 0)))
 
 
 @procs.register
 def conv_transpose2d(
-    self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0
+    x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0
 ):
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
-    x, w = self, weight.reshape(
+    x, w = x, weight.reshape(
         groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]
     ).transpose(0, 2, 1, *trailing).flip(trailing)
     stride = make_pair(stride, len(HW))
@@ -532,7 +534,7 @@ def conv_transpose2d(
             )
         )
     )
-    return x.conv2d(
+    return x.conv(
         w.reshape(w.shape[0] * w.shape[1], *w.shape[2:]),
         groups=groups,
         bias=bias,
@@ -542,15 +544,15 @@ def conv_transpose2d(
 
 
 @procs.register
-def conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
-    (bs, cin_), (cout, cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
-    assert groups * cin == cin_ and len(self.shape) == len(
+def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
+    (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
+    assert groups * cin == cin_ and len(x.shape) == len(
         weight.shape
-    ), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input Tensor shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
     padding_ = (
         [padding] * 2 * len(HW)
         if isinstance(padding, int)
@@ -560,20 +562,22 @@ def conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
             else [p for p in padding for _ in range(2)][::-1]
         )
     )
-    x = self
-    x = x.pad2d(padding_)
+    # x = x.pad2d(padding_)
+    x = x.pad(padding_)
     x = x._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
     x = x.broadcast((bs, groups, cin, rcout, *oyx, *HW))
-    x = x.transpose((
+    x = x.transpose(
+        (
             0,
             1,
             3,
             *[4 + i for i in range(len(oyx))],
             2,
             *[4 + len(oyx) + i for i in range(len(HW))],
-        ))
+        )
+    )
     # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
     x = x * weight.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
@@ -582,16 +586,16 @@ def conv2d(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     return ret if bias is None else ret.add(bias.reshape((1, -1, *[1] * len(HW))))
 
 
-def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
+def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     assert not all(x == 3 for x in HW) or stride != 1 or dilation != 1
-    (bs, cin_), (cout, cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
-    assert groups * cin == cin_ and len(self.shape) == len(
+    (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
+    assert groups * cin == cin_ and len(x.shape) == len(
         weight.shape
-    ), f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input Tensor shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {self.shape}"
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
     padding_ = (
         [padding] * 2 * len(HW)
         if isinstance(padding, int)
@@ -602,7 +606,8 @@ def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding
         )
     )
 
-    x = self.pad2d(padding_)._pool(
+    # x = x.pad2d(padding_)._pool(
+    x = x.pad(padding_)._pool(
         HW, stride, dilation
     )  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
@@ -612,7 +617,7 @@ def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding
         return (
             t
             if dim == len(HW)
-            else Tensor.stack(
+            else stack(
                 [
                     apply_matrix(
                         mat,
@@ -650,7 +655,7 @@ def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding
 
     # todo: stride == dilation
     # use padding to round up to 4x4 output tiles
-    d = self.pad2d(
+    d = x.pad(
         sum(
             [
                 [
@@ -658,7 +663,7 @@ def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding
                     padding_[i * 2 + 1]
                     + (-(dim + sum(padding_[i * 2 : (i + 1) * 2]) - 2) % 4),
                 ]
-                for i, dim in enumerate(self.shape[-len(HW) :])
+                for i, dim in enumerate(x.shape[-len(HW) :])
             ],
             [],
         )
@@ -712,11 +717,11 @@ def conv2d_wino(self, weight, bias=None, groups=1, stride=1, dilation=1, padding
     )
 
 
-def cumsum(self, axis: int = 0):
+def cumsum(x, axis: int = 0):
     return (
-        self.swapaxes(axis, -1)
-        .pad2d((self.shape[axis] - 1, 0))
-        ._pool((self.shape[axis],))
+        x.swapaxes(axis, -1)
+        .pad((x.shape[axis] - 1, 0))
+        ._pool((x.shape[axis],))
         .sum(-1)
         .swapaxes(axis, -1)
     )

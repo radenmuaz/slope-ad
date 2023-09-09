@@ -20,7 +20,6 @@ class LazyInitEnvironment:
 environment = LazyInitEnvironment()
 sev = environment  # Slope EnVironment
 numpy = environment
-torch = environment
 
 
 def M():

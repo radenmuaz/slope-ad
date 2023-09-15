@@ -58,9 +58,9 @@ def __getattr__(attr):
         "linearize",
         "vjp",
         "grad",
-        "register_pytree_node",
-        "tree_flatten",
-        "tree_unflatten",
+        "register_node",
+        "tree_to_seq",
+        "tree_from_seq",
     ):
         return getattr(machine, attr)
     else:

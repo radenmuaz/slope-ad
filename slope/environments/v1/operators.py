@@ -1,7 +1,7 @@
 import slope
 from slope.core import (
     Operator,
-    OperatorsSet,
+    OperatorSet,
     BaseArray,
     VoidArray,
     UndefPrimal,
@@ -22,7 +22,7 @@ from typing import (
 
 sum_py = sum
 
-operators_set = OperatorsSet()
+operator_set = OperatorSet()
 
 # -----------------------
 # UnaryOps
@@ -30,7 +30,7 @@ operators_set = OperatorsSet()
 
 # TODO: in run_program_transposed, try skip run stop_gradient Operator
 stop_gradient = Operator.unary("stop_gradient")
-operators_set.register(stop_gradient)
+operator_set.register(stop_gradient)
 
 
 @stop_gradient.set_run
@@ -53,8 +53,8 @@ def f(self, cts, x):
 
 convert = Operator.unary("convert")
 astype = convert
-operators_set.register(convert)
-operators_set.alias(convert, "astype")
+operator_set.register(convert)
+operator_set.alias(convert, "astype")
 
 
 @convert.set_run
@@ -69,7 +69,7 @@ def f(self, primals, tangents, *, dtype):
 
 
 sqrt = Operator.unary("sqrt")
-operators_set.register(sqrt)
+operator_set.register(sqrt)
 
 
 @sqrt.set_run
@@ -92,7 +92,7 @@ def f(self, cts, x):
 
 
 sin = Operator.unary("sin")
-operators_set.register(sin)
+operator_set.register(sin)
 
 
 @sin.set_run
@@ -113,7 +113,7 @@ def f(self, cts, x):
 
 
 exp = Operator.unary("exp")
-operators_set.register(exp)
+operator_set.register(exp)
 
 
 @exp.set_run
@@ -135,7 +135,7 @@ def f(self, cts, x):
 
 
 log = Operator.unary("log")
-operators_set.register(log)
+operator_set.register(log)
 
 
 @log.set_run
@@ -157,7 +157,7 @@ def f(self, cts, x):
 
 
 neg = Operator.unary("neg")
-operators_set.register(neg)
+operator_set.register(neg)
 
 
 @neg.set_run
@@ -178,7 +178,7 @@ def f(self, cts, x):
 
 
 relu = Operator.unary("relu")
-operators_set.register(relu)
+operator_set.register(relu)
 
 
 @relu.set_run
@@ -205,7 +205,7 @@ def f(self, cts, x):
 
 
 add = Operator.binary("add")
-operators_set.register(add)
+operator_set.register(add)
 
 
 @add.set_run
@@ -226,7 +226,7 @@ def f(self, cts, x, y):
 
 
 sub = Operator.binary("sub")
-operators_set.register(sub)
+operator_set.register(sub)
 
 
 @sub.set_run
@@ -247,7 +247,7 @@ def f(self, cts, x, y):
 
 
 mul = Operator.binary("mul")
-operators_set.register(mul)
+operator_set.register(mul)
 
 
 @mul.set_run
@@ -274,7 +274,7 @@ def f(self, cts, x, y):
 
 
 div = Operator.binary("div")
-operators_set.register(div)
+operator_set.register(div)
 
 
 @div.set_run
@@ -297,7 +297,7 @@ def f(self, cts, x, y):
 
 
 maximum = Operator.binary("maximum")
-operators_set.register(maximum)
+operator_set.register(maximum)
 
 
 @maximum.set_run
@@ -331,7 +331,7 @@ def f(self, cts, x, y):
 
 
 equal = Operator.binary("equal")
-operators_set.register(equal)
+operator_set.register(equal)
 
 
 @equal.set_run
@@ -353,7 +353,7 @@ def f(self, cts, x, y):
 
 
 not_equal = Operator.binary("not_equal")
-operators_set.register(not_equal)
+operator_set.register(not_equal)
 
 
 @not_equal.set_run
@@ -375,7 +375,7 @@ def f(self, cts, x, y):
 
 
 max = Operator.reduce("max")
-operators_set.register(max)
+operator_set.register(max)
 
 
 @max.set_args_fixer
@@ -414,7 +414,7 @@ def f(self, cts, x, *, axes=None, keepdims=False):
 
 
 sum = Operator.reduce("sum")
-operators_set.register(sum)
+operator_set.register(sum)
 
 
 @sum.set_args_fixer
@@ -454,7 +454,7 @@ def f(self, cts, x, *, axes=None, keepdims=False):
 # -----------------------
 
 broadcast_in_dim = Operator.shape("broadcast_in_dim")
-operators_set.register(broadcast_in_dim)
+operator_set.register(broadcast_in_dim)
 
 
 @broadcast_in_dim.set_args_fixer
@@ -534,7 +534,7 @@ def f(self, cts, x, *, shape, axes):
 
 
 reshape = Operator.shape("reshape")
-operators_set.register(reshape)
+operator_set.register(reshape)
 
 
 @reshape.set_args_fixer
@@ -569,7 +569,7 @@ def f(self, cts, x, *, shape):
 
 
 transpose = Operator.shape("transpose")
-operators_set.register(transpose)
+operator_set.register(transpose)
 
 
 @transpose.set_run
@@ -611,7 +611,7 @@ def f(self, cts, x, *, perm):
 
 
 pad_hlo = Operator.shape("pad_hlo")
-operators_set.register(pad_hlo)
+operator_set.register(pad_hlo)
 
 
 @pad_hlo.set_run
@@ -696,7 +696,7 @@ def f(self, cts, x, *, lo, hi, interior=None, value=0.0):
 
 
 slice_hlo = Operator.shape("slice_hlo")
-operators_set.register(slice_hlo)
+operator_set.register(slice_hlo)
 
 
 @slice_hlo.set_run
@@ -788,7 +788,7 @@ def T(cts, x, *, starts, limits, strides=None):
 
 
 flip = Operator.shape("flip")
-operators_set.register(flip)
+operator_set.register(flip)
 
 
 @flip.set_run
@@ -820,8 +820,8 @@ def T(cts, *, axes):
 
 concatenate = Operator.shape("concatenate")
 cat = concatenate
-operators_set.register(concatenate)
-operators_set.alias(concatenate, "cat")
+operator_set.register(concatenate)
+operator_set.alias(concatenate, "cat")
 
 
 @concatenate.set_run
@@ -895,38 +895,38 @@ def T(cts, xs, *, axis):
 # -----------------------
 
 constant = Operator.load("constant")
-operators_set.register(constant)
+operator_set.register(constant)
 
 
 @constant.set_run
-def f(self, *, val, dtype=BaseArray.default_dtype):
+def f(self, *, val, dtype=BaseArray.float32):
     return [slope.environment.array(val, dtype)]
 
 
 @constant.set_jvp
-def f(self, primals, tangents, *, val, dtype=BaseArray.default_dtype):
+def f(self, primals, tangents, *, val, dtype=BaseArray.float32):
     out = slope.environment.array(val, dtype)
     out_jvp = slope.environment.ones_like(out)
     return [out], [out_jvp]
 
 
 @constant.set_T
-def f(self, cts, *, val, dtype=BaseArray.default_dtype):
+def f(self, cts, *, val, dtype=BaseArray.float32):
     return [cts[0]]
 
 
 @constant.set_shape_run
-def f(self, *, val, dtype=BaseArray.default_dtype):
+def f(self, *, val, dtype=BaseArray.float32):
     # TODO: not using numpy to extract shape
     return [VoidArray(np.array(val).shape, dtype)]
 
 
 full = Operator.load("full")
-operators_set.register(full)
+operator_set.register(full)
 
 
 @full.set_run
-def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
+def f(self, *, shape, fill_value, dtype=BaseArray.float32):
     return [
         slope.M().backend.run_impl(
             self, shape=shape, fill_value=fill_value, dtype=dtype
@@ -935,7 +935,7 @@ def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype):
 
 
 @full.set_jvp
-def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dtype):
+def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(
         self, shape=shape, fill_value=fill_value, dtype=dtype
     )
@@ -944,77 +944,77 @@ def f(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.default_dty
 
 
 @full.set_T
-def f(self, cts, *, shape, fill_value, dtype=BaseArray.default_dtype):
+def f(self, cts, *, shape, fill_value, dtype=BaseArray.float32):
     return [cts[0]]
 
 
 @full.set_shape_run
-def f(self, *, shape, fill_value, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+def f(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
 
 random_uniform = Operator.load("random_uniform")
 rand = random_uniform
-operators_set.register(random_uniform)
-operators_set.alias(random_uniform, "randn")
+operator_set.register(random_uniform)
+operator_set.alias(random_uniform, "randn")
 
 
 @random_uniform.set_run
-def f(self, *, shape, dtype=BaseArray.default_dtype):
+def f(self, *, shape, dtype=BaseArray.float32):
     return [slope.M().backend.run_impl(self, shape=shape, dtype=dtype)]
 
 
 @random_uniform.set_jvp
-def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
+def f(self, primals, tangents, *, shape, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(self, shape=shape, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @random_uniform.set_T
-def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
+def f(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
 @random_uniform.set_shape_run
-def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+def f(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
 
 random_normal = Operator.load("random_normal")
 randn = random_normal
-operators_set.register(random_normal)
-operators_set.alias(random_normal, "randn")
+operator_set.register(random_normal)
+operator_set.alias(random_normal, "randn")
 
 
 @random_normal.set_run
-def f(self, *, shape, dtype=BaseArray.default_dtype):
+def f(self, *, shape, dtype=BaseArray.float32):
     return [slope.M().backend.run_impl(random_normal, shape=shape, dtype=dtype)]
 
 
 @random_normal.set_jvp
-def f(self, primals, tangents, *, shape, dtype=BaseArray.default_dtype):
+def f(self, primals, tangents, *, shape, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(random_normal, shape, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @random_normal.set_T
-def f(self, cts, *, shape, dtype=BaseArray.default_dtype):
+def f(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
 @random_normal.set_shape_run
-def f(self, *, shape, dtype=BaseArray.default_dtype) -> List[VoidArray]:
+def f(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
 
 arange = Operator.load("arange")
-operators_set.register(arange)
+operator_set.register(arange)
 
 
 @arange.set_args_fixer
-def f(self, *, start, stop=None, stride=None, dtype=BaseArray.default_dtype):
+def f(self, *, start, stop=None, stride=None, dtype=BaseArray.float32):
     if stop is None:
         stop = start
         start = 0
@@ -1024,26 +1024,22 @@ def f(self, *, start, stop=None, stride=None, dtype=BaseArray.default_dtype):
 
 
 @arange.set_run
-def f(self, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
+def f(self, *, start, stop, stride=None, dtype=BaseArray.float32):
     return [slope.M().backend.run_impl(arange, start, stop, stride, dtype)]
 
 
 @arange.set_jvp
-def f(
-    self, primals, tangents, *, start, stop, stride=None, dtype=BaseArray.default_dtype
-):
+def f(self, primals, tangents, *, start, stop, stride=None, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(arange, start, stop, stride, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_T
-def f(self, cts, *, start, stop, stride=None, dtype=BaseArray.default_dtype):
+def f(self, cts, *, start, stop, stride=None, dtype=BaseArray.float32):
     return [cts[0]]
 
 
 @arange.set_shape_run
-def f(
-    self, *, start, stop, stride=None, dtype=BaseArray.default_dtype
-) -> List[VoidArray]:
+def f(self, *, start, stop, stride=None, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple((stop - start) * stride), dtype)]

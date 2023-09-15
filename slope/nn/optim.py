@@ -8,11 +8,11 @@ from functools import partial
 from slope.core import unzip2, list_map
 
 OptimizerState = namedtuple(
-    "OptimizerState", ["packed_state", "tree_def", "subtree_defs"]
+    "OptimizerState", ["from_seqed_state", "tree_def", "subtree_defs"]
 )
-slope.register_pytree_node(
+slope.register_node(
     OptimizerState,
-    lambda xs: ((xs.packed_state,), (xs.tree_def, xs.subtree_defs)),
+    lambda xs: ((xs.from_seqed_state,), (xs.tree_def, xs.subtree_defs)),
     lambda data, xs: OptimizerState(xs[0], data[0], data[1]),
 )
 
@@ -53,15 +53,17 @@ def optimizer(
 
         @functools.wraps(init)
         def tree_init(x0_tree):
-            x0_flat, tree = slope.tree_flatten(x0_tree)
+            x0_flat, tree = slope.tree_to_seq(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = unzip2(list_map(slope.tree_flatten, initial_states))
+            states_flat, subtrees = unzip2(
+                list_map(slope.tree_to_seq, initial_states)
+            )
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)
         def tree_update(i, grad_tree, opt_state):
             states_flat, tree, subtrees = opt_state
-            grad_flat, tree2 = slope.tree_flatten(grad_tree)
+            grad_flat, tree2 = slope.tree_to_seq(grad_tree)
             if tree2 != tree:
                 msg = (
                     "optimizer update function was passed a gradient tree that did "
@@ -69,10 +71,10 @@ def optimizer(
                     "initialized: parameter tree {} and grad tree {}."
                 )
                 raise TypeError(msg.format(tree, tree2))
-            states = list_map(slope.tree_unflatten, subtrees, states_flat)
+            states = list_map(slope.tree_from_seq, subtrees, states_flat)
             new_states = list_map(partial(update, i), grad_flat, states)
             new_states_flat, subtrees2 = unzip2(
-                list_map(slope.tree_flatten, new_states)
+                list_map(slope.tree_to_seq, new_states)
             )
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
@@ -86,9 +88,9 @@ def optimizer(
         @functools.wraps(get_params)
         def tree_get_params(opt_state):
             states_flat, tree, subtrees = opt_state
-            states = list_map(slope.tree_unflatten, subtrees, states_flat)
+            states = list_map(slope.tree_from_seq, subtrees, states_flat)
             params = list_map(get_params, states)
-            return slope.tree_unflatten(tree, params)
+            return slope.tree_from_seq(tree, params)
 
         return Optimizer(tree_init, tree_update, tree_get_params)
 
@@ -296,12 +298,12 @@ def unpack_optimizer_state(opt_state):
       A pytree with JoinPoint leaves that contain a second level of pytrees.
     """
     states_flat, tree_def, subtree_defs = opt_state
-    subtrees = map(slope.tree_unflatten, subtree_defs, states_flat)
+    subtrees = map(slope.tree_from_seq, subtree_defs, states_flat)
     sentinels = [JoinPoint(subtree) for subtree in subtrees]
-    return slope.tree_unflatten(tree_def, sentinels)
+    return slope.tree_from_seq(tree_def, sentinels)
 
 
-def pack_optimizer_state(marked_pytree):
+def from_seq_optimizer_state(marked_pytree):
     """Converts a marked pytree to an OptimizerState.
 
     The inverse of unpack_optimizer_state. Converts a marked pytree with the
@@ -314,8 +316,8 @@ def pack_optimizer_state(marked_pytree):
     Returns:
       An equivalent OptimizerState to the input argument.
     """
-    sentinels, tree_def = slope.tree_flatten(marked_pytree)
+    sentinels, tree_def = slope.tree_to_seq(marked_pytree)
     assert all(isinstance(s, JoinPoint) for s in sentinels)
     subtrees = [s.subtree for s in sentinels]
-    states_flat, subtree_defs = slope.unzip2(map(slope.tree_flatten, subtrees))
+    states_flat, subtree_defs = slope.unzip2(map(slope.tree_to_seq, subtrees))
     return OptimizerState(states_flat, tree_def, subtree_defs)

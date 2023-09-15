@@ -1,5 +1,5 @@
 import slope
-from slope.environments.v1.operators import operators_set
+from slope.environments.v1.operators import operator_set
 from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
 import numpy as np
 from typing import (
@@ -12,7 +12,9 @@ import math
 import inspect
 import re
 
-numpy_backend = Backend(name="numpy", deps=("numpy as np", "math"))
+numpy_backend = Backend(
+    name="numpy", default_dtype=BaseArray.float32, deps=("numpy as np", "math")
+)
 numpy_dtype_map = {
     BaseArray.float32: np.dtype("float32"),
     BaseArray.int64: np.dtype("int64"),
@@ -20,7 +22,18 @@ numpy_dtype_map = {
     BaseArray.bool: np.dtype("bool"),
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
-default_dtype = numpy_dtype_map[BaseArray.default_dtype]
+
+default_dtype = numpy_backend.default_dtype
+
+
+@numpy_backend.set_numpy_of
+def f(self, array):
+    return array.buf.val
+
+
+@numpy_backend.set_device_of
+def f(self, array):
+    return "cpu"
 
 
 @numpy_backend.set_compile
@@ -190,113 +203,113 @@ def f(self, in_vals, in_avals, *, params):
     return dict(codegen_out=codegen_out)
 
 
-@numpy_backend.set_impl(operators_set.convert)
+@numpy_backend.set_impl(operator_set.convert)
 def f(self, x, *, dtype):
     ret = x
     return ret.astype(dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.stop_gradient)
+@numpy_backend.set_impl(operator_set.stop_gradient)
 def f(self, x, *, dtype):
     return x
 
 
-@numpy_backend.set_impl(operators_set.neg)
+@numpy_backend.set_impl(operator_set.neg)
 def f(self, x):
     return np.negative(x)
 
 
-@numpy_backend.set_impl(operators_set.sqrt)
+@numpy_backend.set_impl(operator_set.sqrt)
 def f(self, x):
     return np.sqrt(x)
 
 
-@numpy_backend.set_impl(operators_set.exp)
+@numpy_backend.set_impl(operator_set.exp)
 def f(self, x):
     return np.exp(x)
 
 
-@numpy_backend.set_impl(operators_set.log)
+@numpy_backend.set_impl(operator_set.log)
 def f(self, x):
     return np.log(x)
 
 
-@numpy_backend.set_impl(operators_set.sin)
+@numpy_backend.set_impl(operator_set.sin)
 def f(self, x):
     return np.sin(x)
 
 
-@numpy_backend.set_impl(operators_set.add)
+@numpy_backend.set_impl(operator_set.add)
 def f(self, x, y):
     return np.add(x, y)
 
 
-@numpy_backend.set_impl(operators_set.sub)
+@numpy_backend.set_impl(operator_set.sub)
 def f(self, x, y):
     return np.subtract(x, y)
 
 
-@numpy_backend.set_impl(operators_set.mul)
+@numpy_backend.set_impl(operator_set.mul)
 def f(self, x, y):
     return np.multiply(x, y)
 
 
-@numpy_backend.set_impl(operators_set.div)
+@numpy_backend.set_impl(operator_set.div)
 def f(self, x, y):
     return np.divide(x, y)
 
 
-@numpy_backend.set_impl(operators_set.equal)
+@numpy_backend.set_impl(operator_set.equal)
 def f(self, x, y):
     return np.equal(x, y)
 
 
-@numpy_backend.set_impl(operators_set.not_equal)
+@numpy_backend.set_impl(operator_set.not_equal)
 def f(self, x, y):
     return np.not_equal(x, y)
 
 
-@numpy_backend.set_impl(operators_set.maximum)
+@numpy_backend.set_impl(operator_set.maximum)
 def f(self, x, y):
     return np.maximum(x, y)
 
 
-@numpy_backend.set_impl(operators_set.sum)
+@numpy_backend.set_impl(operator_set.sum)
 def f(self, x, *, axes=None, keepdims=False):
     return np.sum(x, axis=axes, keepdims=keepdims)
 
 
-@numpy_backend.set_impl(operators_set.max)
+@numpy_backend.set_impl(operator_set.max)
 def f(self, x, *, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
 
 
-@numpy_backend.set_impl(operators_set.constant)
+@numpy_backend.set_impl(operator_set.constant)
 def f(self, val, *, dtype=default_dtype):
     return np.array(val, dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.arange)
+@numpy_backend.set_impl(operator_set.arange)
 def f(self, *, start, stop, stride, dtype=default_dtype):
     return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.full)
+@numpy_backend.set_impl(operator_set.full)
 def f(self, *, shape, fill_value, dtype=default_dtype):
     return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.random_uniform)
+@numpy_backend.set_impl(operator_set.random_uniform)
 def f(self, *, shape, dtype=default_dtype):
     return np.random.uniform(size=shape).astype(dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.random_normal)
+@numpy_backend.set_impl(operator_set.random_normal)
 def f(self, *, shape, dtype=default_dtype):
     return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 
-@numpy_backend.set_impl(operators_set.broadcast_in_dim)
+@numpy_backend.set_impl(operator_set.broadcast_in_dim)
 def f(self, x, *, shape, axes=None):
     ret = x
     if not axes is None:
@@ -306,46 +319,46 @@ def f(self, x, *, shape, axes=None):
     return ret
 
 
-@numpy_backend.set_impl(operators_set.reshape)
+@numpy_backend.set_impl(operator_set.reshape)
 def f(self, x, *, shape):
     return np.reshape(x, newshape=shape)
 
 
-# @numpy_backend.set_impl(operators_set.pad)
+# @numpy_backend.set_impl(operator_set.pad)
 # def f(self, x, *,  pad_width, mode="constant", constant_values=0.0):
 #     # TODO: implement interior pad
 #     return np.pad(x, pad_width=pad_width, mode=mode, constant_values=constant_values)
 
 
-@numpy_backend.set_impl(operators_set.pad_hlo)
+@numpy_backend.set_impl(operator_set.pad_hlo)
 def f(self, x, *, lo, hi, interior, value):
     # TODO: implement interior pad
     return np.pad(x, list(zip(lo, hi)), constant_values=value)
 
 
-@numpy_backend.set_impl(operators_set.slice_hlo)
+@numpy_backend.set_impl(operator_set.slice_hlo)
 def f(self, x, *, starts, limits, strides):
     slices = tuple(slice(s, l, st) for s, l, st in zip(starts, limits, strides))
     return x[slices]
 
 
-@numpy_backend.set_impl(operators_set.concatenate)
+@numpy_backend.set_impl(operator_set.concatenate)
 def f(self, xs, *, axes):
     return np.concatenate(xs, axes)
 
 
-@numpy_backend.set_impl(operators_set.transpose)
+@numpy_backend.set_impl(operator_set.transpose)
 def f(self, x, *, perm):  # NOTE: np.transpose is like torch.permute
     return np.transpose(x, axes=perm)
 
 
-@numpy_backend.set_impl(operators_set.flip)
+@numpy_backend.set_impl(operator_set.flip)
 def f(self, x, *, axes):
     return np.flip(x, axes)
 
 
-#   subc = subc.build(xoperators_set.Tuple(subc, outs))
-#   return destructure_tuple(c, xoperators_set.Call(c, subc, in_vals))
+#   subc = subc.build(xoperator_set.Tuple(subc, outs))
+#   return destructure_tuple(c, xoperator_set.Call(c, subc, in_vals))
 
 
 # def direct_translation(op, c, in_avals, in_vals):

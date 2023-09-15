@@ -1,4 +1,7 @@
 from dataclasses import dataclass
+from pathlib import Path
+import os
+import json
 from typing import (
     Callable,
     NamedTuple,
@@ -22,13 +25,15 @@ from typing import (
     DefaultDict,
     Callable,
     Final,
+    BinaryIO,
 )
+from collections.abc import Callable as abc_Callable
 import weakref
 import types
 from contextlib import contextmanager
 import itertools
 import weakref
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from enum import Enum, auto
 import operator as operator_py
 import string
@@ -120,7 +125,7 @@ class Operator:
     def __repr__(self) -> str:
         return f"Operator <{self.name}>"
 
-    def pack_args(self, args, params):
+    def reorg_args(self, args, params):
         sig = inspect.signature(self.run)
         args_strs = [
             k
@@ -153,12 +158,12 @@ class Operator:
         return args, params
 
     def impl(self, *args, **params):
-        args, params = self.pack_args(args, params)
+        args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
         return slope.M().backend.run_impl(self, *args, **params)
 
     def __call__(self, *args, **params):
-        args, params = self.pack_args(args, params)
+        args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
         return slope.M().bind1(self, *args, **params)
 
@@ -273,7 +278,7 @@ class Operator:
                 return op(args[0], args[1])
             else:
                 assert isinstance(args[0], Array) or isinstance(args[1], Array)
-                args, params = self.pack_args(args, params)
+                args, params = self.reorg_args(args, params)
                 args, params = self.args_fixer(*args, **params)
                 return slope.M().backend.run_impl(self, *args, **params)
 
@@ -301,25 +306,21 @@ class Operator:
             elif type(y) is Array and isinstance(x, TracerArray):
                 y = x._trace.pure(y)
 
-            if getattr(x, "shape", None) == getattr(y, "shape", None):
+            if (xshape := x.shape) == (yshape := y.shape):
                 return (x, y), params
-            if x.ndim == 0:
-                shape_ret = y.shape
-                bx = tuple(range(y.ndim))
-                x = x.broadcast_in_dim(shape=shape_ret, axes=bx)
-            elif y.ndim == 0:
-                shape_ret = x.shape
-                by = tuple(range(x.ndim))
-                y = y.broadcast_in_dim(shape=shape_ret, axes=by)
-            else:
-                bx = tuple(range((max_(x.ndim, y.ndim) - x.ndim)))
-                by = tuple(range((max_(x.ndim, y.ndim) - y.ndim)))
-                bx = bx if len(bx) > 0 else None
-                by = by if len(by) > 0 else None
-                shape_ret = tuple(max_(sx, sy) for sx, sy in list_zip(x.shape, y.shape))
-                x = x.broadcast_in_dim(shape=shape_ret, axes=bx)
-                y = y.broadcast_in_dim(shape=shape_ret, axes=by)
+            shape_delta = len(xshape) - len(yshape)
+            if shape_delta > 0:
+                y = y.reshape((1,) * shape_delta + yshape)
+            elif shape_delta < 0:
+                x = x.reshape((1,) * -shape_delta + xshape)
+            if (xshape := x.shape) == (yshape := y.shape):
+                return (x, y), params
 
+            shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
+            if xshape != shape_ret:
+                x = x.broadcast_to(shape_ret)
+            if yshape != shape_ret:
+                y = y.broadcast_to(shape_ret)
             return (x, y), params
 
         @op.set_vmap
@@ -399,7 +400,7 @@ class Operator:
 # ========================
 
 
-class OperatorsSet:
+class OperatorSet:
     def register(self, op):
         setattr(self, op.name, op)
 
@@ -408,7 +409,7 @@ class OperatorsSet:
         setattr(self, name, getattr(self, op.name))
 
 
-class ProceduresSet:
+class ProcedureSet:
     def register(self, fn):
         setattr(self, fn.__name__, fn)
         return fn
@@ -436,7 +437,20 @@ class BaseArray:
     int32: Final[DType] = DType(1, 4, "int", np.int32)
     int64: Final[DType] = DType(2, 8, "int64", np.int64)
     uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-    default_dtype = float32
+
+    safe_dtypes = {
+        "F16": float16,
+        "F32": float32,
+        "U8": uint8,
+        "I8": int8,
+        "I32": int32,
+        "I64": int64,
+    }
+    safe_dtypes_inv = {v: k for k, v in safe_dtypes.items()}
+
+    @property
+    def default_dtype(self):
+        return slope.M().backend.default_dtype
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -478,40 +492,6 @@ class BaseArray:
     __le__ = lambda self, other: self.minimum(other).equal(self)
     __gt__ = lambda self, other: 1.0 - (self <= other)
     __lt__ = lambda self, other: 1.0 - (self >= other)
-
-
-@dataclass
-class Environment:
-    operators_set: OperatorsSet
-    procedures_set: ProceduresSet
-    backends: dict
-
-    def array(
-        self,
-        val: Union[list, tuple, np.ndarray, "ArrayBuffer"] = None,
-        dtype: Optional[Any] = BaseArray.default_dtype,
-    ):
-        return (
-            Array(val)
-            if isinstance(val, ArrayBuffer)
-            else slope.M().backend.run_impl(
-                self.operators_set.constant, val=val, dtype=dtype
-            )
-        )
-
-    def __getattr__(self, attr):
-        try:
-            # print(f"looking {attr} in operators_set")
-            return getattr(self.operators_set, attr)
-        except:
-            pass
-        try:
-            # print(f"looking {attr} in procedures_set")
-            return getattr(self.procedures_set, attr)
-        except:
-            pass
-        # print(f"fallback to default getattribute")
-        super().__getattribute__(attr)
 
 
 def unzip2(pairs):
@@ -770,7 +750,10 @@ class Array(BaseArray):
 
     @property
     def device(self):
-        return slope.M().backend.get_array_device(self)
+        return slope.M().backend.device_of(self)
+
+    def numpy(self):
+        return slope.M().backend.numpy_of(self)
 
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
@@ -778,11 +761,11 @@ class Array(BaseArray):
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(slope.environment.operators_set).keys():
-            op = getattr(slope.environment.operators_set, attr)
+        if attr in vars(slope.environment.operator_set).keys():
+            op = getattr(slope.environment.operator_set, attr)
             return partial(op.impl, self)
-        elif attr in vars(slope.environment.procedures_set).keys():
-            procedure = getattr(slope.environment.procedures_set, attr)
+        elif attr in vars(slope.environment.procedure_set).keys():
+            procedure = getattr(slope.environment.procedure_set, attr)
             assert not isinstance(
                 procedure, classmethod
             ), f"use machine.{attr} instead of Array.{attr}"
@@ -801,6 +784,96 @@ class Array(BaseArray):
 
     def __setitem__(self, idx, val):
         raise NotImplementedError
+
+
+@dataclass
+class Environment:
+    operator_set: OperatorSet
+    procedure_set: ProcedureSet
+    backends: dict
+
+    def __getattr__(self, attr):
+        try:
+            # print(f"looking {attr} in operator_set")
+            return getattr(self.operator_set, attr)
+        except:
+            pass
+        try:
+            # print(f"looking {attr} in procedure_set")
+            return getattr(self.procedure_set, attr)
+        except:
+            pass
+        # print(f"fallback to default getattribute")
+        super().__getattribute__(attr)
+
+    def array(
+        self,
+        val: Union[list, tuple, np.ndarray, "ArrayBuffer"] = None,
+        dtype: Optional[Any] = BaseArray.float32,
+    ):
+        return (
+            Array(val)
+            if isinstance(val, ArrayBuffer)
+            else slope.M().backend.run_impl(
+                self.operator_set.constant, val=val, dtype=dtype
+            )
+        )
+
+    def save(arr: "Array", filename: str):
+        arr_np = arr.numpy()
+
+    def safe_load(self, fn: Union[Array, str]) -> Dict[str, Array]:
+        t = (
+            fn
+            if isinstance(fn, Array)
+            else Array.empty(
+                os.stat(fn).st_size, dtype=BaseArray.uint8, device=f"disk:{fn}"
+            )
+        )
+        json_len = t[0:1].cast(BaseArray.int64).numpy()[0]
+        metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
+        return {
+            k: t[8 + json_len + v["data_offsets"][0] :]
+            .cast(BaseArray.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
+            .reshape(v["shape"])
+            for k, v in metadata.items()
+            if k != "__metadata__"
+        }
+
+    def safe_save(self, Arrays: Dict[str, Array], fn: str):
+        metadata, offset = {}, 0
+        for k, v in Arrays.items():
+            metadata[k] = {
+                "dtype": BaseArray.safe_dtypes_inv[v.dtype],
+                "shape": list(v.shape),
+                "data_offsets": [offset, offset + v.nbytes()],
+            }
+            offset += v.nbytes()
+        j = json.dumps(metadata, separators=(",", ":"))
+        j += "\x20" * ((8 - len(j) % 8) % 8)
+        Path(fn).unlink(missing_ok=True)
+        t = Array.empty(8 + len(j) + offset, dtype=BaseArray.uint8, device=f"disk:{fn}")
+        t[0:1].cast(BaseArray.int64).assign([len(j)])
+        t[8 : 8 + len(j)].assign(
+            Array(list(j.encode("utf-8")), dtype=BaseArray.uint8, device="cpu")
+        )
+        for k, v in self.safe_load(t).items():
+            v.assign(Arrays[k])
+
+
+#   def assign(self, x) -> Tensor:
+#     # TODO: this is a hack for writing to DISK
+#     if self.device.startswith("DISK"):
+#       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
+#       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
+#       return self
+#     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
+#     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
+#     assert not x.requires_grad  # self requires_grad is okay?
+#     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
+#     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
+#     self.lazydata = x.lazydata
+#     return self
 
 
 class TracerArray(BaseArray):
@@ -829,11 +902,11 @@ class TracerArray(BaseArray):
         return self
 
     def __getattr__(self, attr):
-        if attr in vars(slope.environment.operators_set).keys():
-            op = getattr(slope.environment.operators_set, attr)
+        if attr in vars(slope.environment.operator_set).keys():
+            op = getattr(slope.environment.operator_set, attr)
             return partial(op, self)
-        elif attr in vars(slope.environment.procedures_set).keys():
-            procedure = getattr(slope.environment.procedures_set, attr)
+        elif attr in vars(slope.environment.procedure_set).keys():
+            procedure = getattr(slope.environment.procedure_set, attr)
             assert not isinstance(
                 procedure, classmethod
             ), f"Access this procedure by Array.{attr}"
@@ -871,7 +944,7 @@ class Store:
 
 class NodeType(NamedTuple):
     name: str
-    to_iterable: Callable
+    to_seq: Callable
     from_iterable: Callable
 
 
@@ -880,18 +953,19 @@ class PyTreeDef(NamedTuple):
     node_metadata: Hashable
     child_treedefs: Tuple["PyTreeDef", ...]
 
-    # def __repr__(self):
-    # return f"tree {self.node_type.name})\n\tmetadata:{self.node_metadata}\n\tchildren:{self.child_treedefs}"
+    def __repr__(self):
+        return f"tree {self.node_type.name})\n\tchildren:{self.child_treedefs}"
 
 
 class Leaf:
-    pass
+    def __repr__(self):
+        return "<Leaf>"
 
 
 leaf = Leaf()
 
 jit_op = Operator("jit_op")
-jit_op.pack_args = lambda args, params: (args, params)
+jit_op.reorg_args = lambda args, params: (args, params)
 
 
 @jit_op.set_run
@@ -999,6 +1073,58 @@ def f(
     )
     return instruction1, instruction2, out_unknowns, res
 
+class Module:
+    def get_state_dict(self, obj, prefix: str = ""):
+        if isinstance(obj, Array):
+            return {prefix.strip("."): obj}
+        if hasattr(obj, "_asdict"):
+            return self.get_state_dict(
+                obj._asdict(), prefix, Array
+            )  # namedtuple
+        if isinstance(obj, OrderedDict):
+            return self.get_state_dict(dict(obj), prefix)
+        if hasattr(obj, "__dict__"):
+            return self.get_state_dict(obj.__dict__, prefix)
+        state_dict = {}
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                state_dict.update(
+                    self.get_state_dict(v, f"{prefix}{str(k)}.")
+                )
+        # elif isinstance(obj, (list, tuple)):
+        #     for i, x in enumerate(obj):
+        #         state_dict.update(
+        #             self.get_state_dict(x, f"{prefix}{str(i)}.")
+        #         )
+        return state_dict
+    
+    @property
+    def state_dict(self):
+        return self.get_state_dict(self)
+
+    def to_seq(self):
+        state_dict = self.get_state_dict(self)
+        attrs, arrays = list_map(tuple, unzip2(sorted(state_dict.items())))
+        return (self, attrs), arrays
+
+    @staticmethod
+    def from_seq(aux_tuple, arrays):
+        def set_nested_attr(obj, attr, value):
+            nested_attrs = attr.split('.')
+            target_obj = obj
+            for a in nested_attrs[:-1]:
+                target_obj = getattr(target_obj, a)
+            setattr(target_obj, nested_attrs[-1], value)
+        mod, attrs = aux_tuple
+        for attr, array in list_zip(attrs, arrays):
+            set_nested_attr(mod, attr, array)
+        return mod
+
+@staticmethod
+def as_module(cls):
+    cls = type(cls.__name__, (cls, Module,), {})
+    slope.M().register_node(cls, cls.to_seq, cls.from_seq)
+    return cls
 
 class Machine:
     def __init__(
@@ -1010,20 +1136,34 @@ class Machine:
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
         self.node_types = dict()
-        self.register_pytree_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
-        self.register_pytree_node(list, lambda l: (None, l), lambda _, xs: list(xs))
-        self.register_pytree_node(
+        self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
+        self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs))
+        self.register_node(
             dict,
             lambda d: list_map(tuple, unzip2(sorted(d.items()))),
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
-        self.register_pytree_node(
+        self.register_node(
             UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval)
         )
 
         self.environment = environment
-        self.environment.operators_set.register(jit_op)
+        self.environment.operator_set.register(jit_op)
         self.backend = self.environment.backends[default_backend]
+
+    """
+
+def load_state_dict(model, state_dict, strict=True):
+  with Timing("loaded weights in ", lambda et_ns: f", {GlobalCounters.mem_used/1e9:.2f} GB loaded at {GlobalCounters.mem_used/et_ns:.2f} GB/s"):
+    model_state_dict = get_state_dict(model)
+    if DEBUG >= 1 and len(state_dict) > len(model_state_dict): print("WARNING: unused weights in state_dict", sorted(list(state_dict.keys() - model_state_dict.keys())))
+    for k,v in (t := tqdm(model_state_dict.items(), disable=CI)):
+      t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, {k:50s}")
+      if k not in state_dict and not strict:
+        if DEBUG >= 1: print(f"WARNING: not loading {k}")
+        continue
+      v.assign(state_dict[k].to(v.device)).realize()
+"""
 
     def pprint_trace_stack(self):
         for trace in self.trace_stack:
@@ -1046,69 +1186,57 @@ class Machine:
             breakpoint()
             return x
         else:
-            raise TypeError(x)
+            raise TypeError(type(x))
 
-    # @property
-    # def ops(self):
-    #     return self.environment.operators_set
-
-    # @property
-    # def procedures(self):
-    #     return self.environment.procedures_set
-
-    # @property
-    # def backends(self):
-    #     return self.environment.backends
-
-    def tree_flatten(self, x: Any) -> Any:
-        def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
+    def tree_to_seq(self, x: Any) -> Any:
+        def _tree_to_seq(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
             node_type = self.node_types.get(type(x_))
-
             if node_type:
-                node_metadata, children = node_type.to_iterable(x_)
-                children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
-                flattened = itertools.chain.from_iterable(children_flat)
-                return flattened, PyTreeDef(
+                node_metadata, children = node_type.to_seq(x_)
+                # breakpoint()
+                children_iterable, child_trees = unzip2(
+                    list_map(_tree_to_seq, children)
+                )
+                to_seqed = itertools.chain.from_iterable(children_iterable)
+                return to_seqed, PyTreeDef(
                     node_type, node_metadata, tuple(child_trees)
                 )
             else:
                 return [x_], leaf
 
-        children_iter, treedef = _tree_flatten(x)
+        children_iter, treedef = _tree_to_seq(x)
         return list(children_iter), treedef
 
-    def tree_unflatten(self, treedef: PyTreeDef, xs: List[Any]) -> Any:
-        def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
+    def tree_from_seq(self, treedef: PyTreeDef, xs: List[Any]) -> Any:
+        def _tree_from_seq(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
                 return next(xs_)
             else:
-                children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
+                children = (_tree_from_seq(t, xs_) for t in treedef_.child_treedefs)
                 return treedef_.node_type.from_iterable(
                     treedef_.node_metadata, children
                 )
 
-        return _tree_unflatten(treedef, iter(xs))
+        return _tree_from_seq(treedef, iter(xs))
 
-    def flatten_fun(self, f, in_tree):
+    def seq_fn_wrap(self, f, in_tree):
         store = Store()
 
-        def flat_fun(*args_flat):
-            pytree_args = self.tree_unflatten(in_tree, args_flat)
+        def seq_fun(*args_iterable):
+            pytree_args = self.tree_from_seq(in_tree, args_iterable)
             out = f(*pytree_args)
-            out_flat, out_tree = self.tree_flatten(out)
+            out_iterable, out_tree = self.tree_to_seq(out)
             store.set_value(out_tree)
-            return out_flat
+            return out_iterable
 
-        return flat_fun, store
+        return seq_fun, store
 
-    def register_pytree_node(
-        self, ty: Type, to_iter: Callable, from_iter: Callable
-    ) -> None:
+    def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable) -> None:
         self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
 
     def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
-        leaves, treedef = self.tree_flatten(tree)
-        return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
+        leaves, treedef = self.tree_to_seq(tree)
+        return self.tree_from_seq(treedef, tuple(f(leaf) for leaf in leaves))
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
@@ -1221,10 +1349,10 @@ class Machine:
     def program_as_fun(self, program: Program):
         return lambda *args: self.run_program(program, args)
 
-    def vmap_flat(self, f, in_axes, *args):
-        axis_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
-        assert len(axis_set) == 1
-        (axis_size,) = axis_set
+    def vmap_iterable(self, f, in_axes, *args):
+        axi_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
+        assert len(axi_set) == 1
+        (axis_size,) = axi_set
         with self.new_main(BatchTrace, axis_size) as main:
             trace = BatchTrace(main)
             tracers_in = [
@@ -1242,17 +1370,17 @@ class Machine:
 
     def vmap(self, f, in_axes):
         def batched_f(*args):
-            args_flat, in_tree = self.tree_flatten(args)
-            in_axes_flat, in_tree2 = self.tree_flatten(in_axes)
+            args_iterable, in_tree = self.tree_to_seq(args)
+            in_axes_iterable, in_tree2 = self.tree_to_seq(in_axes)
             if in_tree != in_tree2:
                 raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
-            f_flat, out_tree = self.flatten_fun(f, in_tree)
-            outs_flat = self.vmap_flat(f_flat, in_axes_flat, *args_flat)
-            return self.tree_unflatten(out_tree(), outs_flat)
+            f_iterable, out_tree_store = self.seq_fn_wrap(f, in_tree)
+            outs_iterable = self.vmap_iterable(f_iterable, in_axes_iterable, *args_iterable)
+            return self.tree_mnis(out_tree_store(), outs_iterable)
 
         return batched_f
 
-    def jvp_flat(self, f, primals, tangents):
+    def jvp_iterable(self, f, primals, tangents):
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
             tracers_in = [
@@ -1266,16 +1394,16 @@ class Machine:
         return primals_out, tangents_out
 
     def jvp(self, f, primals, tangents):
-        primals_flat, in_tree = self.tree_flatten(primals)
-        tangents_flat, in_tree2 = self.tree_flatten(tangents)
+        primals_iterable, in_tree = self.tree_to_seq(primals)
+        tangents_iterable, in_tree2 = self.tree_to_seq(tangents)
         if in_tree != in_tree2:
             raise TypeError
-        f, out_tree = self.flatten_fun(f, in_tree)
-        primals_out_flat, tangents_out_flat = self.jvp_flat(
-            f, primals_flat, tangents_flat
+        f, out_tree_store = self.seq_fn_wrap(f, in_tree)
+        primals_out_iterable, tangents_out_iterable = self.jvp_iterable(
+            f, primals_iterable, tangents_iterable
         )
-        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
-        tangents_out = self.tree_unflatten(out_tree(), tangents_out_flat)
+        primals_out = self.tree_from_seq(out_tree_store(), primals_out_iterable)
+        tangents_out = self.tree_from_seq(out_tree_store(), tangents_out_iterable)
         return primals_out, tangents_out
 
     def jacfwd(self, f, x):
@@ -1289,8 +1417,8 @@ class Machine:
         f: Callable,
         *avals_in: VoidArray,
     ) -> Tuple[Program, List[Any], PyTreeDef]:
-        avals_in, in_tree = self.tree_flatten(avals_in)
-        f, out_tree = self.flatten_fun(f, in_tree)
+        avals_in, in_tree = self.tree_to_seq(avals_in)
+        f, out_tree_store = self.seq_fn_wrap(f, in_tree)
 
         builder = ProgramBuilder()
         with self.new_main(ProgramTrace, builder) as main:
@@ -1300,7 +1428,7 @@ class Machine:
                 outs = f(*tracers_in)
                 tracers_out = [self.full_raise(trace, out) for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out)
-        return program, consts, out_tree()
+        return program, consts, out_tree_store()
 
     @lru_cache
     def jvp_program(self, program: Program) -> Tuple[Program, List[Any]]:
@@ -1315,7 +1443,7 @@ class Machine:
         )
         return new_program, new_consts
 
-    def partial_run_flat(
+    def partial_run_iterable(
         self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Program, List["PartialVal"], List[Any]]:
         with self.new_main(PartialEvalTrace) as main:
@@ -1430,7 +1558,7 @@ class Machine:
         if b2 != b2_:
             raise TypeError
 
-    def linearize_flat(self, f, *primals_in):
+    def linearize_iterable(self, f, *primals_in):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
@@ -1439,7 +1567,7 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)
+        program, pvals_out, consts = self.partial_run_iterable(f_jvp, pvals_in)
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
@@ -1447,17 +1575,17 @@ class Machine:
         return primals_out, f_lin
 
     def linearize(self, f, *primals_in):
-        primals_in_flat, in_tree = self.tree_flatten(primals_in)
-        f, out_tree = self.flatten_fun(f, in_tree)
-        primals_out_flat, f_lin_flat = self.linearize_flat(f, *primals_in_flat)
-        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
+        primals_in_iterable, in_tree = self.tree_to_seq(primals_in)
+        f, out_tree_store = self.seq_fn_wrap(f, in_tree)
+        primals_out_iterable, f_lin_iterable = self.linearize_iterable(f, *primals_in_iterable)
+        primals_out = self.tree_from_seq(out_tree_store(), primals_out_iterable)
 
         def f_lin(*tangents_in):
-            tangents_in_flat, in_tree2 = self.tree_flatten(tangents_in)
+            tangents_in_iterable, in_tree2 = self.tree_to_seq(tangents_in)
             if in_tree != in_tree2:
                 raise TypeError
-            tangents_out_flat = f_lin_flat(*tangents_in_flat)
-            return self.tree_unflatten(out_tree(), tangents_out_flat)
+            tangents_out_iterable = f_lin_iterable(*tangents_in_iterable)
+            return self.tree_from_seq(out_tree_store(), tangents_out_iterable)
 
         return primals_out, f_lin
 
@@ -1553,7 +1681,7 @@ class Machine:
         check_toposort(sorted_nodes, parents)
         return sorted_nodes
 
-    def vjp_flat(self, f, *primals_in):
+    def vjp_iterable(self, f, *primals_in):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
@@ -1563,7 +1691,7 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)  # linearize
+        program, pvals_out, consts = self.partial_run_iterable(f_jvp, pvals_in)  # linearize
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
@@ -1572,16 +1700,16 @@ class Machine:
         return primals_out, f_vjp
 
     def vjp(self, f, *primals_in):
-        primals_in_flat, in_tree = self.tree_flatten(primals_in)
-        f, out_tree = self.flatten_fun(f, in_tree)
-        primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat)
-        primals_out = self.tree_unflatten(out_tree(), primals_out_flat)
+        primals_in_iterable, in_tree = self.tree_to_seq(primals_in)
+        f, out_tree_store = self.seq_fn_wrap(f, in_tree)
+        primals_out_iterable, f_vjp_iterable = self.vjp_iterable(f, *primals_in_iterable)
+        primals_out = self.tree_from_seq(out_tree_store(), primals_out_iterable)
 
         def f_vjp(*cotangents_out):
-            cotangents_out_flat, _ = self.tree_flatten(cotangents_out)
-            cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
+            cotangents_out_iterable, _ = self.tree_to_seq(cotangents_out)
+            cotangents_in_iterable = f_vjp_iterable(*cotangents_out_iterable)
 
-            return self.tree_unflatten(in_tree, cotangents_in_flat)
+            return self.tree_from_seq(in_tree, cotangents_in_iterable)
 
         return primals_out, f_vjp
 
@@ -1622,7 +1750,7 @@ class Machine:
             primals_in = list_map(read_primal, instruction.inputs)
             cts_in = list_map(read_cotangent, instruction.out_binders)
             inp, params = primals_in, instruction.params
-            inp, params = instruction.op.pack_args(inp, params)
+            inp, params = instruction.op.reorg_args(inp, params)
             inp, params = instruction.op.args_fixer(*inp, **params)
             cts_out = instruction.op.T(cts_in, *inp, **params)
             list_map(write_cotangent, instruction.inputs, cts_out)
@@ -1673,7 +1801,7 @@ class Machine:
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in)
 
-            args, in_tree = self.tree_flatten(args)
+            args, in_tree = self.tree_to_seq(args)
             outs = self.bind(
                 jit_op,
                 *consts,
@@ -1681,7 +1809,7 @@ class Machine:
                 program=program,
                 num_consts=len(consts),
             )
-            return self.tree_unflatten(out_tree, outs)
+            return self.tree_from_seq(out_tree, outs)
 
         return f_jitted
 
@@ -1732,7 +1860,10 @@ class Backend:
             else:
                 self.deps_dict[dep] = importlib.import_module(dep)
 
-    def get_array_device(self, array):
+    def device_of(self, array):
+        raise NotImplementedError
+
+    def numpy_of(self, array):
         raise NotImplementedError
 
     @lru_cache
@@ -1768,8 +1899,11 @@ class Backend:
         self.dtype_map = dtype_map
         self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
 
-    def set_get_array_device(self, fn):
-        self.get_array_device = types.MethodType(fn, self)
+    def set_device_of(self, fn):
+        self.device_of = types.MethodType(fn, self)
+
+    def set_numpy_of(self, fn):
+        self.numpy_of = types.MethodType(fn, self)
 
     def set_codegen(self, fn):
         self.codegen = types.MethodType(fn, self)
@@ -1812,7 +1946,7 @@ class JitFn:
     def __call__(self, *args, **params):
         # args = [a.val if isinstance(a, Array) else a for a in args]
         args = slope.M().tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
-        args, in_tree = slope.M().tree_flatten(args)
+        args, in_tree = slope.M().tree_to_seq(args)
         try:
             # outs = self.fn(*self.consts, *args, **params)
             outs = self.fn(*args, **params)
@@ -2115,3 +2249,6 @@ class PartialEvalTrace(Trace):
                 op, *list_map(slope.M().full_lower, tracers), **params
             )
         return op.partial_run(self, tracers, **params)
+
+
+# serialization

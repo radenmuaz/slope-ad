@@ -501,7 +501,7 @@ def f(self, primals, tangents, *, shape, axes=None):
     )
 
 
-@broadcast_in_dim.set_shape_run
+@broadcast_in_dim.set_void_run
 def f(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
@@ -557,7 +557,7 @@ def f(self, primals, tangents, *, shape):
     return [x.reshape(shape)], [x_dot.reshape(shape)]
 
 
-@reshape.set_shape_run
+@reshape.set_void_run
 def f(self, x: VoidArray, *, shape: Sequence[int]) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
@@ -598,7 +598,7 @@ def f(self, primals, tangents, *, perm):
     return [x.transpose(perm)], [x_dot.transpose(perm)]
 
 
-@transpose.set_shape_run
+@transpose.set_void_run
 def f(self, x: VoidArray, *, perm: Sequence[int]) -> List[VoidArray]:
     shape = [x.shape[i] for i in perm]
     return [VoidArray(shape, x.dtype)]
@@ -658,7 +658,7 @@ def f(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     ]
 
 
-@pad_hlo.set_shape_run
+@pad_hlo.set_void_run
 def f(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
@@ -741,7 +741,7 @@ def f(self, primals, tangents, *, starts, limits, strides=None):
     ]
 
 
-@slice_hlo.set_shape_run
+@slice_hlo.set_void_run
 def f(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
@@ -807,7 +807,7 @@ def f(self, primals, tangents, *, axes):
     return [x.flip(axes)], [x_dot.flip(axes)]
 
 
-@flip.set_shape_run
+@flip.set_void_run
 def f(self, x: VoidArray, *, axes):
     return [VoidArray(x.shape, x.dtype)]
 
@@ -840,7 +840,7 @@ def jvp(primals, tangents, *, axis):
     return [concatenate(xs, axis=axis)], [concatenate(xs_dot, axis=axis)]
 
 
-@concatenate.set_shape_run
+@concatenate.set_void_run
 def f(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
@@ -915,7 +915,7 @@ def f(self, cts, *, val, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@constant.set_shape_run
+@constant.set_void_run
 def f(self, *, val, dtype=BaseArray.float32):
     # TODO: not using numpy to extract shape
     return [VoidArray(np.array(val).shape, dtype)]
@@ -948,7 +948,7 @@ def f(self, cts, *, shape, fill_value, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@full.set_shape_run
+@full.set_void_run
 def f(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -976,7 +976,7 @@ def f(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@random_uniform.set_shape_run
+@random_uniform.set_void_run
 def f(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -1004,7 +1004,7 @@ def f(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@random_normal.set_shape_run
+@random_normal.set_void_run
 def f(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -1040,6 +1040,6 @@ def f(self, cts, *, start, stop, stride=None, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@arange.set_shape_run
+@arange.set_void_run
 def f(self, *, start, stop, stride=None, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple((stop - start) * stride), dtype)]

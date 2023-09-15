@@ -161,7 +161,7 @@ class Gather(ShapeOp):
         )
 
     @staticmethod
-    def shape_run(
+    def void_run(
         x: VoidArray,
         idx,
         *,
@@ -479,7 +479,7 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def shape_run(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
+    def void_run(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
         shape = [x.shape[i] for i in axis]
         return [VoidArray(shape, x.dtype)]
 

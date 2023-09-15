@@ -28,7 +28,7 @@ class MLP:
 # model = Linear(2, 1)
 model = MLP(2, 3, 1)
 
-
+# @slope.jit
 def loss_fn(model, batch):
     x, y = batch
     y_hat = model(x)
@@ -36,10 +36,14 @@ def loss_fn(model, batch):
     return loss
 
 
-g_loss_fn = slope.grad(loss_fn)
 x = sev.ones((1, 2))
 y = sev.ones(1)
+# print(loss_fn(model, (x, y)))
+# print(slope.jit(loss_fn)(model, (x, y)))
 
-print(loss_fn(model, (x, y)))
-g_loss = g_loss_fn(model, (x, y))
-print(g_loss.state_dict)
+g_loss_fn = slope.grad(loss_fn)
+print(g_loss_fn(model, (x, y)).to_seq()[1])
+print(slope.jit(g_loss_fn)(model, (x, y)).to_seq()[1])
+
+# g_loss_fn = slope.jit(g_loss_fn)
+# print(loss_fn(model, (x, y)))

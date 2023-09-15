@@ -44,7 +44,7 @@ from functools import partial, lru_cache
 
 import slope
 import importlib
-
+import copy
 max_ = max
 sum_ = sum
 slice_ = slice
@@ -176,7 +176,7 @@ class Operator:
     def partial_run(self, trace, tracers, **params):
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
-        avals_out = self.shape_run(*avals_in, **params)
+        avals_out = self.void_run(*avals_in, **params)
         tracers_out = [
             PartialEvalTracerArray(trace, slope.M().make_unknown_pval(aval), None)
             for aval in avals_out
@@ -220,7 +220,7 @@ class Operator:
     def vmap(self, *args, **params):
         raise NotImplementedError
 
-    def shape_run(self, *args, **params):
+    def void_run(self, *args, **params):
         raise NotImplementedError
 
     def set_partial_run_instruction(self, fn):
@@ -244,8 +244,8 @@ class Operator:
     def set_T(self, fn):
         self.T = types.MethodType(fn, self)
 
-    def set_shape_run(self, fn):
-        self.shape_run = types.MethodType(fn, self)
+    def set_void_run(self, fn):
+        self.void_run = types.MethodType(fn, self)
 
     @classmethod
     def unary(cls, name):
@@ -256,7 +256,7 @@ class Operator:
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
 
-        @op.set_shape_run
+        @op.set_void_run
         def f(self, x, **params):
             return [VoidArray(x.shape, x.dtype)]
 
@@ -334,7 +334,7 @@ class Operator:
                     y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
             return [self(x, y, **params)], [x_bdim]
 
-        @op.set_shape_run
+        @op.set_void_run
         def f(self, x: VoidArray, y: VoidArray, **params) -> List[VoidArray]:
             if not type(x) in (Array, VoidArray) or not type(x) in (Array, VoidArray):
                 raise TypeError
@@ -372,7 +372,7 @@ class Operator:
             params["axes"] = tuple(axes)
             return [cls.do(x, **params)], [out_bdim]
 
-        @op.set_shape_run
+        @op.set_void_run
         def f(self, x: VoidArray, axes=None, keepdims=False) -> List[VoidArray]:
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
             axes_ = set(axes)
@@ -585,7 +585,7 @@ class VoidArray:
 
     def __eq__(self, other):
         if type(self) != type(other):
-            return other == self
+            return False
         return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
 
     def __repr__(self):
@@ -911,6 +911,7 @@ class TracerArray(BaseArray):
                 procedure, classmethod
             ), f"Access this procedure by Array.{attr}"
             return partial(procedure, self)
+        return self.__getattribute__(attr)
         try:
             return getattr(self.aval, attr)
         except AttributeError:
@@ -975,6 +976,7 @@ def f(self, *args, program, num_consts):
     hashed_consts = tuple(map(Hashed, consts))
     # print(args, hash(hashed_program), hash(hashed_consts))
     # print([o.aval for o in program.outs])
+    
     jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
     return jit_fn(*consts, *args)
     # return jit_fn(*args, *consts)
@@ -997,7 +999,7 @@ def f(self, primals, tangents, *, program, num_consts):
     return primals_out, tangents_out
 
 
-@jit_op.set_shape_run
+@jit_op.set_void_run
 def f(self, *in_types, program, num_consts):
     program_type = slope.M().typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
@@ -1074,54 +1076,50 @@ def f(
     return instruction1, instruction2, out_unknowns, res
 
 class Module:
-    def get_state_dict(self, obj, prefix: str = ""):
-        if isinstance(obj, Array):
-            return {prefix.strip("."): obj}
-        if hasattr(obj, "_asdict"):
-            return self.get_state_dict(
-                obj._asdict(), prefix, Array
-            )  # namedtuple
-        if isinstance(obj, OrderedDict):
-            return self.get_state_dict(dict(obj), prefix)
-        if hasattr(obj, "__dict__"):
-            return self.get_state_dict(obj.__dict__, prefix)
-        state_dict = {}
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                state_dict.update(
-                    self.get_state_dict(v, f"{prefix}{str(k)}.")
-                )
-        # elif isinstance(obj, (list, tuple)):
-        #     for i, x in enumerate(obj):
-        #         state_dict.update(
-        #             self.get_state_dict(x, f"{prefix}{str(i)}.")
-        #         )
-        return state_dict
+    @staticmethod
+    def get_array_attrs(mod, prefix=""):
+        def find(obj, prefix):
+            if isinstance(obj, Array):
+                return {prefix.strip("."):obj}
+            if isinstance(obj, Module):
+                return find(obj.__dict__, prefix)
+            array_attrs = {}
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    array_attrs.update(find(v, f"{prefix}{str(k)}."))
+            return array_attrs
+        return tuple(find(mod, "").keys())
     
-    @property
-    def state_dict(self):
-        return self.get_state_dict(self)
+    def init_attr_paths(self):
+        self.array_attrs = self.get_array_attrs()
 
     def to_seq(self):
-        state_dict = self.get_state_dict(self)
-        attrs, arrays = list_map(tuple, unzip2(sorted(state_dict.items())))
-        return (self, attrs), arrays
-
+        arrays = tuple(operator_py.attrgetter(attr)(self) for attr in self.array_attrs)
+        return self, arrays
+   
     @staticmethod
-    def from_seq(aux_tuple, arrays):
+    def from_seq(mod, arrays):
         def set_nested_attr(obj, attr, value):
             nested_attrs = attr.split('.')
             target_obj = obj
             for a in nested_attrs[:-1]:
                 target_obj = getattr(target_obj, a)
             setattr(target_obj, nested_attrs[-1], value)
-        mod, attrs = aux_tuple
-        for attr, array in list_zip(attrs, arrays):
+        mod = copy.copy(mod)
+        try:
+            mod = copy.deepcopy(mod)
+        except TypeError as e:
+            pass
+        for attr, array in list_zip(mod.array_attrs, arrays):
             set_nested_attr(mod, attr, array)
         return mod
 
-@staticmethod
 def as_module(cls):
+    original_init = cls.__init__
+    def new_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self.array_attrs = Module.get_array_attrs(self)
+    cls.__init__ = new_init
     cls = type(cls.__name__, (cls, Module,), {})
     slope.M().register_node(cls, cls.to_seq, cls.from_seq)
     return cls
@@ -1193,7 +1191,6 @@ def load_state_dict(model, state_dict, strict=True):
             node_type = self.node_types.get(type(x_))
             if node_type:
                 node_metadata, children = node_type.to_seq(x_)
-                # breakpoint()
                 children_iterable, child_trees = unzip2(
                     list_map(_tree_to_seq, children)
                 )
@@ -1236,6 +1233,7 @@ def load_state_dict(model, state_dict, strict=True):
 
     def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
         leaves, treedef = self.tree_to_seq(tree)
+        # ret =self.tree_from_seq(treedef, tuple(f(leaf) for leaf in leaves));breakpoint()
         return self.tree_from_seq(treedef, tuple(f(leaf) for leaf in leaves))
 
     @contextmanager
@@ -1306,7 +1304,7 @@ def load_state_dict(model, state_dict, strict=True):
 
         for instruction in program.instructions:
             in_types = [self.typecheck_atom(environment, x) for x in instruction.inputs]
-            out_types = instruction.op.shape_run(*in_types, **instruction.params)
+            out_types = instruction.op.void_run(*in_types, **instruction.params)
             for out_binder, out_type in list_zip(instruction.out_binders, out_types):
                 if not out_type == out_binder.aval:
                     raise TypeError
@@ -1798,6 +1796,7 @@ def load_state_dict(model, state_dict, strict=True):
 
     def jit(self, f):
         def f_jitted(*args):
+            args_ = args
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in)
 
@@ -2083,7 +2082,7 @@ class ProgramTrace(Trace):
 
     def run_op(self, op, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_out = op.shape_run(*avals_in, **params)
+        avals_out = op.void_run(*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]

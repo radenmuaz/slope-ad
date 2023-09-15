@@ -14,7 +14,7 @@ class RandomBitGenerator(base_ops.Operator):
     def run(key, *, shape, dtype, algorithm):
         return []
 
-    def shape_run(key, *, shape, dtype, algorithm):
+    def void_run(key, *, shape, dtype, algorithm):
         return [key.shape, key.shape]
 
 

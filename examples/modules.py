@@ -4,9 +4,9 @@ import math
 
 @slope.core.as_module
 class Linear:
-    def __init__(self, in_dim, out_dim, bias=True):
+    def __init__(self, in_dim, out_dim, bias=False):
         self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros(out_dim) if bias else None
+        self.bias = sev.zeros((out_dim,)) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
@@ -21,17 +21,19 @@ class MLP:
 
     def __call__(self, x):
         x = self.linear1(x)
+        # x = x.relu()
         x = self.linear2(x)
         return x
 
 
-# model = Linear(2, 1)
-model = MLP(2, 3, 1)
-
+model = Linear(2, 1)
+# model = MLP(2, 3, 1)
+# model = model.unflatten(*model.flatten())
 # @slope.jit
 def loss_fn(model, batch):
     x, y = batch
     y_hat = model(x)
+    # loss = y_hat.sum()
     loss = (y - y_hat).sum()
     return loss
 
@@ -41,9 +43,12 @@ y = sev.ones(1)
 # print(loss_fn(model, (x, y)))
 # print(slope.jit(loss_fn)(model, (x, y)))
 
+
 g_loss_fn = slope.grad(loss_fn)
-print(g_loss_fn(model, (x, y)).to_seq()[1])
-print(slope.jit(g_loss_fn)(model, (x, y)).to_seq()[1])
+# print(g_loss_fn(model, (x, y)).flatten())
+# print(g_loss_fn(model, (x, y)).flatten()[1])
+# breakpoint()
+print(slope.jit(g_loss_fn)(model, (x, y)).flatten()[1])
 
 # g_loss_fn = slope.jit(g_loss_fn)
 # print(loss_fn(model, (x, y)))

@@ -1,14 +1,5 @@
 import slope
-
-
-def mnist_slope_init():
-    from slope.environments.v1 import v1_environment
-
-    return slope.core.Machine(environment=v1_environment)
-
-
-slope.set_slope_init(mnist_slope_init)
-from slope import environment as sev
+from slope import numpy as snp
 from slope.nn import init, layers, optim
 
 import time
@@ -90,52 +81,34 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-
-@slope.core.as_module
-class Linear:
-    def __init__(self, in_dim, out_dim, bias=True):
-        self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros(out_dim) if bias else None
-
-    def __call__(self, x):
-        x = x.dot(self.weight.T())
-        return x + self.bias if self.bias is not None else x
-
-
-
-@slope.core.as_module
-class Model:
-    def __init__(self, in_dim, hid_dim, out_dim):
-        self.linear1 = Linear(in_dim, hid_dim)
-        self.linear2 = Linear(hid_dim, out_dim)
-
-    def __call__(self, x):
-        x = self.linear1(x)
-        x = x.relu()
-        x = self.linear2(x)
-        return x
-
-
 @slope.jit
-def loss_fn(model, batch):
+def loss_fn(params, batch):
     inputs, targets = batch
-    preds = model(inputs)
+    preds = predict(params, inputs)
     return -(preds * targets).sum()
 
 
-def accuracy(model, batch):
+def accuracy(params, batch):
     inputs, targets = batch
-    target_class = np.argmax(targets.numpy(), axis=-1)
-    predicted_class = np.argmax(model(inputs).numpy(), axis=-1)
+    target_class = np.argmax(targets.val, axis=-1)
+    predicted_class = np.argmax(predict(params, inputs).val, axis=-1)
     return np.mean(predicted_class == target_class)
 
+
 if __name__ == "__main__":
+    init_random_params, predict = layers.serial(
+        layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
+        layers.Dense(200),
+        layers.Fn(lambda x: x.maximum(snp.zeros_like(x))),
+        layers.Dense(10),
+        layers.Fn(lambda x: x.log_softmax(axes=-1)),
+    )
+    out_shape, init_params = init_random_params((-1, 28 * 28))
+
     step_size = 0.001
     num_epochs = 30
     batch_size = 200  # TODO: must be multiple of dataset.
     momentum_mass = 0.9
-
-    model = Model(784,100,10)
 
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
@@ -149,11 +122,16 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sev.array(train_images[batch_idx]), sev.array(
+                yield snp.array(train_images[batch_idx]), snp.array(
                     train_labels[batch_idx]
                 )
 
     batches = data_stream()
+
+    # opt_init, opt_update, get_params = optim.sgd(step_size)
+    # opt_init, opt_update, get_params = optim.sgd_momentum(step_size, momentum_mass)
+    opt_init, opt_update, get_params = optim.adam(step_size)
+    opt_state = opt_init(init_params)
     g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
     def update(i, opt_state, batch):
@@ -166,7 +144,9 @@ if __name__ == "__main__":
     print("\nStarting training...")
     for epoch in range(num_epochs):
         start_time = time.time()
+
         for i in tqdm(range(num_batches)):
+            # print(slope.machine.backend.callable.cache_info())
             loss, opt_state = update(next(itercount), opt_state, next(batches))
             if i % log_interval == 0:
                 print(f"loss: {loss.val:.2f}")
@@ -176,8 +156,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                sev.array(test_images),
-                sev.array(test_labels),
+                snp.array(test_images),
+                snp.array(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

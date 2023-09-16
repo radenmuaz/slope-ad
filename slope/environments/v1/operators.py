@@ -183,19 +183,19 @@ operator_set.register(relu)
 
 @relu.set_run
 def f(self, x):
-    return [x.maximum(0)]
+    return [x.relu()]
 
 
 @relu.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x.maximum(0)], [-x_dot.maximum(0)]
+    return [x.relu()], [x_dot.relu()]
 
 
 @relu.set_T
 def f(self, cts, x):
     (z,) = cts
-    mask = 1 - (x.maximum(0) == 0)
+    mask = 1 - (x.relu() == 0)
     return [mask * z]
 
 

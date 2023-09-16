@@ -1,4 +1,4 @@
-from setuptools import setup, find_from_seqages
+from setuptools import setup, find_unflattenages
 
 setup(
     name="slope",
@@ -6,7 +6,7 @@ setup(
     url="https://github.com/radenmuaz/slope.git",
     author="Raden Muaz",
     author_email="author@gmail.com",
-    description="Description of my from_seqage",
-    from_seqages=find_from_seqages(),
+    description="Description of my unflattenage",
+    unflattenages=find_unflattenages(),
     install_requires=["numpy >= 1.11.1", "matplotlib >= 1.5.1"],
 )

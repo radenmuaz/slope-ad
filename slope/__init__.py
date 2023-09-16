@@ -59,8 +59,8 @@ def __getattr__(attr):
         "vjp",
         "grad",
         "register_node",
-        "tree_to_seq",
-        "tree_from_seq",
+        "tree_flatten",
+        "tree_unflatten",
     ):
         return getattr(machine, attr)
     else:

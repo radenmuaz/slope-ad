@@ -224,6 +224,10 @@ def f(self, x):
     return np.sqrt(x)
 
 
+@numpy_backend.set_impl(operator_set.relu)
+def f(self, x):
+    return np.maximum(x, 0)
+
 @numpy_backend.set_impl(operator_set.exp)
 def f(self, x):
     return np.exp(x)

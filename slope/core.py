@@ -1810,8 +1810,7 @@ class Machine:
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, static_argnums=static_argnums)
 
             args, in_tree = self.tree_flatten(args)
-            outs = self.bind1(
-                jit_op,
+            outs = jit_op(
                 *consts,
                 *args,
                 program=program,

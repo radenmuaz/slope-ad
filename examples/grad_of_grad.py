@@ -1,5 +1,5 @@
 import slope
-from slope import numpy as snp
+from slope import environment as sev
 from slope import jit, jvp, grad
 
 
@@ -28,28 +28,29 @@ def g(x):
 #   for v1, v2 in zip(vals[:-1], vals[1:]):
 #     np.testing.assert_allclose(v1, v2)
 
-# ans1 = f(3.)
-# ans2 = jit(f)(3.)
-# ans3, _ = jvp(f, (3.,), (5.,))
-# ans4, _ = jvp(jit(f), (3.,), (5.,))
-# print(ans1, ans2, ans3, ans4)
-x = snp.array(3.0)
-x_dot = snp.array(1.0)
+x = sev.array(3.)
+x_dot = sev.array(1.0)
+ans1 = f(x); print(f"{ans1=}")
+ans2 = jit(f)(x); print(f"{ans2=}")
+ans3, _ = jvp(f, (x,), (x_dot,)); print(f"{ans3=}")
+ans4, _ = jvp(jit(f), (x,), (x_dot,)); print(f"{ans4=}")
 
-deriv1 = grad(f)(x)
-deriv2 = grad(jit(f))(x)
-deriv3 = jit(grad(jit(f)))(x)
-_, deriv4 = jvp(f, (x,), (x_dot,))
-_, deriv5 = jvp(jit(f), (x,), (x_dot,))
-print(deriv1, deriv2, deriv3, deriv4, deriv5)
-hess1 = grad(grad(f))(x)
-hess2 = grad(grad(jit(f)))(x)
-hess3 = grad(jit(grad(f)))(x)
-hess4 = jit(grad(grad(f)))(x)
-_, hess5 = jvp(grad(f), (x,), (x_dot,))
-_, hess6 = jvp(jit(grad(f)), (x,), (x_dot,))
-_, hess7 = jvp(jit(grad(f)), (x,), (x_dot,))
-print(hess1, hess2, hess3, hess4, hess5, hess6, hess7)
+deriv1 = grad(f)(x); print(f"{deriv1=}")
+deriv2 = grad(jit(f))(x); print(f"{deriv2=}")
+# deriv3 = jit(grad(jit(f)))(x)
+_, deriv4 = jvp(f, (x,), (x_dot,)); print(f"{deriv4=}")
+_, deriv5 = jvp(jit(f), (x,), (x_dot,)); print(f"{deriv5=}")
+# print(deriv1, deriv2, deriv3, deriv4, deriv5)
+# hess1 = grad(grad(f))(x)
+# hess2 = grad(grad(jit(f)))(x)
+# hess3 = grad(jit(grad(f)))(x)
+# hess4 = jit(grad(grad(f)))(x)
+# print(hess1, hess2, hess3, hess4)
+
+# _, hess5 = jvp(grad(f), (x,), (x_dot,))
+# _, hess6 = jvp(jit(grad(f)), (x,), (x_dot,))
+# _, hess7 = jvp(jit(grad(f)), (x,), (x_dot,))
+# print(hess5, hess6, hess7)
 
 # # from core_test.py fun_with_nested_calls_2
 # def foo(x):

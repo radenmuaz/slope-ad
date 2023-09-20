@@ -15,7 +15,7 @@ def g(x):
 
 x = snp.ones((3,))
 # print(f(x)
-out = g(x)
+out = f(x)
 print(out)
 # print(slope.machine.backend.callable.cache_info())
 # print(f(x))

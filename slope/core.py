@@ -721,9 +721,12 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
     def run_op(self, op, args, params):
-        args, params = op.reorg_args(args, params)
-        args, params = op.args_fixer(*args, **params)
-        return [slope.M().backend.run_impl(op, *args, **params)]
+        if op is not slope.core.jit_op:
+            args, params = op.reorg_args(args, params)
+            args, params = op.args_fixer(*args, **params)
+            return [slope.M().backend.run_impl(op, *args, **params)]
+        else:
+            return slope.M().backend.run_impl(op, *args, **params)
 
 
 class ArrayBuffer:
@@ -972,7 +975,6 @@ jit_op.reorg_args = lambda args, params: (args, params)
 
 @jit_op.set_jvp
 def f(self, primals, tangents, *, program, num_consts):
-    del num_consts
     new_program, new_consts = slope.M().jvp_program(program)
     outs = slope.M().bind(
         self,
@@ -1810,7 +1812,7 @@ class Machine:
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, static_argnums=static_argnums)
 
             args, in_tree = self.tree_flatten(args)
-            outs = jit_op(
+            outs = self.bind(jit_op,
                 *consts,
                 *args,
                 program=program,
@@ -1876,8 +1878,6 @@ class Backend:
             jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
             ret = jit_fn(*consts, *args)
             return ret
-            # breakpoint()
-            # return ret[0] if len(ret) == 1 else ret
     
 # @numpy_backend.set_impl(slope.core.jit_op)
 # def f(self, in_vals, in_avals, *, params):
@@ -1945,21 +1945,22 @@ class Backend:
         return set_impl_
 
     def run_impl(self, op, *args, **params):
-        def extract_arg(a):
-            return (
-                a.val
-                if isinstance(a, Array)
-                else self.dtype_map[a]
-                if isinstance(a, DType)
-                else a
-            ) 
         if op is not slope.core.jit_op:
+            def extract_arg(a):
+                return (
+                    a.val
+                    if isinstance(a, Array)
+                    else self.dtype_map[a]
+                    if isinstance(a, DType)
+                    else a
+                ) 
             args = tuple([extract_arg(a) for a in args])
             params = {k: extract_arg(v) for k, v in params.items()}
             val = self.impls[op](*args, **params)
             return Array(ArrayBuffer(val))
         else:
-            return self.impls[op](*args, **params)
+            ret = self.impls[op](*args, **params)
+            return ret
 
     def set_input_handler(self, typ, fn):
         self.input_handlers[typ] = fn

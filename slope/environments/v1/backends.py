@@ -137,6 +137,8 @@ def f(self, program, args) -> List[Any]:
         )
         if instruction.op is slope.core.jit_op:
             # TODO: generalize interface to other than jit_op
+            raise NotImplementedError
+            breakpoint()
             op_out = impl(in_vals, in_avals, params=instruction.params)
             co = op_out["codegen_out"]
             outs = co["outs"]

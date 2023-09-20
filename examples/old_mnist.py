@@ -100,6 +100,7 @@ if __name__ == "__main__":
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         layers.Dense(200),
         layers.Fn(lambda x: x.maximum(snp.zeros_like(x))),
+        # layers.Fn(lambda x: x.relu()),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )

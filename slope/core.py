@@ -157,11 +157,6 @@ class Operator:
             assert len(args) == len(args_strs)
         return args, params
 
-    def impl(self, *args, **params):
-        args, params = self.reorg_args(args, params)
-        args, params = self.args_fixer(*args, **params)
-        return slope.M().backend.run_impl(self, *args, **params)
-
     def __call__(self, *args, **params):
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
@@ -725,8 +720,10 @@ class Trace:
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
-    def run_op(self, op, tracers, params):
-        return op.run(*tracers, **params)
+    def run_op(self, op, args, params):
+        args, params = op.reorg_args(args, params)
+        args, params = op.args_fixer(*args, **params)
+        return [slope.M().backend.run_impl(op, *args, **params)]
 
 
 class ArrayBuffer:
@@ -763,12 +760,12 @@ class Array(BaseArray):
             return self.__dict__[attr]
         if attr in vars(slope.environment.operator_set).keys():
             op = getattr(slope.environment.operator_set, attr)
-            return partial(op.impl, self)
+            return partial(op, self)
         elif attr in vars(slope.environment.procedure_set).keys():
             procedure = getattr(slope.environment.procedure_set, attr)
             assert not isinstance(
                 procedure, classmethod
-            ), f"use machine.{attr} instead of Array.{attr}"
+            ), f"use sev.{attr} instead of Array.{attr}"
             return partial(procedure, self)
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 
@@ -972,20 +969,6 @@ leaf = Leaf()
 
 jit_op = Operator("jit_op")
 jit_op.reorg_args = lambda args, params: (args, params)
-
-
-@jit_op.set_run
-def f(self, *args, program, num_consts):
-    hashed_program = Hashed(program)
-    consts, args = args[:num_consts], args[num_consts:]
-    hashed_consts = tuple(map(Hashed, consts))
-    # print(args, hash(hashed_program), hash(hashed_consts))
-    # print([o.aval for o in program.outs])
-    
-    jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
-    return jit_fn(*consts, *args)
-    # return jit_fn(*args, *consts)
-
 
 @jit_op.set_jvp
 def f(self, primals, tangents, *, program, num_consts):
@@ -1430,9 +1413,8 @@ class Machine:
     def make_program(
         self,
         f: Callable,
-        *avals_in: VoidArray,
+        *avals_in: VoidArray, static_argnums=(), static_args=()
     ) -> Tuple[Program, List[Any], PyTreeDef]:
-        avals_in_ = avals_in
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
 
@@ -1441,9 +1423,14 @@ class Machine:
             with self.new_dynamic(main):
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
-                outs = f(*tracers_in)
+                N = len(avals_in) + len(static_args)
+                argnums = [i for i in range(N)
+                           if i not in static_argnums]
+                args = [tracers_in[i] if i in argnums else static_args[i]
+                        for i in range(N)]
+                outs = f(*args)
                 tracers_out = [self.full_raise(trace, out) for out in outs]
-                program, consts = builder.build(tracers_in, tracers_out)
+                program, consts = builder.build([args[i] for i in argnums], tracers_out)
         
         return program, consts, out_tree_store()
 
@@ -1815,15 +1802,15 @@ class Machine:
         else:
             return gradfun
 
-    def jit(self, f):
-        def f_jitted(*args):
-            args_ = args
+    def jit(self, f, static_argnums=()):
+        def f_jitted(*args,):
+            static_args = tuple(args[i] for i in static_argnums)
+            args = tuple(a for i, a in enumerate(args) if i not in static_argnums)
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
-            program, consts, out_tree = self.make_program(f, *avals_in)
-
+            program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, static_argnums=static_argnums)
 
             args, in_tree = self.tree_flatten(args)
-            outs = self.bind(
+            outs = self.bind1(
                 jit_op,
                 *consts,
                 *args,
@@ -1880,9 +1867,31 @@ class Backend:
                 self.deps_dict[dep_alias] = self.deps_dict[dep]
             else:
                 self.deps_dict[dep] = importlib.import_module(dep)
+        
 
-    def device_of(self, array):
-        raise NotImplementedError
+        @self.set_impl(slope.core.jit_op)
+        def f(self, *args, program, num_consts):
+            hashed_program = Hashed(program)
+            consts, args = args[:num_consts], args[num_consts:]
+            hashed_consts = tuple(map(Hashed, consts))
+            jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
+            ret = jit_fn(*consts, *args)
+            return ret
+            # breakpoint()
+            # return ret[0] if len(ret) == 1 else ret
+    
+# @numpy_backend.set_impl(slope.core.jit_op)
+# def f(self, in_vals, in_avals, *, params):
+#     program = params["program"]
+#     self.codegen_depth += 1
+#     codegen_out = self.codegen(program, in_vals + in_avals)
+#     self.codegen_idx += 1
+#     self.codegen_depth -= 1
+
+#     return dict(codegen_out=codegen_out)
+    @property
+    def default_dtype_value(self):
+        return self.dtype_map[self.default_dtype]
 
     def numpy_of(self, array):
         raise NotImplementedError
@@ -1901,8 +1910,6 @@ class Backend:
         codegen_out = self.codegen(
             program,
             consts + in_avals
-            # consts=tuple([v for v in in_avals if type(v) is not VoidArray])
-            # in_avals=tuple([v.aval for v in program.outs])
         )
         fn, code = self.compile(program, codegen_out, fn_name)
         compiled = JitFn(code, fn, consts)
@@ -1939,19 +1946,21 @@ class Backend:
         return set_impl_
 
     def run_impl(self, op, *args, **params):
-        def procedureess_arg(a):
+        def extract_arg(a):
             return (
                 a.val
                 if isinstance(a, Array)
                 else self.dtype_map[a]
                 if isinstance(a, DType)
                 else a
-            )
-
-        args = tuple([procedureess_arg(a) for a in args])
-        params = {k: procedureess_arg(v) for k, v in params.items()}
-        val = self.impls[op](*args, **params)
-        return Array(ArrayBuffer(val))
+            ) 
+        if op is not slope.core.jit_op:
+            args = tuple([extract_arg(a) for a in args])
+            params = {k: extract_arg(v) for k, v in params.items()}
+            val = self.impls[op](*args, **params)
+            return Array(ArrayBuffer(val))
+        else:
+            return self.impls[op](*args, **params)
 
     def set_input_handler(self, typ, fn):
         self.input_handlers[typ] = fn

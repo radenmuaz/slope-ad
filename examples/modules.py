@@ -6,7 +6,7 @@ import math
 class Linear:
     def __init__(self, in_dim, out_dim, bias=False):
         self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros((out_dim,)) if bias else None
+        self.bias = sev.zeros(out_dim) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
@@ -21,13 +21,13 @@ class MLP:
 
     def __call__(self, x):
         x = self.linear1(x)
-        # x = x.relu()
+        x = x.relu()
         x = self.linear2(x)
         return x
 
 
-model = Linear(2, 1)
-# model = MLP(2, 3, 1)
+# model = Linear(2, 1)
+model = MLP(2, 3, 1)
 # model = model.unflatten(*model.flatten())
 # @slope.jit
 def loss_fn(model, batch):

@@ -93,7 +93,7 @@ def mnist(permute_train=False):
 
 @slope.core.as_module
 class Linear:
-    def __init__(self, in_dim, out_dim, bias=True):
+    def __init__(self, in_dim, out_dim, bias=False):
         self.weight = sev.randn((out_dim, in_dim))
         self.bias = sev.zeros(out_dim) if bias else None
 
@@ -102,19 +102,17 @@ class Linear:
         return x + self.bias if self.bias is not None else x
 
 
-
 @slope.core.as_module
-class Model:
+class MLP:
     def __init__(self, in_dim, hid_dim, out_dim):
         self.linear1 = Linear(in_dim, hid_dim)
         self.linear2 = Linear(hid_dim, out_dim)
 
     def __call__(self, x):
         x = self.linear1(x)
-        x = x.relu()
+        # x = x.relu()
         x = self.linear2(x)
         return x
-
 
 @slope.jit
 def loss_fn(model, batch):
@@ -135,7 +133,7 @@ if __name__ == "__main__":
     batch_size = 200  # TODO: must be multiple of dataset.
     momentum_mass = 0.9
 
-    model = Model(784,100,10)
+    model = MLP(784,100,10)
 
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]

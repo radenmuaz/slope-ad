@@ -23,7 +23,7 @@ numpy_dtype_map = {
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
-default_dtype = numpy_backend.default_dtype
+default_dtype = numpy_backend.default_dtype_value
 
 
 @numpy_backend.set_numpy_of
@@ -192,15 +192,6 @@ def f(self, program, args) -> List[Any]:
 ### Operator Impls
 
 
-@numpy_backend.set_impl(slope.core.jit_op)
-def f(self, in_vals, in_avals, *, params):
-    program = params["program"]
-    self.codegen_depth += 1
-    codegen_out = self.codegen(program, in_vals + in_avals)
-    self.codegen_idx += 1
-    self.codegen_depth -= 1
-
-    return dict(codegen_out=codegen_out)
 
 
 @numpy_backend.set_impl(operator_set.convert)
@@ -224,9 +215,9 @@ def f(self, x):
     return np.sqrt(x)
 
 
-@numpy_backend.set_impl(operator_set.relu)
-def f(self, x):
-    return np.maximum(x, 0)
+# @numpy_backend.set_impl(operator_set.relu)
+# def f(self, x):
+#     return np.maximum(x, 0)
 
 @numpy_backend.set_impl(operator_set.exp)
 def f(self, x):

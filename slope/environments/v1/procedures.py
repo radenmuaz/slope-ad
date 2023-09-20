@@ -218,9 +218,9 @@ def __getitem__(
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
         arange = [
-            Tensor.arange(
+            sev.arange(
                 ret.shape[d],
-                dtype=dtypes.int32,
+                dtype=slope.int32,
                 requires_grad=False,
                 device=x.device,
             ).reshape(*[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1))

@@ -181,23 +181,43 @@ relu = Operator.unary("relu")
 operator_set.register(relu)
 
 
+# @relu.set_run
+# def f(self, x):
+#     breakpoint()
+#     return [x.maximum(0)]
+
+
+# @relu.set_jvp
+# def f(self, primals, tangents, **params):
+#     (x,), (x_dot,) = primals, tangents
+#     return [x.maximum(0)], [x_dot.maximum(0)]
+
+
 @relu.set_run
 def f(self, x):
-    return [x.relu()]
+    breakpoint()
+    return [x.maximum(0)]
 
 
 @relu.set_jvp
 def f(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
-    return [x.relu()], [x_dot.relu()]
+    def sign(z): 
+        def abs(z): 
+            return z.maximum(0) + (-z).maximum(0)
+        breakpoint()
+        return z * (abs(z) + 1e-10)
+    return [x.maximum(0)], [x.maximum(0)]
+    # return [x.maximum(0)], [sign(x_dot)]
+    # return [x.maximum(0)], [ x_dot.maximum(0) + (-x_dot).maximum(0)]
+    # return [x.relu()], [x_dot.relu()]
 
 
 @relu.set_T
 def f(self, cts, x):
+    breakpoint()
     (z,) = cts
-    mask = 1 - (x.relu() == 0)
-    return [mask * z]
-
+    return [-z]
 
 # -----------------------
 # BinaryOps

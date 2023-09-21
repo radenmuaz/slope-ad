@@ -45,7 +45,61 @@ import slope
 import importlib
 import copy
 
-max = max
+# ================
+#   Utils
+# ================
+
+def unzip2(pairs):
+    lst1, lst2 = [], []
+    for x1, x2 in pairs:
+        lst1.append(x1)
+        lst2.append(x2)
+    return lst1, lst2
+
+
+def list_map(f: Any, *xs: Any) -> Any:
+    return list(map(f, *xs))
+
+
+def list_zip(*args: Any) -> Any:
+    fst, *rest = args = list_map(list, args)
+    n = len(fst)
+    for arg in rest:
+        # assert len(arg) == n
+        try:
+            assert len(arg) == n
+        except:
+            breakpoint()
+            raise
+    return list(zip(*args))
+
+
+def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
+    assert not len(lst) % 2
+    return split_list(lst, len(lst) // 2)
+
+
+def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
+    l1, l2 = iter(l1), iter(l2)
+    out = [next(l2) if b else next(l1) for b in which]
+    assert next(l1, None) is next(l2, None) is None
+    return out
+
+
+def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
+    assert 0 <= n <= len(lst)
+    return lst[:n], lst[n:]
+
+
+def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
+    assert len(bs) == len(l)
+    lst1: List[Any] = []
+    lst2: List[Any] = []
+    lists = lst1, lst2
+    # lists = lst1: List[Any], lst2: List[Any] = list(), list()
+    for b, x in list_zip(bs, l):
+        lists[b].append(x)
+    return lst1, lst2
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -100,6 +154,184 @@ class Hashed:
             return self.val == other.val
         return False
 
+# ================
+#   Arrays
+# ================
+
+class DType(NamedTuple):
+    priority: int
+    itemsize: int
+    name: str
+    np: type
+
+    def __repr__(self):
+        return f"DType<{self.name}>"
+
+
+class BaseArray:
+    bool: Final[DType] = DType(0, 1, "bool", bool)
+    float16: Final[DType] = DType(0, 2, "half", np.float16)
+    float32: Final[DType] = DType(4, 4, "float", np.float32)
+    int8: Final[DType] = DType(0, 1, "char", np.int8)
+    int32: Final[DType] = DType(1, 4, "int", np.int32)
+    int64: Final[DType] = DType(2, 8, "int64", np.int64)
+    uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+
+    safe_dtypes = {
+        "F16": float16,
+        "F32": float32,
+        "U8": uint8,
+        "I8": int8,
+        "I32": int32,
+        "I64": int64,
+    }
+    safe_dtypes_inv = {v: k for k, v in safe_dtypes.items()}
+
+    @property
+    def default_dtype(self):
+        return slope.M().backend.default_dtype
+
+    def is_int(self) -> bool:
+        return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
+
+    def is_float(self) -> bool:
+        return self.dtype in (self.float16, self.float32)
+
+    def is_unsigned(self) -> bool:
+        return self.dtype is self.uint8
+
+    def __getattr__(self, attr):
+        if attr in self.__dict__.keys():
+            return self.__dict__[attr]
+        if attr in vars(slope.environment.operator_set).keys():
+            op = getattr(slope.environment.operator_set, attr)
+            return partial(op, self)
+        elif attr in vars(slope.environment.procedure_set).keys():
+            procedure = getattr(slope.environment.procedure_set, attr)
+            assert not isinstance(
+                procedure, classmethod
+            ), f"use sev.{attr} instead of self.{attr}"
+            return partial(procedure, self)
+        raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
+
+    def __getitem__(self, idx):
+        self.getitem(idx)
+
+    def __setitem__(self, idx, item):
+        raise NotImplementedError
+
+    def str_short(self):
+        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
+
+    __neg__ = lambda self: self.neg()
+    __add__ = lambda self, other: self.add(other)
+    __radd__ = lambda self, other: self.add(other)
+    __sub__ = lambda self, other: self.sub(other)
+    __rsub__ = lambda self, other: self.sub.func(other, self)
+    __mul__ = lambda self, other: self.mul(other)
+    __rmul__ = lambda self, other: self.mul(other)
+    __div__ = lambda self, other: self.div(other)
+    __rdiv__ = lambda self, other: self.div.func(other, self)
+    __truediv__ = __div__
+    __truerdiv__ = __rdiv__
+    __eq__ = lambda self, other: self.equal(other)
+    __ne__ = lambda self, other: self.not_equal(other)
+    __ge__ = lambda self, other: self.maximum(other).equal(self)
+    __le__ = lambda self, other: self.minimum(other).equal(self)
+    __gt__ = lambda self, other: 1.0 - (self <= other)
+    __lt__ = lambda self, other: 1.0 - (self >= other)
+
+
+class ArrayBuffer:
+    def __init__(self, val):
+        self.val = val
+
+
+class Array(BaseArray):
+    def __init__(self, val: ArrayBuffer):
+        assert isinstance(val, ArrayBuffer)
+        self.buf = val
+
+    def __hash__(self):
+        return id(self.val)
+
+    val = property(lambda self: self.buf.val)
+
+    @property
+    def dtype(self):
+        return slope.M().backend.dtype_map_inv[self.buf.val.dtype]
+
+    @property
+    def device(self):
+        return slope.M().backend.device_of(self)
+
+    def numpy(self):
+        return slope.M().backend.numpy_of(self)
+
+    shape = property(lambda self: self.buf.val.shape)
+    ndim = property(lambda self: self.buf.val.ndim)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
+
+    __str__ = __repr__
+
+    def __getitem__(self, idx):
+        if type(idx) in (tuple, list):
+            return self.slice(slice(idx))
+        raise NotImplementedError
+
+    def __setitem__(self, idx, val):
+        raise NotImplementedError
+
+
+class VoidArray:
+    array_abstraction_level = 1
+    shape: Tuple[int, ...]
+    dtype: DType
+
+    @classmethod
+    def like(cls, aval):
+        shape = aval.shape
+        if isinstance(aval, Array):
+            dtype = slope.M().backend.dtype_map_inv[aval.buf.val.dtype]
+        else:
+            dtype = aval.dtype
+        return cls(shape, dtype)
+
+    def __init__(self, shape, dtype):
+        self.shape = tuple(shape)
+        self.dtype = dtype
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    @staticmethod
+    def _bool(tracer):
+        raise Exception("VoidArray can't be unambiguously converted to bool")
+
+    @staticmethod
+    def _nonzero(tracer):
+        raise Exception("VoidArray can't be unambiguously converted to bool")
+
+    def str_short(self):
+        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
+
+    def __hash__(self):
+        return hash((self.shape, self.dtype))
+
+    def __eq__(self, other):
+        if type(self) != type(other):
+            return False
+        return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
+
+    def __repr__(self):
+        return f"VoidArray(shape={self.shape}, dtype={self.dtype})"
+
+# ================
+#   Operator
+# ================
 
 class OperatorType(Enum):
     Unary = auto()
@@ -236,19 +468,6 @@ class Operator:
     def binary(cls, name):
         op = cls(name, OperatorType.Binary)
 
-        # # binary op has many edge cases
-        # def impl(self, *args, **params):
-        #     assert len(args) == 2
-        #     if isinstance(args[0], Array) and isinstance(args[1], TracerArray):
-        #         return op(args[0], args[1])
-        #     else:
-        #         assert isinstance(args[0], Array) or isinstance(args[1], Array)
-        #         args, params = self.reorg_args(args, params)
-        #         args, params = self.args_fixer(*args, **params)
-        #         return slope.M().backend.run_impl(self, *args, **params)
-
-        # op.impl = types.MethodType(impl, op)
-
         @op.override_method
         def args_fixer(self, x, y, **params):
             if type(x) is UndefPrimal and type(y) is UndefPrimal:
@@ -381,11 +600,6 @@ class Operator:
         return op
 
 
-# ========================
-# Ops
-# ========================
-
-
 class OperatorSet:
     def register(self, op):
         setattr(self, op.name, op)
@@ -405,177 +619,84 @@ class ProcedureSet:
         setattr(self, name, fn)
 
 
-class DType(NamedTuple):
-    priority: int
-    itemsize: int
-    name: str
-    np: type
-
-    def __repr__(self):
-        return f"DType<{self.name}>"
-
-
-class BaseArray:
-    bool: Final[DType] = DType(0, 1, "bool", bool)
-    float16: Final[DType] = DType(0, 2, "half", np.float16)
-    float32: Final[DType] = DType(4, 4, "float", np.float32)
-    int8: Final[DType] = DType(0, 1, "char", np.int8)
-    int32: Final[DType] = DType(1, 4, "int", np.int32)
-    int64: Final[DType] = DType(2, 8, "int64", np.int64)
-    uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
-
-    safe_dtypes = {
-        "F16": float16,
-        "F32": float32,
-        "U8": uint8,
-        "I8": int8,
-        "I32": int32,
-        "I64": int64,
-    }
-    safe_dtypes_inv = {v: k for k, v in safe_dtypes.items()}
-
-    @property
-    def default_dtype(self):
-        return slope.M().backend.default_dtype
-
-    def is_int(self) -> bool:
-        return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
-
-    def is_float(self) -> bool:
-        return self.dtype in (self.float16, self.float32)
-
-    def is_unsigned(self) -> bool:
-        return self.dtype is self.uint8
+@dataclass
+class Environment:
+    operator_set: OperatorSet
+    procedure_set: ProcedureSet
+    backends: dict
 
     def __getattr__(self, attr):
-        raise NotImplementedError
-
-    def __getitem__(self, idx):
-        # if None in idx:
-        #     self = self.broadcast_in_dim(self.shape, idx)
-        self.getitem(idx)
-
-    def __setitem__(self, idx, item):
-        raise NotImplementedError
-
-    def str_short(self):
-        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
-
-    __neg__ = lambda self: self.neg()
-    __add__ = lambda self, other: self.add(other)
-    __radd__ = lambda self, other: self.add(other)
-    __sub__ = lambda self, other: self.sub(other)
-    __rsub__ = lambda self, other: self.sub.func(other, self)
-    __mul__ = lambda self, other: self.mul(other)
-    __rmul__ = lambda self, other: self.mul(other)
-    __div__ = lambda self, other: self.div(other)
-    __rdiv__ = lambda self, other: self.div.func(other, self)
-    __truediv__ = __div__
-    __truerdiv__ = __rdiv__
-    __eq__ = lambda self, other: self.equal(other)
-    __ne__ = lambda self, other: self.not_equal(other)
-    __ge__ = lambda self, other: self.maximum(other).equal(self)
-    __le__ = lambda self, other: self.minimum(other).equal(self)
-    __gt__ = lambda self, other: 1.0 - (self <= other)
-    __lt__ = lambda self, other: 1.0 - (self >= other)
-
-
-def unzip2(pairs):
-    lst1, lst2 = [], []
-    for x1, x2 in pairs:
-        lst1.append(x1)
-        lst2.append(x2)
-    return lst1, lst2
-
-
-def list_map(f: Any, *xs: Any) -> Any:
-    return list(map(f, *xs))
-
-
-def list_zip(*args: Any) -> Any:
-    fst, *rest = args = list_map(list, args)
-    n = len(fst)
-    for arg in rest:
-        # assert len(arg) == n
         try:
-            assert len(arg) == n
+            # print(f"looking {attr} in operator_set")
+            return getattr(self.operator_set, attr)
         except:
-            breakpoint()
-            raise
-    return list(zip(*args))
+            pass
+        try:
+            # print(f"looking {attr} in procedure_set")
+            return getattr(self.procedure_set, attr)
+        except:
+            pass
+        # print(f"fallback to default getattribute")
+        super().__getattribute__(attr)
 
+    def array(
+        self,
+        val: Union[list, tuple, np.ndarray, "ArrayBuffer"] = None,
+        dtype: Optional[Any] = BaseArray.float32,
+    ):
+        return (
+            Array(val)
+            if isinstance(val, ArrayBuffer)
+            else slope.M().backend.run_impl(
+                self.operator_set.constant, val=val, dtype=dtype
+            )
+        )
 
-def split_half(lst: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert not len(lst) % 2
-    return split_list(lst, len(lst) // 2)
+    def save(arr: "Array", filename: str):
+        # TODO
+        arr_np = arr.numpy()
 
+    def safe_load(self, fn: Union[Array, str]) -> Dict[str, Array]:
+        t = (
+            fn
+            if isinstance(fn, Array)
+            else Array.empty(
+                os.stat(fn).st_size, dtype=BaseArray.uint8, device=f"disk:{fn}"
+            )
+        )
+        json_len = t[0:1].cast(BaseArray.int64).numpy()[0]
+        metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
+        return {
+            k: t[8 + json_len + v["data_offsets"][0] :]
+            .cast(BaseArray.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
+            .reshape(v["shape"])
+            for k, v in metadata.items()
+            if k != "__metadata__"
+        }
 
-def merge_lists(which: List[bool], l1: List[Any], l2: List[Any]) -> List[Any]:
-    l1, l2 = iter(l1), iter(l2)
-    out = [next(l2) if b else next(l1) for b in which]
-    assert next(l1, None) is next(l2, None) is None
-    return out
+    def safe_save(self, Arrays: Dict[str, Array], fn: str):
+        metadata, offset = {}, 0
+        for k, v in Arrays.items():
+            metadata[k] = {
+                "dtype": BaseArray.safe_dtypes_inv[v.dtype],
+                "shape": list(v.shape),
+                "data_offsets": [offset, offset + v.nbytes()],
+            }
+            offset += v.nbytes()
+        j = json.dumps(metadata, separators=(",", ":"))
+        j += "\x20" * ((8 - len(j) % 8) % 8)
+        Path(fn).unlink(missing_ok=True)
+        t = Array.empty(8 + len(j) + offset, dtype=BaseArray.uint8, device=f"disk:{fn}")
+        t[0:1].cast(BaseArray.int64).assign([len(j)])
+        t[8 : 8 + len(j)].assign(
+            Array(list(j.encode("utf-8")), dtype=BaseArray.uint8, device="cpu")
+        )
+        for k, v in self.safe_load(t).items():
+            v.assign(Arrays[k])
 
-
-def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
-    assert 0 <= n <= len(lst)
-    return lst[:n], lst[n:]
-
-
-def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
-    assert len(bs) == len(l)
-    lst1: List[Any] = []
-    lst2: List[Any] = []
-    lists = lst1, lst2
-    # lists = lst1: List[Any], lst2: List[Any] = list(), list()
-    for b, x in list_zip(bs, l):
-        lists[b].append(x)
-    return lst1, lst2
-
-
-class VoidArray:
-    array_abstraction_level = 1
-    shape: Tuple[int, ...]
-    dtype: DType
-
-    @classmethod
-    def like(cls, aval):
-        shape = aval.shape
-        if isinstance(aval, Array):
-            dtype = slope.M().backend.dtype_map_inv[aval.buf.val.dtype]
-        else:
-            dtype = aval.dtype
-        return cls(shape, dtype)
-
-    def __init__(self, shape, dtype):
-        self.shape = tuple(shape)
-        self.dtype = dtype
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    @staticmethod
-    def _bool(tracer):
-        raise Exception("VoidArray can't be unambiguously converted to bool")
-
-    @staticmethod
-    def _nonzero(tracer):
-        raise Exception("VoidArray can't be unambiguously converted to bool")
-
-    def str_short(self):
-        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
-
-    def __hash__(self):
-        return hash((self.shape, self.dtype))
-
-    def __eq__(self, other):
-        if type(self) != type(other):
-            return False
-        return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
-
-    def __repr__(self):
-        return f"VoidArray(shape={self.shape}, dtype={self.dtype})"
+# ================
+#   IR, Programs, Instructions
+# ================
 
 class Var:
     val = None
@@ -617,11 +738,11 @@ class Program(NamedTuple):
 
     def __repr__(self):
         namegen = (
-            # "z"+repr(r)
-            # for r in itertools.count()
-            "".join(s)
-            for r in itertools.count(1)
-            for s in itertools.permutations(string.ascii_lowercase, r)
+            "z"+repr(r)
+            for r in itertools.count()
+            # "".join(s)
+            # for r in itertools.count(1)
+            # for s in itertools.permutations(string.ascii_lowercase, r)
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
@@ -630,15 +751,12 @@ class Program(NamedTuple):
         )
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
         outs = ", ".join(outs)
-        # outs = ', '.join(sorted(outs))
         ret = str(
             PPrint.pp(f"{{ lambda {in_binders} .")
             + (
                 (PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")
             ).indent(2)
         )
-        # print(ret)
-        # print('program outs: ', outs)
         return ret
 
     def pp_instruction(
@@ -683,236 +801,9 @@ class ProgramType(NamedTuple):
         out_types = ", ".join(aval.str_short() for aval in self.out_types)
         return f"({in_types}) -> ({out_types})"
 
-
-class MainTrace(NamedTuple):
-    rt: "Machine"
-    level: int
-    trace_type: Type["Trace"]
-    global_data: Optional[Any]
-
-
-class Trace:
-    main: MainTrace
-
-    def __init__(self, main: MainTrace) -> None:
-        self.main = main
-
-    def pure(self, val):
-        raise NotImplementedError
-
-    def lift(self, val):
-        raise NotImplementedError
-
-    def run_op(self, op, tracers, params):
-        raise NotImplementedError
-
-
-class EvalTrace(Trace):
-    pure = lift = lambda self, x: x
-
-    def run_op(self, op, args, params):
-        if op is not slope.core.jit_op:
-            args, params = op.reorg_args(args, params)
-            args, params = op.args_fixer(*args, **params)
-            return [slope.M().backend.run_impl(op, *args, **params)]
-        else:
-            return slope.M().backend.run_impl(op, *args, **params)
-
-
-class ArrayBuffer:
-    def __init__(self, val):
-        self.val = val
-
-
-class Array(BaseArray):
-    def __init__(self, val: ArrayBuffer):
-        assert isinstance(val, ArrayBuffer)
-        self.buf = val
-
-    def __hash__(self):
-        return id(self.val)
-
-    val = property(lambda self: self.buf.val)
-
-    @property
-    def dtype(self):
-        return slope.M().backend.dtype_map_inv[self.buf.val.dtype]
-
-    @property
-    def device(self):
-        return slope.M().backend.device_of(self)
-
-    def numpy(self):
-        return slope.M().backend.numpy_of(self)
-
-    shape = property(lambda self: self.buf.val.shape)
-    ndim = property(lambda self: self.buf.val.ndim)
-
-    def __getattr__(self, attr):
-        if attr in self.__dict__.keys():
-            return self.__dict__[attr]
-        if attr in vars(slope.environment.operator_set).keys():
-            op = getattr(slope.environment.operator_set, attr)
-            return partial(op, self)
-        elif attr in vars(slope.environment.procedure_set).keys():
-            procedure = getattr(slope.environment.procedure_set, attr)
-            assert not isinstance(
-                procedure, classmethod
-            ), f"use sev.{attr} instead of Array.{attr}"
-            return partial(procedure, self)
-        raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
-
-    __str__ = __repr__
-
-    def __getitem__(self, idx):
-        if type(idx) in (tuple, list):
-            return self.slice(slice(idx))
-        raise NotImplementedError
-
-    def __setitem__(self, idx, val):
-        raise NotImplementedError
-
-
-@dataclass
-class Environment:
-    operator_set: OperatorSet
-    procedure_set: ProcedureSet
-    backends: dict
-
-    def __getattr__(self, attr):
-        try:
-            # print(f"looking {attr} in operator_set")
-            return getattr(self.operator_set, attr)
-        except:
-            pass
-        try:
-            # print(f"looking {attr} in procedure_set")
-            return getattr(self.procedure_set, attr)
-        except:
-            pass
-        # print(f"fallback to default getattribute")
-        super().__getattribute__(attr)
-
-    def array(
-        self,
-        val: Union[list, tuple, np.ndarray, "ArrayBuffer"] = None,
-        dtype: Optional[Any] = BaseArray.float32,
-    ):
-        return (
-            Array(val)
-            if isinstance(val, ArrayBuffer)
-            else slope.M().backend.run_impl(
-                self.operator_set.constant, val=val, dtype=dtype
-            )
-        )
-
-    def save(arr: "Array", filename: str):
-        arr_np = arr.numpy()
-
-    def safe_load(self, fn: Union[Array, str]) -> Dict[str, Array]:
-        t = (
-            fn
-            if isinstance(fn, Array)
-            else Array.empty(
-                os.stat(fn).st_size, dtype=BaseArray.uint8, device=f"disk:{fn}"
-            )
-        )
-        json_len = t[0:1].cast(BaseArray.int64).numpy()[0]
-        metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
-        return {
-            k: t[8 + json_len + v["data_offsets"][0] :]
-            .cast(BaseArray.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
-            .reshape(v["shape"])
-            for k, v in metadata.items()
-            if k != "__metadata__"
-        }
-
-    def safe_save(self, Arrays: Dict[str, Array], fn: str):
-        metadata, offset = {}, 0
-        for k, v in Arrays.items():
-            metadata[k] = {
-                "dtype": BaseArray.safe_dtypes_inv[v.dtype],
-                "shape": list(v.shape),
-                "data_offsets": [offset, offset + v.nbytes()],
-            }
-            offset += v.nbytes()
-        j = json.dumps(metadata, separators=(",", ":"))
-        j += "\x20" * ((8 - len(j) % 8) % 8)
-        Path(fn).unlink(missing_ok=True)
-        t = Array.empty(8 + len(j) + offset, dtype=BaseArray.uint8, device=f"disk:{fn}")
-        t[0:1].cast(BaseArray.int64).assign([len(j)])
-        t[8 : 8 + len(j)].assign(
-            Array(list(j.encode("utf-8")), dtype=BaseArray.uint8, device="cpu")
-        )
-        for k, v in self.safe_load(t).items():
-            v.assign(Arrays[k])
-
-
-#   def assign(self, x) -> Tensor:
-#     # TODO: this is a hack for writing to DISK
-#     if self.device.startswith("DISK"):
-#       if x.__class__ is not Tensor: x = Tensor(x, device="CPU", dtype=self.dtype)
-#       self.lazydata.realize().realized._copyin(x.numpy())  # type: ignore
-#       return self
-#     if x.__class__ is not Tensor: x = Tensor(x, device=self.device, dtype=self.dtype)
-#     assert self.shape == x.shape and self.device == x.device, f"assign shape mismatch {self.shape} != {x.shape} or device mismatch {self.device} != {x.device}"
-#     assert not x.requires_grad  # self requires_grad is okay?
-#     if DEBUG >= 4: print(f"assign {self.lazydata} <- {x.lazydata}")
-#     if self.lazydata.realized is not None and not getenv("DISALLOW_ASSIGN"): x.lazydata.output_buffer = self.lazydata.realized
-#     self.lazydata = x.lazydata
-#     return self
-
-
-class TracerArray(BaseArray):
-    TYPES = {
-        bool,
-        int,
-        float,
-    }
-    _trace: "Trace"
-
-    aval = property(lambda self: self.get_aval(self.val))
-    dtype = property(lambda self: self.aval.dtype)
-    shape = property(lambda self: self.aval.shape)
-
-    @property
-    def val(self):
-        raise NotImplementedError
-
-    # def __repr__(self):
-    #     return f"{self.__class__.__name__}: {repr(self.aval)}"
-
-    def __str__(self):
-        return repr(self)
-
-    def full_lower(self):
-        return self
-
-    def __getattr__(self, attr):
-        if attr in vars(slope.environment.operator_set).keys():
-            op = getattr(slope.environment.operator_set, attr)
-            return partial(op, self)
-        elif attr in vars(slope.environment.procedure_set).keys():
-            procedure = getattr(slope.environment.procedure_set, attr)
-            assert not isinstance(
-                procedure, classmethod
-            ), f"Access this procedure by Array.{attr}"
-            return partial(procedure, self)
-        return self.__getattribute__(attr)
-        try:
-            return getattr(self.aval, attr)
-        except AttributeError:
-            raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.aval)[6:-1] if self.aval.ndim > 0 else self.aval}"
+# ================
+#   Tracer and Trace
+# ================
 
 
 class Empty:
@@ -958,6 +849,31 @@ class Leaf:
 
 
 leaf = Leaf()
+
+
+# ================
+#   jit operator
+# ================
+
+
+class JitFn:
+    def __init__(self, code, fn, consts):
+        super().__init__()
+        self.code = code
+        self.fn = fn
+        self.consts = consts
+
+    def __call__(self, *args, **params):
+        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
+        args, in_tree = slope.M().tree_flatten(args)
+        try:
+            outs = self.fn(*args, **params)
+        except Exception as e:
+            print(self.code)
+            breakpoint()
+            raise
+        return [slope.environment.array(ArrayBuffer(o)) for o in outs]
+
 
 jit_op = Operator("jit_op")
 jit_op.reorg_args = lambda args, params: (args, params)
@@ -1057,6 +973,10 @@ def partial_run_instruction(
     return instruction1, instruction2, out_unknowns, res
 
 
+# ================
+#   Module
+# ================
+
 class Module:
     def get_metadata(self):
         array_attrs = set()
@@ -1147,6 +1067,465 @@ def as_module(cls):
     slope.M().register_node(cls, cls.flatten, cls.unflatten)
     return cls
 
+
+class Backend:
+    def __init__(
+        self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")
+    ):
+        self.name = name
+        self.default_dtype = default_dtype
+        self.impls = dict()
+        self.dtype_map = dict()
+        self.dtype_map_inv = dict()
+        self.deps_dict = dict()
+        self.codegen_depth = 0
+        self.codegen_idx = 0
+        for dep in deps:
+            if " as " in dep:  # e.g. "numpy as np"
+                dep, _, dep_alias = dep.split(" ")
+                self.deps_dict[dep] = importlib.import_module(dep)
+                self.deps_dict[dep_alias] = self.deps_dict[dep]
+            else:
+                self.deps_dict[dep] = importlib.import_module(dep)
+
+        @self.set_impl(slope.core.jit_op)
+        def f(self, *args, program, num_consts):
+            hashed_program = Hashed(program)
+            consts, args = args[:num_consts], args[num_consts:]
+            hashed_consts = tuple(map(Hashed, consts))
+            jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
+            ret = jit_fn(*consts, *args)
+            return ret
+
+    def override_method(self, method):
+        setattr(self, method.__name__, types.MethodType(method, self))
+
+    @property
+    def default_dtype_value(self):
+        return self.dtype_map[self.default_dtype]
+
+    def numpy_of(self, array):
+        raise NotImplementedError
+
+    @lru_cache
+    def callable(
+        self,
+        hashed_program: Hashed,
+        hashed_consts: Tuple[Hashed, ...],
+    ):
+        program: Program = hashed_program.val
+        slope.M().typecheck_program(program)
+        consts = [x.val for x in hashed_consts]
+        in_avals = [v.aval for v in program.in_binders[len(consts) :]]
+        fn_name = f"{self.name.lower()}_fn"
+        codegen_out = self.codegen(program, consts + in_avals)
+        fn, code = self.compile(program, codegen_out, fn_name)
+        compiled = JitFn(code, fn, consts)
+        return compiled
+
+    def codegen(self, program, args, in_avals, name: str):
+        "Returns IR from the Program"
+        raise NotImplementedError
+
+    def compile(self, program, args, in_avals, name: str):
+        "Compiles IR to a Python callable function"
+        raise NotImplementedError
+
+    def set_dtype_map(self, dtype_map):
+        self.dtype_map = dtype_map
+        self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
+
+    def set_impl(self, op):
+        def set_impl_(fn):
+            self.impls[op] = types.MethodType(fn, self)
+
+        return set_impl_
+
+    def run_impl(self, op, *args, **params):
+        if op is not slope.core.jit_op:
+
+            def extract_arg(a):
+                return (
+                    a.val
+                    if isinstance(a, Array)
+                    else self.dtype_map[a]
+                    if isinstance(a, DType)
+                    else a
+                )
+
+            args = tuple([extract_arg(a) for a in args])
+            params = {k: extract_arg(v) for k, v in params.items()}
+            val = self.impls[op](*args, **params)
+            return Array(ArrayBuffer(val))
+        else:
+            ret = self.impls[op](*args, **params)
+            return ret
+
+
+class MainTrace(NamedTuple):
+    rt: "Machine"
+    level: int
+    trace_type: Type["Trace"]
+    global_data: Optional[Any]
+
+
+class Trace:
+    main: MainTrace
+
+    def __init__(self, main: MainTrace) -> None:
+        self.main = main
+
+    def pure(self, val):
+        raise NotImplementedError
+
+    def lift(self, val):
+        raise NotImplementedError
+
+    def run_op(self, op, tracers, params):
+        raise NotImplementedError
+
+
+class EvalTrace(Trace):
+    pure = lift = lambda self, x: x
+
+    def run_op(self, op, args, params):
+        if op is not slope.core.jit_op:
+            args, params = op.reorg_args(args, params)
+            args, params = op.args_fixer(*args, **params)
+            return [slope.M().backend.run_impl(op, *args, **params)]
+        else:
+            return slope.M().backend.run_impl(op, *args, **params)
+
+
+
+class TracerArray(BaseArray):
+    TYPES = {
+        bool,
+        int,
+        float,
+    }
+    _trace: "Trace"
+
+    aval = property(lambda self: self.get_aval(self.val))
+    dtype = property(lambda self: self.aval.dtype)
+    shape = property(lambda self: self.aval.shape)
+
+    @property
+    def val(self):
+        raise NotImplementedError
+
+    # def __repr__(self):
+    #     return f"{self.__class__.__name__}: {repr(self.aval)}"
+
+    def __str__(self):
+        return repr(self)
+
+    def full_lower(self):
+        return self
+    
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}: {repr(self.aval)[6:-1] if self.aval.ndim > 0 else self.aval}"
+
+
+BatchAxis = Union[None, int]
+
+
+class BatchTracerArray(TracerArray):
+    def __init__(self, trace, val, batch_dim: BatchAxis):
+        self._trace = trace
+        self.val = val
+        self.batch_dim = batch_dim
+
+    @property
+    def aval(self):
+        aval = self.get_aval(self.val)
+        if self.batch_dim is None:
+            return aval
+        else:
+            shape = list(aval.shape)
+            del shape[self.batch_dim]
+            return VoidArray(tuple(shape), aval.dtype)
+
+    def full_lower(self):
+        if self.batch_dim is None:
+            return slope.M().full_lower(self.val)
+        else:
+            return self
+
+
+class BatchTrace(Trace):
+    pure = lift = lambda self, val: BatchTracerArray(self, val, None)
+
+    def run_op(self, op, tracers, params):
+        vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
+        val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
+        return [
+            BatchTracerArray(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)
+        ]
+
+    @property
+    def axis_size(self):
+        return self.main.global_data
+
+    @staticmethod
+    def move_batch_axis(axis_size, src, dst, x):
+        if src is None:
+            target_shape = list(x.shape)
+            target_shape.insert(dst, axis_size)
+            out_ndim = len(target_shape)
+            if type(dst) in (tuple, list):
+                out_ndim += 1
+            reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
+            x = x.reshape(reshape_shape)
+            x = x.broadcast_in_dim(target_shape)
+            return x
+        elif src == dst:
+            return x
+        else:
+            perm = [i for i in range(len(x.shape)) if i != src]
+            perm.insert(dst, src)
+            return x.transpose(perm)
+
+
+class JVPTracerArray(TracerArray):
+    def __init__(self, trace, primal, tangent):
+        self._trace = trace
+        self.primal = primal
+        self.tangent = tangent
+
+    @property
+    def aval(self):
+        return slope.M().get_aval(self.primal)
+
+    @property
+    def val(self):
+        return self.primal
+
+    @property
+    def dtype(self):
+        return self.primal.dtype
+
+
+class JVPTrace(Trace):
+    # pure = lift = lambda self, val: JVPTracerArray(self, val, slope.environment.zeros_like(val))
+    def pure(self, val):
+        if isinstance(val, PartialEvalTrace):
+            val = val.pval.const
+        return JVPTracerArray(self, val, slope.environment.zeros_like(val))
+
+    lift = pure
+
+    def run_op(self, op, tracers, params):
+        primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
+        return [
+            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
+        ]
+
+
+class ProgramTracerArray(TracerArray):
+    __slots__ = ["aval"]
+    aval: VoidArray
+
+    def __init__(self, trace, aval):
+        self._trace = trace
+        self.aval = aval
+
+
+class ProgramTrace(Trace):
+    def new_arg(self, aval) -> ProgramTracerArray:
+        aval = VoidArray.like(aval)
+        tracer = self.builder.new_tracer(self, aval)
+        self.builder.tracer_to_var[id(tracer)] = Var(aval)
+
+        return tracer
+
+    def get_or_make_const_tracer(self, val: Any) -> ProgramTracerArray:
+        tracer = self.builder.const_tracers.get(id(val))
+        if tracer is None:
+            tracer = self.builder.new_tracer(self, slope.M().get_aval(val))
+            self.builder.add_const(tracer, val)
+        return tracer
+
+    pure = lift = get_or_make_const_tracer
+
+    def run_op(self, op, tracers, params):
+        avals_in = [t.aval for t in tracers]
+        avals_out = op.void_run(*avals_in, **params)
+        out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
+        inputs = [self.builder.getvar(t) for t in tracers]
+        outvars = [self.builder.add_var(t) for t in out_tracers]
+        self.builder.add_instruction(Instruction(op, inputs, params, outvars))
+        return out_tracers
+
+    @property
+    def builder(self):
+        return self.main.global_data
+
+
+class ProgramBuilder:
+    instructions: List[Instruction]
+    tracer_to_var: Dict[int, Var]
+    const_tracers: Dict[int, TracerArray]
+    constvals: Dict[Var, Any]
+    tracers: List[ProgramTracerArray]
+
+    def __init__(self):
+        self.instructions = []
+        self.tracer_to_var = {}
+        self.const_tracers = {}
+        self.constvals = {}
+        self.tracers = []
+
+    def new_tracer(self, trace: ProgramTrace, aval: VoidArray) -> ProgramTracerArray:
+        tracer = ProgramTracerArray(trace, aval)
+        self.tracers.append(tracer)
+        return tracer
+
+    def add_instruction(self, instruction: Instruction) -> None:
+        self.instructions.append(instruction)
+
+    def add_var(self, tracer: ProgramTracerArray) -> Var:
+        assert id(tracer) not in self.tracer_to_var
+        var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
+        return var
+
+    def getvar(self, tracer: ProgramTracerArray) -> Var:
+        var = self.tracer_to_var.get(id(tracer))
+        assert var is not None
+        return var
+
+    def add_const(self, tracer: ProgramTracerArray, val: Any) -> Var:
+        var = self.add_var(tracer)
+        self.const_tracers[id(val)] = tracer
+        self.constvals[var] = val
+        return var
+
+    def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Program, List[Any]]:
+        constvars, constvals = unzip2(self.constvals.items())
+        t2v = lambda t: self.tracer_to_var[id(t)]
+        in_binders = constvars + [t2v(t) for t in in_tracers]
+        out_vars = [t2v(t) for t in out_tracers]
+        program = Program(in_binders, self.instructions, out_vars)
+        slope.M().typecheck_program(program)
+        program, constvals = self._inline_literals(program, constvals)
+        return program, constvals
+
+    def _inline_literals(
+        self, program: Program, consts: List[Any]
+    ) -> Tuple[Program, List[Any]]:
+        const_binders, other_binders = split_list(program.in_binders, len(consts))
+        scalars = [
+            type(x) in TracerArray.TYPES and not slope.M().get_aval(x).shape
+            for x in consts
+        ]
+        new_const_binders, lit_binders = partition_list(scalars, const_binders)
+        new_consts, lit_vals = partition_list(scalars, consts)
+        literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
+        new_instructions = [
+            Instruction(
+                instruction.op,
+                [literals.get(x, x) for x in instruction.inputs],
+                instruction.params,
+                instruction.out_binders,
+            )
+            for instruction in program.instructions
+        ]
+        new_outs = [literals.get(x, x) for x in program.outs]
+        new_program = Program(
+            new_const_binders + other_binders, new_instructions, new_outs
+        )
+        slope.M().typecheck_program(new_program)
+        return new_program, tuple(new_consts)
+
+
+class UndefPrimal(NamedTuple):
+    aval: VoidArray
+
+    @property
+    def shape(self):
+        return self.aval.shape
+
+    @property
+    def dtype(self):
+        return self.aval.dtype
+
+
+class PartialVal(NamedTuple):
+    aval: VoidArray
+    const: Optional[Any]
+
+    is_known = property(lambda self: self.const is not None)
+    is_unknown = property(lambda self: self.const is None)
+
+
+class LambdaBindingProto(NamedTuple):
+    pass
+
+
+class ConstProto(NamedTuple):
+    val: Any
+
+
+class InstructionProto(NamedTuple):
+    prim: Operator
+    tracers_in: List["PartialEvalTracerArray"]
+    params: Dict[str, Any]
+    avals_out: List[VoidArray]
+    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
+
+
+ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
+
+
+class PartialEvalTracerArray(TracerArray):
+    def __init__(self, trace, pval, proto):
+        self._trace = trace
+        self.pval = pval
+        self.proto = proto
+
+    aval = property(lambda self: self.pval.aval)
+    val = property(lambda self: self.pval.const)
+
+    def full_lower(self):
+        if self.pval.is_known:
+            return slope.M().full_lower(self.pval.const)
+        return self
+
+
+class PartialEvalTrace(Trace):
+    def new_arg(self, pval: PartialVal) -> Any:
+        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
+
+    def lift(self, val: Any) -> PartialEvalTracerArray:
+        return PartialEvalTracerArray(self, slope.M().make_known_pval(val), None)
+
+    pure = lift
+
+    def instantiate_const(
+        self, tracer: PartialEvalTracerArray
+    ) -> PartialEvalTracerArray:
+        if tracer.pval.is_unknown:
+            return tracer
+        else:
+            pval = slope.M().make_unknown_pval(VoidArray.like(tracer.aval))
+            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
+
+    def run_op(self, op, tracers, params):
+        if all(t.pval.is_known for t in tracers):
+            return slope.M().bind(
+                op, *list_map(slope.M().full_lower, tracers), **params
+            )
+        return op.partial_run(self, tracers, **params)
+
+
+# ================
+#   Machine
+# ================
 
 class Machine:
     def __init__(
@@ -1867,411 +2246,3 @@ class Machine:
         return merge_lists(out_unknowns, outs1, outs2)
 
 
-class Backend:
-    def __init__(
-        self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")
-    ):
-        self.name = name
-        self.default_dtype = default_dtype
-        self.impls = dict()
-        self.dtype_map = dict()
-        self.dtype_map_inv = dict()
-        self.deps_dict = dict()
-        self.codegen_depth = 0
-        self.codegen_idx = 0
-        for dep in deps:
-            if " as " in dep:  # e.g. "numpy as np"
-                dep, _, dep_alias = dep.split(" ")
-                self.deps_dict[dep] = importlib.import_module(dep)
-                self.deps_dict[dep_alias] = self.deps_dict[dep]
-            else:
-                self.deps_dict[dep] = importlib.import_module(dep)
-
-        @self.set_impl(slope.core.jit_op)
-        def f(self, *args, program, num_consts):
-            hashed_program = Hashed(program)
-            consts, args = args[:num_consts], args[num_consts:]
-            hashed_consts = tuple(map(Hashed, consts))
-            jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
-            ret = jit_fn(*consts, *args)
-            return ret
-
-    def override_method(self, method):
-        setattr(self, method.__name__, types.MethodType(method, self))
-
-    @property
-    def default_dtype_value(self):
-        return self.dtype_map[self.default_dtype]
-
-    def numpy_of(self, array):
-        raise NotImplementedError
-
-    @lru_cache
-    def callable(
-        self,
-        hashed_program: Hashed,
-        hashed_consts: Tuple[Hashed, ...],
-    ):
-        program: Program = hashed_program.val
-        slope.M().typecheck_program(program)
-        consts = [x.val for x in hashed_consts]
-        in_avals = [v.aval for v in program.in_binders[len(consts) :]]
-        fn_name = f"{self.name.lower()}_fn"
-        codegen_out = self.codegen(program, consts + in_avals)
-        fn, code = self.compile(program, codegen_out, fn_name)
-        compiled = JitFn(code, fn, consts)
-        return compiled
-
-    def codegen(self, program, args, in_avals, name: str):
-        "Returns IR from the Program"
-        raise NotImplementedError
-
-    def compile(self, program, args, in_avals, name: str):
-        "Compiles IR to a Python callable function"
-        raise NotImplementedError
-
-    def set_dtype_map(self, dtype_map):
-        self.dtype_map = dtype_map
-        self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
-
-    def set_impl(self, op):
-        def set_impl_(fn):
-            self.impls[op] = types.MethodType(fn, self)
-
-        return set_impl_
-
-    def run_impl(self, op, *args, **params):
-        if op is not slope.core.jit_op:
-
-            def extract_arg(a):
-                return (
-                    a.val
-                    if isinstance(a, Array)
-                    else self.dtype_map[a]
-                    if isinstance(a, DType)
-                    else a
-                )
-
-            args = tuple([extract_arg(a) for a in args])
-            params = {k: extract_arg(v) for k, v in params.items()}
-            val = self.impls[op](*args, **params)
-            return Array(ArrayBuffer(val))
-        else:
-            ret = self.impls[op](*args, **params)
-            return ret
-
-
-class JitFn:
-    def __init__(self, code, fn, consts):
-        super().__init__()
-        self.code = code
-        self.fn = fn
-        self.consts = consts
-
-    def __call__(self, *args, **params):
-        # args = [a.val if isinstance(a, Array) else a for a in args]
-        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
-        args, in_tree = slope.M().tree_flatten(args)
-        try:
-            # outs = self.fn(*self.consts, *args, **params)
-            outs = self.fn(*args, **params)
-        except Exception as e:
-            print(self.code)
-            breakpoint()
-            raise
-        return [slope.environment.array(ArrayBuffer(o)) for o in outs]
-
-
-BatchAxis = Union[None, int]
-
-
-class BatchTracerArray(TracerArray):
-    def __init__(self, trace, val, batch_dim: BatchAxis):
-        self._trace = trace
-        self.val = val
-        self.batch_dim = batch_dim
-
-    @property
-    def aval(self):
-        aval = self.get_aval(self.val)
-        if self.batch_dim is None:
-            return aval
-        else:
-            shape = list(aval.shape)
-            del shape[self.batch_dim]
-            return VoidArray(tuple(shape), aval.dtype)
-
-    def full_lower(self):
-        if self.batch_dim is None:
-            return slope.M().full_lower(self.val)
-        else:
-            return self
-
-
-class BatchTrace(Trace):
-    pure = lift = lambda self, val: BatchTracerArray(self, val, None)
-
-    def run_op(self, op, tracers, params):
-        vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
-        val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
-        return [
-            BatchTracerArray(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)
-        ]
-
-    @property
-    def axis_size(self):
-        return self.main.global_data
-
-    @staticmethod
-    def move_batch_axis(axis_size, src, dst, x):
-        if src is None:
-            target_shape = list(x.shape)
-            target_shape.insert(dst, axis_size)
-            out_ndim = len(target_shape)
-            if type(dst) in (tuple, list):
-                out_ndim += 1
-            reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
-            x = x.reshape(reshape_shape)
-            x = x.broadcast_in_dim(target_shape)
-            return x
-        elif src == dst:
-            return x
-        else:
-            perm = [i for i in range(len(x.shape)) if i != src]
-            perm.insert(dst, src)
-            return x.transpose(perm)
-
-
-class JVPTracerArray(TracerArray):
-    def __init__(self, trace, primal, tangent):
-        self._trace = trace
-        self.primal = primal
-        self.tangent = tangent
-
-    @property
-    def aval(self):
-        return slope.M().get_aval(self.primal)
-
-    @property
-    def val(self):
-        return self.primal
-
-    @property
-    def dtype(self):
-        return self.primal.dtype
-
-
-class JVPTrace(Trace):
-    # pure = lift = lambda self, val: JVPTracerArray(self, val, slope.environment.zeros_like(val))
-    def pure(self, val):
-        if isinstance(val, PartialEvalTrace):
-            val = val.pval.const
-        return JVPTracerArray(self, val, slope.environment.zeros_like(val))
-
-    lift = pure
-
-    def run_op(self, op, tracers, params):
-        primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
-        return [
-            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
-        ]
-
-
-class ProgramTracerArray(TracerArray):
-    __slots__ = ["aval"]
-    aval: VoidArray
-
-    def __init__(self, trace, aval):
-        self._trace = trace
-        self.aval = aval
-
-
-class ProgramTrace(Trace):
-    def new_arg(self, aval) -> ProgramTracerArray:
-        aval = VoidArray.like(aval)
-        tracer = self.builder.new_tracer(self, aval)
-        self.builder.tracer_to_var[id(tracer)] = Var(aval)
-
-        return tracer
-
-    def get_or_make_const_tracer(self, val: Any) -> ProgramTracerArray:
-        tracer = self.builder.const_tracers.get(id(val))
-        if tracer is None:
-            tracer = self.builder.new_tracer(self, slope.M().get_aval(val))
-            self.builder.add_const(tracer, val)
-        return tracer
-
-    pure = lift = get_or_make_const_tracer
-
-    def run_op(self, op, tracers, params):
-        avals_in = [t.aval for t in tracers]
-        avals_out = op.void_run(*avals_in, **params)
-        out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
-        inputs = [self.builder.getvar(t) for t in tracers]
-        outvars = [self.builder.add_var(t) for t in out_tracers]
-        self.builder.add_instruction(Instruction(op, inputs, params, outvars))
-        return out_tracers
-
-    @property
-    def builder(self):
-        return self.main.global_data
-
-
-class ProgramBuilder:
-    instructions: List[Instruction]
-    tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, TracerArray]
-    constvals: Dict[Var, Any]
-    tracers: List[ProgramTracerArray]
-
-    def __init__(self):
-        self.instructions = []
-        self.tracer_to_var = {}
-        self.const_tracers = {}
-        self.constvals = {}
-        self.tracers = []
-
-    def new_tracer(self, trace: ProgramTrace, aval: VoidArray) -> ProgramTracerArray:
-        tracer = ProgramTracerArray(trace, aval)
-        self.tracers.append(tracer)
-        return tracer
-
-    def add_instruction(self, instruction: Instruction) -> None:
-        self.instructions.append(instruction)
-
-    def add_var(self, tracer: ProgramTracerArray) -> Var:
-        assert id(tracer) not in self.tracer_to_var
-        var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
-        return var
-
-    def getvar(self, tracer: ProgramTracerArray) -> Var:
-        var = self.tracer_to_var.get(id(tracer))
-        assert var is not None
-        return var
-
-    def add_const(self, tracer: ProgramTracerArray, val: Any) -> Var:
-        var = self.add_var(tracer)
-        self.const_tracers[id(val)] = tracer
-        self.constvals[var] = val
-        return var
-
-    def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Program, List[Any]]:
-        constvars, constvals = unzip2(self.constvals.items())
-        t2v = lambda t: self.tracer_to_var[id(t)]
-        in_binders = constvars + [t2v(t) for t in in_tracers]
-        out_vars = [t2v(t) for t in out_tracers]
-        program = Program(in_binders, self.instructions, out_vars)
-        slope.M().typecheck_program(program)
-        program, constvals = self._inline_literals(program, constvals)
-        return program, constvals
-
-    def _inline_literals(
-        self, program: Program, consts: List[Any]
-    ) -> Tuple[Program, List[Any]]:
-        const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [
-            type(x) in TracerArray.TYPES and not slope.M().get_aval(x).shape
-            for x in consts
-        ]
-        new_const_binders, lit_binders = partition_list(scalars, const_binders)
-        new_consts, lit_vals = partition_list(scalars, consts)
-        literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
-        new_instructions = [
-            Instruction(
-                instruction.op,
-                [literals.get(x, x) for x in instruction.inputs],
-                instruction.params,
-                instruction.out_binders,
-            )
-            for instruction in program.instructions
-        ]
-        new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = Program(
-            new_const_binders + other_binders, new_instructions, new_outs
-        )
-        slope.M().typecheck_program(new_program)
-        return new_program, tuple(new_consts)
-
-
-class UndefPrimal(NamedTuple):
-    aval: VoidArray
-
-    @property
-    def shape(self):
-        return self.aval.shape
-
-    @property
-    def dtype(self):
-        return self.aval.dtype
-
-
-class PartialVal(NamedTuple):
-    aval: VoidArray
-    const: Optional[Any]
-
-    is_known = property(lambda self: self.const is not None)
-    is_unknown = property(lambda self: self.const is None)
-
-
-class LambdaBindingProto(NamedTuple):
-    pass
-
-
-class ConstProto(NamedTuple):
-    val: Any
-
-
-class InstructionProto(NamedTuple):
-    prim: Operator
-    tracers_in: List["PartialEvalTracerArray"]
-    params: Dict[str, Any]
-    avals_out: List[VoidArray]
-    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
-
-
-ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
-
-
-class PartialEvalTracerArray(TracerArray):
-    def __init__(self, trace, pval, proto):
-        self._trace = trace
-        self.pval = pval
-        self.proto = proto
-
-    aval = property(lambda self: self.pval.aval)
-    val = property(lambda self: self.pval.const)
-
-    def full_lower(self):
-        if self.pval.is_known:
-            return slope.M().full_lower(self.pval.const)
-        return self
-
-
-class PartialEvalTrace(Trace):
-    def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
-
-    def lift(self, val: Any) -> PartialEvalTracerArray:
-        return PartialEvalTracerArray(self, slope.M().make_known_pval(val), None)
-
-    pure = lift
-
-    def instantiate_const(
-        self, tracer: PartialEvalTracerArray
-    ) -> PartialEvalTracerArray:
-        if tracer.pval.is_unknown:
-            return tracer
-        else:
-            pval = slope.M().make_unknown_pval(VoidArray.like(tracer.aval))
-            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
-
-    def run_op(self, op, tracers, params):
-        if all(t.pval.is_known for t in tracers):
-            return slope.M().bind(
-                op, *list_map(slope.M().full_lower, tracers), **params
-            )
-        return op.partial_run(self, tracers, **params)
-
-
-# serialization

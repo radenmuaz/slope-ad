@@ -577,21 +577,6 @@ class VoidArray:
     def __repr__(self):
         return f"VoidArray(shape={self.shape}, dtype={self.dtype})"
 
-    # def __getattr__(self, attr):
-    #     if attr in self.__dict__.keys():
-    #         return self.__dict__[attr]
-    #     if attr in vars(slope.environment.operator_set).keys():
-    #         op = getattr(slope.environment.operator_set, attr)
-    #         return partial(op.void_run, self)
-    #     elif attr in vars(slope.environment.procedure_set).keys():
-    #         procedure = getattr(slope.environment.procedure_set, attr)
-    #         assert not isinstance(
-    #             procedure, classmethod
-    #         ), f"use sev.{attr} instead of Array.{attr}"
-    #         return partial(procedure, self)
-    #     raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
-
-
 class Var:
     val = None
     aval: VoidArray

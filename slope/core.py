@@ -27,7 +27,6 @@ from typing import (
     Final,
     BinaryIO,
 )
-from collections.abc import Callable as abc_Callable
 import weakref
 import types
 from contextlib import contextmanager
@@ -46,12 +45,7 @@ import slope
 import importlib
 import copy
 
-max_ = max
-sum_ = sum
-slice_ = slice
-zip_ = zip
-map_ = map
-
+max = max
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -1300,7 +1294,7 @@ class Machine:
         return self.bind(*args, **params)[0]
 
     def find_top_trace(self, xs) -> Trace:
-        top_main = max_(
+        top_main = max(
             (x._trace.main for x in xs if isinstance(x, TracerArray)),
             default=self.trace_stack[0],
             key=operator_py.attrgetter("level"),

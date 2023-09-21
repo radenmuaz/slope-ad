@@ -10,7 +10,7 @@ def f(x):
 
 @slope.jit
 def g(x):
-    return x+1, x
+    return x + 1, x
 
 
 x = snp.ones((3,))

@@ -2,6 +2,7 @@ import slope
 from slope import environment as sev
 import math
 
+
 @slope.core.as_module
 class Linear:
     def __init__(self, in_dim, out_dim, bias=False):
@@ -28,6 +29,8 @@ class MLP:
 
 # model = Linear(2, 1)
 model = MLP(2, 3, 1)
+
+
 # model = model.unflatten(*model.flatten())
 # @slope.jit
 def loss_fn(model, batch):

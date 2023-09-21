@@ -55,9 +55,7 @@ def optimizer(
         def tree_init(x0_tree):
             x0_flat, tree = slope.tree_flatten(x0_tree)
             initial_states = [init(x0) for x0 in x0_flat]
-            states_flat, subtrees = unzip2(
-                list_map(slope.tree_flatten, initial_states)
-            )
+            states_flat, subtrees = unzip2(list_map(slope.tree_flatten, initial_states))
             return OptimizerState(states_flat, tree, subtrees)
 
         @functools.wraps(update)

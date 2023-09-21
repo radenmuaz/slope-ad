@@ -90,7 +90,6 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-
 @slope.core.as_module
 class Linear:
     def __init__(self, in_dim, out_dim, bias=False):
@@ -114,6 +113,7 @@ class MLP:
         x = self.linear2(x)
         return x
 
+
 @slope.jit
 def loss_fn(model, batch):
     inputs, targets = batch
@@ -127,13 +127,14 @@ def accuracy(model, batch):
     predicted_class = np.argmax(model(inputs).numpy(), axis=-1)
     return np.mean(predicted_class == target_class)
 
+
 if __name__ == "__main__":
     step_size = 0.001
     num_epochs = 30
     batch_size = 200  # TODO: must be multiple of dataset.
     momentum_mass = 0.9
 
-    model = MLP(784,100,10)
+    model = MLP(784, 100, 10)
 
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]

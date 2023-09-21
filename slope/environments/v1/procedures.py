@@ -59,12 +59,21 @@ def mean(x, axes=None, keepdims=False):
     out = x.sum(axes=axes, keepdim=keepdims)
     return out * (math.prod(out.shape) / math.prod(x.shape))
 
+
 @procedure_set.register
-def rsqrt(self): return (1/self).sqrt()
+def rsqrt(self):
+    return (1 / self).sqrt()
+
+
 @procedure_set.register
-def cos(self): return ((math.pi/2)-self).sin()
+def cos(self):
+    return ((math.pi / 2) - self).sin()
+
+
 @procedure_set.register
-def tan(self): return self.sin() / self.cos()
+def tan(self):
+    return self.sin() / self.cos()
+
 
 @procedure_set.register
 def minimum(x, y):

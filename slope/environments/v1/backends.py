@@ -12,6 +12,7 @@ import math
 import inspect
 import re
 
+compile_py = compile
 numpy_backend = Backend(
     name="numpy", default_dtype=BaseArray.float32, deps=("numpy as np", "math")
 )
@@ -23,21 +24,21 @@ numpy_dtype_map = {
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
-default_dtype = numpy_backend.default_dtype_value
+default_dtype_backend = numpy_backend.default_dtype_value
 
 
-@numpy_backend.set_numpy_of
-def f(self, array):
+@numpy_backend.override_method
+def set_numpy_of(self, array):
     return array.buf.val
 
 
-@numpy_backend.set_device_of
-def f(self, array):
+@numpy_backend.override_method
+def set_device_of(self, array):
     return "cpu"
 
 
-@numpy_backend.set_compile
-def f(self, program, codegen_out, fn_name):
+@numpy_backend.override_method
+def compile(self, program, codegen_out, fn_name):
     def indent(code_line, amount=4):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
@@ -94,13 +95,13 @@ def f(self, program, codegen_out, fn_name):
 
     exec_locals = {}
     code = "\n".join(code_lines).replace("self, ", "")
-    exec(compile(code, "<string>", "exec"), self.deps_dict, exec_locals)
+    exec(compile_py(code, "<string>", "exec"), self.deps_dict, exec_locals)
     fn = exec_locals[fn_name]
     return fn, code
 
 
-@numpy_backend.set_codegen
-def f(self, program, args) -> List[Any]:
+@numpy_backend.override_method
+def codegen(self, program, args) -> List[Any]:
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
     ncs = 0
@@ -194,8 +195,6 @@ def f(self, program, args) -> List[Any]:
 ### Operator Impls
 
 
-
-
 @numpy_backend.set_impl(operator_set.convert)
 def f(self, x, *, dtype):
     ret = x
@@ -220,6 +219,7 @@ def f(self, x):
 # @numpy_backend.set_impl(operator_set.relu)
 # def f(self, x):
 #     return np.maximum(x, 0)
+
 
 @numpy_backend.set_impl(operator_set.exp)
 def f(self, x):
@@ -282,27 +282,27 @@ def f(self, x, *, axes=None, keepdims=False):
 
 
 @numpy_backend.set_impl(operator_set.constant)
-def f(self, val, *, dtype=default_dtype):
+def f(self, val, *, dtype=default_dtype_backend):
     return np.array(val, dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.arange)
-def f(self, *, start, stop, stride, dtype=default_dtype):
+def f(self, *, start, stop, stride, dtype=default_dtype_backend):
     return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.full)
-def f(self, *, shape, fill_value, dtype=default_dtype):
+def f(self, *, shape, fill_value, dtype=default_dtype_backend):
     return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.random_uniform)
-def f(self, *, shape, dtype=default_dtype):
+def f(self, *, shape, dtype=default_dtype_backend):
     return np.random.uniform(size=shape).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.random_normal)
-def f(self, *, shape, dtype=default_dtype):
+def f(self, *, shape, dtype=default_dtype_backend):
     return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 

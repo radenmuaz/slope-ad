@@ -33,13 +33,13 @@ stop_gradient = Operator.unary("stop_gradient")
 operator_set.register(stop_gradient)
 
 
-@stop_gradient.override_method
+@stop_gradient.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [x], [slope.M().zeros_like(x_dot)]
 
 
-@stop_gradient.override_method
+@stop_gradient.set_method
 def T(self, cts, x):
     (z,) = cts
     assert type(x) is UndefPrimal
@@ -52,12 +52,12 @@ operator_set.register(convert)
 operator_set.alias(convert, "astype")
 
 
-@convert.override_method
+@convert.set_method
 def void_run(self, x: VoidArray, *, dtype) -> List[VoidArray]:
     return [VoidArray(x.shape, dtype)]
 
 
-@convert.override_method
+@convert.set_method
 def jvp(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
     return [x.convert(dtype)], [x_dot.convert(dtype)]
@@ -67,7 +67,7 @@ sqrt = Operator.unary("sqrt")
 operator_set.register(sqrt)
 
 
-@sqrt.override_method
+@sqrt.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     ans = x.sqrt()
@@ -75,7 +75,7 @@ def jvp(self, primals, tangents, **params):
     return [ans], [x_dot / (ans * 2)]
 
 
-@sqrt.override_method
+@sqrt.set_method
 def T(self, cts, x):
     (z,) = cts
     return [z / (x.sqrt() * 2)]
@@ -85,13 +85,13 @@ sin = Operator.unary("sin")
 operator_set.register(sin)
 
 
-@sin.override_method
+@sin.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [x.sin()], [(x_dot * ((math.pi / 2) - x).sin())]
 
 
-@sin.override_method
+@sin.set_method
 def T(self, cts, x):
     (z,) = cts
     return [(z * ((math.pi / 2) - x).sin())]
@@ -101,14 +101,14 @@ exp = Operator.unary("exp")
 operator_set.register(exp)
 
 
-@exp.override_method
+@exp.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     ans = x.exp()
     return [ans], [x_dot * ans]
 
 
-@exp.override_method
+@exp.set_method
 def T(self, cts, x):
     (z,) = cts
     return [1 / z]
@@ -118,14 +118,14 @@ log = Operator.unary("log")
 operator_set.register(log)
 
 
-@log.override_method
+@log.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     ans = x.log()
     return [ans], [x_dot / x]
 
 
-@log.override_method
+@log.set_method
 def T(self, cts, x):
     (z,) = cts
     return [1 / z]
@@ -135,13 +135,13 @@ neg = Operator.unary("neg")
 operator_set.register(neg)
 
 
-@neg.override_method
+@neg.set_method
 def jvp(self, primals, tangents, **params):
     (x,), (x_dot,) = primals, tangents
     return [-x], [-x_dot]
 
 
-@neg.override_method
+@neg.set_method
 def T(self, cts, x):
     (z,) = cts
     return [-z]
@@ -198,13 +198,13 @@ add = Operator.binary("add")
 operator_set.register(add)
 
 
-@add.override_method
+@add.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x + y], [x_dot + y_dot]
 
 
-@add.override_method
+@add.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, z_bar]
@@ -214,13 +214,13 @@ sub = Operator.binary("sub")
 operator_set.register(sub)
 
 
-@sub.override_method
+@sub.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x - y], [x_dot - y_dot]
 
 
-@sub.override_method
+@sub.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, -z_bar]
@@ -230,7 +230,7 @@ mul = Operator.binary("mul")
 operator_set.register(mul)
 
 
-@mul.override_method
+@mul.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x * y], [(x_dot * y) + (y_dot * x)]
@@ -238,7 +238,7 @@ def jvp(self, primals, tangents):
     # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
 
 
-@mul.override_method
+@mul.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
@@ -252,7 +252,7 @@ div = Operator.binary("div")
 operator_set.register(div)
 
 
-@div.override_method
+@div.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x / y], [
@@ -260,7 +260,7 @@ def jvp(self, primals, tangents):
     ]  # bug: power returns float64
 
 
-@div.override_method
+@div.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar / y, None]
@@ -270,7 +270,7 @@ maximum = Operator.binary("maximum")
 operator_set.register(maximum)
 
 
-@maximum.override_method
+@maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return (
@@ -289,7 +289,7 @@ def jvp(self, primals, tangents):
     return [run_out], [jvp_out]
 
 
-@maximum.override_method
+@maximum.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, None]
@@ -299,14 +299,14 @@ equal = Operator.binary("equal")
 operator_set.register(equal)
 
 
-@equal.override_method
+@equal.set_method
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
     return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
 
 
-@equal.override_method
+@equal.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, None]
@@ -316,14 +316,14 @@ not_equal = Operator.binary("not_equal")
 operator_set.register(not_equal)
 
 
-@not_equal.override_method
+@not_equal.set_method
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
     return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
 
 
-@not_equal.override_method
+@not_equal.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, None]
@@ -333,7 +333,7 @@ max = Operator.reduce("max")
 operator_set.register(max)
 
 
-@max.override_method
+@max.set_method
 def args_fixer(self, x, *, axes=None, keepdims=None):
     if isinstance(axes, int):
         axes = (axes,)
@@ -344,7 +344,7 @@ def args_fixer(self, x, *, axes=None, keepdims=None):
     return (x,), dict(axes=axes, keepdims=keepdims)
 
 
-@max.override_method
+@max.set_method
 def jvp(self, primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
     run_out = x.max(axes, keepdims)
@@ -357,7 +357,7 @@ def jvp(self, primals, tangents, *, axes=None, keepdims=False):
     return [run_out], [jvp_out]
 
 
-@max.override_method
+@max.set_method
 def T(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
     return [z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)]
@@ -367,7 +367,7 @@ sum = Operator.reduce("sum")
 operator_set.register(sum)
 
 
-@sum.override_method
+@sum.set_method
 def args_fixer(self, x, *, axes=None, keepdims=False):
     if isinstance(axes, int):
         axes = (axes,)
@@ -378,7 +378,7 @@ def args_fixer(self, x, *, axes=None, keepdims=False):
     return (x,), dict(axes=axes, keepdims=keepdims)
 
 
-@sum.override_method
+@sum.set_method
 def jvp(self, primals, tangents, *, axes=None, keepdims=False):
     (x,), (x_dot,) = primals, tangents
     run_out = x.sum(axes, keepdims)
@@ -386,7 +386,7 @@ def jvp(self, primals, tangents, *, axes=None, keepdims=False):
     return [run_out], [jvp_out]
 
 
-@sum.override_method
+@sum.set_method
 def T(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
     # if z.shape != x.aval.shape and keepdims:
@@ -402,7 +402,7 @@ broadcast_in_dim = Operator.shape("broadcast_in_dim")
 operator_set.register(broadcast_in_dim)
 
 
-@broadcast_in_dim.override_method
+@broadcast_in_dim.set_method
 def args_fixer(self, x, *, shape, axes=None):
     if isinstance(axes, int):
         axes = (axes,)
@@ -413,7 +413,7 @@ def args_fixer(self, x, *, shape, axes=None):
     return (x,), dict(shape=shape, axes=axes)
 
 
-@broadcast_in_dim.override_method
+@broadcast_in_dim.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     (x,), (x_bdim,) = vals_in, dims_in
     # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
@@ -431,7 +431,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     return [x.broadcast_in_dim(shape, axes)], [x_bdim]
 
 
-@broadcast_in_dim.override_method
+@broadcast_in_dim.set_method
 def jvp(self, primals, tangents, *, shape, axes=None):
     (x,), (x_dot,) = primals, tangents
     return (
@@ -440,12 +440,12 @@ def jvp(self, primals, tangents, *, shape, axes=None):
     )
 
 
-@broadcast_in_dim.override_method
+@broadcast_in_dim.set_method
 def void_run(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
 
-@broadcast_in_dim.override_method
+@broadcast_in_dim.set_method
 def T(self, cts, x, *, shape, axes):
     (z,) = cts
     out = z
@@ -476,7 +476,7 @@ reshape = Operator.shape("reshape")
 operator_set.register(reshape)
 
 
-@reshape.override_method
+@reshape.set_method
 def args_fixer(self, x, *, shape):
     if -1 in shape:
         others = math.prod([d for d in shape if d != -1])
@@ -485,18 +485,18 @@ def args_fixer(self, x, *, shape):
     return (x,), dict(shape=shape)
 
 
-@reshape.override_method
+@reshape.set_method
 def jvp(self, primals, tangents, *, shape):
     (x,), (x_dot,) = primals, tangents
     return [x.reshape(shape)], [x_dot.reshape(shape)]
 
 
-@reshape.override_method
+@reshape.set_method
 def void_run(self, x: VoidArray, *, shape: Sequence[int]) -> List[VoidArray]:
     return [VoidArray(tuple(shape), x.dtype)]
 
 
-@reshape.override_method
+@reshape.set_method
 def T(self, cts, x, *, shape):
     (z,) = cts
     return [z.reshape(x.aval.shape)]
@@ -506,7 +506,7 @@ transpose = Operator.shape("transpose")
 operator_set.register(transpose)
 
 
-@transpose.override_method
+@transpose.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, perm):
     (x,), (x_bdim,) = vals_in, dims_in
     perm_ = list(perm)
@@ -521,19 +521,19 @@ def vmap(self, axis_size, vals_in, dims_in, *, perm):
     return [x.tranpose(perm)], [x_bdim]
 
 
-@transpose.override_method
+@transpose.set_method
 def jvp(self, primals, tangents, *, perm):
     (x,), (x_dot,) = primals, tangents
     return [x.transpose(perm)], [x_dot.transpose(perm)]
 
 
-@transpose.override_method
+@transpose.set_method
 def void_run(self, x: VoidArray, *, perm: Sequence[int]) -> List[VoidArray]:
     shape = [x.shape[i] for i in perm]
     return [VoidArray(shape, x.dtype)]
 
 
-@transpose.override_method
+@transpose.set_method
 def T(self, cts, x, *, perm):
     (z,) = cts
     return [z.transpose(perm)]
@@ -543,14 +543,14 @@ pad_hlo = Operator.shape("pad_hlo")
 operator_set.register(pad_hlo)
 
 
-@pad_hlo.override_method
+@pad_hlo.set_method
 def args_fixer(self, x, *, lo, hi, interior=None, value=0.0):
     if interior is None:
         interior = tuple([0] * len(lo))
     return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
 
 
-@pad_hlo.override_method
+@pad_hlo.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
     Operand, padding_value = batched_args
@@ -574,7 +574,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 
-@pad_hlo.override_method
+@pad_hlo.set_method
 def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
     return [x.pad_hlo(lo, hi, interior, value)], [
@@ -582,7 +582,7 @@ def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     ]
 
 
-@pad_hlo.override_method
+@pad_hlo.set_method
 def void_run(
     self, x: VoidArray, *, lo, hi, interior=None, value=0.0
 ) -> List[VoidArray]:
@@ -603,7 +603,7 @@ def void_run(
     return [res]
 
 
-@pad_hlo.override_method
+@pad_hlo.set_method
 def T(self, cts, x, *, lo, hi, interior=None, value=0.0):
     (z,) = cts
 
@@ -625,14 +625,14 @@ slice_hlo = Operator.shape("slice_hlo")
 operator_set.register(slice_hlo)
 
 
-@slice_hlo.override_method
+@slice_hlo.set_method
 def args_fixer(self, x, *, starts, limits, strides=None):
     if strides is None:
         strides = (1,) * len(starts)
     return (x,), dict(starts=starts, limits=limits, strides=strides)
 
 
-@slice_hlo.override_method
+@slice_hlo.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
     (x,) = vals_in
@@ -654,7 +654,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     return out, x_bdim
 
 
-@slice_hlo.override_method
+@slice_hlo.set_method
 def jvp(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
     return [x.slice_hlo(starts, limits, strides)], [
@@ -662,7 +662,7 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
     ]
 
 
-@slice_hlo.override_method
+@slice_hlo.set_method
 def void_run(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
@@ -679,7 +679,7 @@ def void_run(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidAr
         return [VoidArray(x.shape, x.dtype)]
 
 
-@slice_hlo.override_method
+@slice_hlo.set_method
 def T(cts, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cts
@@ -712,23 +712,23 @@ flip = Operator.shape("flip")
 operator_set.register(flip)
 
 
-@flip.override_method
+@flip.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axes):
     raise NotImplementedError
 
 
-@flip.override_method
+@flip.set_method
 def jvp(self, primals, tangents, *, axes):
     (x,), (x_dot,) = primals, tangents
     return [x.flip(axes)], [x_dot.flip(axes)]
 
 
-@flip.override_method
+@flip.set_method
 def void_run(self, x: VoidArray, *, axes):
     return [VoidArray(x.shape, x.dtype)]
 
 
-@flip.override_method
+@flip.set_method
 def T(cts, *, axes):
     (z,) = cts
     return [z.flip(axes)]
@@ -740,18 +740,18 @@ operator_set.register(concatenate)
 operator_set.alias(concatenate, "cat")
 
 
-@concatenate.override_method
+@concatenate.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axis):
     raise NotImplementedError
 
 
-@concatenate.override_method
+@concatenate.set_method
 def jvp(primals, tangents, *, axis):
     (xs,), (xs_dot,) = primals, tangents
     return [concatenate(xs, axis=axis)], [concatenate(xs_dot, axis=axis)]
 
 
-@concatenate.override_method
+@concatenate.set_method
 def void_run(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
@@ -779,7 +779,7 @@ def void_run(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
     ]
 
 
-@concatenate.override_method
+@concatenate.set_method
 def T(cts, xs, *, axis):
     (z,) = cts
     x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
@@ -809,19 +809,19 @@ constant = Operator.load("constant")
 operator_set.register(constant)
 
 
-@constant.override_method
+@constant.set_method
 def jvp(self, primals, tangents, *, val, dtype=BaseArray.float32):
     out = slope.environment.array(val, dtype)
     out_jvp = slope.environment.ones_like(out)
     return [out], [out_jvp]
 
 
-@constant.override_method
+@constant.set_method
 def T(self, cts, *, val, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@constant.override_method
+@constant.set_method
 def void_run(self, *, val, dtype=BaseArray.float32):
     # TODO: not using numpy to extract shape
     return [VoidArray(np.array(val).shape, dtype)]
@@ -831,7 +831,7 @@ full = Operator.load("full")
 operator_set.register(full)
 
 
-@full.override_method
+@full.set_method
 def jvp(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(
         self, shape=shape, fill_value=fill_value, dtype=dtype
@@ -840,12 +840,12 @@ def jvp(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.float32):
     return [out], [out_jvp]
 
 
-@full.override_method
+@full.set_method
 def T(self, cts, *, shape, fill_value, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@full.override_method
+@full.set_method
 def void_run(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -856,19 +856,19 @@ operator_set.register(random_uniform)
 operator_set.alias(random_uniform, "randn")
 
 
-@random_uniform.override_method
+@random_uniform.set_method
 def jvp(self, primals, tangents, *, shape, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(self, shape=shape, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
-@random_uniform.override_method
+@random_uniform.set_method
 def T(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@random_uniform.override_method
+@random_uniform.set_method
 def void_run(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -879,19 +879,19 @@ operator_set.register(random_normal)
 operator_set.alias(random_normal, "randn")
 
 
-@random_normal.override_method
+@random_normal.set_method
 def jvp(self, primals, tangents, *, shape, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(random_normal, shape, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
-@random_normal.override_method
+@random_normal.set_method
 def T(self, cts, *, shape, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@random_normal.override_method
+@random_normal.set_method
 def void_run(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple(shape), dtype)]
 
@@ -900,7 +900,7 @@ arange = Operator.load("arange")
 operator_set.register(arange)
 
 
-@arange.override_method
+@arange.set_method
 def args_fixer(self, *, start, stop=None, stride=None, dtype=BaseArray.float32):
     if stop is None:
         stop = start
@@ -910,19 +910,19 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=BaseArray.float32):
     return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
-@arange.override_method
+@arange.set_method
 def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=BaseArray.float32):
     out = slope.M().backend.run_impl(arange, start, stop, stride, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
-@arange.override_method
+@arange.set_method
 def T(self, cts, *, start, stop, stride=None, dtype=BaseArray.float32):
     return [cts[0]]
 
 
-@arange.override_method
+@arange.set_method
 def void_run(
     self, *, start, stop, stride=None, dtype=BaseArray.float32
 ) -> List[VoidArray]:

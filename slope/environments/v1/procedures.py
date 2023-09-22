@@ -4,9 +4,6 @@ from slope.core import ProcedureSet, BaseArray
 from slope.environments.v1.operators import operator_set
 import math
 from typing import Tuple, Union, List, Iterator, Optional, Sequence
-import itertools
-import functools
-import operator
 import math
 from collections import defaultdict
 

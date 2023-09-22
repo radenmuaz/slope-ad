@@ -49,6 +49,7 @@ import copy
 #   Utils
 # ================
 
+
 def unzip2(pairs):
     lst1, lst2 = [], []
     for x1, x2 in pairs:
@@ -100,6 +101,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     for b, x in list_zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
+
 
 class PPrint:
     lines: List[Tuple[int, str]]
@@ -154,9 +156,11 @@ class Hashed:
             return self.val == other.val
         return False
 
+
 # ================
 #   Arrays
 # ================
+
 
 class DType(NamedTuple):
     priority: int
@@ -329,9 +333,11 @@ class VoidArray:
     def __repr__(self):
         return f"VoidArray(shape={self.shape}, dtype={self.dtype})"
 
+
 # ================
 #   Operator
 # ================
+
 
 class OperatorType(Enum):
     Unary = auto()
@@ -340,6 +346,7 @@ class OperatorType(Enum):
     Shape = auto()
     Load = auto()
     Other = auto()
+    Procedure = auto()
 
 
 class Operator:
@@ -441,23 +448,23 @@ class Operator:
 
         return instruction1, instruction2, unks_out, res
 
-    def override_method(self, method):
+    def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
 
     @classmethod
     def unary(cls, name):
         op = cls(name, OperatorType.Unary)
 
-        @op.override_method
+        @op.set_method
         def vmap(self, x, *, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
 
-        @op.override_method
+        @op.set_method
         def void_run(self, x, **params):
             return [VoidArray(x.shape, x.dtype)]
 
-        @op.override_method
+        @op.set_method
         def jvp(self, primals, tangents, **params):
             (x,), (x_dot,) = primals, tangents
             return [self(x, **params)], [self(x_dot, **params)]
@@ -468,7 +475,7 @@ class Operator:
     def binary(cls, name):
         op = cls(name, OperatorType.Binary)
 
-        @op.override_method
+        @op.set_method
         def args_fixer(self, x, y, **params):
             if type(x) is UndefPrimal and type(y) is UndefPrimal:
                 assert x.aval.shape == y.aval.shape
@@ -507,7 +514,7 @@ class Operator:
                 y = y.broadcast_to(shape_ret)
             return (x, y), params
 
-        @op.override_method
+        @op.set_method
         def vmap(self, axis_size, vals_in, dims_in, **params):
             (x, y), (x_bdim, y_bdim) = vals_in, dims_in
             if x_bdim != y_bdim:
@@ -518,7 +525,7 @@ class Operator:
                     y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
             return [self(x, y, **params)], [x_bdim]
 
-        @op.override_method
+        @op.set_method
         def void_run(self, x: VoidArray, y: VoidArray, **params) -> List[VoidArray]:
             if not type(x) in (Array, VoidArray) or not type(x) in (Array, VoidArray):
                 raise TypeError
@@ -546,7 +553,7 @@ class Operator:
                     raise TypeError
                 return [void_x]
 
-        @op.override_method
+        @op.set_method
         def jvp(self, primals, tangents, **params):
             (x,), (x_dot,) = primals, tangents
             return [self(x, **params)], [self(x_dot, **params)]
@@ -557,7 +564,7 @@ class Operator:
     def reduce(cls, name):
         op = cls(name, OperatorType.Reduce)
 
-        @op.override_method
+        @op.set_method
         def args_fixer(self, x, *, axes=None, keepdims=False):
             if axes is None:
                 axes = tuple(range(x.ndim))
@@ -566,7 +573,7 @@ class Operator:
             axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
             return (x,), dict(axes=axes, keepdims=keepdims)
 
-        @op.override_method
+        @op.set_method
         def vmap(self, axis_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             axes = list(params["axes"])
@@ -575,7 +582,7 @@ class Operator:
             params["axes"] = tuple(axes)
             return [cls.do(x, **params)], [out_bdim]
 
-        @op.override_method
+        @op.set_method
         def void_run(
             self, x: VoidArray, *, axes=None, keepdims=False
         ) -> List[VoidArray]:
@@ -599,6 +606,56 @@ class Operator:
         op = cls(name, OperatorType.Load)
         return op
 
+    @classmethod
+    def procedure(cls, name, f, static_argnums=()):
+        op = cls(name, OperatorType.Procedure)
+        make_program_outs = dict(eval=None, jvp=None, T=None, vmap=None)
+        run_f = f
+        jvp_f = f
+        T_f = f
+        vmap_f = f
+        void_run_f = f
+        program = None
+        static_args = ()
+
+        def get_args_static_args(args):
+            nonlocal static_args, program
+            static_args = tuple(args[i] for i in static_argnums)
+            args = tuple(a for i, a in enumerate(*args) if i not in static_argnums)
+            return args
+
+        slope.M().backend.set_impl(op)
+        def impl(self, *args, **params):
+            args = args + params.values()
+            avals_in = slope.M().tree_map(lambda x: VoidArray.like(slope.M().get_aval(x)), args)
+            nonlocal run_f
+            program, consts, out_tree = slope.M().make_program(
+                run_f, *avals_in,
+                static_args=params.values(), static_argnums=self.static_argnums)
+            return self.run_f(*args, static_args)
+            # return slope.M().run_program(program)(*args, static_args)
+        
+        @op.set_method
+        def jvp(self, primals, tangents, **params):
+            nonlocal jvp_f
+            return slope.M().jvp(
+                partial(jvp_f, **params))(primals, tangents)
+        
+        @op.set_method
+        def T(self, cts, xs):
+            nonlocal program
+            return slope.M().run_program_transposed(program)(xs, cts)
+        
+        @op.set_method
+        def vmap(self, axis_size, vals_in, dims_in, **params):
+            nonlocal vmap_f
+            args, static_args = get_args_static_args(vals_in, static_argnums)
+            return slope.M().vmap(
+                partial(vmap_f, **params))(args)
+
+        return op
+
+
 
 class OperatorSet:
     def register(self, op):
@@ -609,10 +666,55 @@ class OperatorSet:
         setattr(self, name, getattr(self, op.name))
 
 
+# class Procedure:
+#     def __init__(self, f, static_argnums=()):
+#         self.f = f
+#         self.static_argnums = static_argnums
+#         self.fs = {}
+#         self.jit_data = {}
+
+#     def override_rule(self, f):
+#         trace_str = f.__name__
+#         assert trace_str in ("jvp", "T")
+#         self.fs[trace_str] = f
+#         return f
+
+#     def get_or_make_data(self, trace_str, static_args, avals_in):
+#         ret = self.jit_data.get(trace_str, None)
+#         if ret is None:
+#             self.jit_data[trace_str] = ret = slope.M().make_program(
+#                 self.fs[trace_str], *avals_in,
+#                 static_args=static_args, static_argnums=self.static_argnums)
+#         return ret
+
+#     def call_impl(self, args, *, trace_str):
+#         static_args = tuple(args[i] for i in self.static_argnums)
+#         args = tuple(a for i, a in enumerate(*args) if i not in self.static_argnums)
+#         avals_in = slope.M().tree_map(lambda x: VoidArray.like(slope.M().get_aval(x)), args)
+#         program, consts, out_tree = self.get_or_make_data(trace_str, static_args, avals_in)
+#         args, in_tree = self.tree_flatten(args)
+#         outs = self.bind(
+#                 jit_op,
+#                 *consts,
+#                 *args,
+#                 program=program,
+#                 num_consts=len(consts),
+#             )
+#         return self.tree_unflatten(out_tree, outs)
+
+#     def __call__(self, *args):
+#         curr_trace = slope.M().find_top_trace()
+#         trace_str = {EvalTrace: "eval", JVPTrace: "jvp"}[type(curr_trace)]
+#         return self.call_impl(args, trace_str=trace_str)
+
+#     def T(self, *args):
+#         return self.call_impl(args, trace_str="T")
+
+
 class ProcedureSet:
-    def register(self, fn):
-        setattr(self, fn.__name__, fn)
-        return fn
+    def register(self, f, static_argnums=()):
+        setattr(self, f.__name__, f)
+        return f
 
     def alias(self, fn, name):
         assert fn in vars(self)
@@ -694,9 +796,11 @@ class Environment:
         for k, v in self.safe_load(t).items():
             v.assign(Arrays[k])
 
+
 # ================
 #   IR, Programs, Instructions
 # ================
+
 
 class Var:
     val = None
@@ -738,7 +842,7 @@ class Program(NamedTuple):
 
     def __repr__(self):
         namegen = (
-            "z"+repr(r)
+            "z" + repr(r)
             for r in itertools.count()
             # "".join(s)
             # for r in itertools.count(1)
@@ -800,6 +904,7 @@ class ProgramType(NamedTuple):
         in_types = ", ".join(aval.str_short() for aval in self.in_types)
         out_types = ", ".join(aval.str_short() for aval in self.out_types)
         return f"({in_types}) -> ({out_types})"
+
 
 # ================
 #   Tracer and Trace
@@ -876,10 +981,9 @@ class JitFn:
 
 
 jit_op = Operator("jit_op")
-jit_op.reorg_args = lambda args, params: (args, params)
 
 
-@jit_op.override_method
+@jit_op.set_method
 def jvp(self, primals, tangents, *, program, num_consts):
     new_program, new_consts = slope.M().jvp_program(program)
     outs = slope.M().bind(
@@ -895,7 +999,7 @@ def jvp(self, primals, tangents, *, program, num_consts):
     return primals_out, tangents_out
 
 
-@jit_op.override_method
+@jit_op.set_method
 def void_run(self, *in_types, program, num_consts):
     program_type = slope.M().typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
@@ -903,7 +1007,7 @@ def void_run(self, *in_types, program, num_consts):
     return program_type.out_types
 
 
-@jit_op.override_method
+@jit_op.set_method
 def T(self, cts, *invals, program, num_consts):
     undef_primals = [type(x) is UndefPrimal for x in invals]
     transposed_program, new_consts = slope.M().transpose_program(
@@ -923,7 +1027,7 @@ def T(self, cts, *invals, program, num_consts):
     return [next(outs) if undef else None for undef in undef_primals]
 
 
-@jit_op.override_method
+@jit_op.set_method
 def partial_run(self, trace, tracers, *, program, num_consts):
     in_unknowns = [not t.pval.is_known for t in tracers]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
@@ -953,7 +1057,7 @@ def partial_run(self, trace, tracers, *, program, num_consts):
     return merge_lists(out_unknowns, outs1, outs2)
 
 
-@jit_op.override_method
+@jit_op.set_method
 def partial_run_instruction(
     self, unks_in, instruction
 ) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
@@ -976,6 +1080,7 @@ def partial_run_instruction(
 # ================
 #   Module
 # ================
+
 
 class Module:
     def get_metadata(self):
@@ -1097,7 +1202,11 @@ class Backend:
             ret = jit_fn(*consts, *args)
             return ret
 
-    def override_method(self, method):
+        # @self.set_impl(slope.core.procedure_op)
+        # def f(self, *args, **params):
+        #     pass
+
+    def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
 
     @property
@@ -1142,7 +1251,9 @@ class Backend:
         return set_impl_
 
     def run_impl(self, op, *args, **params):
-        if op is not slope.core.jit_op:
+        if op is slope.core.jit_op:
+            return self.impls[op](*args, **params)
+        else:
 
             def extract_arg(a):
                 return (
@@ -1156,10 +1267,9 @@ class Backend:
             args = tuple([extract_arg(a) for a in args])
             params = {k: extract_arg(v) for k, v in params.items()}
             val = self.impls[op](*args, **params)
+            if type(val) in (list, tuple):
+                return tuple(Array(ArrayBuffer(v)) for v in val)
             return Array(ArrayBuffer(val))
-        else:
-            ret = self.impls[op](*args, **params)
-            return ret
 
 
 class MainTrace(NamedTuple):
@@ -1197,7 +1307,6 @@ class EvalTrace(Trace):
             return slope.M().backend.run_impl(op, *args, **params)
 
 
-
 class TracerArray(BaseArray):
     TYPES = {
         bool,
@@ -1222,7 +1331,7 @@ class TracerArray(BaseArray):
 
     def full_lower(self):
         return self
-    
+
     @property
     def ndim(self):
         return len(self.shape)
@@ -1311,7 +1420,6 @@ class JVPTracerArray(TracerArray):
 
 
 class JVPTrace(Trace):
-    # pure = lift = lambda self, val: JVPTracerArray(self, val, slope.environment.zeros_like(val))
     def pure(self, val):
         if isinstance(val, PartialEvalTrace):
             val = val.pval.const
@@ -1527,6 +1635,7 @@ class PartialEvalTrace(Trace):
 #   Machine
 # ================
 
+
 class Machine:
     def __init__(
         self,
@@ -1584,9 +1693,6 @@ class Machine:
                     list_map(_tree_flatten, children)
                 )
                 flattened = itertools.chain.from_iterable(children_iterable)
-                # flattened = tuple(itertools.chain.from_iterable(children_iterable))
-                # if all(s not in node_type.name for s in ("list", "tuple", "dict")):
-                #     breakpoint()
                 return flattened, PyTreeDef(
                     node_type, node_metadata, tuple(child_trees)
                 )
@@ -1625,7 +1731,6 @@ class Machine:
 
     def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
         leaves, treedef = self.tree_flatten(tree)
-        # ret =self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves));breakpoint()
         return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
 
     @contextmanager
@@ -1805,7 +1910,7 @@ class Machine:
 
     @lru_cache
     def make_program(
-        self, f: Callable, *avals_in: VoidArray, static_argnums=(), static_args=()
+        self, f: Callable, *avals_in: VoidArray, params
     ) -> Tuple[Program, List[Any], PyTreeDef]:
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
@@ -1815,14 +1920,9 @@ class Machine:
             with self.new_dynamic(main):
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
-                N = len(avals_in) + len(static_args)
-                argnums = [i for i in range(N) if i not in static_argnums]
-                args = [
-                    tracers_in[i] if i in argnums else static_args[i] for i in range(N)
-                ]
-                outs = f(*args)
+                outs = f(*tracers_in, **{k:v for k, v in params})
                 tracers_out = [self.full_raise(trace, out) for out in outs]
-                program, consts = builder.build([args[i] for i in argnums], tracers_out)
+                program, consts = builder.build(tracers_in, tracers_out)
 
         return program, consts, out_tree_store()
 
@@ -1892,13 +1992,6 @@ class Machine:
             if res is not None:
                 residuals.update(res)
             list_map(write, unks_out, instruction.out_binders)
-            # if any(unks_in):
-            #     inputs = [v if unk else new_res(v) for unk, v in zip(unks_in, instruction.inputs)]
-            #     instructions2.append(InstructionProto(instruction.primitive, inputs, instruction.params, instruction.out_binders))
-            #     map(partial(write, True), instruction.out_binders)
-            # else:
-            #     instructions1.append(instruction)
-            #     map(partial(write, False), instruction.out_binders)
 
         out_unknowns = list_map(read, program.outs)
         if instantiate is not None:
@@ -2196,15 +2289,18 @@ class Machine:
         else:
             return gradfun
 
-    def jit(self, f, static_argnums=()):
+    def jit(self, f, static_argnames=()):
         def f_jitted(
-            *args,
+            *args, **params
         ):
-            static_args = tuple(args[i] for i in static_argnums)
-            args = tuple(a for i, a in enumerate(args) if i not in static_argnums)
+            params = tuple(params.items())
+            for k, v in params:
+                if k not in static_argnames:
+                    raise TypeError
+                    # args = args + [params.pop(k)]
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(
-                f, *avals_in, static_args=static_args, static_argnums=static_argnums
+                f, *avals_in, params=params
             )
 
             args, in_tree = self.tree_flatten(args)
@@ -2244,5 +2340,3 @@ class Machine:
         for t in outs2:
             t.proto = proto
         return merge_lists(out_unknowns, outs1, outs2)
-
-

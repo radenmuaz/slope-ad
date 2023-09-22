@@ -27,17 +27,17 @@ numpy_backend.set_dtype_map(numpy_dtype_map)
 default_dtype_backend = numpy_backend.default_dtype_value
 
 
-@numpy_backend.override_method
+@numpy_backend.set_method
 def set_numpy_of(self, array):
     return array.buf.val
 
 
-@numpy_backend.override_method
+@numpy_backend.set_method
 def set_device_of(self, array):
     return "cpu"
 
 
-@numpy_backend.override_method
+@numpy_backend.set_method
 def compile(self, program, codegen_out, fn_name):
     def indent(code_line, amount=4):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
@@ -100,7 +100,7 @@ def compile(self, program, codegen_out, fn_name):
     return fn, code
 
 
-@numpy_backend.override_method
+@numpy_backend.set_method
 def codegen(self, program, args) -> List[Any]:
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}

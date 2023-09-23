@@ -625,36 +625,39 @@ class Operator:
         def impl(self, *args, **params):
             ret = self.impl_f(*args, **params)
             return [ret]
-        
+
         @op.set_method
         def jvp(self, primals, tangents, **params):
             primal_outs, tangent_outs = slope.M().jvp(
-                partial(self.jvp_f, **params), primals, tangents)
+                partial(self.jvp_f, **params), primals, tangents
+            )
             return [primal_outs], [tangent_outs]
-        
+
         @op.set_method
         def T(self, cts, xs):
-            breakpoint()
-            return slope.M().vjp(self.T_f)(cts, xs)
-        
+            return [slope.M().vjp(self.T_f)(cts, xs)]
+
         @op.set_method
-        def vmap(self, axis_size, vals_in, dims_in , **params):
-            return slope.M().vmap(
-                partial(self.vmap_f **params), dims_in)(vals_in)
-        
+        def vmap(self, axis_size, vals_in, dims_in, **params):
+            return [slope.M().vmap(partial(self.vmap_f**params), dims_in)(vals_in)]
+
         @op.set_method
         def reorg_args(self, args, params):
             sig = inspect.signature(self.impl_f)
             args_strs = [
-                k for k, v in sig.parameters.items()
+                k
+                for k, v in sig.parameters.items()
                 if k != "self" and k not in self.static_argnames
             ]
-            params_strs =[
-                k for k, v in sig.parameters.items()
+            params_strs = [
+                k
+                for k, v in sig.parameters.items()
                 if k != "self" and k in self.static_argnames
             ]
 
-            if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
+            if (
+                len(args) > len(args_strs) and len(args) != 0
+            ):  # and len(args_strs) != 0:
                 args_ = args
                 args, rest = args[: len(args_strs)], args[len(args_strs) :]
                 if len(params_strs) > 0:
@@ -674,9 +677,7 @@ class Operator:
                 assert len(args) == len(args_strs)
             return args, params
 
-
         return op
-
 
 
 class OperatorSet:
@@ -737,8 +738,10 @@ class ProcedureSet:
     def register(self, static_argnames=()):
         def wrap(f):
             op = Operator.procedure(f.__name__, f, static_argnames)
+            # op = f
             setattr(self, f.__name__, op)
             return op
+
         return wrap
 
     def alias(self, fn, name):
@@ -1007,6 +1010,7 @@ class JitFn:
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
 
+
 @jit_op.set_method
 def impl(self, *args, program, num_consts):
     hashed_program = Hashed(program)
@@ -1016,9 +1020,12 @@ def impl(self, *args, program, num_consts):
     ret = jit_fn(*consts, *args)
     return ret
 
+
 @jit_op.set_method
 def reorg_args(self, args, params):
     return args, params
+
+
 @jit_op.set_method
 def jvp(self, primals, tangents, *, program, num_consts):
     new_program, new_consts = slope.M().jvp_program(program)
@@ -1229,8 +1236,6 @@ class Backend:
             else:
                 self.deps_dict[dep] = importlib.import_module(dep)
 
-        
-
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
 
@@ -1279,6 +1284,7 @@ class Backend:
         if op.op_type is OperatorType.Meta:
             return op.impl(*args, **params)
         else:
+
             def extract_arg(a):
                 return (
                     a.val
@@ -1325,10 +1331,11 @@ class EvalTrace(Trace):
     def run_op(self, op, args, params):
         args, params = op.reorg_args(args, params)
         args, params = op.args_fixer(*args, **params)
-        ret =  slope.M().backend.run_impl(op, *args, **params)
+        ret = slope.M().backend.run_impl(op, *args, **params)
         if op.op_type is not OperatorType.Meta:
             ret = [ret]
         return ret
+
 
 class TracerArray(BaseArray):
     TYPES = {
@@ -1712,10 +1719,8 @@ class Machine:
             node_type = self.node_types.get(type(x_))
             if node_type:
                 node_metadata, children = node_type.flatten(x_)
-                children_iterable, child_trees = unzip2(
-                    list_map(_tree_flatten, children)
-                )
-                flattened = itertools.chain.from_iterable(children_iterable)
+                children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
+                flattened = itertools.chain.from_iterable(children_flat)
                 return flattened, PyTreeDef(
                     node_type, node_metadata, tuple(child_trees)
                 )
@@ -1740,12 +1745,12 @@ class Machine:
     def flatten_fn(self, f, in_tree):
         store = Store()
 
-        def seq_fun(*args_iterable):
-            pytree_args = self.tree_unflatten(in_tree, args_iterable)
+        def seq_fun(*args_flat):
+            pytree_args = self.tree_unflatten(in_tree, args_flat)
             out = f(*pytree_args)
-            out_iterable, out_tree = self.tree_flatten(out)
+            out_flat, out_tree = self.tree_flatten(out)
             store.set_value(out_tree)
-            return out_iterable
+            return out_flat
 
         return seq_fun, store
 
@@ -1867,7 +1872,7 @@ class Machine:
     def program_as_fun(self, program: Program):
         return lambda *args: self.run_program(program, args)
 
-    def vmap_iterable(self, f, in_axes, *args):
+    def vmap_flat(self, f, in_axes, *args):
         axi_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
         assert len(axi_set) == 1
         (axis_size,) = axi_set
@@ -1888,19 +1893,17 @@ class Machine:
 
     def vmap(self, f, in_axes):
         def batched_f(*args):
-            args_iterable, in_tree = self.tree_flatten(args)
-            in_axes_iterable, in_tree2 = self.tree_flatten(in_axes)
+            args_flat, in_tree = self.tree_flatten(args)
+            in_axes_flat, in_tree2 = self.tree_flatten(in_axes)
             if in_tree != in_tree2:
                 raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
-            f_iterable, out_tree_store = self.flatten_fn(f, in_tree)
-            outs_iterable = self.vmap_iterable(
-                f_iterable, in_axes_iterable, *args_iterable
-            )
-            return self.tree_mnis(out_tree_store(), outs_iterable)
+            f_flat, out_tree_store = self.flatten_fn(f, in_tree)
+            outs_flat = self.vmap_flat(f_flat, in_axes_flat, *args_flat)
+            return self.tree_unflatten(out_tree_store(), outs_flat)
 
         return batched_f
 
-    def jvp_iterable(self, f, primals, tangents):
+    def jvp_flat(self, f, primals, tangents):
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
             tracers_in = [
@@ -1914,16 +1917,16 @@ class Machine:
         return primals_out, tangents_out
 
     def jvp(self, f, primals, tangents):
-        primals_iterable, in_tree = self.tree_flatten(primals)
-        tangents_iterable, in_tree2 = self.tree_flatten(tangents)
+        primals_flat, in_tree = self.tree_flatten(primals)
+        tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
         f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_iterable, tangents_out_iterable = self.jvp_iterable(
-            f, primals_iterable, tangents_iterable
+        primals_out_flat, tangents_out_flat = self.jvp_flat(
+            f, primals_flat, tangents_flat
         )
-        primals_out = self.tree_unflatten(out_tree_store(), primals_out_iterable)
-        tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_iterable)
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
+        tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_flat)
         return primals_out, tangents_out
 
     def jacfwd(self, f, x):
@@ -1943,7 +1946,7 @@ class Machine:
             with self.new_dynamic(main):
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
-                outs = f(*tracers_in, **{k:v for k, v in params})
+                outs = f(*tracers_in, **{k: v for k, v in params})
                 tracers_out = [self.full_raise(trace, out) for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out)
 
@@ -1962,7 +1965,7 @@ class Machine:
         )
         return new_program, new_consts
 
-    def partial_run_iterable(
+    def partial_run_flat(
         self, f: Callable, pvals_in: List["PartialVal"]
     ) -> Tuple[Program, List["PartialVal"], List[Any]]:
         with self.new_main(PartialEvalTrace) as main:
@@ -2070,7 +2073,7 @@ class Machine:
         if b2 != b2_:
             raise TypeError
 
-    def linearize_iterable(self, f, *primals_in):
+    def linearize_flat(self, f, *primals_in):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
@@ -2079,7 +2082,7 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_iterable(f_jvp, pvals_in)
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
@@ -2089,15 +2092,15 @@ class Machine:
     def linearize(self, f, *primals_in):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_iterable, f_lin_flat = self.linearize_iterable(f, *primals_in_flat)
-        primals_out = self.tree_unflatten(out_tree_store(), primals_out_iterable)
+        primals_out_flat, f_lin_flat = self.linearize_flat(f, *primals_in_flat)
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
         def f_lin(*tangents_in):
             tangents_in_flat, in_tree2 = self.tree_flatten(tangents_in)
             if in_tree != in_tree2:
                 raise TypeError
-            tangents_out_iterable = f_lin_flat(*tangents_in_flat)
-            return self.tree_unflatten(out_tree_store(), tangents_out_iterable)
+            tangents_out_flat = f_lin_flat(*tangents_in_flat)
+            return self.tree_unflatten(out_tree_store(), tangents_out_flat)
 
         return primals_out, f_lin
 
@@ -2124,7 +2127,7 @@ class Machine:
         }
         constvar_to_val: Dict[int, Any] = {}
         constid_to_var: Dict[int, Var] = {}
-        procedureessed_instructions: Set[int] = set()
+        processed_instructions: Set[int] = set()
         instructions: List[Instruction] = []
         for t in self.toposort(tracers_out, tracer_parents):
             if isinstance(t.proto, LambdaBindingProto):
@@ -2138,9 +2141,10 @@ class Machine:
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
             elif isinstance(t.proto, InstructionProto):
-                if id(t.proto) not in procedureessed_instructions:
+                print(t.proto.prim)
+                if id(t.proto) not in processed_instructions:
                     instructions.append(proto_to_instruction(tracer_to_var, t.proto))
-                    procedureessed_instructions.add(id(t.proto))
+                    processed_instructions.add(id(t.proto))
             else:
                 raise TypeError(t.proto)
 
@@ -2193,7 +2197,7 @@ class Machine:
         check_toposort(sorted_nodes, parents)
         return sorted_nodes
 
-    def vjp_iterable(self, f, *primals_in):
+    def vjp_flat(self, f, *primals_in):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
@@ -2203,25 +2207,25 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_iterable(
-            f_jvp, pvals_in
-        )  # linearize
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)  # linearize
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
-        primals_out = [pval.const for pval in primal_pvals]
+        primals_out_flat = [pval.const for pval in primal_pvals]
         transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
-        f_vjp = lambda *cts: self.run_program_transposed(program, transpose_inputs, cts)
-        return primals_out, f_vjp
+        f_vjp_flat = lambda *cts: self.run_program_transposed(
+            program, transpose_inputs, cts
+        )
+        return primals_out_flat, f_vjp_flat
 
     def vjp(self, f, *primals_in):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_iterable, f_vjp_iterable = self.vjp_iterable(f, *primals_in_flat)
-        primals_out = self.tree_unflatten(out_tree_store(), primals_out_iterable)
+        primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat)
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
         def f_vjp(*cotangents_out):
-            cotangents_out_iterable, _ = self.tree_flatten(cotangents_out)
-            cotangents_in_flat = f_vjp_iterable(*cotangents_out_iterable)
+            cotangents_out_flat, _ = self.tree_flatten(cotangents_out)
+            cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
 
             return self.tree_unflatten(in_tree, cotangents_in_flat)
 
@@ -2297,6 +2301,7 @@ class Machine:
             if np.shape(y) != ():
                 raise TypeError
             x_bars = f_vjp(self.environment.ones(()))
+
             if ret_fval:
                 return y, x_bars
             else:
@@ -2313,18 +2318,14 @@ class Machine:
             return gradfun
 
     def jit(self, f, static_argnames=()):
-        def f_jitted(
-            *args, **params
-        ):
+        def f_jitted(*args, **params):
             params = tuple(params.items())
             for k, v in params:
                 if k not in static_argnames:
                     raise TypeError
                     # args = args + [params.pop(k)]
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
-            program, consts, out_tree = self.make_program(
-                f, *avals_in, params=params
-            )
+            program, consts, out_tree = self.make_program(f, *avals_in, params=params)
 
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(

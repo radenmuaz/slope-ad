@@ -19,17 +19,17 @@ def flatten_seq(l: Iterator):
     return [item for sublist in l for item in sublist]
 
 
-@procedure_set.register(static_argnames=('shape', 'dtype'))
+@procedure_set.register(static_argnames=("shape", "dtype"))
 def zeros(shape, dtype=BaseArray.float32):
     return sev.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(static_argnames=('shape', 'dtype'))
+@procedure_set.register(static_argnames=("shape", "dtype"))
 def ones(shape, dtype=BaseArray.float32):
     return sev.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
-@procedure_set.register(static_argnames=('fill_value'))
+@procedure_set.register(static_argnames=("fill_value"))
 def full_like(y, fill_value):
     return sev.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
@@ -51,7 +51,7 @@ def where(x, trueval, falseval):
     return cond * trueval + (1.0 - cond) * falseval
 
 
-@procedure_set.register(static_argnames=('axes', 'keepdims'))
+@procedure_set.register(static_argnames=("axes", "keepdims"))
 def mean(x, axes=None, keepdims=False):
     out = x.sum(axes=axes, keepdim=keepdims)
     return out * (math.prod(out.shape) / math.prod(x.shape))
@@ -87,7 +87,7 @@ def min(x, axes=None, keepdims=False):
     return -((-x).max(x, axes, keepdims))
 
 
-@procedure_set.register(static_argnames=('axes', 'keepdims'))
+@procedure_set.register(static_argnames=("axes", "keepdims"))
 def argmax(x, axes=None, keepdims=False):
     if axes is None:
         idx = (x == x.max(axes)) * sev.arange(
@@ -105,7 +105,7 @@ def argmax(x, axes=None, keepdims=False):
     return x.shape[axis] - idx.max(axes=axes, keepdim=keepdims) - 1
 
 
-@procedure_set.register(static_argnames=('axes', 'keepdims'))
+@procedure_set.register(static_argnames=("axes", "keepdims"))
 def argmin(x, axes=None, keepdims=False):
     return (-x).argmax(axes=axes, keepdims=keepdims)
 
@@ -117,20 +117,20 @@ def T(x):
     return x.transpose(perm)
 
 
-@procedure_set.register(static_argnames=('axes'))
+@procedure_set.register(static_argnames=("axes"))
 def _softmax(x, axes):
     m = x - x.max(axes, keepdims=True)
     e = m.exp()
     return m, e, e.sum(axes, keepdims=True)
 
 
-@procedure_set.register(static_argnames=('axes'))
+@procedure_set.register(static_argnames=("axes"))
 def softmax(x, axes=-1):
     _, e, ss = x._softmax(axes)
     return e.div(ss)
 
 
-@procedure_set.register(static_argnames=('axes'))
+@procedure_set.register(static_argnames=("axes"))
 def log_softmax(x, axes=-1):
     m, _, ss = x._softmax(axes)
     return m - ss.log()
@@ -278,7 +278,7 @@ def __getitem__(
     return ret
 
 
-@procedure_set.register(static_argnames=('pad_width', 'mode', 'constant_values'))
+@procedure_set.register(static_argnames=("pad_width", "mode", "constant_values"))
 def pad(x, pad_width, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
     if type(pad_width) is int:

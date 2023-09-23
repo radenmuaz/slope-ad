@@ -345,12 +345,11 @@ class OperatorType(Enum):
     Reduce = auto()
     Shape = auto()
     Load = auto()
-    Other = auto()
-    Procedure = auto()
+    Meta = auto()
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Other):
+    def __init__(self, name, op_type=OperatorType.Meta):
         self.name = name
         self.op_type = op_type
 
@@ -607,51 +606,74 @@ class Operator:
         return op
 
     @classmethod
-    def procedure(cls, name, f, static_argnums=()):
-        op = cls(name, OperatorType.Procedure)
-        make_program_outs = dict(eval=None, jvp=None, T=None, vmap=None)
-        run_f = f
-        jvp_f = f
-        T_f = f
-        vmap_f = f
-        void_run_f = f
-        program = None
-        static_args = ()
+    def procedure(cls, name, f, static_argnames=()):
+        op = cls(name, OperatorType.Meta)
+        # f = types.MethodType(f, op)
+        op.impl_f = f
+        op.jvp_f = f
+        op.T_f = f
+        op.vmap_f = f
+        op.void_run_f = f
+        op.static_argnames = static_argnames
 
-        def get_args_static_args(args):
-            nonlocal static_args, program
-            static_args = tuple(args[i] for i in static_argnums)
-            args = tuple(a for i, a in enumerate(*args) if i not in static_argnums)
-            return args
+        @op.set_method
+        def override_rule(self, new_f):
+            assert new_f.__name__ in ("run", "jvp", "T", "vmap")
+            setattr(self, f"{new_f.__name__}_f", new_f)
 
-        slope.M().backend.set_impl(op)
+        @op.set_method
         def impl(self, *args, **params):
-            args = args + params.values()
-            avals_in = slope.M().tree_map(lambda x: VoidArray.like(slope.M().get_aval(x)), args)
-            nonlocal run_f
-            program, consts, out_tree = slope.M().make_program(
-                run_f, *avals_in,
-                static_args=params.values(), static_argnums=self.static_argnums)
-            return self.run_f(*args, static_args)
-            # return slope.M().run_program(program)(*args, static_args)
+            ret = self.impl_f(*args, **params)
+            return [ret]
         
         @op.set_method
         def jvp(self, primals, tangents, **params):
-            nonlocal jvp_f
-            return slope.M().jvp(
-                partial(jvp_f, **params))(primals, tangents)
+            primal_outs, tangent_outs = slope.M().jvp(
+                partial(self.jvp_f, **params), primals, tangents)
+            return [primal_outs], [tangent_outs]
         
         @op.set_method
         def T(self, cts, xs):
-            nonlocal program
-            return slope.M().run_program_transposed(program)(xs, cts)
+            breakpoint()
+            return slope.M().vjp(self.T_f)(cts, xs)
         
         @op.set_method
-        def vmap(self, axis_size, vals_in, dims_in, **params):
-            nonlocal vmap_f
-            args, static_args = get_args_static_args(vals_in, static_argnums)
+        def vmap(self, axis_size, vals_in, dims_in , **params):
             return slope.M().vmap(
-                partial(vmap_f, **params))(args)
+                partial(self.vmap_f **params), dims_in)(vals_in)
+        
+        @op.set_method
+        def reorg_args(self, args, params):
+            sig = inspect.signature(self.impl_f)
+            args_strs = [
+                k for k, v in sig.parameters.items()
+                if k != "self" and k not in self.static_argnames
+            ]
+            params_strs =[
+                k for k, v in sig.parameters.items()
+                if k != "self" and k in self.static_argnames
+            ]
+
+            if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
+                args_ = args
+                args, rest = args[: len(args_strs)], args[len(args_strs) :]
+                if len(params_strs) > 0:
+                    new_params = {}
+                    for i, rest_arg in enumerate(rest):
+                        k = params_strs[i]
+                        assert k not in params.keys()
+
+                        new_params[k] = rest_arg
+                    params = {**new_params, **params}
+            elif len(args) <= len(args_strs):
+                args = list(args)
+                for i, k in enumerate(args_strs):
+                    if k in params.keys():
+                        args.insert(i, params[k])
+                        del params[k]
+                assert len(args) == len(args_strs)
+            return args, params
+
 
         return op
 
@@ -712,9 +734,12 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, f, static_argnums=()):
-        setattr(self, f.__name__, f)
-        return f
+    def register(self, static_argnames=()):
+        def wrap(f):
+            op = Operator.procedure(f.__name__, f, static_argnames)
+            setattr(self, f.__name__, op)
+            return op
+        return wrap
 
     def alias(self, fn, name):
         assert fn in vars(self)
@@ -980,9 +1005,20 @@ class JitFn:
         return [slope.environment.array(ArrayBuffer(o)) for o in outs]
 
 
-jit_op = Operator("jit_op")
+jit_op = Operator("jit_op", op_type=OperatorType.Meta)
 
+@jit_op.set_method
+def impl(self, *args, program, num_consts):
+    hashed_program = Hashed(program)
+    consts, args = args[:num_consts], args[num_consts:]
+    hashed_consts = tuple(map(Hashed, consts))
+    jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
+    ret = jit_fn(*consts, *args)
+    return ret
 
+@jit_op.set_method
+def reorg_args(self, args, params):
+    return args, params
 @jit_op.set_method
 def jvp(self, primals, tangents, *, program, num_consts):
     new_program, new_consts = slope.M().jvp_program(program)
@@ -1193,18 +1229,7 @@ class Backend:
             else:
                 self.deps_dict[dep] = importlib.import_module(dep)
 
-        @self.set_impl(slope.core.jit_op)
-        def f(self, *args, program, num_consts):
-            hashed_program = Hashed(program)
-            consts, args = args[:num_consts], args[num_consts:]
-            hashed_consts = tuple(map(Hashed, consts))
-            jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
-            ret = jit_fn(*consts, *args)
-            return ret
-
-        # @self.set_impl(slope.core.procedure_op)
-        # def f(self, *args, **params):
-        #     pass
+        
 
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
@@ -1251,10 +1276,9 @@ class Backend:
         return set_impl_
 
     def run_impl(self, op, *args, **params):
-        if op is slope.core.jit_op:
-            return self.impls[op](*args, **params)
+        if op.op_type is OperatorType.Meta:
+            return op.impl(*args, **params)
         else:
-
             def extract_arg(a):
                 return (
                     a.val
@@ -1299,13 +1323,12 @@ class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
     def run_op(self, op, args, params):
-        if op is not slope.core.jit_op:
-            args, params = op.reorg_args(args, params)
-            args, params = op.args_fixer(*args, **params)
-            return [slope.M().backend.run_impl(op, *args, **params)]
-        else:
-            return slope.M().backend.run_impl(op, *args, **params)
-
+        args, params = op.reorg_args(args, params)
+        args, params = op.args_fixer(*args, **params)
+        ret =  slope.M().backend.run_impl(op, *args, **params)
+        if op.op_type is not OperatorType.Meta:
+            ret = [ret]
+        return ret
 
 class TracerArray(BaseArray):
     TYPES = {

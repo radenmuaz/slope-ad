@@ -615,6 +615,7 @@ class Operator:
         op.vmap_f = f
         op.void_run_f = f
         op.static_argnames = static_argnames
+        op.jvp_program = None
 
         @op.set_method
         def override_rule(self, new_f):
@@ -623,15 +624,28 @@ class Operator:
 
         @op.set_method
         def impl(self, *args, **params):
+            M = slope.M()
+            if M.find_top_trace(args).main.global_data == "vjp":
+                breakpoint()
             ret = self.impl_f(*args, **params)
             return [ret]
 
         @op.set_method
         def jvp(self, primals, tangents, **params):
-            primal_outs, tangent_outs = slope.M().jvp(
-                partial(self.jvp_f, **params), primals, tangents
-            )
-            return [primal_outs], [tangent_outs]
+            M = slope.M()
+            params = tuple(params.items())
+            for k, v in params:
+                if k not in static_argnames:
+                    raise TypeError("For now args with no defaults cannot use keyword")
+            avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), primals)
+            program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
+            jvp_program, jvp_consts = M.jvp_program(program, params=params)
+            self.jvp_program = jvp_program
+            # if M.find_top_trace(primals + tangents).main.global_data == "vjp":
+            #     oprimals, otangents = primals[:], tangents[:]
+            primals_out, tangents_out = M.jvp(self.jvp_f, primals, tangents)
+            # M.program_as_fun(jvp_program)(primals + tangents)
+            return [primals_out], [tangents_out]
 
         @op.set_method
         def T(self, cts, xs):
@@ -640,6 +654,64 @@ class Operator:
         @op.set_method
         def vmap(self, axis_size, vals_in, dims_in, **params):
             return [slope.M().vmap(partial(self.vmap_f**params), dims_in)(vals_in)]
+        
+        # @op.set_method
+        # def jvp(self, primals, tangents, **params):
+        #     M = slope.M()
+        #     params = tuple(params.items())
+        #     for k, v in params:
+        #         if k not in static_argnames:
+        #             raise TypeError("For now args with no defaults cannot use keyword")
+        #     avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), primals)
+        #     program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
+        #     jvp_program, jvp_consts = M.jvp_program(program, params=params)
+        #     self.jvp_program = jvp_program
+        #     if M.find_top_trace(primals + tangents).main.global_data == "vjp":
+        #         oprimals, otangents = primals[:], tangents[:]
+        #     breakpoint()
+        #     outs = M.program_as_fun(jvp_program)(primals + tangents)
+        #     breakpoint()
+        #     n = len(outs) // 2
+        #     primals_out, tangents_out = outs[:n], outs[n:]
+        #     return [primals_out], [tangents_out]
+
+        # @op.set_method
+        # def partial_run(self, trace, tracers, **params):
+        #     in_unknowns = [not t.pval.is_known for t in tracers]
+        #     avals_in = self.tree_map(
+        #         lambda x: VoidArray.like(self.get_aval(x)), tracers
+        #     )
+        #     program, consts, out_tree = self.make_program(f, *avals_in, params=params)
+
+        #     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
+        #         program, in_unknowns
+        #     )
+        #     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+        #     known_vals = [t.pval.const for t in known_tracers]
+        #     outs1_res = slope.M().bind(
+        #         jit_op, *known_vals, program=program1, num_consts=0
+        #     )
+        #     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
+        #     res_tracers = [
+        #         trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res
+        #     ]
+        #     outs2 = [
+        #         PartialEvalTracerArray(
+        #             slope.M, trace, slope.M().make_unknown_pval(v.aval), None
+        #         )
+        #         for v in program2.outs
+        #     ]
+        #     instruction = InstructionProto(
+        #         self,
+        #         res_tracers + unknown_tracers,
+        #         dict(program=program2, num_consts=0),
+        #         [v.aval for v in program2.outs],
+        #         list_map(weakref.ref, outs2),
+        #     )
+        #     for t in outs2:
+        #         t.proto = instruction
+
+        #     return merge_lists(out_unknowns, outs1, outs2)
 
         @op.set_method
         def reorg_args(self, args, params):
@@ -1044,7 +1116,7 @@ def jvp(self, primals, tangents, *, program, num_consts):
 
 @jit_op.set_method
 def void_run(self, *in_types, program, num_consts):
-    program_type = slope.M().typecheck_program(program)
+    program_type = slope.M().void_run_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
         raise TypeError
     return program_type.out_types
@@ -1253,7 +1325,7 @@ class Backend:
         hashed_consts: Tuple[Hashed, ...],
     ):
         program: Program = hashed_program.val
-        slope.M().typecheck_program(program)
+        slope.M().void_run_program(program)
         consts = [x.val for x in hashed_consts]
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         fn_name = f"{self.name.lower()}_fn"
@@ -1459,9 +1531,9 @@ class JVPTrace(Trace):
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        primal_outs, tangent_outs = op.jvp(primals_in, tangents_in, **params)
+        primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
         return [
-            JVPTracerArray(self, x, t) for x, t in list_zip(primal_outs, tangent_outs)
+            JVPTracerArray(self, x, t) for x, t in list_zip(primals_out, tangents_out)
         ]
 
 
@@ -1549,7 +1621,7 @@ class ProgramBuilder:
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
         program = Program(in_binders, self.instructions, out_vars)
-        slope.M().typecheck_program(program)
+        slope.M().void_run_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals
 
@@ -1577,7 +1649,7 @@ class ProgramBuilder:
         new_program = Program(
             new_const_binders + other_binders, new_instructions, new_outs
         )
-        slope.M().typecheck_program(new_program)
+        slope.M().void_run_program(new_program)
         return new_program, tuple(new_consts)
 
 
@@ -1654,7 +1726,10 @@ class PartialEvalTrace(Trace):
             return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
-        if all(t.pval.is_known for t in tracers):
+        conds = tuple(t.pval.is_known for t in tracers)
+        breakpoint()
+        if all(conds):
+        # if all(t.pval.is_known for t in tracers):
             return slope.M().bind(
                 op, *list_map(slope.M().full_lower, tracers), **params
             )
@@ -1819,7 +1894,7 @@ class Machine:
         else:
             return val
 
-    def typecheck_program(self, program: Program) -> ProgramType:
+    def void_run_program(self, program: Program) -> ProgramType:
         environment: Set[Var] = set()
 
         for v in program.in_binders:
@@ -1953,7 +2028,7 @@ class Machine:
         return program, consts, out_tree_store()
 
     @lru_cache
-    def jvp_program(self, program: Program) -> Tuple[Program, List[Any]]:
+    def jvp_program(self, program: Program, params) -> Tuple[Program, List[Any]]:
         def jvp_traceable(*primals_and_tangents):
             n = len(primals_and_tangents) // 2
             primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
@@ -1961,14 +2036,14 @@ class Machine:
 
         in_avals = self.tree_map(lambda v: v.aval, program.in_binders)
         new_program, new_consts, _ = self.make_program(
-            jvp_traceable, *in_avals, *in_avals
+            jvp_traceable, *in_avals, *in_avals, params=params
         )
         return new_program, new_consts
 
     def partial_run_flat(
-        self, f: Callable, pvals_in: List["PartialVal"]
+        self, f: Callable, pvals_in: List["PartialVal"], global_data=None
     ) -> Tuple[Program, List["PartialVal"], List[Any]]:
-        with self.new_main(PartialEvalTrace) as main:
+        with self.new_main(PartialEvalTrace, global_data) as main:
             trace = PartialEvalTrace(main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
             outs = f(*tracers_in)
@@ -2044,9 +2119,9 @@ class Machine:
     def typecheck_partial_run_program(
         self, program, in_unknowns, out_unknowns, program1, program2
     ):
-        programty = self.typecheck_program(program)  # (a1,  a2) -> (b1, b2 )
-        program1ty = self.typecheck_program(program1)  #  a1       -> (b1, res)
-        program2ty = self.typecheck_program(program2)  # (res, a2) -> b2
+        programty = self.void_run_program(program)  # (a1,  a2) -> (b1, b2 )
+        program1ty = self.void_run_program(program1)  #  a1       -> (b1, res)
+        program2ty = self.void_run_program(program2)  # (res, a2) -> b2
 
         a1, a2 = partition_list(in_unknowns, programty.in_types)
         b1, b2 = partition_list(out_unknowns, programty.out_types)
@@ -2141,7 +2216,6 @@ class Machine:
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
             elif isinstance(t.proto, InstructionProto):
-                print(t.proto.prim)
                 if id(t.proto) not in processed_instructions:
                     instructions.append(proto_to_instruction(tracer_to_var, t.proto))
                     processed_instructions.add(id(t.proto))
@@ -2152,7 +2226,7 @@ class Machine:
         in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
         out_vars = [tracer_to_var[id(t)] for t in tracers_out]
         program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
-        self.typecheck_program(program)
+        self.void_run_program(program)
         return program, constvals
 
     def toposort(self, out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -2201,13 +2275,13 @@ class Machine:
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
-        primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
+        _, tangent_pvals_in = split_half(pvals_in)
 
         def f_jvp(*primals_tangents_in):
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)  # linearize
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in, 'vjp')
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]
@@ -2285,13 +2359,13 @@ class Machine:
     def transpose_program(
         self, program: Program, undef_primals: tuple[bool, ...]
     ) -> tuple[Program, list[Any]]:
-        avals_in, avals_out = self.typecheck_program(program)
+        avals_in, avals_out = self.void_run_program(program)
         traceable = partial(self.run_program_transposed, program)
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
             traceable, tuple(args), tuple(avals_out)
         )
-        self.typecheck_program(trans_program)
+        self.void_run_program(trans_program)
 
         return trans_program, consts
 
@@ -2322,7 +2396,7 @@ class Machine:
             params = tuple(params.items())
             for k, v in params:
                 if k not in static_argnames:
-                    raise TypeError
+                    raise TypeError("For now args with no defaults cannot use keyword")
                     # args = args + [params.pop(k)]
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in, params=params)

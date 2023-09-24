@@ -422,6 +422,7 @@ class Operator:
         )
         for t in tracers_out:
             t.proto = instruction
+        breakpoint()
         return tracers_out
 
     def partial_run_instruction(self, unks_in, instruction):
@@ -625,9 +626,16 @@ class Operator:
         @op.set_method
         def impl(self, *args, **params):
             M = slope.M()
-            if M.find_top_trace(args).main.global_data == "vjp":
-                breakpoint()
-            ret = self.impl_f(*args, **params)
+            params = tuple(params.items())
+            for k, v in params:
+                if k not in static_argnames:
+                    raise TypeError("For now args with no defaults cannot use keyword")
+            avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
+            program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
+            # M = slope.M()
+            # if M.find_top_trace(args).main.global_data == "vjp":
+            #     breakpoint()
+            # ret = self.impl_f(*args, **params)
             return [ret]
 
         @op.set_method
@@ -1727,7 +1735,6 @@ class PartialEvalTrace(Trace):
 
     def run_op(self, op, tracers, params):
         conds = tuple(t.pval.is_known for t in tracers)
-        breakpoint()
         if all(conds):
         # if all(t.pval.is_known for t in tracers):
             return slope.M().bind(

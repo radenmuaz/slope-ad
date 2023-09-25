@@ -91,7 +91,6 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
             if instruction.op is slope.core.procedure_op:
                 params = instruction.params
                 proc_name, proc_program = params['name'], params['program']
-                breakpoint()
                 if proc_name not in fn_defs.keys():
                     proc_codegen_out = self.codegen(proc_program, args, 
                                         fn_name=proc_name,
@@ -100,7 +99,6 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
                     proc_code_lines = proc_codegen_out["code_lines"]
                     fn_defs = proc_codegen_out["fn_defs"]
                     fn_defs[proc_name] = proc_code_lines
-                breakpoint()
                     
                 args_str = ", ".join(in_vals)
                 lhs = (

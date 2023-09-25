@@ -62,14 +62,14 @@ def rsqrt(x):
     return (1 / x).sqrt()
 
 
-# @procedure_set.register()
-# def cos(x):
-#     return ((math.pi / 2) - x).sin()
-
-
 @procedure_set.register()
 def cos(x):
-    return x.sin()
+    return ((math.pi / 2) - x).sin()
+
+
+# @procedure_set.register()
+# def cos(x):
+#     return x.sin()
 
 
 @procedure_set.register()

@@ -3,8 +3,8 @@ from slope import numpy as snp
 
 
 def f(x):
-    y = x * 3.0
-    # y = x.cos()
+    # y = x * 3.0
+    y = x.cos()
     # z = g(y)
     return y
 

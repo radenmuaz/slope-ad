@@ -694,6 +694,8 @@ class ProcedureSet:
                 *args,
                 program=program,
                 num_consts=len(consts),
+                name=f.__name__,
+                static_args = params
             )
             return M.tree_unflatten(out_tree, outs)
 
@@ -704,14 +706,14 @@ class ProcedureSet:
 procedure_op = Operator("procedure", op_type=OperatorType.Meta)
 
 @procedure_op.set_method
-def impl(self, *args, program, num_consts):
+def impl(self, *args, program, num_consts, name, static_args):
     consts, args = args[:num_consts], args[num_consts:]
     outs = slope.M().run_program(program, consts + args)
     return outs
 
 
 @procedure_op.set_method
-def jvp(self, primals, tangents, *, program, num_consts):
+def jvp(self, primals, tangents, *, program, num_consts, name, static_args):
     new_program, new_consts = slope.M().jvp_program(program)
     outs = slope.M().bind(
         self,
@@ -727,15 +729,15 @@ def jvp(self, primals, tangents, *, program, num_consts):
 
 
 @procedure_op.set_method
-def void_run(self, *in_types, program, num_consts):
+def void_run(self, *in_types, program, num_consts, name, static_args):
     program_type = slope.M().void_run_program(program)
-    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-        raise TypeError
+    # if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+    #     raise TypeError
     return program_type.out_types
 
 
 @procedure_op.set_method
-def T(self, cts, *invals, program, num_consts):
+def T(self, cts, *invals, program, num_consts, name, static_args):
     undef_primals = [type(x) is UndefPrimal for x in invals]
     transposed_program, new_consts = slope.M().transpose_program(
         program, tuple(undef_primals)
@@ -755,7 +757,7 @@ def T(self, cts, *invals, program, num_consts):
 
 
 @procedure_op.set_method
-def partial_run(self, trace, tracers, *, program, num_consts):
+def partial_run(self, trace, tracers, *, program, num_consts, name, static_args):
     in_unknowns = [not t.pval.is_known for t in tracers]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
         program, in_unknowns
@@ -929,11 +931,10 @@ class Program(NamedTuple):
 
     def __repr__(self):
         namegen = (
-            "z" + repr(r)
-            for r in itertools.count()
-            # "".join(s)
-            # for r in itertools.count(1)
-            # for s in itertools.permutations(string.ascii_lowercase, r)
+            # "z" + repr(r) for r in itertools.count()
+            "".join(s)
+            for r in itertools.count(1)
+            for s in itertools.permutations(string.ascii_lowercase, r)
         )
         names = defaultdict(lambda: next(namegen))
         in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
@@ -2011,6 +2012,7 @@ class Machine:
                 outs = f(*tracers_in, **{k: v for k, v in params})
                 tracers_out = [self.full_raise(trace, out) for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out)
+        
 
         return program, consts, out_tree_store()
 
@@ -2384,7 +2386,6 @@ class Machine:
             for k, v in params:
                 if k not in static_argnames:
                     raise TypeError("For now args with no defaults cannot use keyword")
-                    # args = args + [params.pop(k)]
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in, params=params)
 

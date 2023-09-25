@@ -606,138 +606,58 @@ class Operator:
         op = cls(name, OperatorType.Load)
         return op
 
-    @classmethod
-    def procedure(cls, name, f, static_argnames=()):
-        op = cls(name, OperatorType.Meta)
-        # f = types.MethodType(f, op)
-        op.impl_f = f
-        op.jvp_f = f
-        op.T_f = f
-        op.vmap_f = f
-        op.void_run_f = f
-        op.static_argnames = static_argnames
-        op.jvp_program = None
 
-        @op.set_method
-        def override_rule(self, new_f):
-            assert new_f.__name__ in ("run", "jvp", "T", "vmap")
-            setattr(self, f"{new_f.__name__}_f", new_f)
+class OperatorSet:
+    def register(self, op):
+        setattr(self, op.name, op)
 
-        @op.set_method
-        def impl(self, *args, **params):
-            M = slope.M()
-            params = tuple(params.items())
-            for k, v in params:
-                if k not in static_argnames:
-                    raise TypeError("For now args with no defaults cannot use keyword")
-            avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
-            program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
-            # M = slope.M()
-            # if M.find_top_trace(args).main.global_data == "vjp":
-            #     breakpoint()
-            # ret = self.impl_f(*args, **params)
-            return [ret]
+    def alias(self, op, name):
+        assert op.name in vars(self)
+        setattr(self, name, getattr(self, op.name))
 
-        @op.set_method
-        def jvp(self, primals, tangents, **params):
-            M = slope.M()
-            params = tuple(params.items())
-            for k, v in params:
-                if k not in static_argnames:
-                    raise TypeError("For now args with no defaults cannot use keyword")
-            avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), primals)
-            program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
-            jvp_program, jvp_consts = M.jvp_program(program, params=params)
-            self.jvp_program = jvp_program
-            # if M.find_top_trace(primals + tangents).main.global_data == "vjp":
-            #     oprimals, otangents = primals[:], tangents[:]
-            primals_out, tangents_out = M.jvp(self.jvp_f, primals, tangents)
-            # M.program_as_fun(jvp_program)(primals + tangents)
-            return [primals_out], [tangents_out]
 
-        @op.set_method
-        def T(self, cts, xs):
-            return [slope.M().vjp(self.T_f)(cts, xs)]
+class ProcedureSet:
+    def register(self, static_argnames=()):
+        def wrap(f):
+            # procedure = f
+            f_procedure = self.procedure(f, static_argnames)
+            setattr(self, f.__name__, f_procedure)
+            return f_procedure
 
-        @op.set_method
-        def vmap(self, axis_size, vals_in, dims_in, **params):
-            return [slope.M().vmap(partial(self.vmap_f**params), dims_in)(vals_in)]
+        return wrap
+
+    def alias(self, fn, name):
+        assert fn in vars(self)
+        setattr(self, name, fn)
+    
+    def procedure(self, f, static_argnames=()):
+        impl_f=f
+        static_argnames=static_argnames
+        jvp_f=f
+        T_f=f
+        vmap_f=f
+        void_run_f=f
+
+
+        def override_rule(f):
+            nonlocal impl_f, jvp_f, T_f, vmap_f, void_run_f
         
-        # @op.set_method
-        # def jvp(self, primals, tangents, **params):
-        #     M = slope.M()
-        #     params = tuple(params.items())
-        #     for k, v in params:
-        #         if k not in static_argnames:
-        #             raise TypeError("For now args with no defaults cannot use keyword")
-        #     avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), primals)
-        #     program, consts, out_tree = M.make_program(self.jvp_f, *avals_in, params=params)
-        #     jvp_program, jvp_consts = M.jvp_program(program, params=params)
-        #     self.jvp_program = jvp_program
-        #     if M.find_top_trace(primals + tangents).main.global_data == "vjp":
-        #         oprimals, otangents = primals[:], tangents[:]
-        #     breakpoint()
-        #     outs = M.program_as_fun(jvp_program)(primals + tangents)
-        #     breakpoint()
-        #     n = len(outs) // 2
-        #     primals_out, tangents_out = outs[:n], outs[n:]
-        #     return [primals_out], [tangents_out]
 
-        # @op.set_method
-        # def partial_run(self, trace, tracers, **params):
-        #     in_unknowns = [not t.pval.is_known for t in tracers]
-        #     avals_in = self.tree_map(
-        #         lambda x: VoidArray.like(self.get_aval(x)), tracers
-        #     )
-        #     program, consts, out_tree = self.make_program(f, *avals_in, params=params)
-
-        #     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
-        #         program, in_unknowns
-        #     )
-        #     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
-        #     known_vals = [t.pval.const for t in known_tracers]
-        #     outs1_res = slope.M().bind(
-        #         jit_op, *known_vals, program=program1, num_consts=0
-        #     )
-        #     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-        #     res_tracers = [
-        #         trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res
-        #     ]
-        #     outs2 = [
-        #         PartialEvalTracerArray(
-        #             slope.M, trace, slope.M().make_unknown_pval(v.aval), None
-        #         )
-        #         for v in program2.outs
-        #     ]
-        #     instruction = InstructionProto(
-        #         self,
-        #         res_tracers + unknown_tracers,
-        #         dict(program=program2, num_consts=0),
-        #         [v.aval for v in program2.outs],
-        #         list_map(weakref.ref, outs2),
-        #     )
-        #     for t in outs2:
-        #         t.proto = instruction
-
-        #     return merge_lists(out_unknowns, outs1, outs2)
-
-        @op.set_method
-        def reorg_args(self, args, params):
-            sig = inspect.signature(self.impl_f)
+        def f_procedured(*args, **params):
+            nonlocal impl_f, jvp_f, T_f, vmap_f, void_run_f
+            sig = inspect.signature(f)
             args_strs = [
                 k
                 for k, v in sig.parameters.items()
-                if k != "self" and k not in self.static_argnames
+                if k != "self" and k not in static_argnames
             ]
             params_strs = [
                 k
                 for k, v in sig.parameters.items()
-                if k != "self" and k in self.static_argnames
+                if k != "self" and k in static_argnames
             ]
 
-            if (
-                len(args) > len(args_strs) and len(args) != 0
-            ):  # and len(args_strs) != 0:
+            if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
                 args_ = args
                 args, rest = args[: len(args_strs)], args[len(args_strs) :]
                 if len(params_strs) > 0:
@@ -755,78 +675,137 @@ class Operator:
                         args.insert(i, params[k])
                         del params[k]
                 assert len(args) == len(args_strs)
-            return args, params
 
-        return op
+            M = slope.M()
+            params = tuple(params.items())
+            assert all([k in static_argnames for k, v in params])
+            avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
+            top_trace = M.find_top_trace(args)
+            if type(top_trace) is PartialEvalTrace and top_trace.main.global_data == "vjp":
+                breakpoint()
+                program, consts, out_tree = M.make_program(impl_f, *avals_in, params=params)
+            else:
+                program, consts, out_tree = M.make_program(void_run_f, *avals_in, params=params)
 
+            args, in_tree = M.tree_flatten(args)
+            outs = M.bind(
+                procedure_op,
+                *consts,
+                *args,
+                program=program,
+                num_consts=len(consts),
+            )
+            return M.tree_unflatten(out_tree, outs)
 
-class OperatorSet:
-    def register(self, op):
-        setattr(self, op.name, op)
-
-    def alias(self, op, name):
-        assert op.name in vars(self)
-        setattr(self, name, getattr(self, op.name))
-
-
-# class Procedure:
-#     def __init__(self, f, static_argnums=()):
-#         self.f = f
-#         self.static_argnums = static_argnums
-#         self.fs = {}
-#         self.jit_data = {}
-
-#     def override_rule(self, f):
-#         trace_str = f.__name__
-#         assert trace_str in ("jvp", "T")
-#         self.fs[trace_str] = f
-#         return f
-
-#     def get_or_make_data(self, trace_str, static_args, avals_in):
-#         ret = self.jit_data.get(trace_str, None)
-#         if ret is None:
-#             self.jit_data[trace_str] = ret = slope.M().make_program(
-#                 self.fs[trace_str], *avals_in,
-#                 static_args=static_args, static_argnums=self.static_argnums)
-#         return ret
-
-#     def call_impl(self, args, *, trace_str):
-#         static_args = tuple(args[i] for i in self.static_argnums)
-#         args = tuple(a for i, a in enumerate(*args) if i not in self.static_argnums)
-#         avals_in = slope.M().tree_map(lambda x: VoidArray.like(slope.M().get_aval(x)), args)
-#         program, consts, out_tree = self.get_or_make_data(trace_str, static_args, avals_in)
-#         args, in_tree = self.tree_flatten(args)
-#         outs = self.bind(
-#                 jit_op,
-#                 *consts,
-#                 *args,
-#                 program=program,
-#                 num_consts=len(consts),
-#             )
-#         return self.tree_unflatten(out_tree, outs)
-
-#     def __call__(self, *args):
-#         curr_trace = slope.M().find_top_trace()
-#         trace_str = {EvalTrace: "eval", JVPTrace: "jvp"}[type(curr_trace)]
-#         return self.call_impl(args, trace_str=trace_str)
-
-#     def T(self, *args):
-#         return self.call_impl(args, trace_str="T")
+        f_procedured.override_rule = override_rule
+        return f_procedured
 
 
-class ProcedureSet:
-    def register(self, static_argnames=()):
-        def wrap(f):
-            op = Operator.procedure(f.__name__, f, static_argnames)
-            # op = f
-            setattr(self, f.__name__, op)
-            return op
+procedure_op = Operator("procedure", op_type=OperatorType.Meta)
 
-        return wrap
+@procedure_op.set_method
+def impl(self, *args, program, num_consts):
+    consts, args = args[:num_consts], args[num_consts:]
+    outs = slope.M().run_program(program, consts + args)
+    return outs
 
-    def alias(self, fn, name):
-        assert fn in vars(self)
-        setattr(self, name, fn)
+
+@procedure_op.set_method
+def jvp(self, primals, tangents, *, program, num_consts):
+    new_program, new_consts = slope.M().jvp_program(program)
+    outs = slope.M().bind(
+        self,
+        *new_consts,
+        *primals,
+        *tangents,
+        program=new_program,
+        num_consts=len(new_consts),
+    )
+    n = len(outs) // 2
+    primals_out, tangents_out = outs[:n], outs[n:]
+    return primals_out, tangents_out
+
+
+@procedure_op.set_method
+def void_run(self, *in_types, program, num_consts):
+    program_type = slope.M().void_run_program(program)
+    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+        raise TypeError
+    return program_type.out_types
+
+
+@procedure_op.set_method
+def T(self, cts, *invals, program, num_consts):
+    undef_primals = [type(x) is UndefPrimal for x in invals]
+    transposed_program, new_consts = slope.M().transpose_program(
+        program, tuple(undef_primals)
+    )
+
+    residuals, _ = partition_list(undef_primals, invals)
+    outs = slope.M().bind(
+        self,
+        *new_consts,
+        *residuals,
+        *cts,
+        program=transposed_program,
+        num_consts=len(new_consts),
+    )
+    outs = iter(outs)
+    return [next(outs) if undef else None for undef in undef_primals]
+
+
+@procedure_op.set_method
+def partial_run(self, trace, tracers, *, program, num_consts):
+    in_unknowns = [not t.pval.is_known for t in tracers]
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
+        program, in_unknowns
+    )
+    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+    known_vals = [t.pval.const for t in known_tracers]
+    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1, num_consts=0)
+    outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
+    res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
+    outs2 = [
+        PartialEvalTracerArray(
+            slope.M, trace, slope.M().make_unknown_pval(v.aval), None
+        )
+        for v in program2.outs
+    ]
+    instruction = InstructionProto(
+        self,
+        res_tracers + unknown_tracers,
+        dict(program=program2, num_consts=0),
+        [v.aval for v in program2.outs],
+        list_map(weakref.ref, outs2),
+    )
+    for t in outs2:
+        t.proto = instruction
+
+    return merge_lists(out_unknowns, outs1, outs2)
+
+
+@procedure_op.set_method
+def partial_run_instruction(
+    self, unks_in, instruction
+) -> Tuple["Instruction", "Instruction", List[bool], List["Var"]]:
+    program = instruction.params["program"]
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(
+        program, unks_in
+    )
+    ins1, ins2 = partition_list(unks_in, instruction.inputs)
+    out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
+    res = [Var(v.aval) for v in program2.in_binders[:num_res]]
+    instruction1 = Instruction(
+        self, ins1, dict(program=program1, num_consts=0), out_binders1 + res
+    )
+    instruction2 = Instruction(
+        self, res + ins2, dict(program=program2, num_consts=0), out_binders2
+    )
+    return instruction1, instruction2, out_unknowns, res
+
+@procedure_op.set_method
+def reorg_args(self, args, params):
+    return args, params
 
 
 @dataclass
@@ -1096,8 +1075,9 @@ def impl(self, *args, program, num_consts):
     hashed_program = Hashed(program)
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    jit_fn = slope.M().backend.callable(hashed_program, hashed_consts)
+    jit_fn = slope.M().backend.gen_jit_fn(hashed_program, hashed_consts)
     ret = jit_fn(*consts, *args)
+    breakpoint()
     return ret
 
 
@@ -1200,6 +1180,7 @@ def partial_run_instruction(
     return instruction1, instruction2, out_unknowns, res
 
 
+# return op
 # ================
 #   Module
 # ================
@@ -1327,7 +1308,7 @@ class Backend:
         raise NotImplementedError
 
     @lru_cache
-    def callable(
+    def gen_jit_fn(
         self,
         hashed_program: Hashed,
         hashed_consts: Tuple[Hashed, ...],
@@ -1337,8 +1318,8 @@ class Backend:
         consts = [x.val for x in hashed_consts]
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         fn_name = f"{self.name.lower()}_fn"
-        codegen_out = self.codegen(program, consts + in_avals)
-        fn, code = self.compile(program, codegen_out, fn_name)
+        codegen_out = self.codegen(program, consts + in_avals, fn_name="main")
+        fn, code = self.compile(codegen_out)
         compiled = JitFn(code, fn, consts)
         return compiled
 
@@ -1736,7 +1717,7 @@ class PartialEvalTrace(Trace):
     def run_op(self, op, tracers, params):
         conds = tuple(t.pval.is_known for t in tracers)
         if all(conds):
-        # if all(t.pval.is_known for t in tracers):
+            # if all(t.pval.is_known for t in tracers):
             return slope.M().bind(
                 op, *list_map(slope.M().full_lower, tracers), **params
             )
@@ -1791,7 +1772,6 @@ class Machine:
         elif isinstance(x, Array):
             return x
         elif isinstance(x, VoidArray):
-            breakpoint()
             return x
         else:
             raise TypeError(type(x))
@@ -1827,14 +1807,14 @@ class Machine:
     def flatten_fn(self, f, in_tree):
         store = Store()
 
-        def seq_fun(*args_flat):
+        def flat_fn(*args_flat, **params):
             pytree_args = self.tree_unflatten(in_tree, args_flat)
-            out = f(*pytree_args)
+            out = f(*pytree_args, **params)
             out_flat, out_tree = self.tree_flatten(out)
             store.set_value(out_tree)
             return out_flat
 
-        return seq_fun, store
+        return flat_fn, store
 
     def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable) -> None:
         self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
@@ -2288,7 +2268,7 @@ class Machine:
             primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
             return [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in, 'vjp')
+        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in, "vjp")
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]

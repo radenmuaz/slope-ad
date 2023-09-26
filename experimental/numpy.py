@@ -212,9 +212,7 @@ def array(obj, dtype=None, copy=True, order=None):
 
         BufType = _convert_dtype(dtype_orig, "ctypes") * bufsize
         buffer = BufType.from_address(D["data"][0])
-        a = Array(
-            D["shape"], dtype_orig, buffer=buffer, strides=D["strides"], order=order
-        )
+        a = Array(D["shape"], dtype_orig, buffer=buffer, strides=D["strides"], order=order)
         # Convert or copy?
         if dtype is not None and dtype != dtype_orig:
             a = a.astype(dtype)
@@ -387,11 +385,7 @@ def det(A):
                 A[0][0] * A[1][1] * A[2][2]
                 + A[0][1] * A[1][2] * A[2][0]
                 + A[0][2] * A[1][0] * A[2][1]
-                - (
-                    A[0][2] * A[1][1] * A[2][0]
-                    + A[0][1] * A[1][0] * A[2][2]
-                    + A[0][0] * A[1][2] * A[2][1]
-                )
+                - (A[0][2] * A[1][1] * A[2][0] + A[0][1] * A[1][0] * A[2][2] + A[0][0] * A[1][2] * A[2][1])
             )
         except LinAlgError as e:
             det_A = e
@@ -566,9 +560,7 @@ class Array(object):
         "_data",
     ]
 
-    def __init__(
-        self, shape, dtype="float64", buffer=None, offset=0, strides=None, order=None
-    ):
+    def __init__(self, shape, dtype="float64", buffer=None, offset=0, strides=None, order=None):
         # Check order
         if order is not None:
             raise MachineError("Array order parameter is not supported")
@@ -699,10 +691,7 @@ class Array(object):
 
         # Check if size match
         if view.size != len(value_list):
-            raise ValueError(
-                "Number of elements in source does not match "
-                "number of elements in target."
-            )
+            raise ValueError("Number of elements in source does not match " "number of elements in target.")
 
         # Assign data in most efficient way that we can. This code
         # looks for the largest semi-contiguous block: the block that
@@ -836,12 +825,7 @@ class Array(object):
                 out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __truediv__(self, other):
         """divide element-wise with Array or float/scalar"""
@@ -857,12 +841,7 @@ class Array(object):
                 out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __floordiv__(self, other):
         """divide element-wise with Array or float/scalar"""
@@ -878,12 +857,7 @@ class Array(object):
                 out[:] = [i // j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __mod__(self, other):
         """divide element-wise with Array or float/scalar"""
@@ -897,12 +871,7 @@ class Array(object):
                 out[:] = [i % j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __pow__(self, other):
         """power of two Arrays element-wise (of just float power)"""
@@ -916,12 +885,7 @@ class Array(object):
                 out[:] = [i**j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __iadd__(self, other):
         """Addition of other Array or float in place with += operator"""
@@ -935,12 +899,7 @@ class Array(object):
                     self._data[i] += other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __isub__(self, other):
         """Addition of other Array or float in place with += operator"""
@@ -954,12 +913,7 @@ class Array(object):
                     self._data[i] -= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imul__(self, other):
         """multiplication woth other Array or float in place with *= operator"""
@@ -973,12 +927,7 @@ class Array(object):
                     self._data[i] *= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __idiv__(self, other):
         """Division of other Array or float in place with /= operator"""
@@ -994,12 +943,7 @@ class Array(object):
                     self._data[i] /= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __itruediv__(self, other):
         """Division of other Array or float in place with /= operator"""
@@ -1015,12 +959,7 @@ class Array(object):
                     self._data[i] /= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __ifloordiv__(self, other):
         """Division of other Array or float in place with /= operator"""
@@ -1036,12 +975,7 @@ class Array(object):
                     self._data[i] //= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imod__(self, other):
         """mod of other Array or float in place with /= operator"""
@@ -1057,12 +991,7 @@ class Array(object):
                     self._data[i] %= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imod__(self, other):
         """mod of other Array or float in place with /= operator"""
@@ -1078,12 +1007,7 @@ class Array(object):
                     self._data[i] %= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __ipow__(self, other):
         """mod of other Array or float in place with /= operator"""
@@ -1097,12 +1021,7 @@ class Array(object):
                     self._data[i] **= other._data[i]
                 return self
             else:
-                raise ValueError(
-                    "Array sizes do not match. "
-                    + str(self.shape)
-                    + " versus "
-                    + str(other.shape)
-                )
+                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     ## Private helper functions
 
@@ -1123,10 +1042,7 @@ class Array(object):
             axissize = self._shape[axis]
             if isinstance(k, int):
                 if k >= axissize:
-                    raise IndexError(
-                        "index %i is out of bounds for axis %i "
-                        "with size %s" % (k, axis, axissize)
-                    )
+                    raise IndexError("index %i is out of bounds for axis %i " "with size %s" % (k, axis, axissize))
                 offset += k * self._strides[axis] // self.itemsize
                 axis += 1
             elif isinstance(k, slice):

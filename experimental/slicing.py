@@ -195,12 +195,7 @@ def _broadcast_to(arr, shape) -> Array:
     else:
         nlead = len(shape) - len(arr.shape)
         shape_tail = shape[nlead:]
-        (diff,) = np.where(
-            tuple(
-                (len(arr_d) != len(shape_d))
-                for arr_d, shape_d in zip(arr.shape, shape_tail)
-            )
-        )
+        (diff,) = np.where(tuple((len(arr_d) != len(shape_d)) for arr_d, shape_d in zip(arr.shape, shape_tail)))
         new_dims = tuple(range(nlead)) + tuple(nlead + diff)
         kept_dims = tuple(np.delete(np.arange(len(shape)), new_dims))
         return arr.squeeze(tuple(diff)).broadcast(shape, kept_dims)
@@ -236,9 +231,7 @@ def _broadcast_shapes_uncached(*shapes):
     return result_shape
 
 
-def _try_broadcast_shapes(
-    shapes: Sequence[Tuple[int, ...]]
-) -> Optional[Tuple[int, ...]]:
+def _try_broadcast_shapes(shapes: Sequence[Tuple[int, ...]]) -> Optional[Tuple[int, ...]]:
     if len(shapes) == 1:
         return shapes[0]
     rank, *others = {len(shape) for shape in shapes}
@@ -278,25 +271,20 @@ def _static_idx(idx: slice, size):
         return stop + k + 1, start + 1, -step, True
 
 
-def _index_to_gather(
-    x_shape: Sequence[int], idx: Sequence[Any], normalize_indices: bool = True
-) -> _Indexer:
+def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indices: bool = True) -> _Indexer:
     # Remove ellipses and add trailing slice(None)s.
     # idx = _canonicalize_tuple_index(len(x_shape), idx)
     arr_ndim = len(x_shape)
     len_without_none = sum(1 for e in idx if e is not None and e is not Ellipsis)
     if len_without_none > arr_ndim:
         raise IndexError(
-            f"Too many indices for array: {len_without_none} "
-            f"non-None/Ellipsis indices for dim {arr_ndim}."
+            f"Too many indices for array: {len_without_none} " f"non-None/Ellipsis indices for dim {arr_ndim}."
         )
     ellipses = (i for i, elt in enumerate(idx) if elt is Ellipsis)
     ellipsis_index = next(ellipses, None)
     if ellipsis_index is not None:
         if next(ellipses, None) is not None:
-            raise IndexError(
-                f"Multiple ellipses (...) not supported: {list(map(type, idx))}."
-            )
+            raise IndexError(f"Multiple ellipses (...) not supported: {list(map(type, idx))}.")
         colons = (slice(None),) * (arr_ndim - len_without_none)
         idx = idx[:ellipsis_index] + colons + idx[ellipsis_index + 1 :]
     elif len_without_none < arr_ndim:
@@ -319,20 +307,13 @@ def _index_to_gather(
             for e in idx
         ):
             return False
-        return all(
-            e is None or e is Ellipsis or isinstance(e, slice) or _is_int_arraylike(e)
-            for e in idx
-        )
+        return all(e is None or e is Ellipsis or isinstance(e, slice) or _is_int_arraylike(e) for e in idx)
 
     if _is_advanced_int_indexer(idx):
         idx_no_nones = [(i, d) for i, d in enumerate(idx) if d is not None]
-        advanced_pairs = (
-            (Array(e), i, j) for j, (i, e) in enumerate(idx_no_nones) if e is not None
-        )
+        advanced_pairs = ((Array(e), i, j) for j, (i, e) in enumerate(idx_no_nones) if e is not None)
         if normalize_indices:
-            advanced_pairs = (
-                (_normalize_index(e, x_shape[j]), i, j) for e, i, j in advanced_pairs
-            )
+            advanced_pairs = ((_normalize_index(e, x_shape[j]), i, j) for e, i, j in advanced_pairs)
         advanced_indexes, idx_advanced_axes, x_advanced_axes = zip(*advanced_pairs)
         advanced_axes_are_contiguous = bool(np.all(np.diff(idx_advanced_axes) == 1))
 
@@ -368,9 +349,7 @@ def _index_to_gather(
             ndim = len(shape)
 
             start_dim = len(gather_indices_shape)
-            gather_indices += (
-                (a.astype(index_dtype), start_dim) for a in advanced_indexes
-            )
+            gather_indices += ((a.astype(index_dtype), start_dim) for a in advanced_indexes)
             gather_indices_shape += shape
 
             start_index_map.extend(x_advanced_axes)
@@ -390,14 +369,10 @@ def _index_to_gather(
         except TypeError:
             abstract_i = None
         # Handle basic int indexes.
-        if isinstance(abstract_i, (Array,)) and (
-            not abstract_i.shape and abstract_i.dtype == np.integer
-        ):
+        if isinstance(abstract_i, (Array,)) and (not abstract_i.shape and abstract_i.dtype == np.integer):
             if x_shape[x_axis] == 0:
                 # XLA gives error when indexing into an axis of size 0
-                raise IndexError(
-                    f"index is out of bounds for axis {x_axis} with size 0"
-                )
+                raise IndexError(f"index is out of bounds for axis {x_axis} with size 0")
             i = _normalize_index(i, x_shape[x_axis]) if normalize_indices else i
             i = i.astype(index_dtype)
             gather_indices.append((i, len(gather_indices_shape)))
@@ -419,19 +394,13 @@ def _index_to_gather(
             if step is None:
                 if start is None or start == 0:
                     start = None
-                if stop is None or (
-                    not isinstance(stop, TracerArray) and (stop >= x_shape[x_axis])
-                ):
+                if stop is None or (not isinstance(stop, TracerArray) and (stop >= x_shape[x_axis])):
                     stop = None
             elif step == -1:
                 step = -1
 
             # Handle slice(None) and slice(None, None, -1)
-            if (
-                start is None
-                and stop is None
-                and (step is None or isinstance(step, int) and step == -1)
-            ):
+            if start is None and stop is None and (step is None or isinstance(step, int) and step == -1):
                 if step == -1:
                     reversed_y_dims.append(collapsed_y_axis)
                 slice_shape.append(x_shape[x_axis])
@@ -442,10 +411,7 @@ def _index_to_gather(
                 x_axis += 1
             # Handle slice index (only static, otherwise an error is raised)
             else:
-                if not all(
-                    (elt == None or TracerArray.get_aval(elt) is Array)
-                    for elt in (start, stop, step)
-                ):
+                if not all((elt == None or TracerArray.get_aval(elt) is Array) for elt in (start, stop, step)):
                     msg = (
                         "Array slice indices must have static start/stop/step to be used "
                         "with NumPy indexing syntax. "
@@ -463,9 +429,7 @@ def _index_to_gather(
                 #         "Try using lax.dynamic_slice/dynamic_update_slice"
                 #     )
                 #     raise IndexError(msg)
-                start, limit, stride, needs_rev = _static_idx(
-                    slice(start, stop, step), x_shape[x_axis]
-                )
+                start, limit, stride, needs_rev = _static_idx(slice(start, stop, step), x_shape[x_axis])
                 if needs_rev:
                     reversed_y_dims.append(collapsed_y_axis)
                 if stride == 1:
@@ -501,8 +465,7 @@ def _index_to_gather(
         last_dim = len(gather_indices_shape)
         gather_indices_shape.append(1)
         gather_indices_list = [
-            g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim)))
-            for g, i in gather_indices
+            g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim))) for g, i in gather_indices
         ]
         gather_indices_array = TracerArray.concatenate(gather_indices_list, last_dim)
 

@@ -27,9 +27,7 @@ class Gather(ShapeOp):
             operand = batching.moveaxis(operand, operand_bdim, 0)
             slice_sizes = (operand.shape[0],) + slice_sizes
             offset_dims = (0,) + tuple(np.add(1, dimension_numbers.offset_dims))
-            collapsed_slice_dims = tuple(
-                np.add(1, dimension_numbers.collapsed_slice_dims)
-            )
+            collapsed_slice_dims = tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
             start_index_map = tuple(np.add(1, dimension_numbers.start_index_map))
             dnums = GatherDimensionNumbers(
                 offset_dims=offset_dims,
@@ -87,9 +85,7 @@ class Gather(ShapeOp):
             if core.symbolic_equal_dim(operand.shape[0], 0):
                 output_shape = _gather_shape_rule(
                     core.ShapedArray(operand.shape[1:], operand.dtype),
-                    core.ShapedArray(
-                        indices.shape[1:], dtypes.canonicalize_dtype(indices.dtype)
-                    ),
+                    core.ShapedArray(indices.shape[1:], dtypes.canonicalize_dtype(indices.dtype)),
                     dimension_numbers=dimension_numbers,
                     slice_sizes=slice_sizes,
                     unique_indices=unique_indices,
@@ -109,9 +105,7 @@ class Gather(ShapeOp):
             indices = lax.concatenate([counts, indices], len(count_shape) - 1)
 
             slice_sizes = (1,) + slice_sizes
-            collapsed_slice_dims = (0,) + tuple(
-                np.add(1, dimension_numbers.collapsed_slice_dims)
-            )
+            collapsed_slice_dims = (0,) + tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
             offset_dims = tuple(np.add(1, dimension_numbers.offset_dims))
             start_index_map = (0,) + tuple(np.add(1, dimension_numbers.start_index_map))
 
@@ -226,10 +220,7 @@ class Gather(ShapeOp):
 
             for i in range(len(start_index_map)):
                 operand_dim_for_start_index_i = start_index_map[i]
-                if (
-                    operand_dim_for_start_index_i < 0
-                    or operand_dim_for_start_index_i >= _rank(operand)
-                ):
+                if operand_dim_for_start_index_i < 0 or operand_dim_for_start_index_i >= _rank(operand):
                     raise TypeError(
                         f"Invalid start_index_map; domain is "
                         f"[0, {_rank(operand)}), got: "
@@ -243,9 +234,7 @@ class Gather(ShapeOp):
         # AND there are problematic collapsed_slice_dims, the error message will thus
         # be different.
         _is_sorted(collapsed_slice_dims, "gather", "collapsed_slice_dims")
-        _sorted_dims_in_range(
-            collapsed_slice_dims, _rank(operand), "gather", "collapsed_slice_dims"
-        )
+        _sorted_dims_in_range(collapsed_slice_dims, _rank(operand), "gather", "collapsed_slice_dims")
         _no_duplicate_dims(collapsed_slice_dims, "gather", "collapsed_slice_dims")
         # End ValidateGatherDimensions
 
@@ -270,8 +259,7 @@ class Gather(ShapeOp):
             corresponding_input_size = operand.shape[i]
 
             if not (
-                core.greater_equal_dim(slice_size, 0)
-                and core.greater_equal_dim(corresponding_input_size, slice_size)
+                core.greater_equal_dim(slice_size, 0) and core.greater_equal_dim(corresponding_input_size, slice_size)
             ):
                 raise TypeError(
                     f"Slice size at index {i} in gather op is out of range, "
@@ -291,13 +279,8 @@ class Gather(ShapeOp):
         expanded_indices_shape.pop(index_vector_dim)
         indices_shape = iter(expanded_indices_shape)
 
-        slice_sizes = (
-            s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims
-        )
-        return tuple(
-            next(slice_sizes) if i in offset_dims else next(indices_shape)
-            for i in range(output_shape_rank)
-        )
+        slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
+        return tuple(next(slice_sizes) if i in offset_dims else next(indices_shape) for i in range(output_shape_rank))
 
     @staticmethod
     def T(
@@ -364,24 +347,16 @@ class Scatter(ShapeOp):
 
         # move the operand batch dim to the front if it is not None, otherwise create
         # it at the front (so that we can scatter into it)
-        size = next(
-            x.shape[ax] for x, ax in zip(batched_args, batch_dims) if ax is not None
-        )
+        size = next(x.shape[ax] for x, ax in zip(batched_args, batch_dims) if ax is not None)
         operand = batching.bdim_at_front(operand, operand_bdim, size)
         operand_bdim = 0
 
         updates = batching.bdim_at_front(updates, updates_bdim, size)
 
         if indices_bdim is None:
-            inserted_window_dims = tuple(
-                np.add(1, dimension_numbers.inserted_window_dims)
-            )
-            update_window_dims = (0,) + tuple(
-                np.add(1, dimension_numbers.update_window_dims)
-            )
-            scatter_dims_to_operand_dims = tuple(
-                np.add(1, dimension_numbers.scatter_dims_to_operand_dims)
-            )
+            inserted_window_dims = tuple(np.add(1, dimension_numbers.inserted_window_dims))
+            update_window_dims = (0,) + tuple(np.add(1, dimension_numbers.update_window_dims))
+            scatter_dims_to_operand_dims = tuple(np.add(1, dimension_numbers.scatter_dims_to_operand_dims))
             dnums = ScatterDimensionNumbers(
                 update_window_dims=update_window_dims,
                 inserted_window_dims=inserted_window_dims,
@@ -409,12 +384,8 @@ class Scatter(ShapeOp):
         indices = lax.concatenate([counts, indices], len(count_shape) - 1)
 
         update_window_dims = tuple(np.add(1, dimension_numbers.update_window_dims))
-        inserted_window_dims = (0,) + tuple(
-            np.add(1, dimension_numbers.inserted_window_dims)
-        )
-        scatter_dims_to_operand_dims = (0,) + tuple(
-            np.add(1, dimension_numbers.scatter_dims_to_operand_dims)
-        )
+        inserted_window_dims = (0,) + tuple(np.add(1, dimension_numbers.inserted_window_dims))
+        scatter_dims_to_operand_dims = (0,) + tuple(np.add(1, dimension_numbers.scatter_dims_to_operand_dims))
 
         dnums = ScatterDimensionNumbers(
             update_window_dims=update_window_dims,
@@ -503,12 +474,8 @@ class Scatter(ShapeOp):
         else:
             updates_shape = updates.shape
         if type(t) is ad_util.Zero:
-            operand_t = (
-                ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
-            )
-            update_t = (
-                ad_util.Zero(updates.aval) if ad.is_undefined_primal(updates) else None
-            )
+            operand_t = ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
+            update_t = ad_util.Zero(updates.aval) if ad.is_undefined_primal(updates) else None
         else:
             operand_t = update_t = None
             if ad.is_undefined_primal(operand):
@@ -526,9 +493,7 @@ class Scatter(ShapeOp):
                     if i in dimension_numbers.inserted_window_dims:
                         slice_sizes.append(1)
                     else:
-                        slice_sizes.append(
-                            updates_shape[dimension_numbers.update_window_dims[pos]]
-                        )
+                        slice_sizes.append(updates_shape[dimension_numbers.update_window_dims[pos]])
                         pos += 1
                 update_t = gather(
                     t,
@@ -644,13 +609,8 @@ def fn(
     expanded_indices_shape.pop(index_vector_dim)
     indices_shape = iter(expanded_indices_shape)
 
-    slice_sizes = (
-        s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims
-    )
-    res_size = tuple(
-        next(slice_sizes) if i in offset_dims else next(indices_shape)
-        for i in range(output_shape_rank)
-    )
+    slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
+    res_size = tuple(next(slice_sizes) if i in offset_dims else next(indices_shape) for i in range(output_shape_rank))
 
     res = np.zeros(res_size)
     batch_dims = [d for d in list(range(res.ndim)) if d in offset_dims]

@@ -12,10 +12,9 @@ import math
 import inspect
 import re
 from functools import partial
+
 compile_py = compile
-numpy_backend = Backend(
-    name="numpy", default_dtype=BaseArray.float32, deps=("numpy as np", "math")
-)
+numpy_backend = Backend(name="numpy", default_dtype=BaseArray.float32, deps=("numpy as np", "math"))
 numpy_dtype_map = {
     BaseArray.float32: np.dtype("float32"),
     BaseArray.int64: np.dtype("int64"),
@@ -48,20 +47,23 @@ def compile(self, codegen_out):
 
 
 @numpy_backend.set_method
-def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict()) -> List[Any]:
+def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict()) -> List[Any]:
+    print(f"\n--  {depth} Codegen program\n", program, "\n ==")
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
         return "\n".join([spaces + line for line in code_line.strip().split("\n")])
+
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
-    il0 = depth*4 # il = indent level
-    il1 = (depth+1)*4
+    il0 = depth * 4  # il = indent level
+    il1 = (depth + 1) * 4
     ncs = 0
     nxs = 0
     nzs = 0
     inb_args = []
     inb_consts = []
+    njit = 0
 
     for inb in program.in_binders:
         if type(inb.aval) is not VoidArray:
@@ -73,7 +75,7 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
             inb_args += [environment[inb]]
             nxs += 1
 
-    code_lines = []    
+    code_lines = []
     fn_args_strs = f""
     if inb_consts:
         fn_args_strs += f"{', '.join(inb_consts)}, "
@@ -90,35 +92,56 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
                 params = instruction.params
-                proc_name, proc_program = params['name'], params['program']
+                proc_name, proc_program = params["name"], params["program"]
                 if proc_name not in fn_defs.keys():
-                    proc_codegen_out = self.codegen(proc_program, args, 
-                                        fn_name=proc_name,
-                                        depth=depth + 1,
-                                        fn_defs=fn_defs)
-                    proc_code_lines = proc_codegen_out["code_lines"]
-                    fn_defs = proc_codegen_out["fn_defs"]
-                    fn_defs[proc_name] = proc_code_lines
-                    
-                args_str = ", ".join(in_vals)
-                lhs = (
-                    f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+                    proc_codegen_out = self.codegen(
+                        proc_program,
+                        args,
+                        fn_name=proc_name,
+                        depth=0,
+                        fn_defs=fn_defs,
                     )
-                if len(params['static_args']) > 0:
-                    for k, v in params.static_args:
+                    fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
+                    proc_code_lines = proc_codegen_out["code_lines"]
+                    fn_defs[proc_name] = proc_code_lines
+                    breakpoint()
+
+                args_str = ", ".join(in_vals)
+                lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+                if len(params["static_args"]) > 0:
+                    for k, v in params["static_args"]:
                         args_str += f", {k}={v}"
                 rhs = f"{proc_name}({args_str})"
                 if len(proc_program.outs) == 1:
+                    rhs += "[0]"
+            elif instruction.op is slope.core.jit_op:
+                params = instruction.params
+                jit_program = params["program"]
+                jit_name = f"jit_{njit}"
+                njit += 1
+                jit_codegen_out = self.codegen(
+                    jit_program,
+                    args,
+                    fn_name=jit_name,
+                    depth=depth + 1,
+                    fn_defs=fn_defs,
+                )
+                jit_code_lines = jit_codegen_out["code_lines"]
+                fn_defs = jit_codegen_out["fn_defs"]
+                fn_defs[jit_name] = jit_code_lines
+
+                args_str = ", ".join(in_vals)
+                lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+                rhs = f"{jit_name}({args_str})"
+                if len(jit_program.outs) == 1:
                     rhs += "[0]"
             else:
                 raise
         else:
             impl = slope.M().backend.impls[instruction.op]
             args_str = ", ".join(in_vals)
-            lhs = (
-                f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-            )
-            
+            lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+
             impl_lines = inspect.getsourcelines(impl)[0]
             if impl_lines[0][0] == "@":  # delete decorator line
                 impl_lines = impl_lines[1:]
@@ -135,7 +158,7 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
                     def_str = impl_lines[0]
                     impl_lines[0] = f"def {instruction.op.name}{def_str[def_str.find('('):]}"
                     impl_lines[0] = impl_lines[0].replace("self, ", "")
-                    fn_defs[instruction.op.name] = [impl_lines]
+                    fn_defs[instruction.op.name] = [indent(l, il1) for l in impl_lines]
             else:
                 sig = inspect.signature(impl)
                 args_strs = [
@@ -146,11 +169,7 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
                 rhs = impl_lines[1].replace("return", "").strip()
 
                 for argname, arg in list_zip(args_strs, in_vals):
-                    mark = (
-                        ","
-                        if argname != args_strs[-1] or len(instruction.params) > 0
-                        else ")"
-                    )
+                    mark = "," if argname != args_strs[-1] or len(instruction.params) > 0 else ")"
                     rhs = rhs.replace(f"{argname}{mark}", f"{arg}{mark}")
                 for kwargname, kwarg in instruction.params.items():
                     if isinstance(kwarg, slope.core.DType):
@@ -161,23 +180,18 @@ def codegen(self, program, args, *, fn_name: str="main", depth=0, fn_defs = dict
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
-    
-    if len(fn_defs) > 0:
-        code_lines = (
+
+    if fn_name == "main":
+        if len(fn_defs) > 0:
+            code_lines = (
             code_lines[0:1]
-            + [
-                indent(line, il0)
-                for impl_lines in fn_defs.values()
-                for line in impl_lines
-            ]
+            + [indent(f"float32 = np.float32", il1)] # TODO: define types
+            + [indent(line, il0) for impl_lines in fn_defs.values() for line in impl_lines]
             + code_lines[1:]
         )
 
-    if depth == 0:
-        code_lines = [indent(f"float32 = np.float32", il0)] + code_lines # TODO: cleanup dtype translation
-    return dict(
-        code_lines=code_lines, fn_defs=fn_defs
-    )
+    print("Code:\n","\n".join(code_lines))
+    return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 
 ### Operator Impls
@@ -308,6 +322,7 @@ def f(self, x, *, shape, axes=None):
 def f(self, x, *, shape):
     return np.reshape(x, newshape=shape)
 
+
 @numpy_backend.set_impl(operator_set.pad_hlo)
 def f(self, x, *, lo, hi, interior, value):
     # TODO: implement interior pad
@@ -334,18 +349,19 @@ def f(self, x, *, perm):  # NOTE: np.transpose is like torch.permute
 def f(self, x, *, axes):
     return np.flip(x, axes)
 
+
 # def inline():
-    # if instruction.op.op_dtype is slope.core.OperatorType.Meta:
-        #     # TODO: generalize interface to other than jit_op
-        #     raise NotImplementedError
-        #     breakpoint()
-        #     op_out = impl(in_vals, in_avals, params=instruction.params)
-        #     co = op_out["codegen_out"]
-        #     outs = co["outs"]
-        #     rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
-        #     op_code_lines = co["code_lines"]
-        #     input_lhs = ", ".join((co["inb_args"] + co["inb_consts"]))
-        #     input_code_line = f"{input_lhs} = {args_str}"
-        #     output_code_line = f"{lhs} = {rhs}"
-        #     code_lines += [input_code_line] + op_code_lines + [output_code_line]
-        #     continue
+# if instruction.op.op_dtype is slope.core.OperatorType.Meta:
+#     # TODO: generalize interface to other than jit_op
+#     raise NotImplementedError
+#     breakpoint()
+#     op_out = impl(in_vals, in_avals, params=instruction.params)
+#     co = op_out["codegen_out"]
+#     outs = co["outs"]
+#     rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
+#     op_code_lines = co["code_lines"]
+#     input_lhs = ", ".join((co["inb_args"] + co["inb_consts"]))
+#     input_code_line = f"{input_lhs} = {args_str}"
+#     output_code_line = f"{lhs} = {rhs}"
+#     code_lines += [input_code_line] + op_code_lines + [output_code_line]
+#     continue

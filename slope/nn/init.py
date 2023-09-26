@@ -62,9 +62,7 @@ def variance_scaling(
             return sev.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
 
         else:
-            raise ValueError(
-                f"invalid distribution for variance scaling initializer: {distribution}"
-            )
+            raise ValueError(f"invalid distribution for variance scaling initializer: {distribution}")
 
     return init
 

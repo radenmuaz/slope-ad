@@ -7,9 +7,7 @@ import functools
 from functools import partial
 from slope.core import unzip2, list_map
 
-OptimizerState = namedtuple(
-    "OptimizerState", ["unflattened_state", "tree_def", "subtree_defs"]
-)
+OptimizerState = namedtuple("OptimizerState", ["unflattened_state", "tree_def", "subtree_defs"])
 slope.register_node(
     OptimizerState,
     lambda xs: ((xs.unflattened_state,), (xs.tree_def, xs.subtree_defs)),
@@ -71,9 +69,7 @@ def optimizer(
                 raise TypeError(msg.format(tree, tree2))
             states = list_map(slope.tree_unflatten, subtrees, states_flat)
             new_states = list_map(partial(update, i), grad_flat, states)
-            new_states_flat, subtrees2 = unzip2(
-                list_map(slope.tree_flatten, new_states)
-            )
+            new_states_flat, subtrees2 = unzip2(list_map(slope.tree_flatten, new_states))
             for subtree, subtree2 in zip(subtrees, subtrees2):
                 if subtree2 != subtree:
                     msg = (

@@ -26,11 +26,7 @@ def rng_bit_generator(key, shape, dtype=np.uint32, algorithm="default"):
         np.dtype("uint64"),
     }:
         raise TypeError(f"rng_bit_generator: unsupported dtype {dtype}")
-    return tuple(
-        slope.RT.bind1(
-            RandomBitGenerator, key, shape=shape, dtype=dtype, algorithm=algorithm
-        )
-    )
+    return tuple(slope.RT.bind1(RandomBitGenerator, key, shape=shape, dtype=dtype, algorithm=algorithm))
 
 
 class PRNGImpl(NamedTuple):
@@ -107,16 +103,12 @@ def _rbg_seed(seed: typing.Array) -> typing.Array:
 
 def _rbg_split(key, num: int):
     _threefry_split = _threefry_split_original
-    return slope.ad.vmap(_threefry_split, (0, None), 1)(key.reshape(2, 2), num).reshape(
-        num, 4
-    )
+    return slope.ad.vmap(_threefry_split, (0, None), 1)(key.reshape(2, 2), num).reshape(num, 4)
 
 
 def _rbg_fold_in(key, data):
     assert not data.shape
-    return slope.ad.vmap(_threefry_fold_in, (0, None), 0)(
-        key.reshape(2, 2), data
-    ).reshape(4)
+    return slope.ad.vmap(_threefry_fold_in, (0, None), 0)(key.reshape(2, 2), data).reshape(4)
 
 
 def _rbg_random_bits(key, bit_width: int, shape: Sequence[int]):
@@ -282,9 +274,7 @@ class PRNGKeyArrayImpl(PRNGKeyArray):
 
     def concatenate(self, key_arrs, axis, dtype=None) -> PRNGKeyArrayImpl:
         if dtype is not None:
-            raise ValueError(
-                "dtype argument not supported for concatenating PRNGKeyArray"
-            )
+            raise ValueError("dtype argument not supported for concatenating PRNGKeyArray")
         axis = canonicalize_axis(axis, self.ndim)
         arrs = [self._base_array, *[k._base_array for k in key_arrs]]
         return PRNGKeyArrayImpl(self.impl, jnp.concatenate(arrs, axis))
@@ -293,32 +283,21 @@ class PRNGKeyArrayImpl(PRNGKeyArray):
         if jnp.ndim(shape) == 0:
             shape = (shape,)
         new_shape = (*shape, *self.impl.key_shape)
-        return PRNGKeyArrayImpl(
-            self.impl, jnp.broadcast_to(self._base_array, new_shape)
-        )
+        return PRNGKeyArrayImpl(self.impl, jnp.broadcast_to(self._base_array, new_shape))
 
     def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyArrayImpl:
         # follows lax.expand_dims, not jnp.expand_dims, so dimensions is a sequence
         ndim_out = self.ndim + len(set(dimensions))
         dimensions = [canonicalize_axis(d, ndim_out) for d in dimensions]
-        return PRNGKeyArrayImpl(
-            self.impl, lax.expand_dims(self._base_array, dimensions)
-        )
+        return PRNGKeyArrayImpl(self.impl, lax.expand_dims(self._base_array, dimensions))
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}[{self.impl.tag}]" f" {{ {self._base_array} }}"
-        )
+        return f"{self.__class__.__name__}[{self.impl.tag}]" f" {{ {self._base_array} }}"
 
     def pprint(self):
         pp_keys = pp.text("shape = ") + pp.text(str(self.shape))
         pp_impl = pp.text("impl = ") + self.impl.pprint()
-        return str(
-            pp.group(
-                pp.text("PRNGKeyArray:")
-                + pp.nest(2, pp.brk() + pp_keys + pp.brk() + pp_impl)
-            )
-        )
+        return str(pp.group(pp.text("PRNGKeyArray:") + pp.nest(2, pp.brk() + pp_keys + pp.brk() + pp_impl)))
 
     # Overwritten immediately below
     @property
@@ -398,9 +377,7 @@ def make_key_array_phys_sharding(aval, sharding, is_sharding_from_xla):
     elif isinstance(sharding, NamedSharding):
         key_shape = aval.dtype.impl.key_shape
         trailing_spec = [None] * len(key_shape)
-        return NamedSharding(
-            sharding.mesh, PartitionSpec(*sharding.spec, *trailing_spec)
-        )
+        return NamedSharding(sharding.mesh, PartitionSpec(*sharding.spec, *trailing_spec))
     elif is_sharding_from_xla:
         return sharding
     else:
@@ -425,9 +402,7 @@ def philox(cls, key, rounds=10):
         return a, b
 
     assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
-    assert (
-        isinstance(rounds, int) and rounds > 0
-    ), "Number of rounds must be a positive integer"
+    assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
 
     key0, key1 = key
     state = np.array([key0, key1], dtype=np.uint64)
@@ -458,26 +433,16 @@ def threefry(cls, key, rounds=20):
         return a, b, c, d
 
     assert len(key) == 2, "Key must be a tuple of two 64-bit integers"
-    assert (
-        isinstance(rounds, int) and rounds > 0
-    ), "Number of rounds must be a positive integer"
+    assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
 
     key0, key1 = key
     state = np.array([0, 0, key0, key1], dtype=np.uint64)
 
     for _ in range(rounds):
-        state[0], state[1], state[2], state[3] = threefry_round(
-            state[0], state[1], state[2], state[3], 14
-        )
-        state[0], state[1], state[2], state[3] = threefry_round(
-            state[0], state[1], state[2], state[3], 16
-        )
-        state[0], state[1], state[2], state[3] = threefry_round(
-            state[0], state[1], state[2], state[3], 52
-        )
-        state[0], state[1], state[2], state[3] = threefry_round(
-            state[0], state[1], state[2], state[3], 57
-        )
+        state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 14)
+        state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 16)
+        state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 52)
+        state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 57)
 
     return state[:2], state[2:]  # [0, 1] are new keys, [2:] are random numbers
 

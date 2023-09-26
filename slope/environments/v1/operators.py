@@ -255,9 +255,7 @@ operator_set.register(div)
 @div.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
-    return [x / y], [
-        (x_dot / y) + (-y_dot * x * (y**-2))
-    ]  # bug: power returns float64
+    return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]  # bug: power returns float64
 
 
 @div.set_method
@@ -273,14 +271,8 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return (
-            (x == z).where(
-                slope.environment.ones_like(z), slope.environment.zeros_like(z)
-            )
-        ) / (
-            (y == z).where(
-                slope.environment.full_like(z, 2), slope.environment.ones_like(z)
-            )
+        return ((x == z).where(slope.environment.ones_like(z), slope.environment.zeros_like(z))) / (
+            (y == z).where(slope.environment.full_like(z, 2), slope.environment.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -568,31 +560,22 @@ def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
 
     x = pad(operand, _zero(operand), padding_config)
     mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(
-        padding_value, x.shape, (operand_bdim,)
-    )
+    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
     return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 
 @pad_hlo.set_method
 def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
-    return [x.pad_hlo(lo, hi, interior, value)], [
-        x_dot.pad_hlo(lo, hi, interior, value)
-    ]
+    return [x.pad_hlo(lo, hi, interior, value)], [x_dot.pad_hlo(lo, hi, interior, value)]
 
 
 @pad_hlo.set_method
-def void_run(
-    self, x: VoidArray, *, lo, hi, interior=None, value=0.0
-) -> List[VoidArray]:
+def void_run(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
-    shape = tuple(
-        sum_py([l, h, _dilate_dim(d, r + 1)])
-        for l, h, r, d in list_zip(lo, hi, interior, x.shape)
-    )
+    shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
     if not all(d >= 0 for d in shape):
         raise ValueError(
             f"Dimension size after padding is not at least 0, "
@@ -613,9 +596,7 @@ def T(self, cts, x, *, lo, hi, interior=None, value=0.0):
             tuple(s - h for s, h in list_zip(z.shape, hi)),
             tuple([1] * len(interior)),
         )
-        return unpadded.slice_hlo(
-            tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior)
-        )
+        return unpadded.slice_hlo(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
     res = t_op() if isinstance(x, UndefPrimal) else None
     return [res]
@@ -657,25 +638,20 @@ def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
 @slice_hlo.set_method
 def jvp(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice_hlo(starts, limits, strides)], [
-        x_dot.slice_hlo(starts, limits, strides)
-    ]
+    return [x.slice_hlo(starts, limits, strides)], [x_dot.slice_hlo(starts, limits, strides)]
 
 
 @slice_hlo.set_method
 def void_run(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = [
-            limit if type(start) is int and start == 0 else limit - start
-            for start, limit in list_zip(starts, limits)
+            limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)
         ]
         return [VoidArray(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
-        x = x[
-            tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))
-        ]
+        x = x[tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
         return [VoidArray(x.shape, x.dtype)]
 
 
@@ -700,9 +676,7 @@ def T(cts, x, *, starts, limits, strides=None):
                 np.add(1, np.multiply(np.subtract(t.shape, 1), strides)),
             ),
         )
-        lo, hi, interior = list_zip(
-            starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1)
-        )
+        lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
     res = z.pad(lo, hi, interior)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
@@ -774,9 +748,7 @@ def void_run(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
 
     concat_size = sum(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
-    return [
-        VoidArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)
-    ]
+    return [VoidArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
 
 
 @concatenate.set_method
@@ -796,8 +768,7 @@ def T(cts, xs, *, axis):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_hlo(start, limit) if type(o) is UndefPrimal else None
-        for o, start, limit in zip(xs, starts, limits)
+        z.slice_hlo(start, limit) if type(o) is UndefPrimal else None for o, start, limit in zip(xs, starts, limits)
     ]
 
 
@@ -833,9 +804,7 @@ operator_set.register(full)
 
 @full.set_method
 def jvp(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.float32):
-    out = slope.M().backend.run_impl(
-        self, shape=shape, fill_value=fill_value, dtype=dtype
-    )
+    out = slope.M().backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
@@ -923,7 +892,5 @@ def T(self, cts, *, start, stop, stride=None, dtype=BaseArray.float32):
 
 
 @arange.set_method
-def void_run(
-    self, *, start, stop, stride=None, dtype=BaseArray.float32
-) -> List[VoidArray]:
+def void_run(self, *, start, stop, stride=None, dtype=BaseArray.float32) -> List[VoidArray]:
     return [VoidArray(tuple((stop - start) * stride), dtype)]

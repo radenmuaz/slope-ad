@@ -45,9 +45,7 @@ def mnist_raw():
     def parse_images(filename):
         with gzip.open(filename, "rb") as fh:
             _, num_data, rows, cols = struct.unpack(">IIII", fh.read(16))
-            return np.array(array.array("B", fh.read()), dtype=np.uint8).reshape(
-                num_data, rows, cols
-            )
+            return np.array(array.array("B", fh.read()), dtype=np.uint8).reshape(num_data, rows, cols)
 
     for filename in [
         "train-images-idx3-ubyte.gz",
@@ -123,9 +121,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield snp.array(train_images[batch_idx]), snp.array(
-                    train_labels[batch_idx]
-                )
+                yield snp.array(train_images[batch_idx]), snp.array(train_labels[batch_idx])
 
     batches = data_stream()
 

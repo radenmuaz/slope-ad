@@ -64,12 +64,9 @@ def rsqrt(x):
 
 @procedure_set.register()
 def cos(x):
-    return ((math.pi / 2) - x).sin()
+    # return ((math.pi / 2) - x).sin()
+    return x.sin()
 
-
-# @procedure_set.register()
-# def cos(x):
-#     return x.sin()
 
 
 @procedure_set.register()
@@ -150,9 +147,7 @@ def __getitem__(
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
-        raise IndexError(
-            f"index {e} is out of bounds for dimension {i} with size {x.shape[i]}"
-        )
+        raise IndexError(f"index {e} is out of bounds for dimension {i} with size {x.shape[i]}")
 
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     count = defaultdict(list)
@@ -165,9 +160,7 @@ def __getitem__(
         raise IndexError("an index can only have a single ellipsis ('...')")
 
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
-    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice(None)] * (
-        len(x.shape) - num_slices
-    )
+    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice(None)] * (len(x.shape) - num_slices)
 
     valid_slices = [v for v in orig_slices if v is not None]
     valid_slices = [
@@ -180,35 +173,22 @@ def __getitem__(
     ]
 
     start, stop, strides = (
-        zip(*y)
-        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)])
-        else ((), (), ())
+        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)]) else ((), (), ())
     )
-    new_slice = tuple(
-        (s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides)
-    )
-    sliced_tensor = x.slice(new_slice).flip(
-        axis=[i for i, s in enumerate(strides) if s < 0]
-    )
+    new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
+    sliced_tensor = x.slice(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
         strides = tuple(abs(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
-            tuple(
-                (0, s - (dim_sz % s) if dim_sz % s != 0 else 0)
-                for s, dim_sz in zip(strides, sliced_tensor.shape)
-            )
+            tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))
         )
         # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-        reshaped_tensor = padded_tensor.reshape(
-            flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-        )
+        reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.slice(
-            tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
-        )
+        sliced_tensor = reshaped_tensor.slice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i, s in enumerate(orig_slices):
@@ -228,8 +208,7 @@ def __getitem__(
     if tensors:  # Fancy/tensor indexing
         # normalize idx
         idx = [
-            t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t
-            for d, t in zip(dim, tensors)
+            t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)
         ]  # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
         max_dim = max(i.ndim for i in idx)
         # compute sum_dim, arange, and idx
@@ -261,20 +240,14 @@ def __getitem__(
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx
-        ret = ret.reshape(
-            *ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :]
-        )
+        ret = ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
         # iteratively fancy index
         for a, i, sd in zip(arange, idx, sum_dim):
             ret = (a == i).mul(ret).sum(sd)
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret = ret.transpose(
-                ret_dims[dim[0] : dim[0] + max_dim]
-                + ret_dims[: dim[0]]
-                + ret_dims[dim[0] + max_dim :]
-            )
+            ret = ret.transpose(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
@@ -308,13 +281,9 @@ def slice(x, arg):
 @procedure_set.register()
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    padding = tuple(
-        [(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)]
-    )
+    padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(padding, constant_values=value)
-    slc = tuple(
-        [(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)]
-    )
+    slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
     x = x.slice(slc)
     return x
 
@@ -322,17 +291,13 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
 @procedure_set.register()
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(
-        s >= i for s, i in zip(x.shape, idx.shape)
-    ), "all dim of idx.shape must be smaller than x.shape"
+    assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
         dim += x.ndim
     idx = idx.swapaxes(ax1=dim, ax2=0).expand_dims(-1)
     permarg = list(range(x.ndim))
     permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
-        if dim != 0
-        else permarg[1:] + [permarg[0]]
+        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     )
     return (
         (
@@ -375,20 +340,14 @@ def repeat(x, repeats):
 @procedure_set.register()
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
-    slice_params = [
-        [slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)
-    ]
+    slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
     return [x[tuple(sl)] for sl in slice_params]
 
 
 @procedure_set.register()
 def squeeze(x, dim=None):
     if dim is None:
-        return (
-            x
-            if 1 not in x.shape
-            else x.reshape(*[size for size in x.shape if size != 1])
-        )
+        return x if 1 not in x.shape else x.reshape(*[size for size in x.shape if size != 1])
     if dim <= 0 and x.ndim == 0:
         return x  # This is to match PyTorch behavior
     if not -x.ndim <= dim < x.ndim:
@@ -397,11 +356,7 @@ def squeeze(x, dim=None):
         )
     if dim < 0:
         dim += x.ndim
-    return (
-        x
-        if x.shape[dim] != 1
-        else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
-    )
+    return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
 
 
 @procedure_set.register()
@@ -449,9 +404,7 @@ def _pool(
 ):
     assert len(x.shape) >= len(k_), f"can't pool {x.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
-    assert len(k_) == len(s_) and len(k_) == len(
-        d_
-    ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
+    assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     slc_prefix, prefix, i_ = (
         [(0, x) for x in x.shape[0 : -len(k_)]],
         x.shape[0 : -len(k_)],
@@ -459,31 +412,18 @@ def _pool(
     )
     if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
         o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-        e_ = [
-            math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
-        ]  # expands such that we don't need padding
+        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
         xup = xup.broadcast((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
         # slide by dilation
-        xup = xup.padslice(
-            slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)]
-        )
-        xup = xup.reshape(
-            (*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_)))
-        )
-        xup = xup.padslice(
-            slc_prefix
-            + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
-        )
+        xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
+        xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
         # handle stride, and permute to move reduce to the end
-        xup = xup.reshape(
-            (*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_)))
-        )
-        xup = xup.padslice(
-            slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
-        )
+        xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
         return xup.transpose(
             (
@@ -496,9 +436,7 @@ def _pool(
     o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
     xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
-    xup = xup.padslice(
-        (slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_)))
-    )
+    xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
     return xup.transpose(
         (
             *range(len(prefix)),
@@ -511,26 +449,24 @@ def _pool(
 # NOTE: these work for more than 2D
 @procedure_set.register()
 def avg_pool2d(x, kernel_size=(2, 2), stride=None):
-    return x._pool(
-        make_pair(kernel_size), stride if stride is not None else kernel_size
-    ).mean(axis=tuple(range(0 - len(make_pair(kernel_size)), 0)))
+    return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
+        axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+    )
 
 
 @procedure_set.register()
 def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
-    return x._pool(
-        make_pair(kernel_size), stride if stride is not None else kernel_size, dilation
-    ).max(axis=tuple(range(0 - len(make_pair(kernel_size)), 0)))
+    return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
+        axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+    )
 
 
 @procedure_set.register()
-def conv_transpose2d(
-    x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0
-):
+def conv_transpose2d(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
-    x, w = x, weight.reshape(
-        groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]
-    ).transpose(0, 2, 1, *trailing).flip(trailing)
+    x, w = x, weight.reshape(groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]).transpose(
+        0, 2, 1, *trailing
+    ).flip(trailing)
     stride = make_pair(stride, len(HW))
     if any(s > 1 for s in stride):
         x = x.reshape(*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:]))
@@ -580,11 +516,7 @@ def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     padding_ = (
         [padding] * 2 * len(HW)
         if isinstance(padding, int)
-        else (
-            padding
-            if len(padding) == 2 * len(HW)
-            else [p for p in padding for _ in range(2)][::-1]
-        )
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
     # x = x.pad2d(padding_)
     x = x.pad(padding_)
@@ -623,11 +555,7 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     padding_ = (
         [padding] * 2 * len(HW)
         if isinstance(padding, int)
-        else (
-            padding
-            if len(padding) == 2 * len(HW)
-            else [p for p in padding for _ in range(2)][::-1]
-        )
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
 
     # x = x.pad2d(padding_)._pool(
@@ -682,8 +610,7 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
             [
                 [
                     padding_[i * 2],
-                    padding_[i * 2 + 1]
-                    + (-(dim + sum(padding_[i * 2 : (i + 1) * 2]) - 2) % 4),
+                    padding_[i * 2 + 1] + (-(dim + sum(padding_[i * 2 : (i + 1) * 2]) - 2) % 4),
                 ]
                 for i, dim in enumerate(x.shape[-len(HW) :])
             ],
@@ -704,14 +631,10 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
 
     # compute 6x6 winograd tiles: GgGt, BtdB
     gfactors = (
-        apply_matrix(winograd_G, g)
-        .contiguous()
-        .reshape(*HWI, 1, groups, rcout, cin, *([1] * len(tyx)))
+        apply_matrix(winograd_G, g).contiguous().reshape(*HWI, 1, groups, rcout, cin, *([1] * len(tyx)))
     )  # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
     dfactors = (
-        apply_matrix(winograd_Bt, d)
-        .contiguous()
-        .reshape(*HWI, bs, groups, 1, cin, *tyx)
+        apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)
     )  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
 
     ret = apply_matrix(
@@ -729,21 +652,11 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     )  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
 
     return (
-        (
-            ret
-            if bias is None
-            else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))
-        )
+        (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))])))
         .contiguous()
         .contiguous_backward()
     )
 
 
 def cumsum(x, axis: int = 0):
-    return (
-        x.swapaxes(axis, -1)
-        .pad((x.shape[axis] - 1, 0))
-        ._pool((x.shape[axis],))
-        .sum(-1)
-        .swapaxes(axis, -1)
-    )
+    return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)

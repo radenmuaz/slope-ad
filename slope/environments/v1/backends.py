@@ -108,8 +108,8 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                if len(params["static_args"]) > 0:
-                    for k, v in params["static_args"]:
+                if len(params["static_kwargs"]) > 0:
+                    for k, v in params["static_kwargs"]:
                         args_str += f", {k}={v}"
                 rhs = f"{proc_name}({args_str})"
                 if len(proc_program.outs) == 1:

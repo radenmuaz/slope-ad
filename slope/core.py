@@ -605,8 +605,8 @@ class OperatorSet:
 class ProcedureSet:
     def register(self, static_argnames=()):
         def wrap(f):
-            f_procedure = f
-            # f_procedure = self.procedure(f, static_argnames)
+            # f_procedure = f
+            f_procedure = self.procedure(f, static_argnames)
             setattr(self, f.__name__, f_procedure)
             return f_procedure
 
@@ -633,27 +633,29 @@ class ProcedureSet:
             args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
             static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
 
-            args = [(static_args.pop(k) if k in static_args else arg) for k, arg in zip(args_strs, args)]
-            # if args and len(args) > len(args_strs):
-            #     args_, args = args, args[:len(args_strs)]
-            #     if static_args_strs:
-            #         new_static_args = {k: v for k, v in zip(static_args_strs, args_[len(args_strs):])}
-            #         static_args.update(new_static_args)
+            # args = [(static_args.pop(k) if k in static_args else arg) for k, arg in zip(args_strs, args)]
 
-            # elif args and len(args) <= len(args_strs):
-            #     args = [static_args.pop(k) if k in static_args else v for k, v in zip(args_strs, args)]
-            #     assert len(args) == len(args_strs)
+            if args:
+                if len(args) > len(args_strs):
+                    args, rest = args[:len(args_strs)], args[len(args_strs):]
+                    if static_args_strs:
+                        new_static_args = {k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args}
+                        static_args = {**new_static_args, **static_args}
+            else:
+                args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
+                assert len(args) == len(args_strs)
 
             M = slope.M()
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
             avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
             top_trace = M.find_top_trace(args)
-            if type(top_trace) is PartialEvalTrace and top_trace.main.global_data == "vjp":
-                breakpoint()
-                program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
-            else:
-                program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
+            # if type(top_trace) is PartialEvalTrace and top_trace.main.global_data == "vjp":
+            #     breakpoint()
+            #     program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
+            # else:
+            #     program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
+            program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
 
             args, in_tree = M.tree_flatten(args)
             outs = M.bind(
@@ -1844,22 +1846,22 @@ class Machine:
 
         return batched_f
 
-    def jvp_flat(self, f, primals, tangents):
+    def jvp_flat(self, f, primals, tangents, **static_args):
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
             tracers_in = [JVPTracerArray(trace, x, t) for x, t in list_zip(primals, tangents)]
-            outs = f(*tracers_in)
+            outs = f(*tracers_in, **static_args)
             tracers_out = [self.full_raise(trace, out) for out in outs]
             primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
         return primals_out, tangents_out
 
-    def jvp(self, f, primals, tangents):
+    def jvp(self, f, primals, tangents, **static_args):
         primals_flat, in_tree = self.tree_flatten(primals)
         tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
         f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_flat, tangents_out_flat = self.jvp_flat(f, primals_flat, tangents_flat)
+        primals_out_flat, tangents_out_flat = self.jvp_flat(f, primals_flat, tangents_flat, **static_args)
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
         tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_flat)
         return primals_out, tangents_out
@@ -2119,14 +2121,14 @@ class Machine:
         check_toposort(sorted_nodes, parents)
         return sorted_nodes
 
-    def vjp_flat(self, f, *primals_in):
+    def vjp_flat(self, f, *primals_in, **static_args):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(VoidArray.like(self.get_aval(x))) for x in primals_in
         ]
         _, tangent_pvals_in = split_half(pvals_in)
 
         def f_jvp(*primals_tangents_in):
-            primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
+            primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in), **static_args)
             return [*primals_out, *tangents_out]
 
         program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in, "vjp")
@@ -2137,10 +2139,10 @@ class Machine:
         f_vjp_flat = lambda *cts: self.run_program_transposed(program, transpose_inputs, cts)
         return primals_out_flat, f_vjp_flat
 
-    def vjp(self, f, *primals_in):
+    def vjp(self, f, *primals_in, **static_args):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat)
+        primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat, **static_args)
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
         def f_vjp(*cotangents_out):
@@ -2198,8 +2200,8 @@ class Machine:
         return trans_program, consts
 
     def grad(self, f, *, ret_fval=False, argnums=(0,)):
-        def gradfun(x, *xs):
-            y, f_vjp = self.vjp(f, x, *xs)
+        def gradfun(x, *xs, **static_args):
+            y, f_vjp = self.vjp(f, x, *xs, **static_args)
             if np.shape(y) != ():
                 raise TypeError
             x_bars = f_vjp(self.environment.ones(()))

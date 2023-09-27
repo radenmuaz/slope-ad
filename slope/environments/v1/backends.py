@@ -183,12 +183,10 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
 
     if fn_name == "main":
         if len(fn_defs) > 0:
-            code_lines = (
-            code_lines[0:1]
-            + [indent(f"float32 = np.float32", il1)] # TODO: define types
+            code_lines = (code_lines[0:1]
             + [indent(line, il0) for impl_lines in fn_defs.values() for line in impl_lines]
-            + code_lines[1:]
-        )
+            + code_lines[1:])
+        code_lines = (code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]) 
 
     print("Code:\n","\n".join(code_lines))
     return dict(code_lines=code_lines, fn_defs=fn_defs)

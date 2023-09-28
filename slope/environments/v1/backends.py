@@ -106,8 +106,7 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                         fn_defs=fn_defs,
                     )
                     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-                    proc_code_lines = proc_codegen_out["code_lines"]
-                    fn_defs[proc_key] = proc_code_lines
+                    fn_defs[proc_key] = proc_codegen_out["code_lines"]
                 else:
                     proc_code_lines = fn_defs[proc_key]
                     proc_name = proc_code_lines[0].split()[1].split("(")[0]
@@ -119,24 +118,20 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
             elif instruction.op is slope.core.jit_op:
                 params = instruction.params
                 jit_program = params["program"]
-                jit_name = f"jit_{njit}"
-                njit += 1
+                jit_name = f"jit_{len(fn_defs)}"
                 jit_codegen_out = self.codegen(
                     jit_program,
                     args,
                     fn_name=jit_name,
-                    depth=depth + 1,
+                    depth=0,
                     fn_defs=fn_defs,
                 )
-                jit_code_lines = jit_codegen_out["code_lines"]
-                fn_defs = jit_codegen_out["fn_defs"]
-                fn_defs[jit_name] = jit_code_lines
+                fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
+                fn_defs[jit_name] = jit_codegen_out["code_lines"]
 
                 args_str = ", ".join(in_vals)
-                lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+                lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{jit_name}({args_str})"
-                if len(jit_program.outs) == 1:
-                    rhs += "[0]"
             else:
                 raise
         else:

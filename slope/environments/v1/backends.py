@@ -49,6 +49,7 @@ def compile(self, codegen_out):
 @numpy_backend.set_method
 def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict()) -> List[Any]:
     print(f"\n--  {depth} Codegen program\n", program, "\n ==")
+
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
         spaces += " " * amount
@@ -92,8 +93,11 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
                 params = instruction.params
-                proc_name, proc_program = params["name"], params["program"]
-                if proc_name not in fn_defs.keys():
+                s = repr(params['static_args'])
+                proc_key = f"{params['name']}_{s}"
+                proc_program = params["program"]
+                if proc_key not in fn_defs.keys():
+                    proc_name = f"{params['name']}_{len(fn_defs)}"
                     proc_codegen_out = self.codegen(
                         proc_program,
                         args,
@@ -103,17 +107,15 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                     )
                     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
                     proc_code_lines = proc_codegen_out["code_lines"]
-                    fn_defs[proc_name] = proc_code_lines
-                    breakpoint()
+                    fn_defs[proc_key] = proc_code_lines
+                else:
+                    proc_code_lines = fn_defs[proc_key]
+                    proc_name = proc_code_lines[0].split()[1].split("(")[0]
+
 
                 args_str = ", ".join(in_vals)
-                lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                if len(params["static_kwargs"]) > 0:
-                    for k, v in params["static_kwargs"]:
-                        args_str += f", {k}={v}"
+                lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
-                if len(proc_program.outs) == 1:
-                    rhs += "[0]"
             elif instruction.op is slope.core.jit_op:
                 params = instruction.params
                 jit_program = params["program"]
@@ -183,12 +185,14 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
 
     if fn_name == "main":
         if len(fn_defs) > 0:
-            code_lines = (code_lines[0:1]
-            + [indent(line, il0) for impl_lines in fn_defs.values() for line in impl_lines]
-            + code_lines[1:])
-        code_lines = (code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]) 
+            code_lines = (
+                code_lines[0:1]
+                + [indent(line, il1) for impl_lines in fn_defs.values() for line in impl_lines]
+                + code_lines[1:]
+            )
+        code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    print("Code:\n","\n".join(code_lines))
+    print("\n-- Code:\n\n"+"\n".join(code_lines)+ "\n\n==\n")
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 

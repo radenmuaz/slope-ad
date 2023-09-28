@@ -68,7 +68,6 @@ def cos(x):
     return x.sin()
 
 
-
 @procedure_set.register()
 def tan(x):
     return x.sin() / x.cos()

@@ -381,7 +381,7 @@ class Operator:
 
         if args:
             if len(args) > len(args_strs):
-                args, rest = args[:len(args_strs)], args[len(args_strs):]
+                args, rest = args[: len(args_strs)], args[len(args_strs) :]
                 if params_strs:
                     new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
                     params = {**new_params, **params}
@@ -389,7 +389,7 @@ class Operator:
                 args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
                 assert len(args) == len(args_strs)
         return args, params
-    
+
         # if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
         #     args, rest = args[: len(args_strs)], args[len(args_strs) :]
         #     if len(params_strs) > 0:
@@ -637,9 +637,11 @@ class ProcedureSet:
 
             if args:
                 if len(args) > len(args_strs):
-                    args, rest = args[:len(args_strs)], args[len(args_strs):]
+                    args, rest = args[: len(args_strs)], args[len(args_strs) :]
                     if static_args_strs:
-                        new_static_args = {k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args}
+                        new_static_args = {
+                            k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
+                        }
                         static_args = {**new_static_args, **static_args}
             else:
                 args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
@@ -2190,7 +2192,9 @@ class Machine:
         return ret
 
     @lru_cache
-    def transpose_program(self, program: Program, undef_primals: tuple[bool, ...], static_args) -> tuple[Program, list[Any]]:
+    def transpose_program(
+        self, program: Program, undef_primals: tuple[bool, ...], static_args
+    ) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
         traceable = partial(self.run_program_transposed, program)
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]

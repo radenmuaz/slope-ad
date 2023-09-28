@@ -8,28 +8,15 @@ from slope import jit, jvp, grad
 #     z = g(y)
 #     return z
 
+
 def f(x):
-    y = x 
+    y = x
     return y
+
 
 def g(x):
     return x.cos() * 2.0
 
-
-# print(f(3.))
-# print(grad(g)(snp.array(3.)))
-
-
-# x = snp.array(1)
-# gg = slope.grad(slope.jit(g))
-# for i in range(3):
-#     print(gg(snp.array(float(i + 1))))
-#     print(slope.machine.backend.callable.cache_info())
-#     print()
-
-# def assert_allclose(*vals):
-#   for v1, v2 in zip(vals[:-1], vals[1:]):
-#     np.testing.assert_allclose(v1, v2)
 
 x = sev.array(3.0)
 x_dot = sev.array(1.0)
@@ -39,8 +26,8 @@ x_dot = sev.array(1.0)
 # ans4, _ = jvp(jit(f), (x,), (x_dot,)) #; print(f"{ans4=}")
 # print(ans1,ans2,ans3,ans4)
 
-deriv1 = grad(f)(x) #; print(f"{deriv1=}")
-# deriv2 = grad(jit(f))(x) #; print(f"{deriv2=}")
+# deriv1 = grad(f)(x)  # ; print(f"{deriv1=}")
+deriv2 = grad(jit(f))(x) #; print(f"{deriv2=}")
 # deriv3 = jit(grad(jit(f)))(x) #;print(f"{deriv3=}")
 # _, deriv4 = jvp(f, (x,), (x_dot,)) #;print(f"{deriv4=}")
 # _, deriv5 = jvp(jit(f), (x,), (x_dot,)) #;print(f"{deriv5=}")

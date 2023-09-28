@@ -625,7 +625,18 @@ class ProcedureSet:
         void_run_f = f
 
         def override_rule(f):
-            nonlocal impl_f, jvp_f, T_f, vmap_f, void_run_f
+            if f.__name__ == "jvp":
+                nonlocal jvp_f
+                jvp_f = f
+            elif f.__name__ == "T":
+                nonlocal T_f
+                T_f = f
+            elif f.__name__ == "vmap_f":
+                nonlocal vmap_f
+                vmap_f = f
+            elif f.__name__ == "void_run":
+                nonlocal void_run_f
+                void_run_f = f
 
         def f_procedured(*args, **static_args):
             nonlocal impl_f, jvp_f, T_f, vmap_f, void_run_f
@@ -633,31 +644,24 @@ class ProcedureSet:
             args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
             static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
 
-            # args = [(static_args.pop(k) if k in static_args else arg) for k, arg in zip(args_strs, args)]
-
             if args:
                 if len(args) > len(args_strs):
+                    assert static_args_strs
                     args, rest = args[: len(args_strs)], args[len(args_strs) :]
-                    if static_args_strs:
-                        new_static_args = {
-                            k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
-                        }
-                        static_args = {**new_static_args, **static_args}
+                    new_static_args = {
+                        k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
+                    }
+                    static_args = {**new_static_args, **static_args}
             else:
                 args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
-                assert len(args) == len(args_strs)
+            assert len(args) == len(args_strs)
 
             M = slope.M()
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
             avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
             top_trace = M.find_top_trace(args)
-            # if type(top_trace) is PartialEvalTrace and top_trace.main.global_data == "vjp":
-            #     breakpoint()
-            #     program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
-            # else:
-            #     program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
-            program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args)
+            program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args, name=f.__name__)
 
             args, in_tree = M.tree_flatten(args)
             outs = M.bind(
@@ -665,9 +669,6 @@ class ProcedureSet:
                 *consts,
                 *args,
                 program=program,
-                num_consts=len(consts),
-                name=f.__name__,
-                static_args=static_args,
             )
             return M.tree_unflatten(out_tree, outs)
 
@@ -679,24 +680,22 @@ procedure_op = Operator("procedure", op_type=OperatorType.Meta)
 
 
 @procedure_op.set_method
-def impl(self, *args, program, num_consts, name, static_args):
+def impl(self, *args, program):
+    num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     outs = slope.M().run_program(program, consts + args)
     return outs
 
 
 @procedure_op.set_method
-def jvp(self, primals, tangents, *, program, num_consts, name, static_args):
-    new_program, new_consts = slope.M().jvp_program(program, static_args)
+def jvp(self, primals, tangents, *, program):
+    new_program, new_consts = slope.M().jvp_program(program)
     outs = slope.M().bind(
         self,
         *new_consts,
         *primals,
         *tangents,
         program=new_program,
-        num_consts=len(new_consts),
-        name=name,
-        static_args=static_args,
     )
     n = len(outs) // 2
     primals_out, tangents_out = outs[:n], outs[n:]
@@ -704,7 +703,7 @@ def jvp(self, primals, tangents, *, program, num_consts, name, static_args):
 
 
 @procedure_op.set_method
-def void_run(self, *in_types, program, num_consts, name, static_args):
+def void_run(self, *in_types, program):
     program_type = slope.M().typecheck_program(program)
     # TODO: == operator traced as op, so disable check for now
     # if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
@@ -713,9 +712,9 @@ def void_run(self, *in_types, program, num_consts, name, static_args):
 
 
 @procedure_op.set_method
-def T(self, cts, *invals, program, num_consts, name, static_args):
+def T(self, cts, *invals, program):
     undef_primals = [type(x) is UndefPrimal for x in invals]
-    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals), static_args=static_args)
+    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
     outs = slope.M().bind(
@@ -724,28 +723,25 @@ def T(self, cts, *invals, program, num_consts, name, static_args):
         *residuals,
         *cts,
         program=transposed_program,
-        num_consts=len(new_consts),
-        name=name,
-        static_args=static_args,
     )
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
 
 @procedure_op.set_method
-def partial_run(self, trace, tracers, *, program, num_consts, name, static_args):
+def partial_run(self, trace, tracers, *, program):
     in_unknowns = [not t.pval.is_known for t in tracers]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1, num_consts=0)
+    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
     outs2 = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionProto(
         self,
         res_tracers + unknown_tracers,
-        dict(program=program2, num_consts=0, name=name, static_args=static_args),
+        dict(program=program2),
         [v.aval for v in program2.outs],
         list_map(weakref.ref, outs2),
     )
@@ -758,12 +754,15 @@ def partial_run(self, trace, tracers, *, program, num_consts, name, static_args)
 @procedure_op.set_method
 def partial_run_instruction(self, unks_in, instruction) -> Tuple["Instruction", "Instruction", List[bool], List["Var"]]:
     program = instruction.params["program"]
+    static_args = instruction.params["static_args"]
+    name = instruction.params["name"]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, unks_in)
     ins1, ins2 = partition_list(unks_in, instruction.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instruction1 = Instruction(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
-    instruction2 = Instruction(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
+    instruction1 = Instruction(self, ins1, 
+        dict(program=program1), out_binders1 + res)
+    instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
     return instruction1, instruction2, out_unknowns, res
 
 
@@ -878,6 +877,9 @@ class Program(NamedTuple):
     in_binders: Any
     instructions: Tuple[Instruction]
     outs: Any
+    num_consts: int = 0
+    static_args: Any = ()
+    name: str = "my_program"
 
     def __hash__(self):
         return hash(repr(self))
@@ -1011,8 +1013,9 @@ jit_op = Operator("jit_op", op_type=OperatorType.Meta)
 
 
 @jit_op.set_method
-def impl(self, *args, program, num_consts):
+def impl(self, *args, program):
     hashed_program = Hashed(program)
+    num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
     jit_fn = slope.M().backend.gen_jit_fn(hashed_program, hashed_consts)
@@ -1026,7 +1029,7 @@ def reorg_args(self, args, params):
 
 
 @jit_op.set_method
-def jvp(self, primals, tangents, *, program, num_consts):
+def jvp(self, primals, tangents, *, program):
     new_program, new_consts = slope.M().jvp_program(program)
     outs = slope.M().bind(
         self,
@@ -1034,7 +1037,6 @@ def jvp(self, primals, tangents, *, program, num_consts):
         *primals,
         *tangents,
         program=new_program,
-        num_consts=len(new_consts),
     )
     n = len(outs) // 2
     primals_out, tangents_out = outs[:n], outs[n:]
@@ -1042,7 +1044,7 @@ def jvp(self, primals, tangents, *, program, num_consts):
 
 
 @jit_op.set_method
-def void_run(self, *in_types, program, num_consts):
+def void_run(self, *in_types, program):
     program_type = slope.M().typecheck_program(program)
     # if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
     #     breakpoint()
@@ -1051,7 +1053,7 @@ def void_run(self, *in_types, program, num_consts):
 
 
 @jit_op.set_method
-def T(self, cts, *invals, program, num_consts):
+def T(self, cts, *invals, program):
     undef_primals = [type(x) is UndefPrimal for x in invals]
     transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
@@ -1062,26 +1064,25 @@ def T(self, cts, *invals, program, num_consts):
         *residuals,
         *cts,
         program=transposed_program,
-        num_consts=len(new_consts),
     )
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
 
 @jit_op.set_method
-def partial_run(self, trace, tracers, *, program, num_consts):
+def partial_run(self, trace, tracers, *, program):
     in_unknowns = [not t.pval.is_known for t in tracers]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1, num_consts=0)
+    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
-    outs2 = [PartialEvalTracerArray(slope.M, trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
+    outs2 = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionProto(
         self,
         res_tracers + unknown_tracers,
-        dict(program=program2, num_consts=0),
+        dict(program=program2),
         [v.aval for v in program2.outs],
         list_map(weakref.ref, outs2),
     )
@@ -1098,8 +1099,8 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
     ins1, ins2 = partition_list(unks_in, instruction.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instruction1 = Instruction(self, ins1, dict(program=program1, num_consts=0), out_binders1 + res)
-    instruction2 = Instruction(self, res + ins2, dict(program=program2, num_consts=0), out_binders2)
+    instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
+    instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
     return instruction1, instruction2, out_unknowns, res
 
 
@@ -1508,12 +1509,12 @@ class ProgramBuilder:
         self.constvals[var] = val
         return var
 
-    def build(self, in_tracers: Any, out_tracers: Any) -> Tuple[Program, List[Any]]:
+    def build(self, in_tracers: Any, out_tracers: Any, static_args, name) -> Tuple[Program, List[Any]]:
         constvars, constvals = unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
-        program = Program(in_binders, self.instructions, out_vars)
+        program = Program(in_binders, self.instructions, out_vars, 0, static_args, name)
         slope.M().typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals
@@ -1534,7 +1535,8 @@ class ProgramBuilder:
             for instruction in program.instructions
         ]
         new_outs = [literals.get(x, x) for x in program.outs]
-        new_program = Program(new_const_binders + other_binders, new_instructions, new_outs)
+        new_program = Program(new_const_binders + other_binders, new_instructions, new_outs, len(new_consts), 
+                              program.static_args, program.name)
         slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
 
@@ -1874,7 +1876,7 @@ class Machine:
         return self.vmap(pushfwd, (0,))(vecs_in)
 
     @lru_cache
-    def make_program(self, f: Callable, *avals_in: VoidArray, static_args) -> Tuple[Program, List[Any], PyTreeDef]:
+    def make_program(self, f: Callable, *avals_in: VoidArray, static_args, name) -> Tuple[Program, List[Any], PyTreeDef]:
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
 
@@ -1885,7 +1887,7 @@ class Machine:
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in, **{k: v for k, v in static_args})
                 tracers_out = [self.full_raise(trace, out) for out in outs]
-                program, consts = builder.build(tracers_in, tracers_out)
+                program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
         return program, consts, out_tree_store()
 
@@ -1897,7 +1899,8 @@ class Machine:
             return self.jvp(self.program_as_fun(program), primals, tangents)
 
         in_avals = self.tree_map(lambda v: v.aval, program.in_binders)
-        new_program, new_consts, _ = self.make_program(jvp_traceable, *in_avals, *in_avals, static_args=static_args)
+        new_program, new_consts, _ = self.make_program(jvp_traceable, *in_avals, *in_avals, static_args=static_args,
+                                                      name=f"{program.name}_jvp")
         return new_program, new_consts
 
     def partial_run_flat(
@@ -1916,10 +1919,7 @@ class Machine:
         return program, pvals_out, consts
 
     def partial_run_program(
-        self,
-        program: Program,
-        in_unknowns: List[bool],
-        instantiate: Optional[List[bool]] = None,
+        self, program: Program, in_unknowns: List[bool], instantiate: Optional[List[bool]] = None
     ) -> Tuple[Program, Program, List[bool], int]:
         environment: Dict[Var, bool] = {}
         residuals: Set[Var] = set()
@@ -1929,11 +1929,6 @@ class Machine:
 
         def write(unk: bool, v: Var) -> None:
             environment[v] = unk
-
-        def new_res(x: Atom) -> Atom:
-            if type(x) is Var:
-                residuals.add(x)
-            return x
 
         instructions1, instructions2 = [], []
         list_map(write, in_unknowns, program.in_binders)
@@ -1968,8 +1963,8 @@ class Machine:
         ins1, ins2 = partition_list(in_unknowns, program.in_binders)
         outs1, outs2 = partition_list(out_unknowns, program.outs)
 
-        program1 = Program(ins1, instructions1, outs1 + residuals)
-        program2 = Program(residuals + ins2, instructions2, outs2)
+        program1 = Program(ins1, instructions1, outs1 + residuals, 0, program.static_args, f"{program.name}_partial1")
+        program2 = Program(residuals + ins2, instructions2, outs2, 0, program.static_args, f"{program.name}_partial2")
         self.typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, program2)
 
         return program1, program2, out_unknowns, num_res
@@ -2155,7 +2150,7 @@ class Machine:
 
         return primals_out, f_vjp
 
-    def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
+    def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
         primal_environment: Dict[Var, Any] = {}
         ct_environment: Dict[Var, Any] = {}
 
@@ -2193,12 +2188,13 @@ class Machine:
 
     @lru_cache
     def transpose_program(
-        self, program: Program, undef_primals: tuple[bool, ...], static_args
+        self, program: Program, undef_primals: tuple[bool, ...]
     ) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
         traceable = partial(self.run_program_transposed, program)
         args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
-        trans_program, consts, _ = self.make_program(traceable, tuple(args), tuple(avals_out), static_args=static_args)
+        trans_program, consts, _ = self.make_program(traceable, tuple(args), tuple(avals_out), static_args=program.static_args,
+                                                     name=f"{program.name}_T")
         self.typecheck_program(trans_program)
 
         return trans_program, consts
@@ -2232,7 +2228,7 @@ class Machine:
                 if k not in static_argnames:
                     raise TypeError("keyword args reserved for static_args")
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
-            program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args)
+            program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=f"{f.__name__}_jit")
 
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(
@@ -2240,26 +2236,24 @@ class Machine:
                 *consts,
                 *args,
                 program=program,
-                num_consts=len(consts),
             )
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted
 
-    def jit_partial_run(self, trace, tracers, *, program, num_consts):
-        del num_consts  # Unused
+    def jit_partial_run(self, trace, tracers, *, program):
         in_unknowns = [not t.pval.is_known for t in tracers]
         program1, program2, out_unknowns, num_res = self.partial_run_program(program, in_unknowns)
         known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
         known_vals = [t.pval.const for t in known_tracers]
-        outs1_res = jit_op(*known_vals, program=program1, num_consts=0)
+        outs1_res = jit_op(*known_vals, program=program)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
         outs2 = [PartialEvalTracerArray(trace, PartialVal.unknown(v.aval), None) for v in program2.outs]
         proto = InstructionProto(
             jit_op,
             res_tracers + unknown_tracers,
-            dict(program=program2, num_consts=0),
+            dict(program=program2),
             [v.aval for v in program2.outs],
             map(weakref.ref, outs2),
         )

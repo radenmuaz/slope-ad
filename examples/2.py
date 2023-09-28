@@ -16,26 +16,28 @@ def f(x):
 
 def g(x):
     return x.cos() * 2.0
+
+
 # f=g
 
 x = sev.array(3.0)
 x_dot = sev.array(1.0)
 
-# ans1 = f(x) #; print(f"{ans1=}")
-# ans2 = jit(f)(x) # BUG: jit cache not cleared when jvp jit ;# print(f"{ans2=}")
-# ans3, _ = jvp(f, (x,), (x_dot,)) #; print(f"{ans3=}")
-# ans4, _ = jvp(jit(f), (x,), (x_dot,)) #; print(f"{ans4=}")
+# ans1 = f(x)
+# ans2 = jit(f)(x)#; print(ans2)
+# ans3, _ = jvp(f, (x,), (x_dot,)); print(f"{ans3=}")
+# ans4, _ = jvp(jit(f), (x,), (x_dot,)); print(f"{ans4=}")
 # print(ans1,ans2,ans3,ans4)
 
-deriv1 = grad(f)(x)  # ; print(f"{deriv1=}")
-deriv2 = grad(jit(f))(x) #; print(f"{deriv2=}")
+deriv1 = grad(f)(x)#; print(f"{deriv1=}")
+deriv2 = grad(jit(f))(x)#; print(f"{deriv2=}")
 deriv3 = jit(grad(jit(f)))(x) #;print(f"{deriv3=}")
 _, deriv4 = jvp(f, (x,), (x_dot,)) #;print(f"{deriv4=}")
 _, deriv5 = jvp(jit(f), (x,), (x_dot,)) #;print(f"{deriv5=}")
 deriv6 = jit(grad(f))(x) #; print(f"{deriv6=}")
 print(deriv1, deriv2, deriv3, deriv4, deriv5, deriv6)
 
-# hess1 = grad(grad(f))(x)
+# hess1 = grad(grad(g))(x)
 # hess2 = grad(grad(jit(f)))(x)
 # hess3 = grad(jit(grad(f)))(x)
 # hess4 = jit(grad(grad(f)))(x)

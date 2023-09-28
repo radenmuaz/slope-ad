@@ -64,8 +64,8 @@ def rsqrt(x):
 
 @procedure_set.register()
 def cos(x):
-    # return ((math.pi / 2) - x).sin()
-    return x.sin()
+    return ((math.pi / 2) - x).sin()
+    # return x.sin()
 
 
 @procedure_set.register()

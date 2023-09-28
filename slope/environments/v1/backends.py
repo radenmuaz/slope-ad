@@ -92,12 +92,11 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
 
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
-                params = instruction.params
-                s = repr(params['static_args'])
-                proc_key = f"{params['name']}_{s}"
-                proc_program = params["program"]
+                proc_program = instruction.params["program"]
+                s = repr(proc_program.static_args)
+                proc_key = f"{proc_program.name}_{s}"
                 if proc_key not in fn_defs.keys():
-                    proc_name = f"{params['name']}_{len(fn_defs)}"
+                    proc_name = f"{proc_program.name}_{len(fn_defs)}"
                     proc_codegen_out = self.codegen(
                         proc_program,
                         args,
@@ -111,27 +110,24 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                     proc_code_lines = fn_defs[proc_key]
                     proc_name = proc_code_lines[0].split()[1].split("(")[0]
 
-
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
             elif instruction.op is slope.core.jit_op:
-                params = instruction.params
-                jit_program = params["program"]
-                jit_name = f"jit_{len(fn_defs)}"
+                jit_program =  instruction.params["program"]
                 jit_codegen_out = self.codegen(
                     jit_program,
                     args,
-                    fn_name=jit_name,
+                    fn_name=program.name,
                     depth=0,
                     fn_defs=fn_defs,
                 )
                 fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-                fn_defs[jit_name] = jit_codegen_out["code_lines"]
+                fn_defs[program.name] = jit_codegen_out["code_lines"]
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                rhs = f"{jit_name}({args_str})"
+                rhs = f"{program.name}({args_str})"
             else:
                 raise
         else:
@@ -155,7 +151,7 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                     def_str = impl_lines[0]
                     impl_lines[0] = f"def {instruction.op.name}{def_str[def_str.find('('):]}"
                     impl_lines[0] = impl_lines[0].replace("self, ", "")
-                    fn_defs[instruction.op.name] = [indent(l, il1) for l in impl_lines]
+                    fn_defs[instruction.op.name] = impl_lines
             else:
                 sig = inspect.signature(impl)
                 args_strs = [
@@ -187,7 +183,7 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
             )
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    print("\n-- Code:\n\n"+"\n".join(code_lines)+ "\n\n==\n")
+    print("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n")
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 

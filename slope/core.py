@@ -754,8 +754,6 @@ def partial_run(self, trace, tracers, *, program):
 @procedure_op.set_method
 def partial_run_instruction(self, unks_in, instruction) -> Tuple["Instruction", "Instruction", List[bool], List["Var"]]:
     program = instruction.params["program"]
-    static_args = instruction.params["static_args"]
-    name = instruction.params["name"]
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, unks_in)
     ins1, ins2 = partition_list(unks_in, instruction.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
@@ -1514,7 +1512,7 @@ class ProgramBuilder:
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
-        program = Program(in_binders, self.instructions, out_vars, 0, static_args, name)
+        program = Program(in_binders, self.instructions, out_vars, len(constvals), static_args, name)
         slope.M().typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals

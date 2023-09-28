@@ -47,8 +47,8 @@ def compile(self, codegen_out):
 
 
 @numpy_backend.set_method
-def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict()) -> List[Any]:
-    print(f"\n--  {depth} Codegen program\n", program, "\n ==")
+def codegen(self, program, args, *, fn_name: str = "main",fn_defs=dict()) -> List[Any]:
+    print(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
 
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
@@ -57,21 +57,19 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
 
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
-    il0 = depth * 4  # il = indent level
-    il1 = (depth + 1) * 4
+    il1 = 4
     ncs = 0
     nxs = 0
     nzs = 0
     inb_args = []
     inb_consts = []
-    njit = 0
 
     for inb in program.in_binders:
         if type(inb.aval) is not VoidArray:
             environment[inb] = f"c{ncs}"
             inb_consts += [environment[inb]]
             ncs += 1
-        else:
+        else: 
             environment[inb] = f"x{nxs}"
             inb_args += [environment[inb]]
             nxs += 1
@@ -81,7 +79,7 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
     if inb_consts:
         fn_args_strs += f"{', '.join(inb_consts)}, "
     fn_args_strs += f"{', '.join(inb_args)}"
-    code_lines += [indent(f"def {fn_name}({fn_args_strs}):", il0)]
+    code_lines += [f"def {fn_name}({fn_args_strs}):"]
     for instruction in program.instructions:
         in_vals = list_map(lambda x: environment[x], instruction.inputs)
         in_avals = [x.aval for x in instruction.inputs]
@@ -93,6 +91,8 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
                 proc_program = instruction.params["program"]
+                if len(proc_program.instructions) == 0:
+                    continue
                 s = repr(proc_program.static_args)
                 proc_key = f"{proc_program.name}_{s}"
                 if proc_key not in fn_defs.keys():
@@ -101,7 +101,6 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                         proc_program,
                         args,
                         fn_name=proc_name,
-                        depth=0,
                         fn_defs=fn_defs,
                     )
                     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
@@ -109,25 +108,29 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
                 else:
                     proc_code_lines = fn_defs[proc_key]
                     proc_name = proc_code_lines[0].split()[1].split("(")[0]
+                
+                # if proc_name == "zeros_partial2_T_5":
+                #     breakpoint()
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
+                
             elif instruction.op is slope.core.jit_op:
                 jit_program =  instruction.params["program"]
+                jit_name = f"{program.name}_{len(fn_defs)}"
                 jit_codegen_out = self.codegen(
                     jit_program,
                     args,
-                    fn_name=program.name,
-                    depth=0,
+                    fn_name=jit_name,
                     fn_defs=fn_defs,
                 )
                 fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-                fn_defs[program.name] = jit_codegen_out["code_lines"]
+                fn_defs[jit_name] = jit_codegen_out["code_lines"]
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                rhs = f"{program.name}({args_str})"
+                rhs = f"{jit_name}({args_str})"
             else:
                 raise
         else:
@@ -173,7 +176,8 @@ def codegen(self, program, args, *, fn_name: str = "main", depth=0, fn_defs=dict
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
-
+    # if fn_name == "cos_jvp_partial2_T_jvp_partial2_T_5":
+    #     breakpoint()
     if fn_name == "main":
         if len(fn_defs) > 0:
             code_lines = (

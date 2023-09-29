@@ -93,21 +93,28 @@ def codegen(self, program, args, *, fn_name: str = "main",fn_defs=dict()) -> Lis
                 proc_program = instruction.params["program"]
                 if len(proc_program.instructions) == 0:
                     continue
-                s = repr(proc_program.static_args)
-                proc_key = f"{proc_program.name}_{s}"
-                if proc_key not in fn_defs.keys():
-                    proc_name = f"{proc_program.name}_{len(fn_defs)}"
-                    proc_codegen_out = self.codegen(
-                        proc_program,
-                        args,
-                        fn_name=proc_name,
-                        fn_defs=fn_defs,
-                    )
-                    fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-                    fn_defs[proc_key] = proc_codegen_out["code_lines"]
-                else:
-                    proc_code_lines = fn_defs[proc_key]
-                    proc_name = proc_code_lines[0].split()[1].split("(")[0]
+                proc_name = f"{proc_program.name}_{len(fn_defs)}"
+                proc_codegen_out = self.codegen(
+                    proc_program,
+                    args,
+                    fn_name=proc_name,
+                    fn_defs=fn_defs,
+                )
+                fn_defs[proc_name] = proc_codegen_out["code_lines"]
+                fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
+                # if proc_key not in fn_defs.keys():
+                #     proc_name = f"{proc_program.name}_{len(fn_defs)}"
+                #     proc_codegen_out = self.codegen(
+                #         proc_program,
+                #         args,
+                #         fn_name=proc_name,
+                #         fn_defs=fn_defs,
+                #     )
+                #     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
+                #     fn_defs[proc_key] = proc_codegen_out["code_lines"]
+                # else:
+                #     proc_code_lines = fn_defs[proc_key]
+                #     proc_name = proc_code_lines[0].split()[1].split("(")[0]
                 
                 # if proc_name == "zeros_partial2_T_5":
                 #     breakpoint()

@@ -345,17 +345,20 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta):
+    def __init__(self, name, op_type=OperatorType.Meta, is_multi_outs=False):
         self.name = name
         self.op_type = op_type
+        self.is_multi_outs = is_multi_outs
 
     def args_fixer(self, *args, **params):
         return args, params
 
-    def __call__(self, *args, **params):
-        args, params = self.reorg_args(args, params)
+    def __call__(self, *args_, **params_):
+        args, params = self.reorg_args(args_, params_)
         args, params = self.args_fixer(*args, **params)
-        return slope.M().bind1(self, *args, **params)
+        if self.is_multi_outs:
+            return slope.M().bind(self, *args, **params)
+        return slope.M().bind1(self, *args, **params) 
 
     def __repr__(self) -> str:
         return f"Operator <{self.name}>"
@@ -373,6 +376,7 @@ class Operator:
         raise NotImplementedError
 
     def reorg_args(self, args, params):
+        args_, params_ = args, params
         sig = inspect.signature(self.void_run)
         args_strs = [
             k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
@@ -389,25 +393,6 @@ class Operator:
                 args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
                 assert len(args) == len(args_strs)
         return args, params
-
-        # if len(args) > len(args_strs) and len(args) != 0:  # and len(args_strs) != 0:
-        #     args, rest = args[: len(args_strs)], args[len(args_strs) :]
-        #     if len(params_strs) > 0:
-        #         new_params = {}
-        #         for i, rest_arg in enumerate(rest):
-        #             k = params_strs[i]
-        #             assert k not in params.keys()
-
-        #             new_params[k] = rest_arg
-        #         params = {**new_params, **params}
-        # elif len(args) <= len(args_strs):
-        #     args = list(args)
-        #     for i, k in enumerate(args_strs):
-        #         if k in params.keys():
-        #             args.insert(i, params[k])
-        #             del params[k]
-        #     assert len(args) == len(args_strs)
-        # return args, params
 
     def partial_run(self, trace, tracers, **params):
         tracers_in = [trace.instantiate_const(t) for t in tracers]
@@ -1266,7 +1251,10 @@ class Backend:
         else:
 
             def extract_arg(a):
-                return a.val if isinstance(a, Array) else self.dtype_map[a] if isinstance(a, DType) else a
+                return (a.val if isinstance(a, Array) 
+                        else self.dtype_map[a] if isinstance(a, DType)
+                        else tuple(extract_arg(aa) for aa in a) if type(a) in (list, tuple)
+                        else a)
 
             args = tuple([extract_arg(a) for a in args])
             params = {k: extract_arg(v) for k, v in params.items()}
@@ -1302,8 +1290,8 @@ class Trace:
 class EvalTrace(Trace):
     pure = lift = lambda self, x: x
 
-    def run_op(self, op, args, params):
-        args, params = op.reorg_args(args, params)
+    def run_op(self, op, args_, params_):
+        args, params = op.reorg_args(args_, params_)
         args, params = op.args_fixer(*args, **params)
         ret = slope.M().backend.run_impl(op, *args, **params)
         if op.op_type is not OperatorType.Meta:

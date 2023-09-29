@@ -339,8 +339,8 @@ def f(self, x, *, starts, limits, strides):
 
 
 @numpy_backend.set_impl(operator_set.concatenate)
-def f(self, xs, *, axes):
-    return np.concatenate(xs, axes)
+def f(self, xs, *, axis):
+    return np.concatenate(xs, axis)
 
 
 @numpy_backend.set_impl(operator_set.transpose)

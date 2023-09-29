@@ -692,24 +692,28 @@ def T(cts, *, axes):
 
 
 concatenate = Operator.shape("concatenate")
-cat = concatenate
 operator_set.register(concatenate)
 operator_set.alias(concatenate, "cat")
 
+@concatenate.set_method
+def args_fixer(self, xs, *, axis=0):
+    return (xs,), dict(axis=axis)
+
+
 
 @concatenate.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, axis):
+def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
     raise NotImplementedError
 
 
 @concatenate.set_method
-def jvp(primals, tangents, *, axis):
+def jvp(primals, tangents, *, axis=0):
     (xs,), (xs_dot,) = primals, tangents
     return [concatenate(xs, axis=axis)], [concatenate(xs_dot, axis=axis)]
 
 
 @concatenate.set_method
-def void_run(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
+def void_run(self, xs: VoidArray, *, axis=0) -> List[VoidArray]:
     if not xs:
         msg = "concatenate expects at least one Operand, got 0."
         raise TypeError(msg)
@@ -735,7 +739,7 @@ def void_run(self, xs: VoidArray, *, axis: Sequence[int]) -> List[VoidArray]:
 
 
 @concatenate.set_method
-def T(cts, xs, *, axis):
+def T(cts, xs, *, axis=0):
     (z,) = cts
     x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:

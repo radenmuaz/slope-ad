@@ -255,7 +255,8 @@ operator_set.register(div)
 @div.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
-    return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]  # bug: power returns float64
+    return [x / y], [(x_dot / y) + (-y_dot * x * 1/(y*y))]
+    # return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
 
 
 @div.set_method
@@ -325,22 +326,12 @@ max = Operator.reduce("max")
 operator_set.register(max)
 
 
-@max.set_method
-def args_fixer(self, x, *, axes=None, keepdims=None):
-    if isinstance(axes, int):
-        axes = (axes,)
-    elif axes is None:
-        axes = tuple(range((x.ndim)))
-    else:
-        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-    return (x,), dict(axes=axes, keepdims=keepdims)
-
 
 @max.set_method
-def jvp(self, primals, tangents, *, axes=None, keepdims=False):
+def jvp(self, primals, tangents, *, axes=(), keepdims=False):
     (x,), (x_dot,) = primals, tangents
     run_out = x.max(axes, keepdims)
-    locs = x.equal(run_out.broadcast_in_dim(x.shape, None if keepdims else axes))
+    locs = x.equal(run_out.broadcast_in_dim(x.shape, () if keepdims else axes))
     locs = locs.convert(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
@@ -352,7 +343,7 @@ def jvp(self, primals, tangents, *, axes=None, keepdims=False):
 @max.set_method
 def T(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
-    return [z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)]
+    return [z.broadcast_in_dim(x.aval.shape, () if keepdims else axes)]
 
 
 sum = Operator.reduce("sum")
@@ -360,18 +351,7 @@ operator_set.register(sum)
 
 
 @sum.set_method
-def args_fixer(self, x, *, axes=None, keepdims=False):
-    if isinstance(axes, int):
-        axes = (axes,)
-    elif axes is None:
-        axes = tuple(range((x.ndim)))
-    else:
-        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-    return (x,), dict(axes=axes, keepdims=keepdims)
-
-
-@sum.set_method
-def jvp(self, primals, tangents, *, axes=None, keepdims=False):
+def jvp(self, primals, tangents, *, axes=(), keepdims=False):
     (x,), (x_dot,) = primals, tangents
     run_out = x.sum(axes, keepdims)
     jvp_out = x_dot.sum(axes, keepdims)
@@ -381,8 +361,7 @@ def jvp(self, primals, tangents, *, axes=None, keepdims=False):
 @sum.set_method
 def T(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
-    # if z.shape != x.aval.shape and keepdims:
-    out = z.broadcast_in_dim(x.aval.shape, None if keepdims else axes)
+    out = z.broadcast_in_dim(x.aval.shape, () if keepdims else axes)
     return [out]
 
 
@@ -433,7 +412,12 @@ def jvp(self, primals, tangents, *, shape, axes=None):
 
 
 @broadcast_in_dim.set_method
-def void_run(self, x: VoidArray, *, shape: Sequence[int], axes=None) -> List[VoidArray]:
+def void_run(self, x: VoidArray, *, shape: Sequence[int], axes=()) -> List[VoidArray]:
+    e_shape = list(x.shape)
+    for a in axes:
+        e_shape.insert(a, 1)
+    assert len(e_shape) == len(shape)
+    assert all(a <= b for a, b in zip(e_shape, shape))
     return [VoidArray(tuple(shape), x.dtype)]
 
 
@@ -444,8 +428,7 @@ def T(self, cts, x, *, shape, axes):
     if x.aval.shape == z.shape:
         return [out]
 
-    x_ndim = len(x.aval.shape)
-    if x_ndim < out.ndim:
+    if len(x.aval.shape) < out.ndim:
         b_axes = []
         for i, dim in enumerate(out.shape):
             if dim not in x.aval.shape:

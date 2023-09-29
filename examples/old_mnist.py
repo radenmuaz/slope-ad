@@ -1,5 +1,5 @@
 import slope
-from slope import numpy as snp
+from slope import environment as sev
 from slope.nn import init, layers, optim
 
 import time
@@ -78,7 +78,6 @@ def mnist(permute_train=False):
 
     return train_images, train_labels, test_images, test_labels
 
-
 @slope.jit
 def loss_fn(params, batch):
     inputs, targets = batch
@@ -92,15 +91,14 @@ def accuracy(params, batch):
     predicted_class = np.argmax(predict(params, inputs).val, axis=-1)
     return np.mean(predicted_class == target_class)
 
-
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        layers.Dense(200),
-        layers.Fn(lambda x: x.maximum(snp.zeros_like(x))),
-        # layers.Fn(lambda x: x.relu()),
+        # layers.Dense(200),
+        # layers.Fn(lambda x: x.maximum(sev.zeros_like(x))),
         layers.Dense(10),
-        layers.Fn(lambda x: x.log_softmax(axes=-1)),
+        # layers.Fn(lambda x: x.softmax(axes=-1)),
+        # layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
     out_shape, init_params = init_random_params((-1, 28 * 28))
 
@@ -121,7 +119,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield snp.array(train_images[batch_idx]), snp.array(train_labels[batch_idx])
+                yield sev.array(train_images[batch_idx]), sev.array(train_labels[batch_idx])
 
     batches = data_stream()
 
@@ -133,6 +131,7 @@ if __name__ == "__main__":
 
     def update(i, opt_state, batch):
         params = get_params(opt_state)
+        loss = loss_fn(params, batch)
         loss, (g_params, _) = g_loss_fn(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
@@ -153,8 +152,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                snp.array(test_images),
-                snp.array(test_labels),
+                sev.array(test_images),
+                sev.array(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

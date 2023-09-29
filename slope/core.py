@@ -167,17 +167,17 @@ class DType(NamedTuple):
     np: type
 
     def __repr__(self):
-        return f"DType<{self.name}>"
+        return f"{self.name}"
 
 
 class BaseArray:
     bool: Final[DType] = DType(0, 1, "bool", bool)
-    float16: Final[DType] = DType(0, 2, "half", np.float16)
-    float32: Final[DType] = DType(4, 4, "float", np.float32)
-    int8: Final[DType] = DType(0, 1, "char", np.int8)
-    int32: Final[DType] = DType(1, 4, "int", np.int32)
-    int64: Final[DType] = DType(2, 8, "int64", np.int64)
-    uint8: Final[DType] = DType(0, 1, "uchar", np.uint8)
+    float16: Final[DType] = DType(0, 2, "f16", np.float16)
+    float32: Final[DType] = DType(4, 4, "f32", np.float32)
+    int8: Final[DType] = DType(0, 1, "i8", np.int8)
+    int32: Final[DType] = DType(1, 4, "i32", np.int32)
+    int64: Final[DType] = DType(2, 8, "i64", np.int64)
+    uint8: Final[DType] = DType(0, 1, "u8", np.uint8)
 
     safe_dtypes = {
         "F16": float16,
@@ -605,7 +605,7 @@ class OperatorSet:
 class ProcedureSet:
     def register(self, static_argnames=()):
         def wrap(f):
-            # f_procedure = f
+            f_procedure = f
             f_procedure = self.procedure(f, static_argnames)
             setattr(self, f.__name__, f_procedure)
             return f_procedure
@@ -617,6 +617,7 @@ class ProcedureSet:
         setattr(self, name, fn)
 
     def procedure(self, f, static_argnames=()):
+        assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         impl_f = f
         static_argnames = static_argnames
         jvp_f = f
@@ -660,7 +661,7 @@ class ProcedureSet:
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
             avals_in = M.tree_map(lambda x: VoidArray.like(M.get_aval(x)), args)
-            top_trace = M.find_top_trace(args)
+            # top_trace = M.find_top_trace(args)
             program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args, name=f.__name__)
 
             args, in_tree = M.tree_flatten(args)
@@ -695,7 +696,7 @@ def jvp(self, primals, tangents, *, program):
         *new_consts,
         *primals,
         *tangents,
-        program=new_program,
+        program=new_program
     )
     n = len(outs) // 2
     primals_out, tangents_out = outs[:n], outs[n:]
@@ -705,9 +706,11 @@ def jvp(self, primals, tangents, *, program):
 @procedure_op.set_method
 def void_run(self, *in_types, program):
     program_type = slope.M().typecheck_program(program)
-    # TODO: == operator traced as op, so disable check for now
-    # if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-    #     raise TypeError
+    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+        for i, j in zip(program_type.in_types, in_types):
+            print(i, j, i == j)
+        breakpoint()
+        raise TypeError
     return program_type.out_types
 
 
@@ -722,7 +725,7 @@ def T(self, cts, *invals, program):
         *new_consts,
         *residuals,
         *cts,
-        program=transposed_program,
+        program=transposed_program
     )
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
@@ -734,7 +737,7 @@ def partial_run(self, trace, tracers, *, program):
     program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
+    outs1_res = slope.M().bind(self, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
     outs2 = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
@@ -898,7 +901,7 @@ class Program(NamedTuple):
         outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
         outs = ", ".join(outs)
         ret = str(
-            PPrint.pp(f"{{ lambda {in_binders} .")
+            PPrint.pp(f"{{ {self.name} {in_binders} .")
             + ((PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
         )
         return ret
@@ -1044,9 +1047,11 @@ def jvp(self, primals, tangents, *, program):
 @jit_op.set_method
 def void_run(self, *in_types, program):
     program_type = slope.M().typecheck_program(program)
-    # if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-    #     breakpoint()
-    #     raise TypeError
+    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+        for i, j in zip(program_type.in_types, in_types):
+            print(i, j, i == j)
+        breakpoint()
+        raise TypeError
     return program_type.out_types
 
 
@@ -1099,6 +1104,7 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
     instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
     instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
+    breakpoint()
     return instruction1, instruction2, out_unknowns, res
 
 
@@ -2168,10 +2174,9 @@ class Machine:
 
         list_map(write_primal, program.in_binders, args)
         list_map(write_cotangent, program.outs, cotangents)
-        # print(len(program.instructions))
-        # for i, instruction in enumerate(program.instructions[::-1]):
-        #     print(i, instruction)
+        # i = len(program.instructions)-1
         for instruction in program.instructions[::-1]:
+            # print(i, instruction); i -= 1
             primals_in = list_map(read_primal, instruction.inputs)
             cts_in = list_map(read_cotangent, instruction.out_binders)
             inp, params = primals_in, instruction.params
@@ -2220,11 +2225,28 @@ class Machine:
             return gradfun
 
     def jit(self, f, static_argnames=()):
+        assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         def f_jitted(*args, **static_args):
             static_args = tuple(static_args.items())
             for k, v in static_args:
                 if k not in static_argnames:
                     raise TypeError("keyword args reserved for static_args")
+            # sig = inspect.signature(f)
+            # args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
+            # static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
+
+            # if args:
+            #     if len(args) > len(args_strs):
+            #         assert static_args_strs
+            #         args, rest = args[: len(args_strs)], args[len(args_strs) :]
+            #         new_static_args = {
+            #             k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
+            #         }
+            #         static_args = {**new_static_args, **static_args}
+            # else:
+            #     args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
+            # assert len(args) == len(args_strs)
+
             avals_in = self.tree_map(lambda x: VoidArray.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=f"{f.__name__}_jit")
 

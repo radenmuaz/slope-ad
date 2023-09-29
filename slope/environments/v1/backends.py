@@ -306,11 +306,10 @@ def f(self, *, shape, dtype=default_dtype_backend):
 
 
 @numpy_backend.set_impl(operator_set.broadcast_in_dim)
-def f(self, x, *, shape, axes=None):
+def f(self, x, *, shape, axes=()):
     ret = x
-    if not axes is None:
-        for a in sorted(axes):
-            ret = np.expand_dims(ret, a)
+    for a in sorted(axes):
+        ret = np.expand_dims(ret, a)
     ret = np.broadcast_to(ret, shape)
     return ret
 

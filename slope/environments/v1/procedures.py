@@ -29,7 +29,7 @@ def ones(shape, dtype=BaseArray.float32):
     return sev.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
-@procedure_set.register(static_argnames=("fill_value"))
+@procedure_set.register(static_argnames=("fill_value",))
 def full_like(y, fill_value):
     return sev.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
@@ -78,7 +78,7 @@ def minimum(x, y):
     return -x.maximum(-x, -y)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames=("axes", "keepdims"))
 def min(x, axes=None, keepdims=False):
     return -((-x).max(x, axes, keepdims))
 
@@ -113,20 +113,20 @@ def T(x):
     return x.transpose(perm)
 
 
-@procedure_set.register(static_argnames=("axes"))
+@procedure_set.register(static_argnames=("axes",))
 def _softmax(x, axes):
-    m = x - x.max(axes, keepdims=True)
+    m = x# - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
     e = m.exp()
     return m, e, e.sum(axes, keepdims=True)
 
 
-@procedure_set.register(static_argnames=("axes"))
+@procedure_set.register(static_argnames=("axes",))
 def softmax(x, axes=-1):
     _, e, ss = x._softmax(axes)
     return e.div(ss)
 
 
-@procedure_set.register(static_argnames=("axes"))
+@procedure_set.register(static_argnames=("axes",))
 def log_softmax(x, axes=-1):
     m, _, ss = x._softmax(axes)
     return m - ss.log()
@@ -365,18 +365,6 @@ def expand_dims(x, dim):
     return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
 
 
-# (padding_left, padding_right, paddingp, padding_bottom)
-# @procedure_set.register()
-# def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
-#     slc = [
-#         (-p0, s + p1)
-#         for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])
-#     ][::-1]
-#     slc_ = [(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc
-#     ret = x.padslice(slc_, value=value)
-#     return ret
-
-
 @procedure_set.register()
 def swapaxes(x, ax1=1, ax2=0):
     order = list(range(len(x.shape)))
@@ -384,12 +372,12 @@ def swapaxes(x, ax1=1, ax2=0):
     return x.transpose(order)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames=("start_dim",))
 def flatten(x, start_dim=0):
     return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames=("shape",))
 def broadcast_to(x, shape):
     return x.broadcast_in_dim(shape=shape, axes=None)
 

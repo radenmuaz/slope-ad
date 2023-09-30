@@ -345,23 +345,26 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, is_multi_outs=False):
+    def __init__(self, name, op_type=OperatorType.Meta, variadic_inputs=False):
         self.name = name
         self.op_type = op_type
-        self.is_multi_outs = is_multi_outs
+        self.variadic_inputs = variadic_inputs
 
     def args_fixer(self, *args, **params):
         return args, params
 
-    def __call__(self, *args_, **params_):
-        args, params = self.reorg_args(args_, params_)
-        args, params = self.args_fixer(*args, **params)
-        if self.is_multi_outs:
-            return slope.M().bind(self, *args, **params)
-        return slope.M().bind1(self, *args, **params) 
+    def __call__(self, *args, **params):
+        if self.variadic_inputs:
+            *args, params = self.reorg_args(args, params)
+            args, params = self.args_fixer(args, **params)
+            return slope.M().bind1(self, args, **params) 
+        else:
+            args, params = self.reorg_args(args, params)
+            args, params = self.args_fixer(*args, **params)
+            return slope.M().bind1(self, *args, **params) 
 
     def __repr__(self) -> str:
-        return f"Operator <{self.name}>"
+        return f"<{self.name}>"
 
     def void_run(self, *args, **params):
         raise NotImplementedError
@@ -427,8 +430,8 @@ class Operator:
         setattr(self, method.__name__, types.MethodType(method, self))
 
     @classmethod
-    def unary(cls, name):
-        op = cls(name, OperatorType.Unary)
+    def unary(cls, name, **kwargs):
+        op = cls(name, OperatorType.Unary, **kwargs)
 
         @op.set_method
         def vmap(self, x, *, axis_size, vals_in, dims_in, **params):
@@ -447,8 +450,8 @@ class Operator:
         return op
 
     @classmethod
-    def binary(cls, name):
-        op = cls(name, OperatorType.Binary)
+    def binary(cls, name, **kwargs):
+        op = cls(name, OperatorType.Binary, **kwargs)
 
         @op.set_method
         def args_fixer(self, x, y, **params):
@@ -534,8 +537,8 @@ class Operator:
         return op
 
     @classmethod
-    def reduce(cls, name):
-        op = cls(name, OperatorType.Reduce)
+    def reduce(cls, name, **kwargs):
+        op = cls(name, OperatorType.Reduce, **kwargs)
 
         @op.set_method
         def args_fixer(self, x, *, axes=None, keepdims=False):
@@ -568,13 +571,13 @@ class Operator:
         return op
 
     @classmethod
-    def shape(cls, name):
-        op = cls(name, OperatorType.Shape)
+    def shape(cls, name, **kwargs):
+        op = cls(name, OperatorType.Shape, **kwargs)
         return op
 
     @classmethod
-    def load(cls, name):
-        op = cls(name, OperatorType.Load)
+    def load(cls, name, **kwargs):
+        op = cls(name, OperatorType.Load, **kwargs)
         return op
 
 
@@ -1245,10 +1248,11 @@ class Backend:
 
         return set_impl_
 
-    def run_impl(self, op, *args, **params):
+    def run_impl(self, op: Operator, *args, **params):
         if op.op_type is OperatorType.Meta:
             return op.impl(*args, **params)
         else:
+            args_, params_ = args, params
 
             def extract_arg(a):
                 return (a.val if isinstance(a, Array) 
@@ -1258,9 +1262,11 @@ class Backend:
 
             args = tuple([extract_arg(a) for a in args])
             params = {k: extract_arg(v) for k, v in params.items()}
-            val = self.impls[op](*args, **params)
-            if type(val) in (list, tuple):
-                return tuple(Array(ArrayBuffer(v)) for v in val)
+            # if op.variadic_inputs:
+            #     val = self.impls[op](args, **params) 
+            #     breakpoint()
+            # else:
+            val = self.impls[op](*args, **params) 
             return Array(ArrayBuffer(val))
 
 
@@ -1280,15 +1286,12 @@ class Trace:
     def pure(self, val):
         raise NotImplementedError
 
-    def lift(self, val):
-        raise NotImplementedError
-
     def run_op(self, op, tracers, params):
         raise NotImplementedError
 
 
 class EvalTrace(Trace):
-    pure = lift = lambda self, x: x
+    pure = lambda self, x: x
 
     def run_op(self, op, args_, params_):
         args, params = op.reorg_args(args_, params_)
@@ -1359,7 +1362,7 @@ class BatchTracerArray(TracerArray):
 
 
 class BatchTrace(Trace):
-    pure = lift = lambda self, val: BatchTracerArray(self, val, None)
+    pure = lambda self, val: BatchTracerArray(self, val, None)
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
@@ -1415,8 +1418,6 @@ class JVPTrace(Trace):
             val = val.pval.const
         return JVPTracerArray(self, val, slope.environment.zeros_like(val))
 
-    lift = pure
-
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
@@ -1440,14 +1441,14 @@ class ProgramTrace(Trace):
 
         return tracer
 
-    def get_or_make_const_tracer(self, val: Any) -> ProgramTracerArray:
+    def pure(self, val: Any) -> ProgramTracerArray:
+        # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
             tracer = self.builder.new_tracer(self, slope.M().get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
-    pure = lift = get_or_make_const_tracer
 
     def run_op(self, op, tracers, params):
         avals_in = [t.aval for t in tracers]
@@ -1591,10 +1592,8 @@ class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
         return PartialEvalTracerArray(self, pval, LambdaBindingProto())
 
-    def lift(self, val: Any) -> PartialEvalTracerArray:
+    def pure(self, val: Any) -> PartialEvalTracerArray:
         return PartialEvalTracerArray(self, slope.M().make_known_pval(val), None)
-
-    pure = lift
 
     def instantiate_const(self, tracer: PartialEvalTracerArray) -> PartialEvalTracerArray:
         if tracer.pval.is_unknown:
@@ -1639,9 +1638,11 @@ class Machine:
         self.environment.operator_set.register(jit_op)
         self.backend = self.environment.backends[default_backend]
 
-    def pprint_trace_stack(self):
+    def __repr__(self):
+        ret = f"{self.__class__.__name__}\n"
         for trace in self.trace_stack:
-            print(f"{trace.level}: {trace.trace_type.__name__}\t{trace.global_data=}")
+            ret += f"{trace.level}: {trace.trace_type.__name__}\t{trace.global_data=}\n"
+        return ret
 
     def make_known_pval(self, val: Any):
         return PartialVal(self.get_aval(val), val)
@@ -1725,17 +1726,29 @@ class Machine:
 
     def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
+        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         tracers = [self.full_raise(top_trace, arg) for arg in args]
         outs = top_trace.run_op(op, tracers, params)
+        # lowered = self.tree_map(self.full_lower, outs)
         lowered = [self.full_lower(out) for out in outs]
         return lowered
 
-    def bind1(self, *args, **params):
-        return self.bind(*args, **params)[0]
+    def bind1(self, op, *args, **params):
+        return self.bind(op, *args, **params)[0]
 
     def find_top_trace(self, xs) -> Trace:
+        arrs = []
+        def get_arr_from_seq(seq):
+            nonlocal arrs
+            for x in seq:
+                if type(x) in (tuple, list):
+                    get_arr_from_seq(x)
+                elif isinstance(x, TracerArray):
+                    arrs += [x]
+        get_arr_from_seq(xs)
+        arrs = tuple(arrs)
         top_main = max(
-            (x._trace.main for x in xs if isinstance(x, TracerArray)),
+            (x._trace.main for x in arrs),
             default=self.trace_stack[0],
             key=operator_py.attrgetter("level"),
         )
@@ -1750,7 +1763,7 @@ class Machine:
         if val._trace.main is trace.main:
             return val
         elif val._trace.main.level < level:
-            return trace.lift(val)
+            return trace.pure(val)
         elif val._trace.main.level > level:
             raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
         else:  # val._trace.level == level
@@ -1759,6 +1772,8 @@ class Machine:
     def full_lower(self, val: Any):
         if isinstance(val, TracerArray):
             return val.full_lower()
+        elif type(val) in (list, tuple):
+            return tuple(self.full_lower(v) for v in val)
         else:
             return val
 

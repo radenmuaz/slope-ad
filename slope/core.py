@@ -345,23 +345,20 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, variadic_inputs=False):
+    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False):
         self.name = name
         self.op_type = op_type
-        self.variadic_inputs = variadic_inputs
+        self.nary_inputs = nary_inputs
 
     def args_fixer(self, *args, **params):
         return args, params
 
     def __call__(self, *args, **params):
-        if self.variadic_inputs:
-            *args, params = self.reorg_args(args, params)
-            args, params = self.args_fixer(args, **params)
-            return slope.M().bind1(self, args, **params) 
-        else:
-            args, params = self.reorg_args(args, params)
-            args, params = self.args_fixer(*args, **params)
-            return slope.M().bind1(self, *args, **params) 
+        args_ = args
+        # if self.nary_inputs:
+        args, params = self.reorg_args(args, params)
+        args, params = self.args_fixer(*args, **params)
+        return slope.M().bind1(self, *args, **params) 
 
     def __repr__(self) -> str:
         return f"<{self.name}>"
@@ -393,7 +390,7 @@ class Operator:
                     new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
                     params = {**new_params, **params}
             else:
-                args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
+                args = tuple([params[k] if k in params else arg for k, arg in zip(args_strs, args)])
                 assert len(args) == len(args_strs)
         return args, params
 
@@ -1262,10 +1259,8 @@ class Backend:
 
             args = tuple([extract_arg(a) for a in args])
             params = {k: extract_arg(v) for k, v in params.items()}
-            # if op.variadic_inputs:
-            #     val = self.impls[op](args, **params) 
-            #     breakpoint()
-            # else:
+            # if op.nary_inputs:
+                # val = self.impls[op](args, **params) 
             val = self.impls[op](*args, **params) 
             return Array(ArrayBuffer(val))
 
@@ -1293,8 +1288,8 @@ class Trace:
 class EvalTrace(Trace):
     pure = lambda self, x: x
 
-    def run_op(self, op, args_, params_):
-        args, params = op.reorg_args(args_, params_)
+    def run_op(self, op, args, params):
+        args, params = op.reorg_args(args, params)
         args, params = op.args_fixer(*args, **params)
         ret = slope.M().backend.run_impl(op, *args, **params)
         if op.op_type is not OperatorType.Meta:
@@ -1419,8 +1414,18 @@ class JVPTrace(Trace):
         return JVPTracerArray(self, val, slope.environment.zeros_like(val))
 
     def run_op(self, op, tracers, params):
-        primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        # primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        # primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        if not op.nary_inputs:
+            primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+            primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        else:
+            M = slope.M()
+            tracers_seq, treedef = M.tree_flatten(tracers)
+            primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers_seq)
+            primals_in = M.tree_unflatten(treedef, primals_in)
+            tangents_in = M.tree_unflatten(treedef, tangents_in)
+            primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
         return [JVPTracerArray(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
 
@@ -1671,10 +1676,10 @@ class Machine:
                 flattened = itertools.chain.from_iterable(children_flat)
                 return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
             else:
-                return [x_], leaf
+                return (x_,), leaf
 
         children_iter, treedef = _tree_flatten(x)
-        return list(children_iter), treedef
+        return tuple(children_iter), treedef
 
     def tree_unflatten(self, treedef: PyTreeDef, xs: List[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
@@ -1726,11 +1731,11 @@ class Machine:
 
     def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
-        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
-        tracers = [self.full_raise(top_trace, arg) for arg in args]
+        tracers = self.tree_map(partial(self.full_raise, top_trace), args)
+        # tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
         outs = top_trace.run_op(op, tracers, params)
-        # lowered = self.tree_map(self.full_lower, outs)
-        lowered = [self.full_lower(out) for out in outs]
+        lowered = self.tree_map(self.full_lower, outs)
+        # lowered = tuple([self.full_lower(out) for out in outs])
         return lowered
 
     def bind1(self, op, *args, **params):

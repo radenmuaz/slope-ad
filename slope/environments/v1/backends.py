@@ -339,7 +339,7 @@ def f(self, x, *, starts, limits, strides):
 
 
 @numpy_backend.set_impl(operator_set.concatenate)
-def f(self, *xs, axis):
+def f(self, xs, axis):
     assert len(xs) > 1
     return np.concatenate(xs, axis)
 

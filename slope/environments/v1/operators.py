@@ -691,35 +691,35 @@ def T(cts, *, axes):
     return [z.flip(axes)]
 
 
-concatenate = Operator.shape("concatenate", variadic_inputs=True)
+concatenate = Operator.shape("concatenate", nary_inputs=True)
 operator_set.register(concatenate)
 operator_set.alias(concatenate, "cat")
 
 @concatenate.set_method
 def args_fixer(self, xs, axis=0):
-    return *xs, dict(axis=axis)
-@concatenate.set_method
+    xs = tuple(xs)
+    return (xs,), dict(axis=axis)
+    # return xs, dict(axis=axis)
 
-def reorg_args(self, args, params):
-    args_, params_ = args, params
-    sig = inspect.signature(self.void_run)
-    args_strs = [
-        k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
-    ]
-    params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
+# @concatenate.set_method
+# def reorg_args(self, args, params):
+#     args_, params_ = args, params
+#     sig = inspect.signature(self.void_run)
+#     args_strs = [
+#         k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
+#     ]
+#     params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
 
-    if args:
-        if len(args) > len(args_strs):
-            args, rest = args[: len(args_strs)], args[len(args_strs) :]
-            if params_strs:
-                new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
-                params = {**new_params, **params}
-        else:
-            args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
-            assert len(args) == len(args_strs)
-    return args, params
-
-
+#     if args:
+#         if len(args) > len(args_strs):
+#             args, rest = args[: len(args_strs)], args[len(args_strs) :]
+#             if params_strs:
+#                 new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
+#                 params = {**new_params, **params}
+#         else:
+#             args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
+#             assert len(args) == len(args_strs)
+#     return args, params
 
 @concatenate.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
@@ -728,7 +728,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
 
 @concatenate.set_method
 def jvp(self, primals, tangents, *, axis=0):
-    return [concatenate(primals, axis=axis)], [concatenate(tangents, axis=axis)]
+    return [concatenate(*primals, axis=axis)], [concatenate(*tangents, axis=axis)]
 
 
 @concatenate.set_method

@@ -697,6 +697,8 @@ operator_set.alias(concatenate, "cat")
 
 @concatenate.set_method
 def args_fixer(self, *xs, axis=0):
+    if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
+        xs = xs[0]
     xs = tuple(xs)
     return xs, dict(axis=axis)
     # return xs, dict(axis=axis)
@@ -756,12 +758,12 @@ def void_run(self, *xs: VoidArray, axis=0) -> List[VoidArray]:
 
 
 @concatenate.set_method
-def T(cts, *xs, axis=0):
+def T(self, cts, *xs, axis=0):
     (z,) = cts
     x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:
         return [None if type(o) is UndefPrimal else None for o in xs]
-    else:  # TODO: replace numpy Ops with pure Python
+    else:  # TODO: replace numpy with pure Python
         limit_points = np.cumsum([shape[axis] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
         limits = np.tile(z.shape, (len(xs), 1)).tolist()

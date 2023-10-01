@@ -349,13 +349,13 @@ class Operator:
         self.name = name
         self.op_type = op_type
         self.nary_inputs = nary_inputs
+        if self.nary_inputs:
+            self.reorg_args = self.reorg_args_nary
 
     def args_fixer(self, *args, **params):
         return args, params
 
     def __call__(self, *args, **params):
-        args_ = args
-        # if self.nary_inputs:
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
         return slope.M().bind1(self, *args, **params) 
@@ -392,6 +392,25 @@ class Operator:
             else:
                 args = tuple([params[k] if k in params else arg for k, arg in zip(args_strs, args)])
                 assert len(args) == len(args_strs)
+        return args, params
+
+    def reorg_args_nary(self, args, params):
+        # args_, params_ = args, params
+        # sig = inspect.signature(self.void_run)
+        # args_strs = [
+        #     k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
+        # ]
+        # params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
+
+        # if args:
+        #     if len(args) > len(args_strs):
+        #         args, rest = args[: len(args_strs)], args[len(args_strs) :]
+        #         if params_strs:
+        #             new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
+        #             params = {**new_params, **params}
+        #     else:
+        #         args = tuple([params[k] if k in params else arg for k, arg in zip(args_strs, args)])
+        #         assert len(args) == len(args_strs)
         return args, params
 
     def partial_run(self, trace, tracers, **params):
@@ -1288,7 +1307,8 @@ class Trace:
 class EvalTrace(Trace):
     pure = lambda self, x: x
 
-    def run_op(self, op, args, params):
+    def run_op(self, op: Operator, args, params):
+        args_ = args
         args, params = op.reorg_args(args, params)
         args, params = op.args_fixer(*args, **params)
         ret = slope.M().backend.run_impl(op, *args, **params)
@@ -1414,18 +1434,18 @@ class JVPTrace(Trace):
         return JVPTracerArray(self, val, slope.environment.zeros_like(val))
 
     def run_op(self, op, tracers, params):
-        # primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        # primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        if not op.nary_inputs:
-            primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-            primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        else:
-            M = slope.M()
-            tracers_seq, treedef = M.tree_flatten(tracers)
-            primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers_seq)
-            primals_in = M.tree_unflatten(treedef, primals_in)
-            tangents_in = M.tree_unflatten(treedef, tangents_in)
-            primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        # if not op.nary_inputs:
+        #     primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        #     primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
+        # else:
+        #     M = slope.M()
+        #     tracers_seq, treedef = M.tree_flatten(tracers)
+        #     primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers_seq)
+        #     primals_in = M.tree_unflatten(treedef, primals_in)
+        #     tangents_in = M.tree_unflatten(treedef, tangents_in)
+        #     primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
         return [JVPTracerArray(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
 
@@ -1457,6 +1477,7 @@ class ProgramTrace(Trace):
 
     def run_op(self, op, tracers, params):
         avals_in = [t.aval for t in tracers]
+        avals_in = slope.M().tree_map(lambda x: x.aval, tracers)
         avals_out = op.void_run(*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
@@ -1731,11 +1752,11 @@ class Machine:
 
     def bind(self, op, *args, **params):
         top_trace = self.find_top_trace(args)
-        tracers = self.tree_map(partial(self.full_raise, top_trace), args)
-        # tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
+        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
+        tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
         outs = top_trace.run_op(op, tracers, params)
-        lowered = self.tree_map(self.full_lower, outs)
-        # lowered = tuple([self.full_lower(out) for out in outs])
+        # lowered = self.tree_map(self.full_lower, outs)
+        lowered = tuple([self.full_lower(out) for out in outs])
         return lowered
 
     def bind1(self, op, *args, **params):

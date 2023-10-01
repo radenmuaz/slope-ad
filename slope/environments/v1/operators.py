@@ -696,13 +696,14 @@ operator_set.register(concatenate)
 operator_set.alias(concatenate, "cat")
 
 @concatenate.set_method
-def args_fixer(self, xs, axis=0):
+def args_fixer(self, *xs, axis=0):
     xs = tuple(xs)
-    return (xs,), dict(axis=axis)
+    return xs, dict(axis=axis)
     # return xs, dict(axis=axis)
 
 # @concatenate.set_method
-# def reorg_args(self, args, params):
+# def reorg_args(self, *args, **params):
+#     return args, params
 #     args_, params_ = args, params
 #     sig = inspect.signature(self.void_run)
 #     args_strs = [
@@ -732,10 +733,7 @@ def jvp(self, primals, tangents, *, axis=0):
 
 
 @concatenate.set_method
-def void_run(self, xs: VoidArray, *, axis=0) -> List[VoidArray]:
-    if not xs:
-        msg = "concatenate expects at least one Operand, got 0."
-        raise TypeError(msg)
+def void_run(self, *xs: VoidArray, axis=0) -> List[VoidArray]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot concatenate arrays with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -752,13 +750,13 @@ def void_run(self, xs: VoidArray, *, axis=0) -> List[VoidArray]:
         shapes = [x.shape for x in xs]
         raise TypeError(msg.format(axis, ", ".join(map(str, shapes))))
 
-    concat_size = sum(x.shape[axis] for x in xs)
+    concat_size = sum_py(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
     return [VoidArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
 
 
 @concatenate.set_method
-def T(cts, xs, *, axis=0):
+def T(cts, *xs, axis=0):
     (z,) = cts
     x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:

@@ -155,8 +155,8 @@ class Gather(ShapeOp):
         )
 
     @staticmethod
-    def void_run(
-        x: VoidArray,
+    def typecheck(
+        x: TypecheckArray,
         idx,
         *,
         dimension_numbers,
@@ -165,7 +165,7 @@ class Gather(ShapeOp):
         indices_are_sorted,
         mode,
         fill_value,
-    ) -> List[VoidArray]:
+    ) -> List[TypecheckArray]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -450,9 +450,9 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def void_run(x: VoidArray, idx, *, axis: Sequence[int]) -> List[VoidArray]:
+    def typecheck(x: TypecheckArray, idx, *, axis: Sequence[int]) -> List[TypecheckArray]:
         shape = [x.shape[i] for i in axis]
-        return [VoidArray(shape, x.dtype)]
+        return [TypecheckArray(shape, x.dtype)]
 
     @staticmethod
     def T(

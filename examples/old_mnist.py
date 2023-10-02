@@ -78,6 +78,7 @@ def mnist(permute_train=False):
 
     return train_images, train_labels, test_images, test_labels
 
+
 @slope.jit
 def loss_fn(params, batch):
     inputs, targets = batch
@@ -90,6 +91,7 @@ def accuracy(params, batch):
     target_class = np.argmax(targets.val, axis=-1)
     predicted_class = np.argmax(predict(params, inputs).val, axis=-1)
     return np.mean(predicted_class == target_class)
+
 
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(

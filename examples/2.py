@@ -17,6 +17,7 @@ def f(x):
 def g(x):
     return x.cos() * 2.0
 
+
 x = sev.array(3.0)
 x_dot = sev.array(1.0)
 

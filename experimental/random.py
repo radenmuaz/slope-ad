@@ -1,6 +1,6 @@
 import slope
 from slope import base_ops
-from slope.array_shape import VoidArray
+from slope.array_shape import TypecheckArray
 import numpy as np
 
 from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple
@@ -14,7 +14,7 @@ class RandomBitGenerator(base_ops.Operator):
     def run(key, *, shape, dtype, algorithm):
         return []
 
-    def void_run(key, *, shape, dtype, algorithm):
+    def typecheck(key, *, shape, dtype, algorithm):
         return [key.shape, key.shape]
 
 

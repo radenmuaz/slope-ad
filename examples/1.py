@@ -17,7 +17,8 @@ def g(x):
 
 x = sev.ones(())
 x_dot = sev.ones(())
-out = f(x); print(out)
+out = f(x)
+print(out)
 out = slope.jit(f)(x)
 # print(out)
 

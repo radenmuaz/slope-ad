@@ -1,6 +1,6 @@
 import slope
 from slope.environments.v1.operators import operator_set
-from slope.core import Backend, BaseArray, VoidArray, list_zip, list_map
+from slope.core import Backend, BaseArray, TypecheckArray, list_zip, list_map
 import numpy as np
 from typing import (
     List,
@@ -47,7 +47,7 @@ def compile(self, codegen_out):
 
 
 @numpy_backend.set_method
-def codegen(self, program, args, *, fn_name: str = "main",fn_defs=dict()) -> List[Any]:
+def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
     print(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
 
     def indent(code_line, amount):
@@ -65,11 +65,11 @@ def codegen(self, program, args, *, fn_name: str = "main",fn_defs=dict()) -> Lis
     inb_consts = []
 
     for inb in program.in_binders:
-        if type(inb.aval) is not VoidArray:
+        if type(inb.aval) is not TypecheckArray:
             environment[inb] = f"c{ncs}"
             inb_consts += [environment[inb]]
             ncs += 1
-        else: 
+        else:
             environment[inb] = f"x{nxs}"
             inb_args += [environment[inb]]
             nxs += 1
@@ -115,16 +115,16 @@ def codegen(self, program, args, *, fn_name: str = "main",fn_defs=dict()) -> Lis
                 # else:
                 #     proc_code_lines = fn_defs[proc_key]
                 #     proc_name = proc_code_lines[0].split()[1].split("(")[0]
-                
+
                 # if proc_name == "zeros_partial2_T_5":
                 #     breakpoint()
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
-                
+
             elif instruction.op is slope.core.jit_op:
-                jit_program =  instruction.params["program"]
+                jit_program = instruction.params["program"]
                 jit_name = f"{program.name}_{len(fn_defs)}"
                 jit_codegen_out = self.codegen(
                     jit_program,

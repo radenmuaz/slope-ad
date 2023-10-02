@@ -9,6 +9,8 @@ from collections import defaultdict
 
 procedure_set = ProcedureSet()
 
+slice_py = slice
+
 
 # Utils
 def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
@@ -115,7 +117,7 @@ def T(x):
 
 @procedure_set.register(static_argnames=("axes",))
 def _softmax(x, axes):
-    m = x# - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
+    m = x  # - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
     e = m.exp()
     return m, e, e.sum(axes, keepdims=True)
 
@@ -139,43 +141,66 @@ def dot(x, w):
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
 
-@procedure_set.register()
-def __getitem__(
-    x, val
-):  # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+# - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
+# - A slice i:j returns the elements with indices in [i, j)
+#    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
+#    - Negative values for i and j are taken relative to the end of the sequence
+#    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
+# - Indexing with None on a given axis will add a new dimension of size one before that axis
+# - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
+# - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
+# - Strides > 1 and < 0 are now allowed!:
+#    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
+#    - Idea of stride < 0 support:
+#        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
+#    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
+#        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
+#        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
+#          is possible.
+#        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
+# - Fancy indexing and combined indexing is supported
+#    - Combined indexing works by letting regular slicing finish first -> computing the resulting dims w.r.t to Tensors passed in -> fancy indexing
+#    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
+#        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
+#    - There's a special case where a permute is needed at the end:
+#        - if first Tensor passed in (expand dims) is not at dim 0
+#        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
+# val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
+@procedure_set.register(not_op=True)  # not_op because easier to support variadic dynamic and static args
+def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
-        raise IndexError(f"index {e} is out of bounds for dimension {i} with size {x.shape[i]}")
+        raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
 
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     count = defaultdict(list)
     for i, v in enumerate(orig_slices):
-        count[type(v)].append(i)
+        count[type(v) if not isinstance(v, slope.core.BaseArray) else "array"] += [i]
 
-    if (num_slices := len(count[int]) + len(count[slice]) + len(count)) > len(x.shape):
-        raise IndexError(f"too many indices for tensor of dimension {len(x.shape)}")
+    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["array"])) > len(self.shape):
+        raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
 
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
-    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice(None)] * (len(x.shape) - num_slices)
+    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice_py(None)] * (len(self.shape) - num_slices)
 
     valid_slices = [v for v in orig_slices if v is not None]
     valid_slices = [
         v
-        if isinstance(v, slice)
-        else slice(y_ := normalize_int(v, i, dim_sz), y_ + 1)
+        if isinstance(v, slice_py)
+        else slice_py(y_ := normalize_int(v, i, dim_sz), y_ + 1)
         if isinstance(v, int)
-        else slice(None)
-        for i, (v, dim_sz) in enumerate(zip(valid_slices, x.shape))
+        else slice_py(None)
+        for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))
     ]
 
     start, stop, strides = (
-        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)]) else ((), (), ())
+        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     )
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = x.slice(new_slice).flip(axis=[i for i, s in enumerate(strides) if s < 0])
+    sliced_tensor = self.padslice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
         strides = tuple(abs(s) for s in strides)
@@ -187,7 +212,7 @@ def __getitem__(
         reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.slice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i, s in enumerate(orig_slices):
@@ -199,7 +224,7 @@ def __getitem__(
                 dim_collapsed += 1
             else:
                 final_shape.append(dim_shape)
-                if isinstance(s, Tensor):
+                if isinstance(s, slope.core.BaseArray):
                     tensors.append(s)
                     dim.append(i - dim_collapsed)
     ret = sliced_tensor.reshape(tuple(final_shape))
@@ -207,41 +232,30 @@ def __getitem__(
     if tensors:  # Fancy/tensor indexing
         # normalize idx
         idx = [
-            t.sign().contiguous().__neg__().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)
+            t.sign().contiguous().neg().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)
         ]  # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
         max_dim = max(i.ndim for i in idx)
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
-        arange = [
-            sev.arange(
-                ret.shape[d],
-                dtype=slope.int32,
-                requires_grad=False,
-                device=x.device,
-            ).reshape(*[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1))
+        slice_arange = [
+            sev.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=self.device).reshape(
+                *[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1)
+            )
             for n, (sd, d) in enumerate(zip(sum_dim, dim))
         ]
         first_idx = [
             idx[0].reshape(
-                *[1] * dim[0],
-                *[1] * (1 + max_dim - idx[0].ndim),
-                *idx[0].shape,
-                *[1] * (ret.ndim - dim[0] - 1),
+                *[1] * dim[0], *[1] * (1 + max_dim - idx[0].ndim), *idx[0].shape, *[1] * (ret.ndim - dim[0] - 1)
             )
         ]
         rest_idx = [
-            i.reshape(
-                *[1] * dim[0],
-                *[1] * (max_dim - i.ndim),
-                *i.shape,
-                *[1] * (ret.ndim - dim[0] - n),
-            )
+            i.reshape(*[1] * dim[0], *[1] * (max_dim - i.ndim), *i.shape, *[1] * (ret.ndim - dim[0] - n))
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx
         ret = ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
         # iteratively fancy index
-        for a, i, sd in zip(arange, idx, sum_dim):
+        for a, i, sd in zip(slice_arange, idx, sum_dim):
             ret = (a == i).mul(ret).sum(sd)
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
@@ -269,15 +283,16 @@ def pad(x, pad_width, mode="constant", constant_values=0.0):
     return x.pad_hlo(lo, hi, interior, value=constant_values)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames=("arg",))
 def slice(x, arg):
-    assert all(2 <= len(a) <= 3 for a in arg)
+    # assert all(2 <= len(a) <= 3 for a in arg)
     arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
     starts, limits, strides = tuple(zip(*arg))
     return x.slice_hlo(starts, limits, strides)
 
 
-@procedure_set.register()
+# @procedure_set.register(static_argnames=("arg", "value"))
+@procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
@@ -287,7 +302,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     return x
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames=("dim",))
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
@@ -495,7 +510,7 @@ def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         weight.shape
-    ), f"Input Tensor shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input axis shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
@@ -534,7 +549,7 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         weight.shape
-    ), f"Input Tensor shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input axis shape {x.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW

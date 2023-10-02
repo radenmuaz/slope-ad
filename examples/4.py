@@ -7,15 +7,16 @@ x_dot = sev.ones((3,))
 # Concat
 
 
-@slope.jit
+# @slope.jit
 def f(x):
     y = x
-    y = sev.concatenate([x, x])
-    y = y.sum()
+    y = y[0:1]
     return y
 
 
 out = f(x)
-out, out_deriv = slope.jvp(f, (x,), (x_dot,))
-g_out = slope.grad(f)(x)
-print(g_out)
+# out, out_deriv = slope.jvp(f, (x,), (x_dot,))
+print(out)
+
+# g_out = slope.grad(f)(x)
+# print(g_out)

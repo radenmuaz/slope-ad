@@ -3,13 +3,13 @@ from slope.core import (
     Operator,
     OperatorSet,
     BaseArray,
-    VoidArray,
+    TypecheckArray,
     UndefPrimal,
     list_zip,
     list_map,
 )
 
-# from slope import Operator, VoidArray, BaseArray
+# from slope import Operator, TypecheckArray, BaseArray
 import math
 import numpy as np
 from typing import (
@@ -20,6 +20,7 @@ from typing import (
     Sequence,
 )
 import inspect
+
 sum_py = sum
 
 operator_set = OperatorSet()
@@ -53,8 +54,8 @@ operator_set.alias(convert, "astype")
 
 
 @convert.set_method
-def void_run(self, x: VoidArray, *, dtype) -> List[VoidArray]:
-    return [VoidArray(x.shape, dtype)]
+def typecheck(self, x: TypecheckArray, *, dtype) -> List[TypecheckArray]:
+    return [TypecheckArray(x.shape, dtype)]
 
 
 @convert.set_method
@@ -255,7 +256,7 @@ operator_set.register(div)
 @div.set_method
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
-    return [x / y], [(x_dot / y) + (-y_dot * x * 1/(y*y))]
+    return [x / y], [(x_dot / y) + (-y_dot * x * 1 / (y * y))]
     # return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
 
 
@@ -324,7 +325,6 @@ def T(self, cts, x, y):
 
 max = Operator.reduce("max")
 operator_set.register(max)
-
 
 
 @max.set_method
@@ -412,13 +412,13 @@ def jvp(self, primals, tangents, *, shape, axes=None):
 
 
 @broadcast_in_dim.set_method
-def void_run(self, x: VoidArray, *, shape: Sequence[int], axes=()) -> List[VoidArray]:
+def typecheck(self, x: TypecheckArray, *, shape: Sequence[int], axes=()) -> List[TypecheckArray]:
     e_shape = list(x.shape)
     for a in axes:
         e_shape.insert(a, 1)
     assert len(e_shape) == len(shape)
     assert all(a <= b for a, b in zip(e_shape, shape))
-    return [VoidArray(tuple(shape), x.dtype)]
+    return [TypecheckArray(tuple(shape), x.dtype)]
 
 
 @broadcast_in_dim.set_method
@@ -467,8 +467,8 @@ def jvp(self, primals, tangents, *, shape):
 
 
 @reshape.set_method
-def void_run(self, x: VoidArray, *, shape: Sequence[int]) -> List[VoidArray]:
-    return [VoidArray(tuple(shape), x.dtype)]
+def typecheck(self, x: TypecheckArray, *, shape: Sequence[int]) -> List[TypecheckArray]:
+    return [TypecheckArray(tuple(shape), x.dtype)]
 
 
 @reshape.set_method
@@ -503,9 +503,9 @@ def jvp(self, primals, tangents, *, perm):
 
 
 @transpose.set_method
-def void_run(self, x: VoidArray, *, perm: Sequence[int]) -> List[VoidArray]:
+def typecheck(self, x: TypecheckArray, *, perm: Sequence[int]) -> List[TypecheckArray]:
     shape = [x.shape[i] for i in perm]
-    return [VoidArray(shape, x.dtype)]
+    return [TypecheckArray(shape, x.dtype)]
 
 
 @transpose.set_method
@@ -554,7 +554,7 @@ def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
 
 
 @pad_hlo.set_method
-def void_run(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[VoidArray]:
+def typecheck(self, x: TypecheckArray, *, lo, hi, interior=None, value=0.0) -> List[TypecheckArray]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -565,7 +565,7 @@ def void_run(self, x: VoidArray, *, lo, hi, interior=None, value=0.0) -> List[Vo
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
-    res = VoidArray(shape, x.dtype)
+    res = TypecheckArray(shape, x.dtype)
     return [res]
 
 
@@ -625,17 +625,17 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 
 
 @slice_hlo.set_method
-def void_run(self, x: VoidArray, *, starts, limits, strides=None) -> List[VoidArray]:
+def typecheck(self, x: TypecheckArray, *, starts, limits, strides=None) -> List[TypecheckArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
-        shape = [
+        shape = tuple([
             limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)
-        ]
-        return [VoidArray(shape, x.dtype)]
+        ])
+        return [TypecheckArray(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
-        x = x[tuple(slice_hlo(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-        return [VoidArray(x.shape, x.dtype)]
+        x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
+        return [TypecheckArray(x.shape, x.dtype)]
 
 
 @slice_hlo.set_method
@@ -669,6 +669,18 @@ flip = Operator.shape("flip")
 operator_set.register(flip)
 
 
+
+@flip.set_method
+def args_fixer(self, x, *, axes=None):
+    if axes is None:
+        axes = tuple(range((x.ndim)))
+    elif type(axes) is int:
+        axes = (axes,)
+    elif type(axes) is list:
+        axes = tuple(axes)
+    return (x,), dict(axes=axes)
+
+
 @flip.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axes):
     raise NotImplementedError
@@ -681,8 +693,8 @@ def jvp(self, primals, tangents, *, axes):
 
 
 @flip.set_method
-def void_run(self, x: VoidArray, *, axes):
-    return [VoidArray(x.shape, x.dtype)]
+def typecheck(self, x: TypecheckArray, *, axes):
+    return [TypecheckArray(x.shape, x.dtype)]
 
 
 @flip.set_method
@@ -695,6 +707,7 @@ concatenate = Operator.shape("concatenate", nary_inputs=True)
 operator_set.register(concatenate)
 operator_set.alias(concatenate, "cat")
 
+
 @concatenate.set_method
 def args_fixer(self, *xs, axis=0):
     if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
@@ -703,11 +716,12 @@ def args_fixer(self, *xs, axis=0):
     return xs, dict(axis=axis)
     # return xs, dict(axis=axis)
 
+
 # @concatenate.set_method
 # def reorg_args(self, *args, **params):
 #     return args, params
 #     args_, params_ = args, params
-#     sig = inspect.signature(self.void_run)
+#     sig = inspect.signature(self.typecheck)
 #     args_strs = [
 #         k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
 #     ]
@@ -724,6 +738,7 @@ def args_fixer(self, *xs, axis=0):
 #             assert len(args) == len(args_strs)
 #     return args, params
 
+
 @concatenate.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
     raise NotImplementedError
@@ -735,7 +750,7 @@ def jvp(self, primals, tangents, *, axis=0):
 
 
 @concatenate.set_method
-def void_run(self, *xs: VoidArray, axis=0) -> List[VoidArray]:
+def typecheck(self, *xs: TypecheckArray, axis=0) -> List[TypecheckArray]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot concatenate arrays with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -754,7 +769,7 @@ def void_run(self, *xs: VoidArray, axis=0) -> List[VoidArray]:
 
     concat_size = sum_py(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
-    return [VoidArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
+    return [TypecheckArray(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
 
 
 @concatenate.set_method
@@ -799,9 +814,9 @@ def T(self, cts, *, val, dtype=BaseArray.float32):
 
 
 @constant.set_method
-def void_run(self, *, val, dtype=BaseArray.float32):
+def typecheck(self, *, val, dtype=BaseArray.float32):
     # TODO: not using numpy to extract shape
-    return [VoidArray(np.array(val).shape, dtype)]
+    return [TypecheckArray(np.array(val).shape, dtype)]
 
 
 full = Operator.load("full")
@@ -821,8 +836,8 @@ def T(self, cts, *, shape, fill_value, dtype=BaseArray.float32):
 
 
 @full.set_method
-def void_run(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[VoidArray]:
-    return [VoidArray(tuple(shape), dtype)]
+def typecheck(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[TypecheckArray]:
+    return [TypecheckArray(tuple(shape), dtype)]
 
 
 random_uniform = Operator.load("random_uniform")
@@ -844,8 +859,8 @@ def T(self, cts, *, shape, dtype=BaseArray.float32):
 
 
 @random_uniform.set_method
-def void_run(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
-    return [VoidArray(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype=BaseArray.float32) -> List[TypecheckArray]:
+    return [TypecheckArray(tuple(shape), dtype)]
 
 
 random_normal = Operator.load("random_normal")
@@ -867,8 +882,8 @@ def T(self, cts, *, shape, dtype=BaseArray.float32):
 
 
 @random_normal.set_method
-def void_run(self, *, shape, dtype=BaseArray.float32) -> List[VoidArray]:
-    return [VoidArray(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype=BaseArray.float32) -> List[TypecheckArray]:
+    return [TypecheckArray(tuple(shape), dtype)]
 
 
 arange = Operator.load("arange")
@@ -898,5 +913,5 @@ def T(self, cts, *, start, stop, stride=None, dtype=BaseArray.float32):
 
 
 @arange.set_method
-def void_run(self, *, start, stop, stride=None, dtype=BaseArray.float32) -> List[VoidArray]:
-    return [VoidArray(tuple((stop - start) * stride), dtype)]
+def typecheck(self, *, start, stop, stride=None, dtype=BaseArray.float32) -> List[TypecheckArray]:
+    return [TypecheckArray(tuple((stop - start) * stride), dtype)]

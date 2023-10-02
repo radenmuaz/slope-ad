@@ -231,9 +231,7 @@ def getitem(self, val):
 
     if tensors:  # Fancy/tensor indexing
         # normalize idx
-        idx = [
-            t.sign().contiguous().neg().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)
-        ]  # TODO first contiguous fixes torch+cpu_only CI, but it causes llvm to fail. Second one fixes llvm
+        idx = [t.sign().neg().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
         max_dim = max(i.ndim for i in idx)
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
@@ -325,7 +323,7 @@ def gather(x, idx, dim: int):
                 )
             )
             * x.transpose(*permarg)
-            .slice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
+            .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
             .expand_dims(0)
         )
         .sum(-1)

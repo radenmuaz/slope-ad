@@ -351,7 +351,7 @@ def f(self, x, *, perm):  # NOTE: np.transpose is like torch.permute
 
 @numpy_backend.set_impl(operator_set.flip)
 def f(self, x, *, axes):
-    return np.flip(x, axes)
+    return np.flip(x, axis=axes)
 
 
 # def inline():

@@ -627,9 +627,9 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 @slice_hlo.set_method
 def typecheck(self, x: TypecheckArray, *, starts, limits, strides=None) -> List[TypecheckArray]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
-        shape = tuple([
-            limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)
-        ])
+        shape = tuple(
+            [limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)]
+        )
         return [TypecheckArray(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
@@ -639,7 +639,7 @@ def typecheck(self, x: TypecheckArray, *, starts, limits, strides=None) -> List[
 
 
 @slice_hlo.set_method
-def T(cts, x, *, starts, limits, strides=None):
+def T(self, cts, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cts
     x_shape = x.aval.shape
@@ -660,14 +660,14 @@ def T(cts, x, *, starts, limits, strides=None):
             ),
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
-    res = z.pad(lo, hi, interior)
+
+    res = z.pad_hlo(lo, hi, interior)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
 
 flip = Operator.shape("flip")
 operator_set.register(flip)
-
 
 
 @flip.set_method
@@ -694,11 +694,11 @@ def jvp(self, primals, tangents, *, axes):
 
 @flip.set_method
 def typecheck(self, x: TypecheckArray, *, axes):
-    return [TypecheckArray(x.shape, x.dtype)]
+    return [TypecheckArray(tuple(x.shape), x.dtype)]
 
 
 @flip.set_method
-def T(cts, *, axes):
+def T(self, cts, x, *, axes):
     (z,) = cts
     return [z.flip(axes)]
 

@@ -823,20 +823,29 @@ full = Operator.load("full")
 operator_set.register(full)
 
 
+
 @full.set_method
-def jvp(self, primals, tangents, *, shape, fill_value, dtype=BaseArray.float32):
+def args_fixer(self, *, shape, fill_value, dtype=BaseArray.float32):
+    if isinstance(shape, int):
+        shape = (shape,)
+    elif shape is None:
+        shape = ()
+    return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
+
+@full.set_method
+def jvp(self, primals, tangents, *, shape, fill_value, dtype):
     out = slope.M().backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @full.set_method
-def T(self, cts, *, shape, fill_value, dtype=BaseArray.float32):
+def T(self, cts, *, shape, fill_value, dtype):
     return [cts[0]]
 
 
 @full.set_method
-def typecheck(self, *, shape, fill_value, dtype=BaseArray.float32) -> List[TypecheckArray]:
+def typecheck(self, *, shape, fill_value, dtype) -> List[TypecheckArray]:
     return [TypecheckArray(tuple(shape), dtype)]
 
 
@@ -847,19 +856,27 @@ operator_set.alias(random_uniform, "randn")
 
 
 @random_uniform.set_method
-def jvp(self, primals, tangents, *, shape, dtype=BaseArray.float32):
+def args_fixer(self, *, shape, dtype):
+    if isinstance(shape, int):
+        shape = (shape,)
+    elif shape is None:
+        shape = ()
+    return (), dict(shape=shape, dtype=dtype)
+
+@random_uniform.set_method
+def jvp(self, primals, tangents, *, shape, dtype):
     out = slope.M().backend.run_impl(self, shape=shape, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @random_uniform.set_method
-def T(self, cts, *, shape, dtype=BaseArray.float32):
+def T(self, cts, *, shape, dtype):
     return [cts[0]]
 
 
 @random_uniform.set_method
-def typecheck(self, *, shape, dtype=BaseArray.float32) -> List[TypecheckArray]:
+def typecheck(self, *, shape, dtype) -> List[TypecheckArray]:
     return [TypecheckArray(tuple(shape), dtype)]
 
 
@@ -868,6 +885,14 @@ randn = random_normal
 operator_set.register(random_normal)
 operator_set.alias(random_normal, "randn")
 
+
+@random_normal.set_method
+def args_fixer(self, *, shape, dtype):
+    if isinstance(shape, int):
+        shape = (shape,)
+    elif shape is None:
+        shape = ()
+    return (), dict(shape=shape, dtype=dtype)
 
 @random_normal.set_method
 def jvp(self, primals, tangents, *, shape, dtype=BaseArray.float32):

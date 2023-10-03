@@ -21,17 +21,17 @@ def flatten_seq(l: Iterator):
     return [item for sublist in l for item in sublist]
 
 
-@procedure_set.register(static_argnames=("shape", "dtype"))
+@procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=BaseArray.float32):
     return sev.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(static_argnames=("shape", "dtype"))
+@procedure_set.register(static_argnames="shape dtype")
 def ones(shape, dtype=BaseArray.float32):
     return sev.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
-@procedure_set.register(static_argnames=("fill_value",))
+@procedure_set.register(static_argnames="fill_value")
 def full_like(y, fill_value):
     return sev.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
@@ -53,7 +53,7 @@ def where(x, trueval, falseval):
     return cond * trueval + (1.0 - cond) * falseval
 
 
-@procedure_set.register(static_argnames=("axes", "keepdims"))
+@procedure_set.register(static_argnames="axes keepdims")
 def mean(x, axes=None, keepdims=False):
     out = x.sum(axes=axes, keepdim=keepdims)
     return out * (math.prod(out.shape) / math.prod(x.shape))
@@ -80,12 +80,12 @@ def minimum(x, y):
     return -x.maximum(-x, -y)
 
 
-@procedure_set.register(static_argnames=("axes", "keepdims"))
+@procedure_set.register(static_argnames="axes keepdims")
 def min(x, axes=None, keepdims=False):
     return -((-x).max(x, axes, keepdims))
 
 
-@procedure_set.register(static_argnames=("axes", "keepdims"))
+@procedure_set.register(static_argnames="axes keepdims")
 def argmax(x, axes=None, keepdims=False):
     if axes is None:
         idx = (x == x.max(axes)) * sev.arange(
@@ -103,7 +103,7 @@ def argmax(x, axes=None, keepdims=False):
     return x.shape[axis] - idx.max(axes=axes, keepdim=keepdims) - 1
 
 
-@procedure_set.register(static_argnames=("axes", "keepdims"))
+@procedure_set.register(static_argnames="axes keepdims")
 def argmin(x, axes=None, keepdims=False):
     return (-x).argmax(axes=axes, keepdims=keepdims)
 
@@ -115,20 +115,20 @@ def T(x):
     return x.transpose(perm)
 
 
-@procedure_set.register(static_argnames=("axes",))
+@procedure_set.register(static_argnames="axes")
 def _softmax(x, axes):
     m = x  # - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
     e = m.exp()
     return m, e, e.sum(axes, keepdims=True)
 
 
-@procedure_set.register(static_argnames=("axes",))
+@procedure_set.register(static_argnames="axes")
 def softmax(x, axes=-1):
     _, e, ss = x._softmax(axes)
     return e.div(ss)
 
 
-@procedure_set.register(static_argnames=("axes",))
+@procedure_set.register(static_argnames="axes")
 def log_softmax(x, axes=-1):
     m, _, ss = x._softmax(axes)
     return m - ss.log()
@@ -262,7 +262,7 @@ def getitem(self, val):
     return ret
 
 
-@procedure_set.register(static_argnames=("pad_width", "mode", "constant_values"))
+@procedure_set.register(static_argnames="pad_width mode constant_values")
 def pad(x, pad_width, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
     if type(pad_width) is int:
@@ -281,7 +281,7 @@ def pad(x, pad_width, mode="constant", constant_values=0.0):
     return x.pad_hlo(lo, hi, interior, value=constant_values)
 
 
-@procedure_set.register(static_argnames=("arg",))
+@procedure_set.register(static_argnames="arg")
 def slice(x, arg):
     # assert all(2 <= len(a) <= 3 for a in arg)
     arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
@@ -300,7 +300,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     return x
 
 
-@procedure_set.register(static_argnames=("dim",))
+@procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
@@ -331,7 +331,7 @@ def gather(x, idx, dim: int):
     )
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="dim")
 @staticmethod
 def stack(tensors, dim=0):
     first = tensors[0].expand_dims(dim)
@@ -340,7 +340,7 @@ def stack(tensors, dim=0):
     return first.concatenate(*expand_dimsd_tensors, dim=dim)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="repeats")
 def repeat(x, repeats):
     base_shape = (1,) * (len(repeats) - x.ndim) + x.shape
     new_shape = [x for b in base_shape for x in [1, b]]
@@ -349,14 +349,14 @@ def repeat(x, repeats):
     return x.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="dim")
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
     slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
     return [x[tuple(sl)] for sl in slice_params]
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="dim")
 def squeeze(x, dim=None):
     if dim is None:
         return x if 1 not in x.shape else x.reshape(*[size for size in x.shape if size != 1])
@@ -371,31 +371,31 @@ def squeeze(x, dim=None):
     return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="dim")
 def expand_dims(x, dim):
     if dim < 0:
         dim = len(x.shape) + dim + 1
     return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="ax1 ax2")
 def swapaxes(x, ax1=1, ax2=0):
     order = list(range(len(x.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return x.transpose(order)
 
 
-@procedure_set.register(static_argnames=("start_dim",))
+@procedure_set.register(static_argnames="start_dim")
 def flatten(x, start_dim=0):
     return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
 
-@procedure_set.register(static_argnames=("shape",))
+@procedure_set.register(static_argnames="shape")
 def broadcast_to(x, shape):
     return x.broadcast_in_dim(shape=shape, axes=None)
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="k_ stride dilation")
 def _pool(
     x,
     k_: Tuple[int, ...],
@@ -415,7 +415,7 @@ def _pool(
         e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
-        xup = xup.broadcast((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
+        xup = xup.broadcast_to((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
         # slide by dilation
         xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
@@ -447,22 +447,22 @@ def _pool(
 
 
 # NOTE: these work for more than 2D
-@procedure_set.register()
+@procedure_set.register(static_argnames="kernel_size stride")
 def avg_pool2d(x, kernel_size=(2, 2), stride=None):
     return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
 
-@procedure_set.register()
+@procedure_set.register(static_argnames="kernel_size stride dilation")
 def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
     return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
 
-@procedure_set.register()
-def conv_transpose2d(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+@procedure_set.register(static_argnames="groups stride dilation padding output_padding")
+def conv_transpose2d(x, weight, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
     x, w = x, weight.reshape(groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]).transpose(
         0, 2, 1, *trailing
@@ -497,14 +497,13 @@ def conv_transpose2d(x, weight, bias=None, groups=1, stride=1, dilation=1, paddi
     return x.conv(
         w.reshape(w.shape[0] * w.shape[1], *w.shape[2:]),
         groups=groups,
-        bias=bias,
         dilation=dilation,
         padding=padding,
     )
 
 
-@procedure_set.register()
-def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
+@procedure_set.register(static_argnames="groups stride dilation padding")
+def conv(x, weight, groups=1, stride=1, dilation=1, padding=0):
     (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         weight.shape
@@ -518,12 +517,12 @@ def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
         if isinstance(padding, int)
         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
-    # x = x.pad2d(padding_)
+    padding_ = tuple(padding_)
     x = x.pad(padding_)
     x = x._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
-    x = x.broadcast((bs, groups, cin, rcout, *oyx, *HW))
+    x = x.broadcast_to((bs, groups, cin, rcout, *oyx, *HW))
     x = x.transpose(
         (
             0,
@@ -539,10 +538,11 @@ def conv(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
     x = x.reshape((bs, cout, *oyx))
     ret = x
-    return ret if bias is None else ret.add(bias.reshape((1, -1, *[1] * len(HW))))
+    return ret
 
 
-def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
+@procedure_set.register(static_argnames="groups stride dilation padding")
+def conv_wino(x, weight, groups=1, stride=1, dilation=1, padding=0):
     assert not all(x == 3 for x in HW) or stride != 1 or dilation != 1
     (bs, cin_), (cout, cin), HW = x.shape[:2], weight.shape[:2], weight.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
@@ -651,11 +651,7 @@ def conv_wino(x, weight, bias=None, groups=1, stride=1, dilation=1, padding=0):
         tuple((0, s) for s in [bs, cout, *oyx])
     )  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
 
-    return (
-        (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))])))
-        .contiguous()
-        .contiguous_backward()
-    )
+    return ret
 
 
 def cumsum(x, axis: int = 0):

@@ -7,7 +7,7 @@ x_dot = sev.ones((3,))
 # Concat
 
 
-# @slope.jit
+@slope.jit
 def f(x):
     y = x
     y = y[0:1]

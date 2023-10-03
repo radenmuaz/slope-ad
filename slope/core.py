@@ -601,7 +601,7 @@ class OperatorSet:
 class ProcedureSet:
     def register(self, static_argnames=(), not_op=False):
         def wrap(f):
-            f_procedure = self.procedure(f, static_argnames) if not not_op else f
+            f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             setattr(self, f.__name__, f_procedure)
             return f_procedure
 
@@ -611,7 +611,9 @@ class ProcedureSet:
         assert fn in vars(self)
         setattr(self, name, fn)
 
-    def procedure(self, f, static_argnames=()):
+    def new_procedure(self, f, static_argnames=()):
+        if type(static_argnames) is str:
+            static_argnames = tuple(static_argnames.split(" "))
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         impl_f = f
         static_argnames = static_argnames
@@ -636,6 +638,7 @@ class ProcedureSet:
 
         def f_procedured(*args, **static_args):
             nonlocal impl_f, jvp_f, T_f, vmap_f, typecheck_f
+        
             sig = inspect.signature(f)
             args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
             static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
@@ -649,10 +652,18 @@ class ProcedureSet:
                     }
                     static_args = {**new_static_args, **static_args}
             else:
-                args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
+                args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
             assert len(args) == len(args_strs)
 
+            for k, v in static_args.items():
+                if type(v) is list:
+                    static_args[k] = tuple(v)
+                    for i, vov in enumerate(v):
+                        if type(vov) is list:
+                            static_args[k][i] = tuple(static_args[k][i])
+
             M = slope.M()
+            # static_args = M.tree_map(lambda x: tuple(x) if type(x) is list else x, static_args)
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
             avals_in = M.tree_map(lambda x: TypecheckArray.like(M.get_aval(x)), args)

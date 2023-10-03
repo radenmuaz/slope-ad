@@ -1,5 +1,5 @@
-from slope.array import Array
-from slope.tracer_array import TracerArray
+from slope.tensor import Tensor
+from slope.tracer_tensor import TracerTensor
 import slope
 from typing import (
     Sequence,
@@ -78,7 +78,7 @@ def _gather(arr, treedef, static_idx, dynamic_idx):
     indexer = _index_to_gather(arr.shape, idx)  # shared with _scatter_update
     y = arr
     if indexer.slice_shape == ():
-        return Array.zeros(shape=indexer.slice_shape, dtype=y.dtype)
+        return Tensor.zeros(shape=indexer.slice_shape, dtype=y.dtype)
     if indexer.gather_indices.shape != ():
         y = y.gather(indexer.gather_indices, indexer.dnums, indexer.gather_slice_shape)
     if indexer.reversed_y_dims:
@@ -96,7 +96,7 @@ class GatherDimensionNumbers(NamedTuple):
 class _Indexer(NamedTuple):
     slice_shape: Sequence[int]
     gather_slice_shape: Sequence[int]
-    gather_indices: Array
+    gather_indices: Tensor
     dnums: GatherDimensionNumbers
     reversed_y_dims: Sequence[int]
     newaxis_dims: Sequence[int]
@@ -108,7 +108,7 @@ def _split_index_for_jit(idx, shape):
     Used to pass indices into `jit`-ted function.
     """
     # Convert list indices to tuples in cases (deprecated by NumPy.)
-    assert type(idx) in (int, tuple, Array)
+    assert type(idx) in (int, tuple, Tensor)
     if type(idx) is int:
         idx = (idx,)
     # idx = _expand_bool_indices(idx, shape)
@@ -140,12 +140,12 @@ def _merge_static_and_dynamic_indices(treedef, static_idx, dynamic_idx):
     return treedef.unflatten(idx)
 
 
-# def _canonicalize_tuple_index(arr_ndim, idx, array_name="array"):
+# def _canonicalize_tuple_index(arr_ndim, idx, tensor_name="tensor"):
 #     """Helper to remove Ellipsis and add in the implicit trailing slice(None)."""
 #     len_without_none = sum(1 for e in idx if e is not None and e is not Ellipsis)
 #     if len_without_none > arr_ndim:
 #         raise IndexError(
-#             f"Too many indices for {array_name}: {len_without_none} "
+#             f"Too many indices for {tensor_name}: {len_without_none} "
 #             f"non-None/Ellipsis indices for dim {arr_ndim}."
 #         )
 #     ellipses = (i for i, elt in enumerate(idx) if elt is Ellipsis)
@@ -163,14 +163,14 @@ def _merge_static_and_dynamic_indices(treedef, static_idx, dynamic_idx):
 #     return idx
 
 
-def _is_int_arraylike(x):
-    """Returns True if x is array-like with integer dtype, False otherwise."""
+def _is_int_tensorlike(x):
+    """Returns True if x is tensor-like with integer dtype, False otherwise."""
     return (
         isinstance(x, int)
         and not isinstance(x, bool)
         or getattr(x, "dtype", None) == np.integer
         or isinstance(x, (list, tuple))
-        and all(_is_int_arraylike(e) for e in x)
+        and all(_is_int_tensorlike(e) for e in x)
     )
 
 
@@ -178,16 +178,16 @@ def _normalize_index(index, axis_size):
     return (index < 0).select(index + axis_size, index)
 
 
-def broadcast_arrays(*args) -> List[Array]:
-    """Like Numpy's broadcast_arrays but doesn't return views."""
+def broadcast_tensors(*args) -> List[Tensor]:
+    """Like Numpy's broadcast_tensors but doesn't return views."""
     shapes = [np.shape(arg) for arg in args]
     if not shapes or all(shapes[0] == s for s in shapes):
-        return Array(arg)
+        return Tensor(arg)
     result_shape = _broadcast_shapes_uncached(*shapes)
     return [_broadcast_to(arg, result_shape) for arg in args]
 
 
-def _broadcast_to(arr, shape) -> Array:
+def _broadcast_to(arr, shape) -> Tensor:
     if not isinstance(shape, tuple) and np.ndim(shape) == 0:
         shape = (shape,)
     if arr.shape == shape:
@@ -278,7 +278,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
     len_without_none = sum(1 for e in idx if e is not None and e is not Ellipsis)
     if len_without_none > arr_ndim:
         raise IndexError(
-            f"Too many indices for array: {len_without_none} " f"non-None/Ellipsis indices for dim {arr_ndim}."
+            f"Too many indices for tensor: {len_without_none} " f"non-None/Ellipsis indices for dim {arr_ndim}."
         )
     ellipses = (i for i, elt in enumerate(idx) if elt is Ellipsis)
     ellipsis_index = next(ellipses, None)
@@ -292,7 +292,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
         idx = tuple(idx) + colons
     advanced_axes_are_contiguous = False
 
-    advanced_indexes: Optional[Sequence[Union[Array, np.ndarray]]] = None
+    advanced_indexes: Optional[Sequence[Union[Tensor, np.ndarray]]] = None
     idx_advanced_axes: Sequence[int] = []
     x_advanced_axes: Optional[Sequence[int]] = None
 
@@ -307,11 +307,11 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             for e in idx
         ):
             return False
-        return all(e is None or e is Ellipsis or isinstance(e, slice) or _is_int_arraylike(e) for e in idx)
+        return all(e is None or e is Ellipsis or isinstance(e, slice) or _is_int_tensorlike(e) for e in idx)
 
     if _is_advanced_int_indexer(idx):
         idx_no_nones = [(i, d) for i, d in enumerate(idx) if d is not None]
-        advanced_pairs = ((Array(e), i, j) for j, (i, e) in enumerate(idx_no_nones) if e is not None)
+        advanced_pairs = ((Tensor(e), i, j) for j, (i, e) in enumerate(idx_no_nones) if e is not None)
         if normalize_indices:
             advanced_pairs = ((_normalize_index(e, x_shape[j]), i, j) for e, i, j in advanced_pairs)
         advanced_indexes, idx_advanced_axes, x_advanced_axes = zip(*advanced_pairs)
@@ -344,7 +344,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             or not advanced_axes_are_contiguous
             and idx_pos == 0
         ):
-            advanced_indexes = broadcast_arrays(*advanced_indexes)
+            advanced_indexes = broadcast_tensors(*advanced_indexes)
             shape = advanced_indexes[0].shape
             ndim = len(shape)
 
@@ -365,11 +365,11 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             continue
 
         try:
-            abstract_i = TracerArray.get_aval(i)
+            abstract_i = TracerTensor.get_aval(i)
         except TypeError:
             abstract_i = None
         # Handle basic int indexes.
-        if isinstance(abstract_i, (Array,)) and (not abstract_i.shape and abstract_i.dtype == np.integer):
+        if isinstance(abstract_i, (Tensor,)) and (not abstract_i.shape and abstract_i.dtype == np.integer):
             if x_shape[x_axis] == 0:
                 # XLA gives error when indexing into an axis of size 0
                 raise IndexError(f"index is out of bounds for axis {x_axis} with size 0")
@@ -394,7 +394,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             if step is None:
                 if start is None or start == 0:
                     start = None
-                if stop is None or (not isinstance(stop, TracerArray) and (stop >= x_shape[x_axis])):
+                if stop is None or (not isinstance(stop, TracerTensor) and (stop >= x_shape[x_axis])):
                     stop = None
             elif step == -1:
                 step = -1
@@ -411,20 +411,20 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
                 x_axis += 1
             # Handle slice index (only static, otherwise an error is raised)
             else:
-                if not all((elt == None or TracerArray.get_aval(elt) is Array) for elt in (start, stop, step)):
+                if not all((elt == None or TracerTensor.get_aval(elt) is Tensor) for elt in (start, stop, step)):
                     msg = (
-                        "Array slice indices must have static start/stop/step to be used "
+                        "Tensor slice indices must have static start/stop/step to be used "
                         "with NumPy indexing syntax. "
                         f"Found slice({start}, {stop}, {step}). "
                         "To index a statically sized "
-                        "array at a dynamic position, try lax.dynamic_slice/"
+                        "tensor at a dynamic position, try lax.dynamic_slice/"
                         "dynamic_update_slice (JAX does not support dynamically sized "
-                        "arrays within JIT compiled functions)."
+                        "tensors within JIT compiled functions)."
                     )
                     raise IndexError(msg)
                 # if not core.is_constant_dim(x_shape[x_axis]):
                 #     msg = (
-                #         "Cannot use NumPy slice indexing on an array dimension whose "
+                #         "Cannot use NumPy slice indexing on an tensor dimension whose "
                 #         f"size is not statically known ({x_shape[x_axis]}). "
                 #         "Try using lax.dynamic_slice/dynamic_update_slice"
                 #     )
@@ -457,17 +457,17 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             raise NotImplementedError
 
     if len(gather_indices) == 0:
-        gather_indices_array = np.zeros((0,), dtype=index_dtype)
+        gather_indices_tensor = np.zeros((0,), dtype=index_dtype)
     elif len(gather_indices) == 1:
         g, _ = gather_indices[0]
-        gather_indices_array = g.expand_dims((g.ndim,))
+        gather_indices_tensor = g.expand_dims((g.ndim,))
     else:
         last_dim = len(gather_indices_shape)
         gather_indices_shape.append(1)
         gather_indices_list = [
             g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim))) for g, i in gather_indices
         ]
-        gather_indices_array = TracerArray.concatenate(gather_indices_list, last_dim)
+        gather_indices_tensor = TracerTensor.concatenate(gather_indices_list, last_dim)
 
     return _Indexer(
         slice_shape=slice_shape,
@@ -479,7 +479,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             collapsed_slice_dims=tuple(sorted(collapsed_slice_dims)),
             start_index_map=tuple(start_index_map),
         ),
-        gather_indices=gather_indices_array,
+        gather_indices=gather_indices_tensor,
     )
 
 
@@ -488,7 +488,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 #     abstract_i = core.get_aval(i)
 #   except TypeError:
 #     abstract_i = None
-#   return (isinstance(abstract_i, ShapedArray) and issubdtype(abstract_i.dtype, bool_)
+#   return (isinstance(abstract_i, ShapedTensor) and issubdtype(abstract_i.dtype, bool_)
 #           or isinstance(i, list) and i and all(_is_scalar(e)
 #           and issubdtype(_dtype(e), np.bool_) for e in i))
 
@@ -511,15 +511,15 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 #             abstract_i = None
 #         if _is_boolean_index(i):
 #             if isinstance(i, list):
-#                 i = Array(i)
+#                 i = Tensor(i)
 #             elif i.ndim == 0:
-#                 raise TypeError("JAX arrays do not support boolean scalar indices")
+#                 raise TypeError("JAX tensors do not support boolean scalar indices")
 #             else:
 #                 i_shape = i.shape
 #                 start = len(out) + ellipsis_offset
 #                 expected_shape = shape[start: start + i.ndim]
 #                 if i_shape != expected_shape:
-#                     raise IndexError("boolean index did not match shape of indexed array in index "
+#                     raise IndexError("boolean index did not match shape of indexed tensor in index "
 #                                 f"{dim_number}: got {i_shape}, expected {expected_shape}")
 #                 out.extend(np.where(i))
 #         else:
@@ -605,7 +605,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             return arr
 
         idx += (arr.ndim - len(idx)) * (slice(None),)
-        start_indices: Sequence[ArrayLike] = []
+        start_indices: Sequence[TensorLike] = []
         slice_sizes: Sequence[int] = []
 
         for ind, size in list_zip(idx, arr.shape):

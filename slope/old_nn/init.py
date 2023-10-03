@@ -55,7 +55,7 @@ def variance_scaling(
             denominator = (fan_in + fan_out) / 2
         else:
             raise ValueError(f"invalid mode for variance scaling initializer: {mode}")
-        variance = sev.array(scale / denominator, dtype=dtype)
+        variance = sev.tensor(scale / denominator, dtype=dtype)
         if distribution == "normal":
             return sev.randn(shape) * variance.sqrt()
         elif distribution == "uniform":

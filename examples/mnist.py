@@ -17,7 +17,7 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-import array
+import tensor
 import gzip
 import os
 from os import path
@@ -40,7 +40,7 @@ def download(url, filename):
 
 
 def one_hot(x, k, dtype=np.float32):
-    return np.array(x[:, None] == np.arange(k), dtype)
+    return np.tensor(x[:, None] == np.arange(k), dtype)
 
 
 def mnist_raw():
@@ -49,12 +49,12 @@ def mnist_raw():
     def parse_labels(filename):
         with gzip.open(filename, "rb") as fh:
             _ = struct.unpack(">II", fh.read(8))
-            return np.array(array.array("B", fh.read()), dtype=np.uint8)
+            return np.tensor(tensor.tensor("B", fh.read()), dtype=np.uint8)
 
     def parse_images(filename):
         with gzip.open(filename, "rb") as fh:
             _, num_data, rows, cols = struct.unpack(">IIII", fh.read(16))
-            return np.array(array.array("B", fh.read()), dtype=np.uint8).reshape(num_data, rows, cols)
+            return np.tensor(tensor.tensor("B", fh.read()), dtype=np.uint8).reshape(num_data, rows, cols)
 
     for filename in [
         "train-images-idx3-ubyte.gz",
@@ -146,7 +146,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sev.array(train_images[batch_idx]), sev.array(train_labels[batch_idx])
+                yield sev.tensor(train_images[batch_idx]), sev.tensor(train_labels[batch_idx])
 
     batches = data_stream()
     g_loss_fn = slope.grad(loss_fn, ret_fval=True)
@@ -171,8 +171,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                sev.array(test_images),
-                sev.array(test_labels),
+                sev.tensor(test_images),
+                sev.tensor(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

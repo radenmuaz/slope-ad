@@ -18,8 +18,8 @@ def g(x):
     return x.cos() * 2.0
 
 
-x = sev.array(3.0)
-x_dot = sev.array(1.0)
+x = sev.tensor(3.0)
+x_dot = sev.tensor(1.0)
 
 # ans1 = f(x)
 # ans2 = jit(f)(x)#; print(ans2)

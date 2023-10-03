@@ -1,6 +1,6 @@
 import slope
 from slope.environments.v1.operators import operator_set
-from slope.core import Backend, BaseArray, TypecheckArray, list_zip, list_map
+from slope.core import Backend, BaseTensor, TypecheckTensor, list_zip, list_map
 import numpy as np
 from typing import (
     List,
@@ -14,12 +14,12 @@ import re
 from functools import partial
 
 compile_py = compile
-numpy_backend = Backend(name="numpy", default_dtype=BaseArray.float32, deps=("numpy as np", "math"))
+numpy_backend = Backend(name="numpy", default_dtype=BaseTensor.float32, deps=("numpy as np", "math"))
 numpy_dtype_map = {
-    BaseArray.float32: np.dtype("float32"),
-    BaseArray.int64: np.dtype("int64"),
-    BaseArray.int8: np.dtype("int8"),
-    BaseArray.bool: np.dtype("bool"),
+    BaseTensor.float32: np.dtype("float32"),
+    BaseTensor.int64: np.dtype("int64"),
+    BaseTensor.int8: np.dtype("int8"),
+    BaseTensor.bool: np.dtype("bool"),
 }
 numpy_backend.set_dtype_map(numpy_dtype_map)
 
@@ -27,12 +27,12 @@ default_dtype_backend = numpy_backend.default_dtype_value
 
 
 @numpy_backend.set_method
-def set_numpy_of(self, array):
-    return array.buf.val
+def set_numpy_of(self, tensor):
+    return tensor.buf.val
 
 
 @numpy_backend.set_method
-def set_device_of(self, array):
+def set_device_of(self, tensor):
     return "cpu"
 
 
@@ -65,7 +65,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     inb_consts = []
 
     for inb in program.in_binders:
-        if type(inb.aval) is not TypecheckArray:
+        if type(inb.aval) is not TypecheckTensor:
             environment[inb] = f"c{ncs}"
             inb_consts += [environment[inb]]
             ncs += 1

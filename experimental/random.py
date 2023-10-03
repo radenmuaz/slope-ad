@@ -1,6 +1,6 @@
 import slope
 from slope import base_ops
-from slope.array_shape import TypecheckArray
+from slope.tensor_shape import TypecheckTensor
 import numpy as np
 
 from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple
@@ -63,7 +63,7 @@ def threefry_seed(seed):
       seed: a 64- or 32-bit integer used as the value of the key.
 
     Returns:
-      The PRNG key contents, modeled as an array of shape (2,) and dtype
+      The PRNG key contents, modeled as an tensor of shape (2,) and dtype
       uint32. The key is constructed from a 64-bit seed by effectively
       bit-casting to a pair of uint32 values (or from a 32-bit seed by
       first padding out with zeros).
@@ -73,29 +73,29 @@ def threefry_seed(seed):
     if not np.issubdtype(seed.dtype, np.integer):
         raise TypeError(f"PRNG key seed must be an integer; got {seed!r}")
     convert = lambda k: base_ops.reshape(convert(k, np.uint32), [1])
-    k1 = convert(base_ops.shift_right_logical(seed, np.array(32, dtype=seed.dtype)))
+    k1 = convert(base_ops.shift_right_logical(seed, np.tensor(32, dtype=seed.dtype)))
     k2 = convert(np.bitwise_and(seed, np.uint32(0xFFFFFFFF)))
     return base_ops.concatenate([k1, k2], 0)
 
 
 def random_seed(seeds, impl):
-    seeds_arr = np.asarray(seeds)
+    seeds_arr = np.astensor(seeds)
     return random_seed(seeds_arr, impl=impl)
 
 
 def PRNGKey(seed):
     if np.ndim(seed):
         raise TypeError(
-            "PRNGKey accepts a scalar seed, but was given an array of"
+            "PRNGKey accepts a scalar seed, but was given an tensor of"
             f"shape {np.shape(seed)} != (). Use jax.vmap for batching"
         )
     key = random_seed(seed, impl=rbg_prng_impl)
-    if not isinstance(key, PRNGKeyArrayImpl):
+    if not isinstance(key, PRNGKeyTensorImpl):
         raise TypeError
     return random_unwrap(keys)
 
 
-def _rbg_seed(seed: typing.Array) -> typing.Array:
+def _rbg_seed(seed: typing.Tensor) -> typing.Tensor:
     assert not seed.shape
     halfkey = threefry_seed(seed)
     return jnp.concatenate([halfkey, halfkey])
@@ -135,10 +135,10 @@ def threefry_2x32(keypair, count):
 
     Args:
       keypair: a pair of 32bit unsigned integers used for the key.
-      count: an array of dtype uint32 used for the counts.
+      count: an tensor of dtype uint32 used for the counts.
 
     Returns:
-      An array of dtype uint32 with the same shape as `count`.
+      An tensor of dtype uint32 with the same shape as `count`.
     """
     key1, key2 = keypair
     if not dtype(key1) == dtype(key2) == dtype(count) == np.uint32:
@@ -182,45 +182,45 @@ def _threefry_fold_in(key, data):
 #
 
 
-class PRNGKeyArrayImpl(PRNGKeyArray):
-    """An array of PRNG keys backed by an RNG implementation.
+class PRNGKeyTensorImpl(PRNGKeyTensor):
+    """An tensor of PRNG keys backed by an RNG implementation.
 
     This class lifts the definition of a PRNG, provided in the form of a
-    ``PRNGImpl``, into an array-like pytree class. Instances of this
-    class behave like an array whose base elements are keys, hiding the
-    fact that keys are typically arrays (of ``uint32`` dtype) themselves.
+    ``PRNGImpl``, into an tensor-like pytree class. Instances of this
+    class behave like an tensor whose base elements are keys, hiding the
+    fact that keys are typically tensors (of ``uint32`` dtype) themselves.
 
-    PRNGKeyArrays are also restricted relative to JAX arrays in that
+    PRNGKeyTensors are also restricted relative to JAX tensors in that
     they do not expose arithmetic operations. They instead expose
     wrapper methods around the PRNG implementation functions (``split``,
     ``random_bits``, ``fold_in``).
     """
 
     impl: PRNGImpl
-    _base_array: typing.Array
+    _base_tensor: typing.Tensor
 
     def __init__(self, impl, key_data: Any):
-        assert not isinstance(key_data, core.TracerArray)
+        assert not isinstance(key_data, core.TracerTensor)
         _check_prng_key_data(impl, key_data)
         self.impl = impl
-        self._base_array = key_data
+        self._base_tensor = key_data
 
-    # TODO(frostig): rename to unsafe_base_array, or just offer base_array attr?
-    def unsafe_raw_array(self):
-        """Access the raw numerical array that carries underlying key data.
+    # TODO(frostig): rename to unsafe_base_tensor, or just offer base_tensor attr?
+    def unsafe_raw_tensor(self):
+        """Access the raw numerical tensor that carries underlying key data.
 
         Returns:
-          A uint32 JAX array whose leading dimensions are ``self.shape``.
+          A uint32 JAX tensor whose leading dimensions are ``self.shape``.
         """
-        return self._base_array
+        return self._base_tensor
 
     def block_until_ready(self):
-        _ = self._base_array.block_until_ready()
+        _ = self._base_tensor.block_until_ready()
         return self
 
     @property
     def shape(self):
-        return base_arr_shape_to_keys_shape(self.impl, self._base_array.shape)
+        return base_arr_shape_to_keys_shape(self.impl, self._base_tensor.shape)
 
     @property
     def ndim(self):
@@ -230,37 +230,37 @@ class PRNGKeyArrayImpl(PRNGKeyArray):
     def dtype(self):
         return KeyTy(self.impl)
 
-    _device = property(op.attrgetter("_base_array._device"))
-    _committed = property(op.attrgetter("_base_array._committed"))
+    _device = property(op.attrgetter("_base_tensor._device"))
+    _committed = property(op.attrgetter("_base_tensor._committed"))
 
     @property
     def sharding(self):
-        aval = keys_shaped_array(self.impl, self.shape)
-        phys_sharding = self._base_array.sharding
+        aval = keys_shaped_tensor(self.impl, self.shape)
+        phys_sharding = self._base_tensor.sharding
         return KeyTyRules.logical_op_sharding(aval, phys_sharding)
 
     def _is_scalar(self):
         base_ndim = len(self.impl.key_shape)
-        return self._base_array.ndim == base_ndim
+        return self._base_tensor.ndim == base_ndim
 
     def __len__(self):
         if self._is_scalar():
             raise TypeError("len() of unsized object")
-        return len(self._base_array)
+        return len(self._base_tensor)
 
-    def __iter__(self) -> Iterator[PRNGKeyArrayImpl]:
+    def __iter__(self) -> Iterator[PRNGKeyTensorImpl]:
         if self._is_scalar():
-            raise TypeError("iteration over a 0-d key array")
+            raise TypeError("iteration over a 0-d key tensor")
         # TODO(frostig): we may want to avoid iteration by slicing because
         # a very common use of iteration is `k1, k2 = split(key)`, and
         # slicing/indexing may be trickier to track for linearity checking
         # purposes. Maybe we can:
         # * introduce an unpack primitive+traceable (also allow direct use)
-        # * unpack upfront into shape[0] many keyarray slices
+        # * unpack upfront into shape[0] many keytensor slices
         # * return iter over these unpacked slices
         # Whatever we do, we'll want to do it by overriding
-        # ShapedArray._iter when the element type is KeyTy...
-        return (PRNGKeyArrayImpl(self.impl, k) for k in iter(self._base_array))
+        # ShapedTensor._iter when the element type is KeyTy...
+        return (PRNGKeyTensorImpl(self.impl, k) for k in iter(self._base_tensor))
 
     # TODO(frostig): are all of the stackable methods below (reshape,
     # concat, broadcast_to, expand_dims), and the stackable registration,
@@ -268,66 +268,66 @@ class PRNGKeyArrayImpl(PRNGKeyArray):
     # to remove stackables altogether? This may be the only application.
 
     # TODO(frostig): Remove? Overwritten below in particular
-    def reshape(self, newshape, order=None) -> PRNGKeyArrayImpl:
-        reshaped_base = jnp.reshape(self._base_array, (*newshape, -1), order=order)
-        return PRNGKeyArrayImpl(self.impl, reshaped_base)
+    def reshape(self, newshape, order=None) -> PRNGKeyTensorImpl:
+        reshaped_base = jnp.reshape(self._base_tensor, (*newshape, -1), order=order)
+        return PRNGKeyTensorImpl(self.impl, reshaped_base)
 
-    def concatenate(self, key_arrs, axis, dtype=None) -> PRNGKeyArrayImpl:
+    def concatenate(self, key_arrs, axis, dtype=None) -> PRNGKeyTensorImpl:
         if dtype is not None:
-            raise ValueError("dtype argument not supported for concatenating PRNGKeyArray")
+            raise ValueError("dtype argument not supported for concatenating PRNGKeyTensor")
         axis = canonicalize_axis(axis, self.ndim)
-        arrs = [self._base_array, *[k._base_array for k in key_arrs]]
-        return PRNGKeyArrayImpl(self.impl, jnp.concatenate(arrs, axis))
+        arrs = [self._base_tensor, *[k._base_tensor for k in key_arrs]]
+        return PRNGKeyTensorImpl(self.impl, jnp.concatenate(arrs, axis))
 
-    def broadcast_to(self, shape) -> PRNGKeyArrayImpl:
+    def broadcast_to(self, shape) -> PRNGKeyTensorImpl:
         if jnp.ndim(shape) == 0:
             shape = (shape,)
         new_shape = (*shape, *self.impl.key_shape)
-        return PRNGKeyArrayImpl(self.impl, jnp.broadcast_to(self._base_array, new_shape))
+        return PRNGKeyTensorImpl(self.impl, jnp.broadcast_to(self._base_tensor, new_shape))
 
-    def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyArrayImpl:
+    def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyTensorImpl:
         # follows lax.expand_dims, not jnp.expand_dims, so dimensions is a sequence
         ndim_out = self.ndim + len(set(dimensions))
         dimensions = [canonicalize_axis(d, ndim_out) for d in dimensions]
-        return PRNGKeyArrayImpl(self.impl, lax.expand_dims(self._base_array, dimensions))
+        return PRNGKeyTensorImpl(self.impl, lax.expand_dims(self._base_tensor, dimensions))
 
     def __repr__(self):
-        return f"{self.__class__.__name__}[{self.impl.tag}]" f" {{ {self._base_array} }}"
+        return f"{self.__class__.__name__}[{self.impl.tag}]" f" {{ {self._base_tensor} }}"
 
     def pprint(self):
         pp_keys = pp.text("shape = ") + pp.text(str(self.shape))
         pp_impl = pp.text("impl = ") + self.impl.pprint()
-        return str(pp.group(pp.text("PRNGKeyArray:") + pp.nest(2, pp.brk() + pp_keys + pp.brk() + pp_impl)))
+        return str(pp.group(pp.text("PRNGKeyTensor:") + pp.nest(2, pp.brk() + pp_keys + pp.brk() + pp_impl)))
 
     # Overwritten immediately below
     @property
-    def T(self) -> PRNGKeyArray:
+    def T(self) -> PRNGKeyTensor:
         assert False
 
-    def __getitem__(self, _) -> PRNGKeyArray:
+    def __getitem__(self, _) -> PRNGKeyTensor:
         assert False
 
-    def ravel(self, *_, **__) -> PRNGKeyArray:
+    def ravel(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def squeeze(self, *_, **__) -> PRNGKeyArray:
+    def squeeze(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def swapaxes(self, *_, **__) -> PRNGKeyArray:
+    def swapaxes(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def take(self, *_, **__) -> PRNGKeyArray:
+    def take(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def transpose(self, *_, **__) -> PRNGKeyArray:
+    def transpose(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def flatten(self, *_, **__) -> PRNGKeyArray:
+    def flatten(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
 
-_set_device_array_base_attributes(
-    PRNGKeyArrayImpl,
+_set_device_tensor_base_attributes(
+    PRNGKeyTensorImpl,
     include=[
         "__getitem__",
         "ravel",
@@ -340,22 +340,22 @@ _set_device_array_base_attributes(
         "T",
     ],
 )
-_register_stackable(PRNGKeyArrayImpl)
-basearray.Array.register(PRNGKeyArrayImpl)
+_register_stackable(PRNGKeyTensorImpl)
+basetensor.Tensor.register(PRNGKeyTensorImpl)
 
 
 # TODO(frostig): remove, rerouting callers directly to random_seed
-def seed_with_impl(impl: PRNGImpl, seed: Union[int, Array]) -> PRNGKeyArrayImpl:
+def seed_with_impl(impl: PRNGImpl, seed: Union[int, Tensor]) -> PRNGKeyTensorImpl:
     return random_seed(seed, impl=impl)
 
 
-def keys_shaped_array(impl, shape):
-    return core.ShapedArray(shape, KeyTy(impl))
+def keys_shaped_tensor(impl, shape):
+    return core.ShapedTensor(shape, KeyTy(impl))
 
 
 def keys_aval_to_base_arr_aval(keys_aval):
     shape = (*keys_aval.shape, *keys_aval.dtype.impl.key_shape)
-    return core.ShapedArray(shape, np.dtype("uint32"))
+    return core.ShapedTensor(shape, np.dtype("uint32"))
 
 
 def base_arr_shape_to_keys_shape(impl, base_arr_shape):
@@ -363,7 +363,7 @@ def base_arr_shape_to_keys_shape(impl, base_arr_shape):
     return base_arr_shape[:-base_ndim]
 
 
-def make_key_array_phys_sharding(aval, sharding, is_sharding_from_xla):
+def make_key_tensor_phys_sharding(aval, sharding, is_sharding_from_xla):
     if dispatch.is_single_device_sharding(sharding):
         return sharding
     elif isinstance(sharding, PmapSharding):
@@ -405,7 +405,7 @@ def philox(cls, key, rounds=10):
     assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
 
     key0, key1 = key
-    state = np.array([key0, key1], dtype=np.uint64)
+    state = np.tensor([key0, key1], dtype=np.uint64)
 
     for _ in range(rounds):
         state[0], state[1] = philox_round(state[0], state[1], _)
@@ -436,7 +436,7 @@ def threefry(cls, key, rounds=20):
     assert isinstance(rounds, int) and rounds > 0, "Number of rounds must be a positive integer"
 
     key0, key1 = key
-    state = np.array([0, 0, key0, key1], dtype=np.uint64)
+    state = np.tensor([0, 0, key0, key1], dtype=np.uint64)
 
     for _ in range(rounds):
         state[0], state[1], state[2], state[3] = threefry_round(state[0], state[1], state[2], state[3], 14)

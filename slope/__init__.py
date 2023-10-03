@@ -67,9 +67,9 @@ def __getattr__(attr):
         return getattr(globals(), attr)
 
 
-float32 = core.BaseArray.float32
-float16 = core.BaseArray.float16
-int8 = core.BaseArray.int8
-int32 = core.BaseArray.int32
-int64 = core.BaseArray.int64
-uint8 = core.BaseArray.uint8
+float32 = core.BaseTensor.float32
+float16 = core.BaseTensor.float16
+int8 = core.BaseTensor.int8
+int32 = core.BaseTensor.int32
+int64 = core.BaseTensor.int64
+uint8 = core.BaseTensor.uint8

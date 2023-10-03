@@ -1,7 +1,7 @@
-import array  # python array
+import tensor  # python tensor
 
 """
-A lightweight, pure Python, numpy compliant Array class.
+A lightweight, pure Python, numpy compliant Tensor class.
 
 The documenation in this module is rather compact. For details on each
 function, see the corresponding documentation at:
@@ -63,7 +63,7 @@ def _convert_dtype(dtype, to="numpy"):
     if dtype is None:
         return dtype
     dtype = str(dtype)
-    index = {"Array": 0, "short": 1, "numpy": 2, "ctypes": 3}[to]
+    index = {"Tensor": 0, "short": 1, "numpy": 2, "ctypes": 3}[to]
     for dd in _dtypes:
         if dtype in dd:
             return dd[index]
@@ -75,7 +75,7 @@ def _ceildiv(a, b):
 
 
 def _get_step(view):
-    """Return step to walk over np. If 1, the Array is fully
+    """Return step to walk over np. If 1, the Tensor is fully
     C-contiguous. If 0, the striding is such that one cannot
     step through the np.
     """
@@ -133,7 +133,7 @@ def _shape_from_object(obj):
     return tuple(shape)
 
 
-def _assign_from_object(Array, obj):
+def _assign_from_object(Tensor, obj):
     key = []
 
     # todo: make more efficient, especially the try-except
@@ -144,7 +144,7 @@ def _assign_from_object(Array, obj):
                 _assign_from_object_r(e)
                 key.pop()
         except TypeError:
-            Array[tuple(key)] = element
+            Tensor[tuple(key)] = element
 
     _assign_from_object_r(obj)
 
@@ -180,30 +180,30 @@ def _zerositer(n):
 ## Public functions
 
 
-def array(obj, dtype=None, copy=True, order=None):
-    """Array(obj, dtype=None, copy=True, order=None)
+def tensor(obj, dtype=None, copy=True, order=None):
+    """Tensor(obj, dtype=None, copy=True, order=None)
 
-    Create a new np. If obj is an Array, and copy=False, a view
-    of that Array is returned. For details see:
+    Create a new np. If obj is an Tensor, and copy=False, a view
+    of that Tensor is returned. For details see:
     http://docs.scipy.org/doc/numpy/reference/generated/numpy.np.html
     """
     dtype = _convert_dtype(dtype)
 
-    if isinstance(obj, Array):
-        # From existing Array
+    if isinstance(obj, Tensor):
+        # From existing Tensor
         a = obj.view()
         if dtype is not None and dtype != a.dtype:
             a = a.astype(dtype)
         elif copy:
             a = a.copy()
         return a
-    if hasattr(obj, "__Array_interface__"):
-        # From something that looks like an Array, we can create
-        # the ctypes Array for this and use that as a buffer
-        D = obj.__Array_interface__
+    if hasattr(obj, "__Tensor_interface__"):
+        # From something that looks like an Tensor, we can create
+        # the ctypes Tensor for this and use that as a buffer
+        D = obj.__Tensor_interface__
         # Get dtype
         dtype_orig = _convert_dtype(D["typestr"][1:])
-        # Create Array
+        # Create Tensor
         if D["strides"]:
             itemsize = int(D["typestr"][-1])
             bufsize = D["strides"][0] * D["shape"][0] // itemsize
@@ -212,7 +212,7 @@ def array(obj, dtype=None, copy=True, order=None):
 
         BufType = _convert_dtype(dtype_orig, "ctypes") * bufsize
         buffer = BufType.from_address(D["data"][0])
-        a = Array(D["shape"], dtype_orig, buffer=buffer, strides=D["strides"], order=order)
+        a = Tensor(D["shape"], dtype_orig, buffer=buffer, strides=D["strides"], order=order)
         # Convert or copy?
         if dtype is not None and dtype != dtype_orig:
             a = a.astype(dtype)
@@ -229,44 +229,44 @@ def array(obj, dtype=None, copy=True, order=None):
                 el = el[0]
             if isinstance(el, int):
                 dtype = "int64"
-        # Create Array
-        a = Array(shape, dtype, order=None)
+        # Create Tensor
+        a = Tensor(shape, dtype, order=None)
         _assign_from_object(a, obj)
         return a
 
 
 def zeros_like(a, dtype=None, order=None):
-    """Return an Array of zeros with the same shape and type as a given np."""
+    """Return an Tensor of zeros with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return zeros(a.shape, dtype, order)
 
 
 def ones_like(a, dtype=None, order=None):
-    """Return an Array of ones with the same shape and type as a given np."""
+    """Return an Tensor of ones with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return ones(a.shape, dtype, order)
 
 
 def empty_like(a, dtype=None, order=None):
-    """Return a new Array with the same shape and type as a given np."""
+    """Return a new Tensor with the same shape and type as a given np."""
     dtype = a.dtype if dtype is None else dtype
     return empty(a.shape, dtype, order)
 
 
 def zeros(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, filled with zeros"""
+    """Return a new Tensor of given shape and type, filled with zeros"""
     return empty(shape, dtype, order)
 
 
 def ones(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, filled with ones"""
+    """Return a new Tensor of given shape and type, filled with ones"""
     a = empty(shape, dtype, order)
     a.fill(1)
     return a
 
 
 def eye(size):
-    """Return a new 2d Array with given dimensions, filled with ones on the
+    """Return a new 2d Tensor with given dimensions, filled with ones on the
     diagonal and zeros elsewhere.
     """
     a = zeros((size, size))
@@ -276,8 +276,8 @@ def eye(size):
 
 
 def empty(shape, dtype=None, order=None):
-    """Return a new Array of given shape and type, without initializing entries"""
-    return Array(shape, dtype, order=order)
+    """Return a new Tensor of given shape and type, without initializing entries"""
+    return Tensor(shape, dtype, order=order)
 
 
 def arange(*args, **kwargs):
@@ -289,7 +289,7 @@ def arange(*args, **kwargs):
     (in other words, the interval including `start` but excluding `stop`).
     For integer arguments the function is equivalent to the Python built-in
     `range <http://docs.python.org/lib/built-in-funcs.html>`_ function,
-    but returns an Array rather than a list.
+    but returns an Tensor rather than a list.
 
     When using a non-integer step, such as 0.1, the results will often not
     be consistent.  It is better to use ``linspace`` for these cases.
@@ -341,35 +341,35 @@ def linspace(start, stop, num=50, endpoint=True, retstep=False, dtype=None):
         return a
 
 
-def add(Array_vec1, Array_vec2):
+def add(Tensor_vec1, Tensor_vec2):
     c = []
-    for a, b in zip(Array_vec1, Array_vec2):
+    for a, b in zip(Tensor_vec1, Tensor_vec2):
         c.append(a + b)
-    cRay = Array(c)
+    cRay = Tensor(c)
     return cRay
 
 
-def subtract(Array_vec1, Array_vec2):
+def subtract(Tensor_vec1, Tensor_vec2):
     c = []
-    for a, b in zip(Array_vec1, Array_vec2):
+    for a, b in zip(Tensor_vec1, Tensor_vec2):
         c.append(a - b)
-    cRay = Array(c)
+    cRay = Tensor(c)
     return cRay
 
 
-def multiply(Array_vec1, Array_vec2):
+def multiply(Tensor_vec1, Tensor_vec2):
     c = []
-    for a, b in zip(Array_vec1, Array_vec2):
+    for a, b in zip(Tensor_vec1, Tensor_vec2):
         c.append(a * b)
-    cRay = Array(c)
+    cRay = Tensor(c)
     return cRay
 
 
-def divide(Array_vec1, integer):
+def divide(Tensor_vec1, integer):
     c = []
-    for a in Array_vec1:
+    for a in Tensor_vec1:
         c.append(a / integer)
-    cRay = Array(c)
+    cRay = Tensor(c)
     return cRay
 
 
@@ -446,9 +446,9 @@ def dot(u, v):
 
 def reshape(X, shape):
     """
-    Returns the reshaped image of an Array
+    Returns the reshaped image of an Tensor
     """
-    assert isinstance(X, Array)
+    assert isinstance(X, Tensor)
     assert isinstance(shape, tuple) or isinstance(shape, list)
     return X.reshape(shape)
 
@@ -456,22 +456,22 @@ def reshape(X, shape):
 ## The class
 
 
-class Array(object):
-    """Array(shape, dtype='float64', buffer=None, offset=0,
+class Tensor(object):
+    """Tensor(shape, dtype='float64', buffer=None, offset=0,
                 strides=None, order=None)
 
-    Array class similar to numpy's Array, implemented in pure Python.
-    This class can be distinguished from a real numpy Array in that
-    the repr always shows the dtype as a string, and for larger Arrays
+    Tensor class similar to numpy's Tensor, implemented in pure Python.
+    This class can be distinguished from a real numpy Tensor in that
+    the repr always shows the dtype as a string, and for larger Tensors
     (more than 100 elements) it shows a short one-line repr.
 
-    An Array object represents a multidimensional, homogeneous Array
+    An Tensor object represents a multidimensional, homogeneous Tensor
     of fixed-size items.  An associated data-type property describes the
     format of each element in the np.
 
-    Arrays should be constructed using `Array`, `zeros` or `empty` (refer
+    Tensors should be constructed using `Tensor`, `zeros` or `empty` (refer
     to the See Also section below).  The parameters given here refer to
-    a low-level method (`Array(...)`) for instantiating an np.
+    a low-level method (`Tensor(...)`) for instantiating an np.
 
     Parameters
     ----------
@@ -480,11 +480,11 @@ class Array(object):
     dtype : data-type, optional
         Any object that can be interpreted as a numpy data type.
     buffer : object contaning data, optional
-        Used to fill the Array with data. If another Array is given,
-        the underlying data is used. Can also be a ctypes.Array or any
+        Used to fill the Tensor with data. If another Tensor is given,
+        the underlying data is used. Can also be a ctypes.Tensor or any
         object that exposes the buffer interface.
     offset : int, optional
-        Offset of Array data in buffer.
+        Offset of Tensor data in buffer.
     strides : tuple of ints, optional
         Strides of data in memory.
     order : {'C', 'F'}, optional  NOT SUPPORTED
@@ -492,10 +492,10 @@ class Array(object):
 
     Attributes
     ----------
-    T : Array
+    T : Tensor
         Transpose of the np. In tinynumpy only supported for ndim <= 3.
     data : buffer
-        The Array's elements, in memory. In tinynumpy this is a ctypes np.
+        The Tensor's elements, in memory. In tinynumpy this is a ctypes np.
     dtype : str
         Describes the format of the elements in the np. In tinynumpy
         this is a string.
@@ -503,45 +503,45 @@ class Array(object):
         Dictionary containing information related to memory use, e.g.,
         'C_CONTIGUOUS', 'OWNDATA', 'WRITEABLE', etc.
     flat : iterator object
-        Flattened version of the Array as an iterator. In tinynumpy
+        Flattened version of the Tensor as an iterator. In tinynumpy
         the iterator cannot be indexed.
     size : int
         Number of elements in the np.
     itemsize : int
-        The memory use of each Array element in bytes.
+        The memory use of each Tensor element in bytes.
     nbytes : int
-        The total number of bytes required to store the Array data,
+        The total number of bytes required to store the Tensor data,
         i.e., ``itemsize * size``.
     ndim : int
-        The Array's number of dimensions.
+        The Tensor's number of dimensions.
     shape : tuple of ints
         Shape of the np.
     strides : tuple of ints
         The step-size required to move from one element to the next in
-        memory. For example, a contiguous ``(3, 4)`` Array of type
+        memory. For example, a contiguous ``(3, 4)`` Tensor of type
         ``int16`` in C-order has strides ``(8, 2)``.  This implies that
         to move from element to element in memory requires jumps of 2 bytes.
         To move from row-to-row, one needs to jump 8 bytes at a time
         (``2 * 4``).
-    base : Array
-        If the Array is a view into another Array, that Array is its `base`
-        (unless that Array is also a view).  The `base` Array is where the
-        Array data is actually stored.
-    __Array_interface__ : dict
-        Dictionary with low level Array information. Used by numpy to
+    base : Tensor
+        If the Tensor is a view into another Tensor, that Tensor is its `base`
+        (unless that Tensor is also a view).  The `base` Tensor is where the
+        Tensor data is actually stored.
+    __Tensor_interface__ : dict
+        Dictionary with low level Tensor information. Used by numpy to
         turn into a real numpy np. Can also be used to give C libraries
         access to the data via ctypes.
 
     See Also
     --------
-    Array : Construct an np.
-    zeros : Create an Array, each element of which is zero.
-    empty : Create an Array, but leave its allocated memory unchanged (i.e.,
+    Tensor : Construct an np.
+    zeros : Create an Tensor, each element of which is zero.
+    empty : Create an Tensor, but leave its allocated memory unchanged (i.e.,
             it contains "garbage").
 
     Notes
     -----
-    There are two modes of creating an Array:
+    There are two modes of creating an Tensor:
 
     1. If `buffer` is None, then only `shape`, `dtype`, and `order`
        are used.
@@ -563,7 +563,7 @@ class Array(object):
     def __init__(self, shape, dtype="float64", buffer=None, offset=0, strides=None, order=None):
         # Check order
         if order is not None:
-            raise MachineError("Array order parameter is not supported")
+            raise MachineError("Tensor order parameter is not supported")
         # Check and set shape
         try:
             assert isinstance(shape, Iterable)
@@ -581,7 +581,7 @@ class Array(object):
         self._itemsize = int(_convert_dtype(dtype, "short")[-1])
 
         if buffer is None:
-            # New Array
+            # New Tensor
             self._base = None
             # Check and set offset and strides
             assert offset == 0
@@ -590,13 +590,13 @@ class Array(object):
             self._strides = _strides_for_shape(self._shape, self.itemsize)
 
         else:
-            # Existing Array
-            if isinstance(buffer, Array) and buffer.base is not None:
+            # Existing Tensor
+            if isinstance(buffer, Tensor) and buffer.base is not None:
                 buffer = buffer.base
             # Keep a reference to avoid memory cleanup
             self._base = buffer
-            # for Array we use the data property
-            if isinstance(buffer, Array):
+            # for Tensor we use the data property
+            if isinstance(buffer, Tensor):
                 buffer = buffer.data
             # Check and set offset
             assert isinstance(offset, int) and offset >= 0
@@ -616,31 +616,31 @@ class Array(object):
         # Create buffer
         if buffer is None:
             self._data = BufferClass()
-        elif isinstance(buffer, ctypes.Array):
+        elif isinstance(buffer, ctypes.Tensor):
             self._data = BufferClass.from_address(ctypes.addressof(buffer))
         else:
             self._data = BufferClass.from_buffer(buffer)
 
     @property
-    def __Array_interface__(self):
-        """Allow converting to real numpy Array, or pass pointer to C library
-        http://docs.scipy.org/doc/numpy/reference/Arrays.interface.html
+    def __Tensor_interface__(self):
+        """Allow converting to real numpy Tensor, or pass pointer to C library
+        http://docs.scipy.org/doc/numpy/reference/Tensors.interface.html
         """
         readonly = False
         # typestr
         typestr = "<" + _convert_dtype(self.dtype, "short")
         # Pointer
-        if isinstance(self._data, ctypes.Array):
+        if isinstance(self._data, ctypes.Tensor):
             ptr = ctypes.addressof(self._data)
-        elif hasattr(self._data, "__Array_interface__"):
-            ptr, readonly = self._data.__Array_interface__["data"]
-        elif hasattr(self._data, "buffer_info"):  # Python's np.Array
+        elif hasattr(self._data, "__Tensor_interface__"):
+            ptr, readonly = self._data.__Tensor_interface__["data"]
+        elif hasattr(self._data, "buffer_info"):  # Python's np.Tensor
             ptr = self._data.buffer_info()[0]
         elif isinstance(self._data, bytes):
             ptr = ctypes.cast(self._data, ctypes.c_void_p).value
             readonly = True
         else:
-            raise TypeError("Cannot get address to underlying Array data")
+            raise TypeError("Cannot get address to underlying Tensor data")
         ptr += self._offset * self.itemsize
         #
         return dict(
@@ -664,7 +664,7 @@ class Array(object):
             return self._data[offset]
         else:
             # Return view
-            return Array(shape, self.dtype, offset=offset, strides=strides, buffer=self)
+            return Tensor(shape, self.dtype, offset=offset, strides=strides, buffer=self)
 
     def __setitem__(self, key, value):
         # Get info for view
@@ -676,17 +676,17 @@ class Array(object):
             return
 
         # Create view to set data to
-        view = Array(shape, self.dtype, offset=offset, strides=strides, buffer=self)
+        view = Tensor(shape, self.dtype, offset=offset, strides=strides, buffer=self)
 
         # Get data to set as a list (because getting slices from ctype
-        # Arrays yield lists anyway). The list is our "contiguous Array"
+        # Tensors yield lists anyway). The list is our "contiguous Tensor"
         if isinstance(value, (float, int)):
             value_list = [value] * view.size
         elif isinstance(value, (tuple, list)):
             value_list = value
         else:
-            if not isinstance(value, Array):
-                value = Array(value, copy=False)
+            if not isinstance(value, Tensor):
+                value = Tensor(value, copy=False)
             value_list = value._toflatlist()
 
         # Check if size match
@@ -695,7 +695,7 @@ class Array(object):
 
         # Assign data in most efficient way that we can. This code
         # looks for the largest semi-contiguous block: the block that
-        # we can access as a 1D Array with a stepsize.
+        # we can access as a 1D Tensor with a stepsize.
         subviews = [view]
         value_index = 0
         count = 0
@@ -717,19 +717,19 @@ class Array(object):
         if self.size == 1:
             return float(self.data[self._offset])
         else:
-            raise TypeError("Only length-1 Arrays can be converted to scalar")
+            raise TypeError("Only length-1 Tensors can be converted to scalar")
 
     def __int__(self):
         if self.size == 1:
             return int(self.data[self._offset])
         else:
-            raise TypeError("Only length-1 Arrays can be converted to scalar")
+            raise TypeError("Only length-1 Tensors can be converted to scalar")
 
     def __repr__(self):
         # If more than 100 elements, show short repr
         if self.size > 100:
             shapestr = "x".join([str(i) for i in self.shape])
-            return "<Array %s %s at 0x%x>" % (shapestr, self.dtype, id(self))
+            return "<Tensor %s %s at 0x%x>" % (shapestr, self.dtype, id(self))
 
         # Otherwise, try to show in nice way
         def _repr_r(s, axis, offset):
@@ -755,9 +755,9 @@ class Array(object):
 
         s = _repr_r("", 0, self._offset)
         if self.dtype != "float64" and self.dtype != "int32":
-            return "Array(" + s + ", dtype='%s')" % self.dtype
+            return "Tensor(" + s + ", dtype='%s')" % self.dtype
         else:
-            return "Array(" + s + ")"
+            return "Tensor(" + s + ")"
 
     def __eq__(self, other):
         if other.__module__.split(".")[0] == "numpy":
@@ -773,7 +773,7 @@ class Array(object):
             out = empty(self.shape, self.dtype)
             out[:] = [dat + other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i + j for (i, j) in zip(self.flat, other.flat)]
@@ -787,7 +787,7 @@ class Array(object):
             out = empty(self.shape, self.dtype)
             out[:] = [dat - other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i - j for (i, j) in zip(self.flat, other.flat)]
@@ -797,12 +797,12 @@ class Array(object):
         return self.__sub__(other)
 
     def __mul__(self, other):
-        """multiply element-wise with Array or float/scalar"""
+        """multiply element-wise with Tensor or float/scalar"""
         if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
             out[:] = [dat * other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i * j for (i, j) in zip(self.flat, other.flat)]
@@ -812,222 +812,222 @@ class Array(object):
         return self.__mul__(other)
 
     def __div__(self, other):
-        """divide element-wise with Array or float/scalar"""
+        """divide element-wise with Tensor or float/scalar"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
             out[:] = [dat / other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __truediv__(self, other):
-        """divide element-wise with Array or float/scalar"""
+        """divide element-wise with Tensor or float/scalar"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
             out[:] = [dat / other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i / j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __floordiv__(self, other):
-        """divide element-wise with Array or float/scalar"""
+        """divide element-wise with Tensor or float/scalar"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             out = empty(self.shape, self.dtype)
             out[:] = [dat // other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i // j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __mod__(self, other):
-        """divide element-wise with Array or float/scalar"""
+        """divide element-wise with Tensor or float/scalar"""
         if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
             out[:] = [dat % other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i % j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __pow__(self, other):
-        """power of two Arrays element-wise (of just float power)"""
+        """power of two Tensors element-wise (of just float power)"""
         if isinstance(other, int) or isinstance(other, float):
             out = empty(self.shape, self.dtype)
             out[:] = [dat**other for dat in self._data]
             return out
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 out = empty(self.shape, self.dtype)
                 out[:] = [i**j for (i, j) in zip(self.flat, other.flat)]
                 return out
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __iadd__(self, other):
-        """Addition of other Array or float in place with += operator"""
+        """Addition of other Tensor or float in place with += operator"""
         if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
                 self._data[i] += other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] += other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __isub__(self, other):
-        """Addition of other Array or float in place with += operator"""
+        """Addition of other Tensor or float in place with += operator"""
         if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
                 self._data[i] -= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] -= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imul__(self, other):
-        """multiplication woth other Array or float in place with *= operator"""
+        """multiplication woth other Tensor or float in place with *= operator"""
         if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
                 self._data[i] *= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] *= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __idiv__(self, other):
-        """Division of other Array or float in place with /= operator"""
+        """Division of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             for i in range(len(self._data)):
                 self._data[i] /= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] /= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __itruediv__(self, other):
-        """Division of other Array or float in place with /= operator"""
+        """Division of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             for i in range(len(self._data)):
                 self._data[i] /= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] /= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __ifloordiv__(self, other):
-        """Division of other Array or float in place with /= operator"""
+        """Division of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             for i in range(len(self._data)):
                 self._data[i] //= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] //= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imod__(self, other):
-        """mod of other Array or float in place with /= operator"""
+        """mod of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             for i in range(len(self._data)):
                 self._data[i] %= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] %= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __imod__(self, other):
-        """mod of other Array or float in place with /= operator"""
+        """mod of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             if other == 0:
                 raise ZeroDivisionError
             for i in range(len(self._data)):
                 self._data[i] %= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] %= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     def __ipow__(self, other):
-        """mod of other Array or float in place with /= operator"""
+        """mod of other Tensor or float in place with /= operator"""
         if isinstance(other, int) or isinstance(other, float):
             for i in range(len(self._data)):
                 self._data[i] **= other
             return self
-        if isinstance(other, Array):
+        if isinstance(other, Tensor):
             if self.shape == other.shape:
                 for i in range(len(self._data)):
                     self._data[i] **= other._data[i]
                 return self
             else:
-                raise ValueError("Array sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
+                raise ValueError("Tensor sizes do not match. " + str(self.shape) + " versus " + str(other.shape))
 
     ## Private helper functions
 
     def _index_helper(self, key):
         # Indexing spec is located at:
-        # http://docs.scipy.org/doc/numpy/reference/Arrays.indexing.html
+        # http://docs.scipy.org/doc/numpy/reference/Tensors.indexing.html
 
         # Promote to tuple.
         if not isinstance(key, tuple):
@@ -1104,7 +1104,7 @@ class Array(object):
         if newshape == self.shape:
             return
         if self.size != _size_for_shape(newshape):
-            raise ValueError("Total size of new Array must be unchanged")
+            raise ValueError("Total size of new Tensor must be unchanged")
         if _get_step(self) == 1:
             # Contiguous, hooray!
             self._shape = tuple(newshape)
@@ -1122,7 +1122,7 @@ class Array(object):
         # Check if squeezed shapes match
         newshape_ = [newshape[i] for i in range(len(newshape)) if newshape[i] > 1]
         if newshape_ != shape:
-            raise AttributeError("incompatible shape for non-contiguous Array")
+            raise AttributeError("incompatible shape for non-contiguous Tensor")
         # Modify to make this data work in loop
         strides.append(strides[-1])
         shape.append(1)
@@ -1138,7 +1138,7 @@ class Array(object):
                     newstrides.append(strides[i])
         except IndexError:
             # Fail
-            raise AttributeError("incompatible shape for non-contiguous Array")
+            raise AttributeError("incompatible shape for non-contiguous Tensor")
         else:
             # Success
             newstrides.reverse()
@@ -1273,7 +1273,7 @@ class Array(object):
         if dtype is None:
             dtype = self.dtype
         if dtype == self.dtype:
-            return Array(
+            return Tensor(
                 self.shape,
                 dtype,
                 buffer=self,
@@ -1285,7 +1285,7 @@ class Array(object):
             size = self.nbytes // itemsize
             offsetinbytes = self._offset * self.itemsize
             offset = offsetinbytes // itemsize
-            return Array((size,), dtype, buffer=self, offset=offset)
+            return Tensor((size,), dtype, buffer=self, offset=offset)
         else:
             raise ValueError("new type not compatible with np.")
 
@@ -1414,7 +1414,7 @@ class Array(object):
 
     def tolist(self):
         """
-        Returns the Array as a comprehensive list
+        Returns the Tensor as a comprehensive list
         """
         shp = list(self.shape).copy()
         jump = self.size // shp[-1]
@@ -1429,8 +1429,8 @@ class Array(object):
 
 
 class nditer:
-    def __init__(self, Array):
-        self.Array = Array
+    def __init__(self, Tensor):
+        self.Tensor = Tensor
         self.key = [0] * len(self.np.shape)
 
     def __iter__(self):
@@ -1441,12 +1441,12 @@ class nditer:
 
     def __getitem__(self, index):
         key = _key_for_index(index, self.np.shape)
-        return self.Array[key]
+        return self.Tensor[key]
 
     def __next__(self):
         if self.key is None:
             raise StopIteration
-        value = self.Array[tuple(self.key)]
+        value = self.Tensor[tuple(self.key)]
         if not _increment_mutable_key(self.key, self.np.shape):
             self.key = None
         return value

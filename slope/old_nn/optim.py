@@ -15,7 +15,7 @@ slope.register_node(
 )
 
 
-Array = Any
+Tensor = Any
 Params = Any  # Parameters are arbitrary nests of `jnp.ndarrays`.
 State = Any  # internal State
 Updates = Params  # Gradient updates are of the same type as parameters.
@@ -243,8 +243,8 @@ def polynomial_decay(step_size, decay_steps, final_step_size, power=1.0):
 
 
 def piecewise_constant(boundaries: Any, values: Any):
-    boundaries = np.array(boundaries)
-    values = np.array(values)
+    boundaries = np.tensor(boundaries)
+    values = np.tensor(values)
     if not boundaries.ndim == values.ndim == 1:
         raise ValueError("boundaries and values must be sequences")
     if not boundaries.shape[0] == values.shape[0] - 1:
@@ -274,7 +274,7 @@ class JoinPoint:
     def __init__(self, subtree):
         self.subtree = subtree
 
-    # Since pytrees are containers of numpy arrays, look iterable.
+    # Since pytrees are containers of numpy tensors, look iterable.
     def __iter__(self):
         yield self.subtree
 

@@ -56,7 +56,7 @@ class Gather(ShapeOp):
                 collapsed_slice_dims=dimension_numbers.collapsed_slice_dims,
                 start_index_map=dimension_numbers.start_index_map,
             )
-            # If batching indexed accesses into the same array, the batched gather may
+            # If batching indexed accesses into the same tensor, the batched gather may
             # no longer have sorted or unique indices.
             return (
                 gather(
@@ -84,8 +84,8 @@ class Gather(ShapeOp):
             # an explicit iota of size-1 slices.
             if core.symbolic_equal_dim(operand.shape[0], 0):
                 output_shape = _gather_shape_rule(
-                    core.ShapedArray(operand.shape[1:], operand.dtype),
-                    core.ShapedArray(indices.shape[1:], dtypes.canonicalize_dtype(indices.dtype)),
+                    core.ShapedTensor(operand.shape[1:], operand.dtype),
+                    core.ShapedTensor(indices.shape[1:], dtypes.canonicalize_dtype(indices.dtype)),
                     dimension_numbers=dimension_numbers,
                     slice_sizes=slice_sizes,
                     unique_indices=unique_indices,
@@ -156,7 +156,7 @@ class Gather(ShapeOp):
 
     @staticmethod
     def typecheck(
-        x: TypecheckArray,
+        x: TypecheckTensor,
         idx,
         *,
         dimension_numbers,
@@ -165,7 +165,7 @@ class Gather(ShapeOp):
         indices_are_sorted,
         mode,
         fill_value,
-    ) -> List[TypecheckArray]:
+    ) -> List[TypecheckTensor]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -450,9 +450,9 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def typecheck(x: TypecheckArray, idx, *, axis: Sequence[int]) -> List[TypecheckArray]:
+    def typecheck(x: TypecheckTensor, idx, *, axis: Sequence[int]) -> List[TypecheckTensor]:
         shape = [x.shape[i] for i in axis]
-        return [TypecheckArray(shape, x.dtype)]
+        return [TypecheckTensor(shape, x.dtype)]
 
     @staticmethod
     def T(
@@ -522,11 +522,11 @@ def fn(
 ):
     return """
 # SmallVector<Tensor> runScatterOp(
-#     ArrayRef<Tensor> inputs, const Tensor &scatterIndices,
-#     ArrayRef<Tensor> updates, const Axes &updateWindowDims,
+#     TensorRef<Tensor> inputs, const Tensor &scatterIndices,
+#     TensorRef<Tensor> updates, const Axes &updateWindowDims,
 #     const Axes &insertedWindowDims, const Axes &scatterDimsToOperandDims,
 #     Axis indexVectorDim, Region &updateComputation, Scope &scope,
-#     ArrayRef<ShapedType> resultTypes) {
+#     TensorRef<ShapedType> resultTypes) {
 #   SmallVector<Tensor> results;
 #   for (auto input : inputs) results.push_back(input);
 

@@ -156,7 +156,7 @@ class Hashed:
 
 
 # ================
-#   Arrays
+#   Tensors
 # ================
 
 
@@ -170,7 +170,7 @@ class DType(NamedTuple):
         return f"{self.name}"
 
 
-class BaseArray:
+class BaseTensor:
     bool: Final[DType] = DType(0, 1, "bool", bool)
     float16: Final[DType] = DType(0, 2, "f16", np.float16)
     float32: Final[DType] = DType(4, 4, "f32", np.float32)
@@ -242,14 +242,14 @@ class BaseArray:
     __lt__ = lambda self, other: 1.0 - (self >= other)
 
 
-class ArrayBuffer:
+class TensorBuffer:
     def __init__(self, val):
         self.val = val
 
 
-class Array(BaseArray):
-    def __init__(self, val: ArrayBuffer):
-        assert isinstance(val, ArrayBuffer)
+class Tensor(BaseTensor):
+    def __init__(self, val: TensorBuffer):
+        assert isinstance(val, TensorBuffer)
         self.buf = val
 
     def __hash__(self):
@@ -277,15 +277,15 @@ class Array(BaseArray):
     __str__ = __repr__
 
 
-class TypecheckArray:
-    array_abstraction_level = 1
+class TypecheckTensor:
+    tensor_abstraction_level = 1
     shape: Tuple[int, ...]
     dtype: DType
 
     @classmethod
     def like(cls, aval):
         shape = aval.shape
-        if isinstance(aval, Array):
+        if isinstance(aval, Tensor):
             dtype = slope.M().backend.dtype_map_inv[aval.buf.val.dtype]
         else:
             dtype = aval.dtype
@@ -301,11 +301,11 @@ class TypecheckArray:
 
     @staticmethod
     def _bool(tracer):
-        raise Exception("TypecheckArray can't be unambiguously converted to bool")
+        raise Exception("TypecheckTensor can't be unambiguously converted to bool")
 
     @staticmethod
     def _nonzero(tracer):
-        raise Exception("TypecheckArray can't be unambiguously converted to bool")
+        raise Exception("TypecheckTensor can't be unambiguously converted to bool")
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -319,7 +319,7 @@ class TypecheckArray:
         return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
 
     def __repr__(self):
-        return f"TypecheckArray(shape={self.shape}, dtype={self.dtype})"
+        return f"TypecheckTensor(shape={self.shape}, dtype={self.dtype})"
 
 
 # ================
@@ -409,7 +409,7 @@ class Operator:
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.typecheck(*avals_in, **params)
-        tracers_out = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
+        tracers_out = [PartialEvalTracerTensor(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
         instruction = InstructionProto(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
             t.proto = instruction
@@ -448,7 +448,7 @@ class Operator:
 
         @op.set_method
         def typecheck(self, x, **params):
-            return [TypecheckArray(x.shape, x.dtype)]
+            return [TypecheckTensor(x.shape, x.dtype)]
 
         @op.set_method
         def jvp(self, primals, tangents, **params):
@@ -474,13 +474,13 @@ class Operator:
                 return (x, y), params
 
             if type(x) in [bool, int, float]:
-                x = slope.environment.array(x, dtype=y.dtype)
+                x = slope.environment.tensor(x, dtype=y.dtype)
             elif type(y) in [bool, int, float]:
-                y = slope.environment.array(y, dtype=x.dtype)
+                y = slope.environment.tensor(y, dtype=x.dtype)
 
-            if type(x) is Array and isinstance(y, TracerArray):
+            if type(x) is Tensor and isinstance(y, TracerTensor):
                 x = y._trace.pure(x)
-            elif type(y) is Array and isinstance(x, TracerArray):
+            elif type(y) is Tensor and isinstance(x, TracerTensor):
                 y = x._trace.pure(y)
 
             if (xshape := x.shape) == (yshape := y.shape):
@@ -512,27 +512,27 @@ class Operator:
             return [self(x, y, **params)], [x_bdim]
 
         @op.set_method
-        def typecheck(self, x: TypecheckArray, y: TypecheckArray, **params) -> List[TypecheckArray]:
-            if not type(x) in (Array, TypecheckArray) or not type(x) in (Array, TypecheckArray):
+        def typecheck(self, x: TypecheckTensor, y: TypecheckTensor, **params) -> List[TypecheckTensor]:
+            if not type(x) in (Tensor, TypecheckTensor) or not type(x) in (Tensor, TypecheckTensor):
                 raise TypeError
-            void_x = TypecheckArray.like(x)
-            void_y = TypecheckArray.like(y)
+            void_x = TypecheckTensor.like(x)
+            void_y = TypecheckTensor.like(y)
             if void_x == void_y:
                 return [void_x]
             shape_delta = len(void_x.shape) - len(void_y.shape)
             if shape_delta > 0:
-                void_y = TypecheckArray((1,) * shape_delta + void_y.shape, void_y.dtype)
+                void_y = TypecheckTensor((1,) * shape_delta + void_y.shape, void_y.dtype)
             elif shape_delta < 0:
                 x = x.reshape((1,) * -shape_delta + void_x.shape)
-                void_x = TypecheckArray((1,) * -shape_delta + void_x.shape, void_x.dtype)
+                void_x = TypecheckTensor((1,) * -shape_delta + void_x.shape, void_x.dtype)
             if void_x == void_y:
                 return [void_x]
             else:
                 shape_ret = tuple([max(x, y) for x, y in zip(void_x.shape, void_y.shape)])
                 if void_x.shape != shape_ret:
-                    void_x = TypecheckArray(shape_ret, void_x.dtype)
+                    void_x = TypecheckTensor(shape_ret, void_x.dtype)
                 if void_y.shape != shape_ret:
-                    void_y = TypecheckArray(shape_ret, void_y.dtype)
+                    void_y = TypecheckTensor(shape_ret, void_y.dtype)
                 if void_x != void_y:
                     raise TypeError
                 return [void_x]
@@ -567,14 +567,14 @@ class Operator:
             return [cls.do(x, **params)], [out_bdim]
 
         @op.set_method
-        def typecheck(self, x: TypecheckArray, *, axes=None, keepdims=False) -> List[TypecheckArray]:
+        def typecheck(self, x: TypecheckTensor, *, axes=None, keepdims=False) -> List[TypecheckTensor]:
             axes = [a + len(x.shape) if a < 0 else a for a in axes]
             axes_ = set(axes)
             if keepdims:
                 new_shape = [d if i not in axes_ else 1 for i, d in enumerate(x.shape)]
             else:
                 new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
-            return [TypecheckArray(tuple(new_shape), x.dtype)]
+            return [TypecheckTensor(tuple(new_shape), x.dtype)]
 
         return op
 
@@ -666,7 +666,7 @@ class ProcedureSet:
             # static_args = M.tree_map(lambda x: tuple(x) if type(x) is list else x, static_args)
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
-            avals_in = M.tree_map(lambda x: TypecheckArray.like(M.get_aval(x)), args)
+            avals_in = M.tree_map(lambda x: TypecheckTensor.like(M.get_aval(x)), args)
             # top_trace = M.find_top_trace(args)
             program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args, name=f.__name__)
 
@@ -734,7 +734,7 @@ def partial_run(self, trace, tracers, *, program):
     outs1_res = slope.M().bind(self, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
-    outs2 = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
+    outs2 = [PartialEvalTracerTensor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionProto(
         self,
         res_tracers + unknown_tracers,
@@ -785,42 +785,42 @@ class Environment:
         # print(f"fallback to default getattribute")
         super().__getattribute__(attr)
 
-    def array(
+    def tensor(
         self,
-        val: Union[list, tuple, np.ndarray, "ArrayBuffer"] = None,
-        dtype: Optional[Any] = BaseArray.float32,
+        val: Union[list, tuple, np.ndarray, "TensorBuffer"] = None,
+        dtype: Optional[Any] = BaseTensor.float32,
     ):
         return (
-            Array(val)
-            if isinstance(val, ArrayBuffer)
+            Tensor(val)
+            if isinstance(val, TensorBuffer)
             else slope.M().backend.run_impl(self.operator_set.constant, val=val, dtype=dtype)
         )
 
-    def save(arr: "Array", filename: str):
+    def save(arr: "Tensor", filename: str):
         # TODO
         arr_np = arr.numpy()
 
-    def safe_load(self, fn: Union[Array, str]) -> Dict[str, Array]:
+    def safe_load(self, fn: Union[Tensor, str]) -> Dict[str, Tensor]:
         t = (
             fn
-            if isinstance(fn, Array)
-            else Array.empty(os.stat(fn).st_size, dtype=BaseArray.uint8, device=f"disk:{fn}")
+            if isinstance(fn, Tensor)
+            else Tensor.empty(os.stat(fn).st_size, dtype=BaseTensor.uint8, device=f"disk:{fn}")
         )
-        json_len = t[0:1].cast(BaseArray.int64).numpy()[0]
+        json_len = t[0:1].cast(BaseTensor.int64).numpy()[0]
         metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
         return {
             k: t[8 + json_len + v["data_offsets"][0] :]
-            .cast(BaseArray.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
+            .cast(BaseTensor.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
             .reshape(v["shape"])
             for k, v in metadata.items()
             if k != "__metadata__"
         }
 
-    def safe_save(self, Arrays: Dict[str, Array], fn: str):
+    def safe_save(self, Tensors: Dict[str, Tensor], fn: str):
         metadata, offset = {}, 0
-        for k, v in Arrays.items():
+        for k, v in Tensors.items():
             metadata[k] = {
-                "dtype": BaseArray.safe_dtypes_inv[v.dtype],
+                "dtype": BaseTensor.safe_dtypes_inv[v.dtype],
                 "shape": list(v.shape),
                 "data_offsets": [offset, offset + v.nbytes()],
             }
@@ -828,11 +828,11 @@ class Environment:
         j = json.dumps(metadata, separators=(",", ":"))
         j += "\x20" * ((8 - len(j) % 8) % 8)
         Path(fn).unlink(missing_ok=True)
-        t = Array.empty(8 + len(j) + offset, dtype=BaseArray.uint8, device=f"disk:{fn}")
-        t[0:1].cast(BaseArray.int64).assign([len(j)])
-        t[8 : 8 + len(j)].assign(Array(list(j.encode("utf-8")), dtype=BaseArray.uint8, device="cpu"))
+        t = Tensor.empty(8 + len(j) + offset, dtype=BaseTensor.uint8, device=f"disk:{fn}")
+        t[0:1].cast(BaseTensor.int64).assign([len(j)])
+        t[8 : 8 + len(j)].assign(Tensor(list(j.encode("utf-8")), dtype=BaseTensor.uint8, device="cpu"))
         for k, v in self.safe_load(t).items():
-            v.assign(Arrays[k])
+            v.assign(Tensors[k])
 
 
 # ================
@@ -842,7 +842,7 @@ class Environment:
 
 class Var:
     val = None
-    aval: TypecheckArray
+    aval: TypecheckTensor
 
     def __init__(self, aval):
         self.aval = aval
@@ -850,11 +850,11 @@ class Var:
 
 class Lit:
     val: Any
-    aval: TypecheckArray
+    aval: TypecheckTensor
 
     def __init__(self, val):
-        self.aval = aval = TypecheckArray.like(self.get_aval(val))
-        self.val = np.array(val, aval.dtype)
+        self.aval = aval = TypecheckTensor.like(self.get_aval(val))
+        self.val = np.tensor(val, aval.dtype)
 
 
 Atom = Union[Var, Lit]
@@ -920,8 +920,8 @@ class Program(NamedTuple):
 
 
 class ProgramType(NamedTuple):
-    in_types: Tuple[TypecheckArray]
-    out_types: Tuple[TypecheckArray]
+    in_types: Tuple[TypecheckTensor]
+    out_types: Tuple[TypecheckTensor]
 
     def __repr__(self):
         in_types = ", ".join(aval.str_short() for aval in self.in_types)
@@ -992,7 +992,7 @@ class JitFn:
         self.consts = consts
 
     def __call__(self, *args, **params):
-        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Array) else a, args)
+        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         args, in_tree = slope.M().tree_flatten(args)
         try:
             outs = self.fn(*args, **params)
@@ -1000,7 +1000,7 @@ class JitFn:
             print(self.code)
             breakpoint()
             raise
-        return [slope.environment.array(ArrayBuffer(o)) for o in outs]
+        return [slope.environment.tensor(TensorBuffer(o)) for o in outs]
 
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
@@ -1074,7 +1074,7 @@ def partial_run(self, trace, tracers, *, program):
     outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
-    outs2 = [PartialEvalTracerArray(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
+    outs2 = [PartialEvalTracerTensor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionProto(
         self,
         res_tracers + unknown_tracers,
@@ -1109,13 +1109,13 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 class Module:
     def get_metadata(self):
-        array_attrs = set()
+        tensor_attrs = set()
         module_attrs = set()
 
         def find(obj, prefix):
-            nonlocal array_attrs, module_attrs
-            if isinstance(obj, (BaseArray, TypecheckArray)):
-                array_attrs.add(prefix.strip("."))
+            nonlocal tensor_attrs, module_attrs
+            if isinstance(obj, (BaseTensor, TypecheckTensor)):
+                tensor_attrs.add(prefix.strip("."))
                 return
             if isinstance(obj, Module):
                 if obj is not self:
@@ -1124,27 +1124,27 @@ class Module:
                     find(v, f"{prefix}{str(k)}.")
 
         find(self, "")
-        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(array_attrs) + tuple(module_attrs)}
+        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
         return dict(
             cls=self.__class__,
-            array_attrs=tuple(array_attrs),
+            tensor_attrs=tuple(tensor_attrs),
             module_attrs=tuple(module_attrs),
             static_dict=static_dict,
         )
 
     def flatten(self):
         metadata = self.get_metadata()
-        arrays = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["array_attrs"])
+        tensors = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
         rest = OrderedDict()
         for mod_attr in metadata["module_attrs"]:
             mod = operator_py.attrgetter(mod_attr)(self)
             mod_rest, _ = mod.flatten()
             rest[mod_attr] = mod_rest
 
-        return (metadata, rest), arrays
+        return (metadata, rest), tensors
 
     @staticmethod
-    def unflatten(metadata_rest, arrays):
+    def unflatten(metadata_rest, tensors):
         def reassamble(metadata, rest):
             cls = metadata["cls"]
             mod = cls.__new__(cls)
@@ -1163,8 +1163,8 @@ class Module:
                 target_obj = getattr(target_obj, a)
             setattr(target_obj, nested_attrs[-1], value)
 
-        for array, array_attr in list_zip(list(arrays), metadata["array_attrs"]):
-            set_nested_attr(mod, array_attr, array)
+        for tensor, tensor_attr in list_zip(list(tensors), metadata["tensor_attrs"]):
+            set_nested_attr(mod, tensor_attr, tensor)
         return mod
 
     def override(self, args):
@@ -1193,7 +1193,7 @@ def as_module(cls):
 
 
 class Backend:
-    def __init__(self, name, default_dtype=BaseArray.float32, deps=("numpy as np", "math")):
+    def __init__(self, name, default_dtype=BaseTensor.float32, deps=("numpy as np", "math")):
         self.name = name
         self.default_dtype = default_dtype
         self.impls = dict()
@@ -1217,7 +1217,7 @@ class Backend:
     def default_dtype_value(self):
         return self.dtype_map[self.default_dtype]
 
-    def numpy_of(self, array):
+    def numpy_of(self, tensor):
         raise NotImplementedError
 
     @lru_cache
@@ -1262,7 +1262,7 @@ class Backend:
             def extract_arg(a):
                 return (
                     a.val
-                    if isinstance(a, Array)
+                    if isinstance(a, Tensor)
                     else self.dtype_map[a]
                     if isinstance(a, DType)
                     else tuple(extract_arg(aa) for aa in a)
@@ -1275,7 +1275,7 @@ class Backend:
             # if op.nary_inputs:
             # val = self.impls[op](args, **params)
             val = self.impls[op](*args, **params)
-            return Array(ArrayBuffer(val))
+            return Tensor(TensorBuffer(val))
 
 
 class MainTrace(NamedTuple):
@@ -1311,7 +1311,7 @@ class EvalTrace(Trace):
         return ret
 
 
-class TracerArray(BaseArray):
+class TracerTensor(BaseTensor):
     TYPES = {
         bool,
         int,
@@ -1347,7 +1347,7 @@ class TracerArray(BaseArray):
 BatchAxis = Union[None, int]
 
 
-class BatchTracerArray(TracerArray):
+class BatchTracerTensor(TracerTensor):
     def __init__(self, trace, val, batch_dim: BatchAxis):
         self._trace = trace
         self.val = val
@@ -1361,7 +1361,7 @@ class BatchTracerArray(TracerArray):
         else:
             shape = list(aval.shape)
             del shape[self.batch_dim]
-            return TypecheckArray(tuple(shape), aval.dtype)
+            return TypecheckTensor(tuple(shape), aval.dtype)
 
     def full_lower(self):
         if self.batch_dim is None:
@@ -1371,12 +1371,12 @@ class BatchTracerArray(TracerArray):
 
 
 class BatchTrace(Trace):
-    pure = lambda self, val: BatchTracerArray(self, val, None)
+    pure = lambda self, val: BatchTracerTensor(self, val, None)
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
-        return [BatchTracerArray(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
+        return [BatchTracerTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @property
     def axis_size(self):
@@ -1402,7 +1402,7 @@ class BatchTrace(Trace):
             return x.transpose(perm)
 
 
-class JVPTracerArray(TracerArray):
+class JVPTracerTensor(TracerTensor):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -1425,7 +1425,7 @@ class JVPTrace(Trace):
     def pure(self, val):
         if isinstance(val, PartialEvalTrace):
             val = val.pval.const
-        return JVPTracerArray(self, val, slope.environment.zeros_like(val))
+        return JVPTracerTensor(self, val, slope.environment.zeros_like(val))
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
@@ -1440,12 +1440,12 @@ class JVPTrace(Trace):
         #     primals_in = M.tree_unflatten(treedef, primals_in)
         #     tangents_in = M.tree_unflatten(treedef, tangents_in)
         #     primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        return [JVPTracerArray(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
+        return [JVPTracerTensor(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
 
-class ProgramTracerArray(TracerArray):
+class ProgramTracerTensor(TracerTensor):
     __slots__ = ["aval"]
-    aval: TypecheckArray
+    aval: TypecheckTensor
 
     def __init__(self, trace, aval):
         self._trace = trace
@@ -1453,14 +1453,14 @@ class ProgramTracerArray(TracerArray):
 
 
 class ProgramTrace(Trace):
-    def new_arg(self, aval) -> ProgramTracerArray:
-        aval = TypecheckArray.like(aval)
+    def new_arg(self, aval) -> ProgramTracerTensor:
+        aval = TypecheckTensor.like(aval)
         tracer = self.builder.new_tracer(self, aval)
         self.builder.tracer_to_var[id(tracer)] = Var(aval)
 
         return tracer
 
-    def pure(self, val: Any) -> ProgramTracerArray:
+    def pure(self, val: Any) -> ProgramTracerTensor:
         # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
@@ -1486,9 +1486,9 @@ class ProgramTrace(Trace):
 class ProgramBuilder:
     instructions: List[Instruction]
     tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, TracerArray]
+    const_tracers: Dict[int, TracerTensor]
     constvals: Dict[Var, Any]
-    tracers: List[ProgramTracerArray]
+    tracers: List[ProgramTracerTensor]
 
     def __init__(self):
         self.instructions = []
@@ -1497,25 +1497,25 @@ class ProgramBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgramTrace, aval: TypecheckArray) -> ProgramTracerArray:
-        tracer = ProgramTracerArray(trace, aval)
+    def new_tracer(self, trace: ProgramTrace, aval: TypecheckTensor) -> ProgramTracerTensor:
+        tracer = ProgramTracerTensor(trace, aval)
         self.tracers.append(tracer)
         return tracer
 
     def add_instruction(self, instruction: Instruction) -> None:
         self.instructions.append(instruction)
 
-    def add_var(self, tracer: ProgramTracerArray) -> Var:
+    def add_var(self, tracer: ProgramTracerTensor) -> Var:
         assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
         return var
 
-    def getvar(self, tracer: ProgramTracerArray) -> Var:
+    def getvar(self, tracer: ProgramTracerTensor) -> Var:
         var = self.tracer_to_var.get(id(tracer))
         assert var is not None
         return var
 
-    def add_const(self, tracer: ProgramTracerArray, val: Any) -> Var:
+    def add_const(self, tracer: ProgramTracerTensor, val: Any) -> Var:
         var = self.add_var(tracer)
         self.const_tracers[id(val)] = tracer
         self.constvals[var] = val
@@ -1533,7 +1533,7 @@ class ProgramBuilder:
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in TracerArray.TYPES and not slope.M().get_aval(x).shape for x in consts]
+        scalars = [type(x) in TracerTensor.TYPES and not slope.M().get_aval(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1560,7 +1560,7 @@ class ProgramBuilder:
 
 
 class UndefPrimal(NamedTuple):
-    aval: TypecheckArray
+    aval: TypecheckTensor
 
     @property
     def shape(self):
@@ -1572,7 +1572,7 @@ class UndefPrimal(NamedTuple):
 
 
 class PartialVal(NamedTuple):
-    aval: TypecheckArray
+    aval: TypecheckTensor
     const: Optional[Any]
 
     is_known = property(lambda self: self.const is not None)
@@ -1589,16 +1589,16 @@ class ConstProto(NamedTuple):
 
 class InstructionProto(NamedTuple):
     prim: Operator
-    tracers_in: List["PartialEvalTracerArray"]
+    tracers_in: List["PartialEvalTracerTensor"]
     params: Dict[str, Any]
-    avals_out: List[TypecheckArray]
-    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerArray"]]
+    avals_out: List[TypecheckTensor]
+    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracerTensor"]]
 
 
 ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
 
 
-class PartialEvalTracerArray(TracerArray):
+class PartialEvalTracerTensor(TracerTensor):
     def __init__(self, trace, pval, proto):
         self._trace = trace
         self.pval = pval
@@ -1615,17 +1615,17 @@ class PartialEvalTracerArray(TracerArray):
 
 class PartialEvalTrace(Trace):
     def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracerArray(self, pval, LambdaBindingProto())
+        return PartialEvalTracerTensor(self, pval, LambdaBindingProto())
 
-    def pure(self, val: Any) -> PartialEvalTracerArray:
-        return PartialEvalTracerArray(self, slope.M().make_known_pval(val), None)
+    def pure(self, val: Any) -> PartialEvalTracerTensor:
+        return PartialEvalTracerTensor(self, slope.M().make_known_pval(val), None)
 
-    def instantiate_const(self, tracer: PartialEvalTracerArray) -> PartialEvalTracerArray:
+    def instantiate_const(self, tracer: PartialEvalTracerTensor) -> PartialEvalTracerTensor:
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = slope.M().make_unknown_pval(TypecheckArray.like(tracer.aval))
-            return PartialEvalTracerArray(self, pval, ConstProto(tracer.pval.const))
+            pval = slope.M().make_unknown_pval(TypecheckTensor.like(tracer.aval))
+            return PartialEvalTracerTensor(self, pval, ConstProto(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         conds = tuple(t.pval.is_known for t in tracers)
@@ -1672,17 +1672,17 @@ class Machine:
     def make_known_pval(self, val: Any):
         return PartialVal(self.get_aval(val), val)
 
-    def make_unknown_pval(self, aval: TypecheckArray):
+    def make_unknown_pval(self, aval: TypecheckTensor):
         return PartialVal(aval, None)
 
     def get_aval(self, x):
-        if isinstance(x, TracerArray):
+        if isinstance(x, TracerTensor):
             return x.aval
-        elif type(x) in TracerArray.TYPES:
-            return self.environment.array(x)
-        elif isinstance(x, Array):
+        elif type(x) in TracerTensor.TYPES:
+            return self.environment.tensor(x)
+        elif isinstance(x, Tensor):
             return x
-        elif isinstance(x, TypecheckArray):
+        elif isinstance(x, TypecheckTensor):
             return x
         else:
             raise TypeError(type(x))
@@ -1769,7 +1769,7 @@ class Machine:
             for x in seq:
                 if type(x) in (tuple, list):
                     get_arr_from_seq(x)
-                elif isinstance(x, TracerArray):
+                elif isinstance(x, TracerTensor):
                     arrs += [x]
 
         get_arr_from_seq(xs)
@@ -1783,8 +1783,8 @@ class Machine:
             top_main = self.dynamic_trace
         return top_main.trace_type(top_main)
 
-    def full_raise(self, trace: Trace, val: Any) -> TracerArray:
-        if not isinstance(val, TracerArray):
+    def full_raise(self, trace: Trace, val: Any) -> TracerTensor:
+        if not isinstance(val, TracerTensor):
             return trace.pure(val)
         level = trace.main.level
         if val._trace.main is trace.main:
@@ -1797,7 +1797,7 @@ class Machine:
             raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
     def full_lower(self, val: Any):
-        if isinstance(val, TracerArray):
+        if isinstance(val, TracerTensor):
             return val.full_lower()
         elif type(val) in (list, tuple):
             return tuple(self.full_lower(v) for v in val)
@@ -1827,7 +1827,7 @@ class Machine:
         out_types = [self.typecheck_atom(environment, x) for x in program.outs]
         return ProgramType(tuple(in_types), tuple(out_types))
 
-    def typecheck_atom(self, environment: Set[Var], x: Atom) -> TypecheckArray:
+    def typecheck_atom(self, environment: Set[Var], x: Atom) -> TypecheckTensor:
         if isinstance(x, Var):
             if x not in environment:
                 raise TypeError("unbound variable")
@@ -1863,7 +1863,7 @@ class Machine:
         (axis_size,) = axi_set
         with self.new_main(BatchTrace, axis_size) as main:
             trace = BatchTrace(main)
-            tracers_in = [BatchTracerArray(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_axes)]
+            tracers_in = [BatchTracerTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_axes)]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
             vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
@@ -1887,7 +1887,7 @@ class Machine:
     def jvp_flat(self, f, primals, tangents, **static_args):
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
-            tracers_in = [JVPTracerArray(trace, x, t) for x, t in list_zip(primals, tangents)]
+            tracers_in = [JVPTracerTensor(trace, x, t) for x, t in list_zip(primals, tangents)]
             outs = f(*tracers_in, **static_args)
             tracers_out = [self.full_raise(trace, out) for out in outs]
             primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
@@ -1911,7 +1911,7 @@ class Machine:
 
     @lru_cache
     def make_program(
-        self, f: Callable, *avals_in: TypecheckArray, static_args, name
+        self, f: Callable, *avals_in: TypecheckTensor, static_args, name
     ) -> Tuple[Program, List[Any], PyTreeDef]:
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
@@ -2038,7 +2038,7 @@ class Machine:
 
     def linearize_flat(self, f, *primals_in):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
-            self.make_unknown_pval(TypecheckArray.like(self.get_aval(x))) for x in primals_in
+            self.make_unknown_pval(TypecheckTensor.like(self.get_aval(x))) for x in primals_in
         ]
 
         def f_jvp(*primals_tangents_in):
@@ -2069,10 +2069,10 @@ class Machine:
 
     def tracers_to_program(
         self,
-        tracers_in: List["PartialEvalTracerArray"],
-        tracers_out: List["PartialEvalTracerArray"],
+        tracers_in: List["PartialEvalTracerTensor"],
+        tracers_out: List["PartialEvalTracerTensor"],
     ):
-        def tracer_parents(t: PartialEvalTracerArray) -> List[PartialEvalTracerArray]:
+        def tracer_parents(t: PartialEvalTracerTensor) -> List[PartialEvalTracerTensor]:
             return t.proto.tracers_in if isinstance(t.proto, InstructionProto) else []
 
         def proto_to_instruction(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
@@ -2083,7 +2083,7 @@ class Machine:
                     tracer_to_var[id(t_ref())] = var
             return Instruction(proto.prim, inputs, proto.params, out_binders)
 
-        tracer_to_var: Dict[int, Var] = {id(t): Var(TypecheckArray.like(t.aval)) for t in tracers_in}
+        tracer_to_var: Dict[int, Var] = {id(t): Var(TypecheckTensor.like(t.aval)) for t in tracers_in}
         constvar_to_val: Dict[int, Any] = {}
         constid_to_var: Dict[int, Var] = {}
         processed_instructions: Set[int] = set()
@@ -2095,7 +2095,7 @@ class Machine:
                 val = t.proto.val
                 var = constid_to_var.get(id(val))
                 if var is None:
-                    aval = TypecheckArray.like(self.get_aval(val))
+                    aval = TypecheckTensor.like(self.get_aval(val))
                     var = constid_to_var[id(val)] = Var(aval)
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
@@ -2157,7 +2157,7 @@ class Machine:
 
     def vjp_flat(self, f, *primals_in, **static_args):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
-            self.make_unknown_pval(TypecheckArray.like(self.get_aval(x))) for x in primals_in
+            self.make_unknown_pval(TypecheckTensor.like(self.get_aval(x))) for x in primals_in
         ]
         _, tangent_pvals_in = split_half(pvals_in)
 
@@ -2280,7 +2280,7 @@ class Machine:
             #     args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
             # assert len(args) == len(args_strs)
 
-            avals_in = self.tree_map(lambda x: TypecheckArray.like(self.get_aval(x)), args)
+            avals_in = self.tree_map(lambda x: TypecheckTensor.like(self.get_aval(x)), args)
             program, consts, out_tree = self.make_program(
                 f, *avals_in, static_args=static_args, name=f"{f.__name__}_jit"
             )
@@ -2304,7 +2304,7 @@ class Machine:
         outs1_res = jit_op(*known_vals, program=program)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
-        outs2 = [PartialEvalTracerArray(trace, PartialVal.unknown(v.aval), None) for v in program2.outs]
+        outs2 = [PartialEvalTracerTensor(trace, PartialVal.unknown(v.aval), None) for v in program2.outs]
         proto = InstructionProto(
             jit_op,
             res_tracers + unknown_tracers,

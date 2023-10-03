@@ -2,8 +2,8 @@ README.md
 setup.py
 slope/__init__.py
 slope/ad.py
-slope/array.py
-slope/array_shape.py
+slope/tensor.py
+slope/tensor_shape.py
 slope/ops.py
 slope/tracer.py
 slope/utils.py

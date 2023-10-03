@@ -25,7 +25,7 @@ class TestJit(unittest.TestCase):
             return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.environment.array([1.0, 2.0, 3.0])
+        x = machine.environment.tensor([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -43,7 +43,7 @@ class TestJit(unittest.TestCase):
             return machine.grad(loss)(x)
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.environment.array([1.0, 2.0, 3.0])
+        x = machine.environment.tensor([1.0, 2.0, 3.0])
         res = f(x)
         print(res)
         res = f(x)
@@ -58,7 +58,7 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.environment.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        x = machine.environment.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
         res = f(x)
         print(res)
         res = f(x)
@@ -74,8 +74,8 @@ class TestJit(unittest.TestCase):
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        x = machine.environment.array([1.0, 2.0, 3.0])
-        y = machine.environment.array([4.0, 5.0, 6.0])
+        x = machine.environment.tensor([1.0, 2.0, 3.0])
+        y = machine.environment.tensor([4.0, 5.0, 6.0])
         res = f(x, y)
         print(res)
         res = f(y, x + x)
@@ -91,15 +91,15 @@ class TestJit(unittest.TestCase):
             out = out + z
             out = out + 1.0
             out = out.sum(keepdims=True)
-            # out = x + Array([4.0, 5.0, 6.0])
+            # out = x + Tensor([4.0, 5.0, 6.0])
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = machine.environment.array([1.0, 2.0])
+        # a = machine.environment.tensor([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        x = machine.environment.array([1.0, 2.0, 3.0])
-        y = machine.environment.array([4.0, 5.0, 6.0])
+        x = machine.environment.tensor([1.0, 2.0, 3.0])
+        y = machine.environment.tensor([4.0, 5.0, 6.0])
         args0 = ((x, y),)
         args1 = {"s": 1.0}
         res = f(args0, args1)
@@ -114,16 +114,16 @@ class TestJit(unittest.TestCase):
             print("tracing!")
             out = x + x
             out = out.sum(keepdims=True)
-            # out = x + Array([4.0, 5.0, 6.0])
+            # out = x + Tensor([4.0, 5.0, 6.0])
             return out
 
         # print(f"{f.get_jit_fn()=}")
-        # a = machine.environment.array([1.0, 2.0])
+        # a = machine.environment.tensor([1.0, 2.0])
         # a = a.pad((0,), (1,), None, 0.0)
         # a = a.slice((0,), (2,), (1,))
-        res = f(machine.environment.array([1.0, 2.0, 3.0]))
+        res = f(machine.environment.tensor([1.0, 2.0, 3.0]))
         print(res)
-        res = f(machine.environment.array([4.0, 5.0, 6.0]))
+        res = f(machine.environment.tensor([4.0, 5.0, 6.0]))
         # print(f"{f.get_jit_fn()=}")
         print(res)
 

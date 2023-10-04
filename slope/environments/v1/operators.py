@@ -4,7 +4,7 @@ from slope.core import (
     OperatorSet,
     Tensor,
     Typecheckor,
-    UndefPrimal,
+    PrimalProxy,
     list_zip,
     list_map,
 )
@@ -43,7 +43,7 @@ def jvp(self, primals, tangents, **params):
 @stop_gradient.set_method
 def T(self, cts, x):
     (z,) = cts
-    assert type(x) is UndefPrimal
+    assert type(x) is PrimalProxy
     return [slope.environment.zeros_like(z)]
 
 
@@ -242,10 +242,10 @@ def jvp(self, primals, tangents):
 @mul.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
-    assert (type(x) is UndefPrimal) ^ (type(y) is UndefPrimal)
-    if type(x) is UndefPrimal:
+    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
+    if type(x) is PrimalProxy:
         return [z_bar * y, None]
-    elif type(y) is UndefPrimal:
+    elif type(y) is PrimalProxy:
         return [None, x * z_bar]
 
 
@@ -581,7 +581,7 @@ def T(self, cts, x, *, lo, hi, interior=None, value=0.0):
         )
         return unpadded.slice_hlo(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
-    res = t_op() if isinstance(x, UndefPrimal) else None
+    res = t_op() if isinstance(x, PrimalProxy) else None
     return [res]
 
 
@@ -643,7 +643,7 @@ def T(self, cts, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cts
     x_shape = x.aval.shape
-    assert isinstance(x, UndefPrimal)
+    assert isinstance(x, PrimalProxy)
     if strides is None or np.all(np.equal(strides, 1)):
         lo, hi, interior = (
             starts,
@@ -775,9 +775,9 @@ def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
 @concatenate.set_method
 def T(self, cts, *xs, axis=0):
     (z,) = cts
-    x_shapes = [o.aval.shape if type(o) is UndefPrimal else o.shape for o in xs]
+    x_shapes = [o.aval.shape if type(o) is PrimalProxy else o.shape for o in xs]
     if type(z) is None:
-        return [None if type(o) is UndefPrimal else None for o in xs]
+        return [None if type(o) is PrimalProxy else None for o in xs]
     else:  # TODO: replace numpy with pure Python
         limit_points = np.cumsum([shape[axis] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
@@ -789,7 +789,7 @@ def T(self, cts, *xs, axis=0):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_hlo(start, limit) if type(o) is UndefPrimal else None for o, start, limit in zip(xs, starts, limits)
+        z.slice_hlo(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)
     ]
 
 

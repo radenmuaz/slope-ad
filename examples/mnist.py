@@ -88,8 +88,7 @@ def mnist(permute_train=False):
     return train_images, train_labels, test_images, test_labels
 
 
-@slope.core.as_module
-class Linear:
+class Linear(slope.core.Module):
     def __init__(self, in_dim, out_dim, bias=False):
         self.weight = sev.randn((out_dim, in_dim))
         self.bias = sev.zeros(out_dim) if bias else None
@@ -99,24 +98,28 @@ class Linear:
         return x + self.bias if self.bias is not None else x
 
 
-@slope.core.as_module
-class MLP:
+class MLP(slope.core.Module):
     def __init__(self, in_dim, hid_dim, out_dim):
         self.linear1 = Linear(in_dim, hid_dim)
         self.linear2 = Linear(hid_dim, out_dim)
 
     def __call__(self, x):
         x = self.linear1(x)
-        # x = x.relu()
+        x = x.relu()
         x = self.linear2(x)
         return x
 
-
 @slope.jit
-def loss_fn(model, batch):
-    inputs, targets = batch
-    preds = model(inputs)
-    return -(preds * targets).sum()
+def train_step(model, batch, optimizer):
+    def loss_fn(model, batch):
+        inputs, targets = batch
+        preds = model(inputs)
+        return -(preds * targets).sum()
+    
+    g_loss_fn = slope.grad(loss_fn)
+    loss, g_model = g_loss_fn(model, batch)
+    model, optimizer = optimizer(model, g_model)
+    return loss, model, optimizer
 
 
 def accuracy(model, batch):

@@ -1,6 +1,7 @@
 import slope
 from slope.core import Tensor
 from typing import Tuple
+def dedup(x): return list(dict.fromkeys(x))   # retains list order
 
 
 class Optimizer:

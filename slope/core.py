@@ -25,14 +25,13 @@ from typing import (
     DefaultDict,
     Callable,
     Final,
-    BinaryIO,
 )
 import weakref
 import types
 from contextlib import contextmanager
 import itertools
 import weakref
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from enum import Enum, auto
 import operator as operator_py
 import string
@@ -43,7 +42,6 @@ from functools import partial, lru_cache
 
 import slope
 import importlib
-import copy
 
 # ================
 #   Utils
@@ -176,7 +174,7 @@ class TensorBuffer:
 
 
 class Tensor:
-    bool: Final[DType] = DType(0, 1, "bool", bool)
+    bool: Final[DType] = DType(0, 1, "bool", np.bool_)
     float16: Final[DType] = DType(0, 2, "f16", np.float16)
     float32: Final[DType] = DType(4, 4, "f32", np.float32)
     int8: Final[DType] = DType(0, 1, "i8", np.int8)
@@ -184,15 +182,16 @@ class Tensor:
     int64: Final[DType] = DType(2, 8, "i64", np.int64)
     uint8: Final[DType] = DType(0, 1, "u8", np.uint8)
 
-    safe_dtypes = {
-        "F16": float16,
-        "F32": float32,
-        "U8": uint8,
-        "I8": int8,
-        "I32": int32,
-        "I64": int64,
+    dtypes = {
+        "bool": bool,
+        "f16": float16,
+        "f32": float32,
+        "u8": uint8,
+        "i8": int8,
+        "i32": int32,
+        "i64": int64,
     }
-    safe_dtypes_inv = {v: k for k, v in safe_dtypes.items()}
+    dtypes_inv = {v: k for k, v in dtypes.items()}
 
     @property
     def default_dtype(self):
@@ -276,9 +275,9 @@ class Tensor:
 
 
 class Typecheckor:
-    tensor_abstraction_level = 1
-    shape: Tuple[int, ...]
-    dtype: DType
+    def __init__(self, shape, dtype):
+        self.shape = tuple(shape)
+        self.dtype = dtype
 
     @classmethod
     def like(cls, aval):
@@ -289,21 +288,11 @@ class Typecheckor:
             dtype = aval.dtype
         return cls(shape, dtype)
 
-    def __init__(self, shape, dtype):
-        self.shape = tuple(shape)
-        self.dtype = dtype
+    
 
     @property
     def ndim(self):
         return len(self.shape)
-
-    @staticmethod
-    def _bool(tracer):
-        raise Exception("Typecheckor can't be unambiguously converted to bool")
-
-    @staticmethod
-    def _nonzero(tracer):
-        raise Exception("Typecheckor can't be unambiguously converted to bool")
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -385,22 +374,6 @@ class Operator:
         return args, params
 
     def reorg_args_nary(self, args, params):
-        # args_, params_ = args, params
-        # sig = inspect.signature(self.typecheck)
-        # args_strs = [
-        #     k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
-        # ]
-        # params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
-
-        # if args:
-        #     if len(args) > len(args_strs):
-        #         args, rest = args[: len(args_strs)], args[len(args_strs) :]
-        #         if params_strs:
-        #             new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
-        #             params = {**new_params, **params}
-        #     else:
-        #         args = tuple([params[k] if k in params else arg for k, arg in zip(args_strs, args)])
-        #         assert len(args) == len(args_strs)
         return args, params
 
     def partial_run(self, trace, tracers, **params):
@@ -471,9 +444,9 @@ class Operator:
                 assert y.aval.shape == x.shape
                 return (x, y), params
 
-            if type(x) in [bool, int, float]:
+            if type(x) in Tracor.PYTHON_TYPES:
                 x = slope.environment.tensor(x, dtype=y.dtype)
-            elif type(y) in [bool, int, float]:
+            elif type(y) in Tracor.PYTHON_TYPES:
                 y = slope.environment.tensor(y, dtype=x.dtype)
 
             if type(x) is Tensor and isinstance(y, Tracor):
@@ -589,6 +562,7 @@ class Operator:
 
 class OperatorSet:
     def register(self, op):
+        assert op.name not in vars(self)
         setattr(self, op.name, op)
 
     def alias(self, op, name):
@@ -600,6 +574,7 @@ class ProcedureSet:
     def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
+            assert f.__name__ not in vars(self)
             setattr(self, f.__name__, f_procedure)
             return f_procedure
 
@@ -1281,7 +1256,7 @@ class EvalTrace(Trace):
 
 
 class Tracor(Tensor):
-    TYPES = {
+    PYTHON_TYPES = {
         bool,
         int,
         float,
@@ -1299,9 +1274,6 @@ class Tracor(Tensor):
     def val(self):
         raise NotImplementedError
 
-    # def __repr__(self):
-    #     return f"{self.__class__.__name__}: {repr(self.aval)}"
-
     def __str__(self):
         return repr(self)
 
@@ -1313,7 +1285,7 @@ class Tracor(Tensor):
         return len(self.shape)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.aval)[6:-1] if self.aval.ndim > 0 else self.aval}"
+        return f"{self.__class__.__name__}({repr(self.aval)})"
 
 
 BatchAxis = Union[None, int]
@@ -1505,7 +1477,7 @@ class ProgramBuilder:
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in Tracor.TYPES and not slope.M().get_aval(x).shape for x in consts]
+        scalars = [type(x) in Tracor.PYTHON_TYPES and not slope.M().get_aval(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1653,7 +1625,7 @@ class Machine:
     def get_aval(self, x):
         if isinstance(x, Tracor):
             return x.aval
-        elif type(x) in Tracor.TYPES:
+        elif type(x) in Tracor.PYTHON_TYPES:
             return self.environment.tensor(x)
         elif isinstance(x, Tensor):
             return x

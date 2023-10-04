@@ -97,7 +97,8 @@ if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         layers.Dense(200),
-        layers.Fn(lambda x: x.maximum(sev.zeros_like(x))),
+        layers.Fn(lambda x: x.relu()),
+        # layers.Fn(lambda x: x.maximum(sev.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
     )
@@ -153,8 +154,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                sev.array(test_images),
-                sev.array(test_labels),
+                sev.tensor(test_images),
+                sev.tensor(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

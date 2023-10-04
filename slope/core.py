@@ -408,9 +408,9 @@ class Operator:
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.typecheck(*avals_in, **params)
         tracers_out = [PartialEvalTracor(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
-        instruction = InstructionProto(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
+        instruction = InstructionDraft(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
-            t.proto = instruction
+            t.draft = instruction
         return tracers_out
 
     def partial_run_instruction(self, unks_in, instruction):
@@ -461,13 +461,13 @@ class Operator:
 
         @op.set_method
         def args_fixer(self, x, y, **params):
-            if type(x) is UndefPrimal and type(y) is UndefPrimal:
+            if type(x) is PrimalProxy and type(y) is PrimalProxy:
                 assert x.aval.shape == y.aval.shape
                 return (x, y), params
-            elif type(x) is UndefPrimal:
+            elif type(x) is PrimalProxy:
                 assert x.aval.shape == y.shape
                 return (x, y), params
-            elif type(y) is UndefPrimal:
+            elif type(y) is PrimalProxy:
                 assert y.aval.shape == x.shape
                 return (x, y), params
 
@@ -714,7 +714,7 @@ def typecheck(self, *in_types, program):
 
 @procedure_op.set_method
 def T(self, cts, *invals, program):
-    undef_primals = [type(x) is UndefPrimal for x in invals]
+    undef_primals = [type(x) is PrimalProxy for x in invals]
     transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
@@ -733,7 +733,7 @@ def partial_run(self, trace, tracers, *, program):
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
     outs2 = [PartialEvalTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
-    instruction = InstructionProto(
+    instruction = InstructionDraft(
         self,
         res_tracers + unknown_tracers,
         dict(program=program2),
@@ -741,7 +741,7 @@ def partial_run(self, trace, tracers, *, program):
         list_map(weakref.ref, outs2),
     )
     for t in outs2:
-        t.proto = instruction
+        t.draft = instruction
 
     return merge_lists(out_unknowns, outs1, outs2)
 
@@ -949,7 +949,7 @@ class Store:
 class NodeType(NamedTuple):
     name: str
     flatten: Callable
-    from_iterable: Callable
+    unflatten: Callable
 
 
 class PyTreeDef(NamedTuple):
@@ -958,16 +958,37 @@ class PyTreeDef(NamedTuple):
     child_treedefs: Tuple["PyTreeDef", ...]
 
     def __repr__(self):
-        # cs = repr(self.child_treedefs).replace(', tree', ',\ntree')
-        ret = f"tree {self.node_type.name}\n"
-        for i, c in enumerate(self.child_treedefs):
-            ret += f"{i} {c}\n"
+        ret = self.to_s_expression()
         return ret
+        # ret = self.pretty_print()
+        # ret = f"tree {self.node_type.name}\n"
+        # for i, c in enumerate(self.child_treedefs):
+        #     ret += f"{i} {c}\n"
+
+    def pretty_print(self, indent=0):
+        indent_str = " " * indent
+        child_str = ""
+        if self.child_treedefs:
+            child_str = "\n" + "\n".join(child.pretty_print(indent + 2) for child in self.child_treedefs)
+        return f"{indent_str}PyTreeDef({self.node_type},\n  {child_str})"
+
+    def to_s_expression(self, indent=0):
+        if not self.child_treedefs:
+            return f"({self.node_type.name})"
+        indent_str = " " * indent
+        child_s_expr = "\n".join(child.to_s_expression(indent + 2) for child in self.child_treedefs)
+        return f"{indent_str}({self.node_type.name} {child_s_expr})"
 
 
 class Leaf:
     def __repr__(self):
-        return "<Leaf>"
+        return "Leaf"
+
+    def pretty_print(self, indent=0):
+        return " " * indent + repr(self)
+
+    def to_s_expression(self, indent=0):
+        return f"({repr(self)}"
 
 
 leaf = Leaf()
@@ -1044,7 +1065,7 @@ def typecheck(self, *in_types, program):
 
 @jit_op.set_method
 def T(self, cts, *invals, program):
-    undef_primals = [type(x) is UndefPrimal for x in invals]
+    undef_primals = [type(x) is PrimalProxy for x in invals]
     transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
@@ -1069,7 +1090,7 @@ def partial_run(self, trace, tracers, *, program):
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
     outs2 = [PartialEvalTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
-    instruction = InstructionProto(
+    instruction = InstructionDraft(
         self,
         res_tracers + unknown_tracers,
         dict(program=program2),
@@ -1077,7 +1098,7 @@ def partial_run(self, trace, tracers, *, program):
         list_map(weakref.ref, outs2),
     )
     for t in outs2:
-        t.proto = instruction
+        t.draft = instruction
 
     return merge_lists(out_unknowns, outs1, outs2)
 
@@ -1104,18 +1125,12 @@ class Module:
         tensor_attrs = set()
         module_attrs = set()
 
-        def find(obj, prefix):
-            nonlocal tensor_attrs, module_attrs
-            if isinstance(obj, (Tensor, Typecheckor)):
-                tensor_attrs.add(prefix.strip("."))
-                return
-            if isinstance(obj, Module):
-                if obj is not self:
-                    module_attrs.add(prefix.strip("."))
-                for k, v in obj.__dict__.items():
-                    find(v, f"{prefix}{str(k)}.")
+        for k, v in self.__dict__.items():
+            if isinstance(v, (Tensor, Typecheckor)):
+                tensor_attrs.add(k)
+            elif isinstance(v, Module):
+                module_attrs.add(k)
 
-        find(self, "")
         static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
         return dict(
             cls=self.__class__,
@@ -1126,56 +1141,24 @@ class Module:
 
     def flatten(self):
         metadata = self.get_metadata()
-        tensors = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
-        rest = OrderedDict()
-        for mod_attr in metadata["module_attrs"]:
-            mod = operator_py.attrgetter(mod_attr)(self)
-            mod_rest, _ = mod.flatten()
-            rest[mod_attr] = mod_rest
-
-        return (metadata, rest), tensors
+        tensors = tuple(getattr(self, attr) for attr in metadata["tensor_attrs"])
+        modules = tuple(getattr(self, attr) for attr in metadata["module_attrs"])
+        return metadata, (tensors, modules)
 
     @staticmethod
-    def unflatten(metadata_rest, tensors):
-        def reassamble(metadata, rest):
-            cls = metadata["cls"]
-            mod = cls.__new__(cls)
-            mod.__dict__.update(metadata["static_dict"])
-            for mod_attr, (metadata_, rest_) in rest.items():
-                setattr(mod, mod_attr, reassamble(metadata_, rest_))
-            return mod
+    def unflatten(metadata, tensors_modules):
+        cls = metadata["cls"]
+        mod = cls.__new__(cls)
+        mod.__dict__.update(metadata["static_dict"])
 
-        metadata, rest = metadata_rest
-        mod = reassamble(metadata, rest)
-
-        def set_nested_attr(obj, attr, value):
-            nested_attrs = attr.split(".")
-            target_obj = obj
-            for a in nested_attrs[:-1]:
-                target_obj = getattr(target_obj, a)
-            setattr(target_obj, nested_attrs[-1], value)
-
-        for tensor, tensor_attr in list_zip(list(tensors), metadata["tensor_attrs"]):
-            set_nested_attr(mod, tensor_attr, tensor)
+        tensor_attrs = metadata["tensor_attrs"]
+        module_attrs = metadata["module_attrs"]
+        tensors, modules = tensors_modules
+        for k, v in zip(tensor_attrs, tensors):
+            setattr(mod, k, v)
+        for k, v in zip(module_attrs, modules):
+            setattr(mod, k, v)
         return mod
-
-    def override(self, args):
-        for hp in self.__dict__.keys():
-            if getattr(args, hp, None) is not None:
-                self.__dict__[hp] = getattr(args, hp)
-
-
-# def as_module(cls):
-#     cls = type(
-#         cls.__name__,
-#         (
-#             cls,
-#             Module,
-#         ),
-#         {},
-#     )
-#     slope.M().register_node(cls, cls.flatten, cls.unflatten)
-#     return cls
 
 
 class Backend:
@@ -1548,7 +1531,7 @@ class ProgramBuilder:
         return new_program, tuple(new_consts)
 
 
-class UndefPrimal(NamedTuple):
+class PrimalProxy(NamedTuple):
     aval: Typecheckor
 
     @property
@@ -1560,7 +1543,7 @@ class UndefPrimal(NamedTuple):
         return self.aval.dtype
 
 
-class PartialVal(NamedTuple):
+class PartialValue(NamedTuple):
     aval: Typecheckor
     const: Optional[Any]
 
@@ -1568,15 +1551,15 @@ class PartialVal(NamedTuple):
     is_unknown = property(lambda self: self.const is None)
 
 
-class LambdaBindingProto(NamedTuple):
+class LambdaBindingDraft(NamedTuple):
     pass
 
 
-class ConstProto(NamedTuple):
+class ConstDraft(NamedTuple):
     val: Any
 
 
-class InstructionProto(NamedTuple):
+class InstructionDraft(NamedTuple):
     prim: Operator
     tracers_in: List["PartialEvalTracor"]
     params: Dict[str, Any]
@@ -1584,14 +1567,14 @@ class InstructionProto(NamedTuple):
     tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracor"]]
 
 
-ProgramProto = Union[LambdaBindingProto, ConstProto, InstructionProto]
+ProgramDraft = Union[LambdaBindingDraft, ConstDraft, InstructionDraft]
 
 
 class PartialEvalTracor(Tracor):
-    def __init__(self, trace, pval, proto):
+    def __init__(self, trace, pval, draft):
         self._trace = trace
         self.pval = pval
-        self.proto = proto
+        self.draft = draft
 
     aval = property(lambda self: self.pval.aval)
     val = property(lambda self: self.pval.const)
@@ -1603,8 +1586,8 @@ class PartialEvalTracor(Tracor):
 
 
 class PartialEvalTrace(Trace):
-    def new_arg(self, pval: PartialVal) -> Any:
-        return PartialEvalTracor(self, pval, LambdaBindingProto())
+    def new_arg(self, pval: PartialValue) -> Any:
+        return PartialEvalTracor(self, pval, LambdaBindingDraft())
 
     def pure(self, val: Any) -> PartialEvalTracor:
         return PartialEvalTracor(self, slope.M().make_known_pval(val), None)
@@ -1614,7 +1597,7 @@ class PartialEvalTrace(Trace):
             return tracer
         else:
             pval = slope.M().make_unknown_pval(Typecheckor.like(tracer.aval))
-            return PartialEvalTracor(self, pval, ConstProto(tracer.pval.const))
+            return PartialEvalTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         conds = tuple(t.pval.is_known for t in tracers)
@@ -1639,15 +1622,16 @@ class Machine:
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
         self.node_types = dict()
-        self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs))
-        self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs))
+        self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
+        self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
         self.register_node(
             dict,
             lambda d: list_map(tuple, unzip2(sorted(d.items()))),
             lambda keys, vals: dict(list_zip(keys, vals)),
+            "dict",
         )
-        self.register_node(UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval))
-        self.register_node(Module, Module.flatten, Module.unflatten)
+        self.register_node(PrimalProxy, lambda u: (u.aval, ()), lambda aval, _: PrimalProxy(aval), "PrimalProxy")
+        self.register_node(Module, Module.flatten, Module.unflatten, "Module")
 
         self.environment = environment
         self.environment.operator_set.register(jit_op)
@@ -1661,10 +1645,10 @@ class Machine:
         return ret
 
     def make_known_pval(self, val: Any):
-        return PartialVal(self.get_aval(val), val)
+        return PartialValue(self.get_aval(val), val)
 
     def make_unknown_pval(self, aval: Typecheckor):
-        return PartialVal(aval, None)
+        return PartialValue(aval, None)
 
     def get_aval(self, x):
         if isinstance(x, Tracor):
@@ -1680,30 +1664,40 @@ class Machine:
 
     def tree_flatten(self, x: Any) -> Any:
         def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
-            if isinstance(x_, Module):
-                node_type = self.node_types[Module]
-            else:
-                node_type = self.node_types.get(type(x_), None)
+            node_type = None
+            for k in self.node_types.keys():
+                if isinstance(x_, k):
+                    node_type = self.node_types[k]
 
             if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
+
+                # print(f'flattened {x_}\n\n  children:\n{children}\n\n  metadata:\n{node_metadata}\n')
                 children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
-                flattened = itertools.chain.from_iterable(children_flat)
-                return flattened, PyTreeDef(node_type, node_metadata, tuple(child_trees))
+                children_iter = itertools.chain.from_iterable(children_flat)
+                treedef = PyTreeDef(node_type, node_metadata, tuple(child_trees))
+                return children_iter, treedef
             else:
+                # print(f'    leaf found: {x_}\n')
                 return (x_,), leaf
 
+        # print(f"flattening {x} of {type(x)}")
+        # breakpoint()
         children_iter, treedef = _tree_flatten(x)
         return tuple(children_iter), treedef
 
-    def tree_unflatten(self, treedef: PyTreeDef, xs: List[Any]) -> Any:
+    def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
+                # print(f'    tree leaf found: {xs_}\n')
                 return next(xs_)
             else:
+                # print(f"    now\n  {treedef_}")
                 children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-                return treedef_.node_type.from_iterable(treedef_.node_metadata, children)
+                # print(f"{children=}\n")
+                return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
+        # print(f'unflattening {treedef}')
         return _tree_unflatten(treedef, iter(xs))
 
     def flatten_fn(self, f, in_tree):
@@ -1718,8 +1712,10 @@ class Machine:
 
         return flat_fn, store
 
-    def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable) -> None:
-        self.node_types[ty] = NodeType(str(ty), to_iter, from_iter)
+    def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable, name=None) -> None:
+        if name is None:
+            name = str(ty)
+        self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
     def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
         leaves, treedef = self.tree_flatten(tree)
@@ -1936,8 +1932,8 @@ class Machine:
         return new_program, new_consts
 
     def partial_run_flat(
-        self, f: Callable, pvals_in: List["PartialVal"], global_data=None
-    ) -> Tuple[Program, List["PartialVal"], List[Any]]:
+        self, f: Callable, pvals_in: List["PartialValue"], global_data=None
+    ) -> Tuple[Program, List["PartialValue"], List[Any]]:
         with self.new_main(PartialEvalTrace, global_data) as main:
             trace = PartialEvalTrace(main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
@@ -2068,15 +2064,15 @@ class Machine:
         tracers_out: List["PartialEvalTracor"],
     ):
         def tracer_parents(t: PartialEvalTracor) -> List[PartialEvalTracor]:
-            return t.proto.tracers_in if isinstance(t.proto, InstructionProto) else []
+            return t.draft.tracers_in if isinstance(t.draft, InstructionDraft) else []
 
-        def proto_to_instruction(tracer_to_var: Dict[int, Var], proto: InstructionProto) -> Instruction:
-            inputs = [tracer_to_var[id(t)] for t in proto.tracers_in]
-            out_binders = [Var(aval) for aval in proto.avals_out]
-            for t_ref, var in list_zip(proto.tracer_refs_out, out_binders):
+        def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
+            inputs = [tracer_to_var[id(t)] for t in draft.tracers_in]
+            out_binders = [Var(aval) for aval in draft.avals_out]
+            for t_ref, var in list_zip(draft.tracer_refs_out, out_binders):
                 if t_ref() is not None:
                     tracer_to_var[id(t_ref())] = var
-            return Instruction(proto.prim, inputs, proto.params, out_binders)
+            return Instruction(draft.prim, inputs, draft.params, out_binders)
 
         tracer_to_var: Dict[int, Var] = {id(t): Var(Typecheckor.like(t.aval)) for t in tracers_in}
         constvar_to_val: Dict[int, Any] = {}
@@ -2084,22 +2080,22 @@ class Machine:
         processed_instructions: Set[int] = set()
         instructions: List[Instruction] = []
         for t in self.toposort(tracers_out, tracer_parents):
-            if isinstance(t.proto, LambdaBindingProto):
+            if isinstance(t.draft, LambdaBindingDraft):
                 assert id(t) in set(list_map(id, tracers_in))
-            elif isinstance(t.proto, ConstProto):
-                val = t.proto.val
+            elif isinstance(t.draft, ConstDraft):
+                val = t.draft.val
                 var = constid_to_var.get(id(val))
                 if var is None:
                     aval = Typecheckor.like(self.get_aval(val))
                     var = constid_to_var[id(val)] = Var(aval)
                     constvar_to_val[var] = val
                 tracer_to_var[id(t)] = var
-            elif isinstance(t.proto, InstructionProto):
-                if id(t.proto) not in processed_instructions:
-                    instructions.append(proto_to_instruction(tracer_to_var, t.proto))
-                    processed_instructions.add(id(t.proto))
+            elif isinstance(t.draft, InstructionDraft):
+                if id(t.draft) not in processed_instructions:
+                    instructions.append(draft_to_instruction(tracer_to_var, t.draft))
+                    processed_instructions.add(id(t.draft))
             else:
-                raise TypeError(t.proto)
+                raise TypeError(t.draft)
 
         constvars, constvals = unzip2(constvar_to_val.items())
         in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
@@ -2164,7 +2160,7 @@ class Machine:
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]
-        transpose_inputs = consts + [UndefPrimal(p.aval) for p in tangent_pvals_in]
+        transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
         f_vjp_flat = lambda *cts: self.run_program_transposed(program, transpose_inputs, cts)
         return primals_out_flat, f_vjp_flat
 
@@ -2187,10 +2183,10 @@ class Machine:
         ct_environment: Dict[Var, Any] = {}
 
         def read_primal(x: Atom) -> Any:
-            return primal_environment.get(x, UndefPrimal(x.aval)) if type(x) is Var else x.val
+            return primal_environment.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
 
         def write_primal(v: Var, val: Any) -> None:
-            if type(val) is not UndefPrimal:
+            if type(val) is not PrimalProxy:
                 primal_environment[v] = val
 
         def read_cotangent(v: Var) -> Any:
@@ -2213,7 +2209,7 @@ class Machine:
             cts_out = instruction.op.T(cts_in, *inp, **params)
             list_map(write_cotangent, instruction.inputs, cts_out)
 
-        ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
+        ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is PrimalProxy]
 
         return ret
 
@@ -2221,7 +2217,7 @@ class Machine:
     def transpose_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
         traceable = partial(self.run_program_transposed, program)
-        args = [UndefPrimal(a) if u else a for a, u in zip(avals_in, undef_primals)]
+        args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
             traceable, tuple(args), tuple(avals_out), static_args=program.static_args, name=f"{program.name}_T"
         )
@@ -2299,8 +2295,8 @@ class Machine:
         outs1_res = jit_op(*known_vals, program=program)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
-        outs2 = [PartialEvalTracor(trace, PartialVal.unknown(v.aval), None) for v in program2.outs]
-        proto = InstructionProto(
+        outs2 = [PartialEvalTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
+        draft = InstructionDraft(
             jit_op,
             res_tracers + unknown_tracers,
             dict(program=program2),
@@ -2308,5 +2304,5 @@ class Machine:
             map(weakref.ref, outs2),
         )
         for t in outs2:
-            t.proto = proto
+            t.draft = draft
         return merge_lists(out_unknowns, outs1, outs2)

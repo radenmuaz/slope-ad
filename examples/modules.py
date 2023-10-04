@@ -15,42 +15,53 @@ class Linear(slope.core.Module):
 
 class MLP(slope.core.Module):
     def __init__(self, in_dim, hid_dim, out_dim):
+        self.t = sev.randn(1)
         self.linear1 = Linear(in_dim, hid_dim)
         self.linear2 = Linear(hid_dim, out_dim)
 
     def __call__(self, x):
         x = self.linear1(x)
         x = x.relu()
-        # x = x.maximum(sev.zeros_like(x))
         x = self.linear2(x)
         return x
 
+
+x = sev.ones((1, 2))
+y = sev.full((1,), 1)
 
 # model = Linear(2, 1)
 model = MLP(2, 3, 1)
 
 
-# model = model.unflatten(*model.flatten())
-# @slope.jit
+@slope.jit
 def loss_fn(model, batch):
     x, y = batch
     y_hat = model(x)
-    # loss = y_hat.sum()
     loss = (y - y_hat).sum()
     return loss
 
 
-x = sev.ones((1, 2))
-y = sev.ones(1)
 # print(loss_fn(model, (x, y)))
-# print(slope.jit(loss_fn)(model, (x, y)))
-
-
 g_loss_fn = slope.grad(loss_fn)
-# print(g_loss_fn(model, (x, y)).flatten())
+print(g_loss_fn(model, (x, y)).flatten())
 # print(g_loss_fn(model, (x, y)).flatten()[1])
 # breakpoint()
-print(slope.jit(g_loss_fn)(model, (x, y)).flatten()[1])
+# print(slope.jit(g_loss_fn)(model, (x, y)).flatten()[1])
 
 # g_loss_fn = slope.jit(g_loss_fn)
 # print(loss_fn(model, (x, y)))
+
+
+# a = (y,(y,y))
+# af, at = slope.tree_flatten(a)
+# b = slope.tree_unflatten(at, af)
+# print(a)
+# print(b)
+# print(f"{af=}")
+# print(f"{ta=}")
+# m = Linear(2, 1, True)
+# m = MLP(2, 3, 1)
+# mf, mt = slope.tree_flatten(m)
+# m_hat = slope.tree_unflatten(mt, mf)
+# print(f"{mf=}")
+# print(f"{mt=}")

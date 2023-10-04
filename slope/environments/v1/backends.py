@@ -49,7 +49,7 @@ def compile(self, codegen_out):
 @numpy_backend.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
     if fn_name == "main":
-        assert not hasattr(self, "fn_count") 
+        assert not hasattr(self, "fn_count")
         self.fn_count = 0
     print(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
 
@@ -124,7 +124,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
-                if len(lhs) == 0: # return None functions
+                if len(lhs) == 0:  # return None functions
                     continue
 
             elif instruction.op is slope.core.jit_op:

@@ -174,6 +174,7 @@ class TensorBuffer:
     def __init__(self, val):
         self.val = val
 
+
 class Tensor:
     bool: Final[DType] = DType(0, 1, "bool", bool)
     float16: Final[DType] = DType(0, 2, "f16", np.float16)
@@ -272,8 +273,6 @@ class Tensor:
         return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
 
     __str__ = __repr__
-
-    
 
 
 class Typecheckor:
@@ -637,7 +636,7 @@ class ProcedureSet:
 
         def f_procedured(*args, **static_args):
             nonlocal impl_f, jvp_f, T_f, vmap_f, typecheck_f
-        
+
             sig = inspect.signature(f)
             args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
             static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
@@ -800,11 +799,7 @@ class Environment:
         arr_np = arr.numpy()
 
     def safe_load(self, fn: Union[Tensor, str]) -> Dict[str, Tensor]:
-        t = (
-            fn
-            if isinstance(fn, Tensor)
-            else Tensor.empty(os.stat(fn).st_size, dtype=Tensor.uint8, device=f"disk:{fn}")
-        )
+        t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=Tensor.uint8, device=f"disk:{fn}")
         json_len = t[0:1].cast(Tensor.int64).numpy()[0]
         metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
         return {
@@ -1170,23 +1165,17 @@ class Module:
                 self.__dict__[hp] = getattr(args, hp)
 
 
-def as_module(cls):
-    # original_init = cls.__init__
-
-    # def new_init(self, *args, **kwargs):
-    #     original_init(self, *args, **kwargs)
-
-    # cls.__init__ = new_init
-    cls = type(
-        cls.__name__,
-        (
-            cls,
-            Module,
-        ),
-        {},
-    )
-    slope.M().register_node(cls, cls.flatten, cls.unflatten)
-    return cls
+# def as_module(cls):
+#     cls = type(
+#         cls.__name__,
+#         (
+#             cls,
+#             Module,
+#         ),
+#         {},
+#     )
+#     slope.M().register_node(cls, cls.flatten, cls.unflatten)
+#     return cls
 
 
 class Backend:
@@ -1655,6 +1644,8 @@ class Machine:
             lambda keys, vals: dict(list_zip(keys, vals)),
         )
         self.register_node(UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval))
+        self.register_node(Module, Module.flatten, Module.unflatten)
+
 
         self.environment = environment
         self.environment.operator_set.register(jit_op)
@@ -1686,8 +1677,12 @@ class Machine:
 
     def tree_flatten(self, x: Any) -> Any:
         def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
-            node_type = self.node_types.get(type(x_))
-            if node_type:
+            if isinstance(x_, Module):
+                node_type = self.node_types[Module]
+            else:
+                node_type = self.node_types.get(type(x_), None)
+                
+            if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
                 children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
                 flattened = itertools.chain.from_iterable(children_flat)

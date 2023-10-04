@@ -823,7 +823,6 @@ full = Operator.load("full")
 operator_set.register(full)
 
 
-
 @full.set_method
 def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
     if isinstance(shape, int):
@@ -831,6 +830,7 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
     elif shape is None:
         shape = ()
     return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
+
 
 @full.set_method
 def jvp(self, primals, tangents, *, shape, fill_value, dtype):
@@ -863,6 +863,7 @@ def args_fixer(self, *, shape, dtype=Tensor.float32):
         shape = ()
     return (), dict(shape=shape, dtype=dtype)
 
+
 @random_uniform.set_method
 def jvp(self, primals, tangents, *, shape, dtype):
     out = slope.M().backend.run_impl(self, shape=shape, dtype=dtype)
@@ -893,6 +894,7 @@ def args_fixer(self, *, shape, dtype=Tensor.float32):
     elif shape is None:
         shape = ()
     return (), dict(shape=shape, dtype=dtype)
+
 
 @random_normal.set_method
 def jvp(self, primals, tangents, *, shape, dtype=Tensor.float32):

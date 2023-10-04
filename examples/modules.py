@@ -3,8 +3,7 @@ from slope import environment as sev
 import math
 
 
-@slope.core.as_module
-class Linear:
+class Linear(slope.core.Module):
     def __init__(self, in_dim, out_dim, bias=False):
         self.weight = sev.randn((out_dim, in_dim))
         self.bias = sev.zeros(out_dim) if bias else None
@@ -14,8 +13,7 @@ class Linear:
         return x + self.bias if self.bias is not None else x
 
 
-@slope.core.as_module
-class MLP:
+class MLP(slope.core.Module):
     def __init__(self, in_dim, hid_dim, out_dim):
         self.linear1 = Linear(in_dim, hid_dim)
         self.linear2 = Linear(hid_dim, out_dim)

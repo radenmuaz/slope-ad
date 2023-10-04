@@ -1097,11 +1097,9 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
     instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
     instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
-    breakpoint()
     return instruction1, instruction2, out_unknowns, res
 
 
-# return op
 # ================
 #   Module
 # ================

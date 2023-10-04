@@ -23,6 +23,7 @@ class MLP:
     def __call__(self, x):
         x = self.linear1(x)
         x = x.relu()
+        # x = x.maximum(sev.zeros_like(x))
         x = self.linear2(x)
         return x
 

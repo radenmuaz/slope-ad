@@ -45,6 +45,10 @@ def zeros_like(y):
 def ones_like(y):
     return sev.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
+# @procedure_set.register(not_op=True)
+@procedure_set.register()
+def relu(x):
+    return x.maximum(sev.zeros_like(x))
 
 @procedure_set.register()
 def where(x, trueval, falseval):

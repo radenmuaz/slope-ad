@@ -48,6 +48,7 @@ def compile(self, codegen_out):
 
 @numpy_backend.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
+    self.fn_count = getattr(self, "fn_count", 0)
     print(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
 
     def indent(code_line, amount):
@@ -91,9 +92,10 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
                 proc_program = instruction.params["program"]
-                if len(proc_program.instructions) == 0:
-                    continue
-                proc_name = f"{proc_program.name}_{len(fn_defs)}"
+                # if len(proc_program.instructions) == 0:
+                #     continue
+                self.fn_count += 1
+                proc_name = f"{proc_program.name}_{self.fn_count}"
                 proc_codegen_out = self.codegen(
                     proc_program,
                     args,
@@ -122,6 +124,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{proc_name}({args_str})"
+                if len(lhs) == 0: # return None functions
+                    continue
 
             elif instruction.op is slope.core.jit_op:
                 jit_program = instruction.params["program"]
@@ -195,6 +199,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
     print("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n")
+    if fn_name == "main":
+        del self.fn_count
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 

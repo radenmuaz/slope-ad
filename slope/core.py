@@ -847,8 +847,8 @@ class Lit:
     aval: Typecheckor
 
     def __init__(self, val):
-        self.aval = aval = Typecheckor.like(self.get_aval(val))
-        self.val = np.tensor(val, aval.dtype)
+        self.aval = Typecheckor.like(slope.M().get_aval(val))
+        self.val = val
 
 
 Atom = Union[Var, Lit]
@@ -1305,7 +1305,10 @@ class Tracor(Tensor):
     }
     _trace: "Trace"
 
-    aval = property(lambda self: self.get_aval(self.val))
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError
+
+    aval = property(lambda self: slope.M().get_aval(self.val))
     dtype = property(lambda self: self.aval.dtype)
     shape = property(lambda self: self.aval.shape)
 
@@ -1341,7 +1344,7 @@ class BatchTracor(Tracor):
 
     @property
     def aval(self):
-        aval = self.get_aval(self.val)
+        aval = slope.M().get_aval(self.val)
         if self.batch_dim is None:
             return aval
         else:
@@ -1646,9 +1649,9 @@ class Machine:
         self.register_node(UndefPrimal, lambda u: (u.aval, ()), lambda aval, _: UndefPrimal(aval))
         self.register_node(Module, Module.flatten, Module.unflatten)
 
-
         self.environment = environment
         self.environment.operator_set.register(jit_op)
+        self.environment.operator_set.register(procedure_op)
         self.backend = self.environment.backends[default_backend]
 
     def __repr__(self):
@@ -1681,7 +1684,7 @@ class Machine:
                 node_type = self.node_types[Module]
             else:
                 node_type = self.node_types.get(type(x_), None)
-                
+
             if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
                 children_flat, child_trees = unzip2(list_map(_tree_flatten, children))

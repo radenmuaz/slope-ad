@@ -1,6 +1,6 @@
 import slope
 from slope import environment as sev
-from slope.core import ProcedureSet, BaseTensor
+from slope.core import ProcedureSet, Tensor
 from slope.environments.v1.operators import operator_set
 import math
 from typing import Tuple, Union, List, Iterator, Optional, Sequence
@@ -22,12 +22,12 @@ def flatten_seq(l: Iterator):
 
 
 @procedure_set.register(static_argnames="shape dtype")
-def zeros(shape, dtype=BaseTensor.float32):
+def zeros(shape, dtype=Tensor.float32):
     return sev.full(shape, 0.0, dtype)
 
 
 @procedure_set.register(static_argnames="shape dtype")
-def ones(shape, dtype=BaseTensor.float32):
+def ones(shape, dtype=Tensor.float32):
     return sev.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
@@ -180,7 +180,7 @@ def getitem(self, val):
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     count = defaultdict(list)
     for i, v in enumerate(orig_slices):
-        count[type(v) if not isinstance(v, slope.core.BaseTensor) else "tensor"] += [i]
+        count[type(v) if not isinstance(v, slope.core.Tensor) else "tensor"] += [i]
 
     if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(self.shape):
         raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
@@ -228,7 +228,7 @@ def getitem(self, val):
                 dim_collapsed += 1
             else:
                 final_shape.append(dim_shape)
-                if isinstance(s, slope.core.BaseTensor):
+                if isinstance(s, slope.core.Tensor):
                     tensors.append(s)
                     dim.append(i - dim_collapsed)
     ret = sliced_tensor.reshape(tuple(final_shape))

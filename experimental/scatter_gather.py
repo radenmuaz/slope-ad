@@ -156,7 +156,7 @@ class Gather(ShapeOp):
 
     @staticmethod
     def typecheck(
-        x: TypecheckTensor,
+        x: Typecheckor,
         idx,
         *,
         dimension_numbers,
@@ -165,7 +165,7 @@ class Gather(ShapeOp):
         indices_are_sorted,
         mode,
         fill_value,
-    ) -> List[TypecheckTensor]:
+    ) -> List[Typecheckor]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -450,9 +450,9 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def typecheck(x: TypecheckTensor, idx, *, axis: Sequence[int]) -> List[TypecheckTensor]:
+    def typecheck(x: Typecheckor, idx, *, axis: Sequence[int]) -> List[Typecheckor]:
         shape = [x.shape[i] for i in axis]
-        return [TypecheckTensor(shape, x.dtype)]
+        return [Typecheckor(shape, x.dtype)]
 
     @staticmethod
     def T(

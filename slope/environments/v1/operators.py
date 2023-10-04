@@ -2,14 +2,14 @@ import slope
 from slope.core import (
     Operator,
     OperatorSet,
-    BaseTensor,
-    TypecheckTensor,
+    Tensor,
+    Typecheckor,
     UndefPrimal,
     list_zip,
     list_map,
 )
 
-# from slope import Operator, TypecheckTensor, BaseTensor
+# from slope import Operator, Typecheckor, Tensor
 import math
 import numpy as np
 from typing import (
@@ -54,8 +54,8 @@ operator_set.alias(convert, "astype")
 
 
 @convert.set_method
-def typecheck(self, x: TypecheckTensor, *, dtype) -> List[TypecheckTensor]:
-    return [TypecheckTensor(x.shape, dtype)]
+def typecheck(self, x: Typecheckor, *, dtype) -> List[Typecheckor]:
+    return [Typecheckor(x.shape, dtype)]
 
 
 @convert.set_method
@@ -412,13 +412,13 @@ def jvp(self, primals, tangents, *, shape, axes=None):
 
 
 @broadcast_in_dim.set_method
-def typecheck(self, x: TypecheckTensor, *, shape: Sequence[int], axes=()) -> List[TypecheckTensor]:
+def typecheck(self, x: Typecheckor, *, shape: Sequence[int], axes=()) -> List[Typecheckor]:
     e_shape = list(x.shape)
     for a in axes:
         e_shape.insert(a, 1)
     assert len(e_shape) == len(shape)
     assert all(a <= b for a, b in zip(e_shape, shape))
-    return [TypecheckTensor(tuple(shape), x.dtype)]
+    return [Typecheckor(tuple(shape), x.dtype)]
 
 
 @broadcast_in_dim.set_method
@@ -467,8 +467,8 @@ def jvp(self, primals, tangents, *, shape):
 
 
 @reshape.set_method
-def typecheck(self, x: TypecheckTensor, *, shape: Sequence[int]) -> List[TypecheckTensor]:
-    return [TypecheckTensor(tuple(shape), x.dtype)]
+def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
+    return [Typecheckor(tuple(shape), x.dtype)]
 
 
 @reshape.set_method
@@ -503,9 +503,9 @@ def jvp(self, primals, tangents, *, perm):
 
 
 @transpose.set_method
-def typecheck(self, x: TypecheckTensor, *, perm: Sequence[int]) -> List[TypecheckTensor]:
+def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]:
     shape = [x.shape[i] for i in perm]
-    return [TypecheckTensor(shape, x.dtype)]
+    return [Typecheckor(shape, x.dtype)]
 
 
 @transpose.set_method
@@ -554,7 +554,7 @@ def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
 
 
 @pad_hlo.set_method
-def typecheck(self, x: TypecheckTensor, *, lo, hi, interior=None, value=0.0) -> List[TypecheckTensor]:
+def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List[Typecheckor]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -565,7 +565,7 @@ def typecheck(self, x: TypecheckTensor, *, lo, hi, interior=None, value=0.0) -> 
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
-    res = TypecheckTensor(shape, x.dtype)
+    res = Typecheckor(shape, x.dtype)
     return [res]
 
 
@@ -625,17 +625,17 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 
 
 @slice_hlo.set_method
-def typecheck(self, x: TypecheckTensor, *, starts, limits, strides=None) -> List[TypecheckTensor]:
+def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typecheckor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
             [limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)]
         )
-        return [TypecheckTensor(shape, x.dtype)]
+        return [Typecheckor(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
         x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-        return [TypecheckTensor(x.shape, x.dtype)]
+        return [Typecheckor(x.shape, x.dtype)]
 
 
 @slice_hlo.set_method
@@ -693,8 +693,8 @@ def jvp(self, primals, tangents, *, axes):
 
 
 @flip.set_method
-def typecheck(self, x: TypecheckTensor, *, axes):
-    return [TypecheckTensor(tuple(x.shape), x.dtype)]
+def typecheck(self, x: Typecheckor, *, axes):
+    return [Typecheckor(tuple(x.shape), x.dtype)]
 
 
 @flip.set_method
@@ -750,7 +750,7 @@ def jvp(self, primals, tangents, *, axis=0):
 
 
 @concatenate.set_method
-def typecheck(self, *xs: TypecheckTensor, axis=0) -> List[TypecheckTensor]:
+def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot concatenate tensors with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -769,7 +769,7 @@ def typecheck(self, *xs: TypecheckTensor, axis=0) -> List[TypecheckTensor]:
 
     concat_size = sum_py(x.shape[axis] for x in xs)
     ex_shape = xs[0].shape
-    return [TypecheckTensor(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
+    return [Typecheckor(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
 
 
 @concatenate.set_method
@@ -802,21 +802,21 @@ operator_set.register(constant)
 
 
 @constant.set_method
-def jvp(self, primals, tangents, *, val, dtype=BaseTensor.float32):
+def jvp(self, primals, tangents, *, val, dtype=Tensor.float32):
     out = slope.environment.tensor(val, dtype)
     out_jvp = slope.environment.ones_like(out)
     return [out], [out_jvp]
 
 
 @constant.set_method
-def T(self, cts, *, val, dtype=BaseTensor.float32):
+def T(self, cts, *, val, dtype=Tensor.float32):
     return [cts[0]]
 
 
 @constant.set_method
-def typecheck(self, *, val, dtype=BaseTensor.float32):
+def typecheck(self, *, val, dtype=Tensor.float32):
     # TODO: not using numpy to extract shape
-    return [TypecheckTensor(np.tensor(val).shape, dtype)]
+    return [Typecheckor(np.tensor(val).shape, dtype)]
 
 
 full = Operator.load("full")
@@ -825,7 +825,7 @@ operator_set.register(full)
 
 
 @full.set_method
-def args_fixer(self, *, shape, fill_value, dtype=BaseTensor.float32):
+def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -845,8 +845,8 @@ def T(self, cts, *, shape, fill_value, dtype):
 
 
 @full.set_method
-def typecheck(self, *, shape, fill_value, dtype) -> List[TypecheckTensor]:
-    return [TypecheckTensor(tuple(shape), dtype)]
+def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
+    return [Typecheckor(tuple(shape), dtype)]
 
 
 random_uniform = Operator.load("random_uniform")
@@ -856,7 +856,7 @@ operator_set.alias(random_uniform, "randn")
 
 
 @random_uniform.set_method
-def args_fixer(self, *, shape, dtype=BaseTensor.float32):
+def args_fixer(self, *, shape, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -876,8 +876,8 @@ def T(self, cts, *, shape, dtype):
 
 
 @random_uniform.set_method
-def typecheck(self, *, shape, dtype) -> List[TypecheckTensor]:
-    return [TypecheckTensor(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype) -> List[Typecheckor]:
+    return [Typecheckor(tuple(shape), dtype)]
 
 
 random_normal = Operator.load("random_normal")
@@ -887,7 +887,7 @@ operator_set.alias(random_normal, "randn")
 
 
 @random_normal.set_method
-def args_fixer(self, *, shape, dtype=BaseTensor.float32):
+def args_fixer(self, *, shape, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -895,20 +895,20 @@ def args_fixer(self, *, shape, dtype=BaseTensor.float32):
     return (), dict(shape=shape, dtype=dtype)
 
 @random_normal.set_method
-def jvp(self, primals, tangents, *, shape, dtype=BaseTensor.float32):
+def jvp(self, primals, tangents, *, shape, dtype=Tensor.float32):
     out = slope.M().backend.run_impl(random_normal, shape, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @random_normal.set_method
-def T(self, cts, *, shape, dtype=BaseTensor.float32):
+def T(self, cts, *, shape, dtype=Tensor.float32):
     return [cts[0]]
 
 
 @random_normal.set_method
-def typecheck(self, *, shape, dtype=BaseTensor.float32) -> List[TypecheckTensor]:
-    return [TypecheckTensor(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype=Tensor.float32) -> List[Typecheckor]:
+    return [Typecheckor(tuple(shape), dtype)]
 
 
 arange = Operator.load("arange")
@@ -916,7 +916,7 @@ operator_set.register(arange)
 
 
 @arange.set_method
-def args_fixer(self, *, start, stop=None, stride=None, dtype=BaseTensor.float32):
+def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
     if stop is None:
         stop = start
         start = 0
@@ -926,17 +926,17 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=BaseTensor.float32)
 
 
 @arange.set_method
-def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=BaseTensor.float32):
+def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=Tensor.float32):
     out = slope.M().backend.run_impl(arange, start, stop, stride, dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_method
-def T(self, cts, *, start, stop, stride=None, dtype=BaseTensor.float32):
+def T(self, cts, *, start, stop, stride=None, dtype=Tensor.float32):
     return [cts[0]]
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride=None, dtype=BaseTensor.float32) -> List[TypecheckTensor]:
-    return [TypecheckTensor(tuple((stop - start) * stride), dtype)]
+def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[Typecheckor]:
+    return [Typecheckor(tuple((stop - start) * stride), dtype)]

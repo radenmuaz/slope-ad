@@ -2,7 +2,7 @@ import unittest
 
 import slope
 from slope import ad
-from slope.base_tensor import BaseTensor
+from slope.base_tensor import Tensor
 from slope.tensor import Tensor
 import numpy as np
 import os
@@ -13,10 +13,10 @@ DEBUG = os.environmentiron.get("SLOPE_DEBUG", 0)
 
 
 class ADResult(NamedTuple):
-    run_out: BaseTensor
-    jvp_out: BaseTensor
-    loss: BaseTensor
-    grads: BaseTensor
+    run_out: Tensor
+    jvp_out: Tensor
+    loss: Tensor
+    grads: Tensor
 
 
 class TestGrad(unittest.TestCase):

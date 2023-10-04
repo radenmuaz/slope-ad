@@ -1,6 +1,6 @@
 import slope
 from slope import base_ops
-from slope.tensor_shape import TypecheckTensor
+from slope.tensor_shape import Typecheckor
 import numpy as np
 
 from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple
@@ -200,7 +200,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     _base_tensor: typing.Tensor
 
     def __init__(self, impl, key_data: Any):
-        assert not isinstance(key_data, core.TracerTensor)
+        assert not isinstance(key_data, core.Tracor)
         _check_prng_key_data(impl, key_data)
         self.impl = impl
         self._base_tensor = key_data

@@ -1113,6 +1113,34 @@ class Module:
             module_attrs=tuple(module_attrs),
             static_dict=static_dict,
         )
+    
+    def get_tensors(self):
+        tensor_attrs = set()
+        for k, v in self.__dict__.items():
+            if isinstance(v, (Tensor, Typecheckor)):
+                tensor_attrs.add(v)
+        return tuple(tensor_attrs)
+    
+    def get_modules(self):
+        module_attrs = set()
+        for k, v in self.__dict__.items():
+            if isinstance(v, Module):
+                module_attrs.add(v)
+        return tuple(module_attrs)
+
+    def get_named_tensors(self):
+        tensor_attrs = set()
+        for k, v in self.__dict__.items():
+            if isinstance(v, (Tensor, Typecheckor)):
+                tensor_attrs.add((k, v))
+        return tuple(tensor_attrs)
+    
+    def get_named_modules(self):
+        module_attrs = set()
+        for k, v in self.__dict__.items():
+            if isinstance(v, Module):
+                module_attrs.add((k, v))
+        return tuple(module_attrs)
 
     def flatten(self):
         metadata = self.get_metadata()
@@ -1122,19 +1150,73 @@ class Module:
 
     @staticmethod
     def unflatten(metadata, tensors_modules):
-        cls = metadata["cls"]
-        mod = cls.__new__(cls)
+        mod = metadata["cls"].__new__(metadata["cls"])
         mod.__dict__.update(metadata["static_dict"])
-
-        tensor_attrs = metadata["tensor_attrs"]
-        module_attrs = metadata["module_attrs"]
         tensors, modules = tensors_modules
-        for k, v in zip(tensor_attrs, tensors):
+        for k, v in zip(metadata["tensor_attrs"], tensors):
             setattr(mod, k, v)
-        for k, v in zip(module_attrs, modules):
+        for k, v in zip(metadata["module_attrs"], modules):
             setattr(mod, k, v)
         return mod
 
+    def leaf_get_metadata(self):
+        tensor_attrs = set()
+        module_attrs = set()
+
+        def find(obj, prefix):
+            nonlocal tensor_attrs, module_attrs
+            if isinstance(obj, (Tensor, Typecheckor)):
+                tensor_attrs.add(prefix.strip("."))
+                return
+            if isinstance(obj, Module):
+                if obj is not self:
+                    module_attrs.add(prefix.strip("."))
+                for k, v in obj.__dict__.items():
+                    find(v, f"{prefix}{str(k)}.")
+
+        find(self, "")
+        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
+        return dict(
+            cls=self.__class__,
+            tensor_attrs=tuple(tensor_attrs),
+            module_attrs=tuple(module_attrs),
+            static_dict=static_dict,
+        )
+
+    def leaf_flatten(self):
+        metadata = self.get_metadata()
+        tensors = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
+        rest = dict()
+        for mod_attr in metadata["module_attrs"]:
+            mod = operator_py.attrgetter(mod_attr)(self)
+            mod_rest, _ = mod.flatten()
+            rest[mod_attr] = mod_rest
+
+        return (metadata, rest), tensors
+
+    @staticmethod
+    def leaf_unflatten(metadata_rest, tensors):
+        def reassamble(metadata, rest):
+            cls = metadata["cls"]
+            mod = cls.__new__(cls)
+            mod.__dict__.update(metadata["static_dict"])
+            for mod_attr, (metadata_, rest_) in rest.items():
+                setattr(mod, mod_attr, reassamble(metadata_, rest_))
+            return mod
+
+        metadata, rest = metadata_rest
+        mod = reassamble(metadata, rest)
+
+        def set_nested_attr(obj, attr, value):
+            nested_attrs = attr.split(".")
+            target_obj = obj
+            for a in nested_attrs[:-1]:
+                target_obj = getattr(target_obj, a)
+            setattr(target_obj, nested_attrs[-1], value)
+
+        for tensor, tensor_attr in list_zip(list(tensors), metadata["tensor_attrs"]):
+            set_nested_attr(mod, tensor_attr, tensor)
+        return mod
 
 class Backend:
     def __init__(self, name, default_dtype=Tensor.float32, deps=("numpy as np", "math")):
@@ -1654,7 +1736,6 @@ class Machine:
                 return (x_,), leaf
 
         # print(f"flattening {x} of {type(x)}")
-        # breakpoint()
         children_iter, treedef = _tree_flatten(x)
         return tuple(children_iter), treedef
 
@@ -1689,9 +1770,21 @@ class Machine:
             name = str(ty)
         self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
-    def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
+    # def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
+    #     leaves, treedef = self.tree_flatten(tree)
+    #     return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
+    
+    def tree_map(self, f: Callable[..., Any], tree, *rest) -> Any:
         leaves, treedef = self.tree_flatten(tree)
-        return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
+        if len(rest)==0:
+            return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
+        all_leaves = [leaves]
+        for t in rest:
+            t_leaves, t_treedef = self.tree_flatten(t)
+            assert t_treedef == treedef
+            all_leaves += [t_leaves] 
+        return self.tree_unflatten(treedef, tuple(f(*all_leaves)))
+    
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):

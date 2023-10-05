@@ -61,6 +61,7 @@ def __getattr__(attr):
         "register_node",
         "tree_flatten",
         "tree_unflatten",
+        "tree_map"
     ):
         return getattr(machine, attr)
     else:

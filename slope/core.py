@@ -1770,9 +1770,6 @@ class Machine:
             name = str(ty)
         self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
-    # def tree_map(self, f: Callable[..., Any], tree: Any) -> Any:
-    #     leaves, treedef = self.tree_flatten(tree)
-    #     return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
     
     def tree_map(self, f: Callable[..., Any], tree, *rest) -> Any:
         leaves, treedef = self.tree_flatten(tree)
@@ -1782,8 +1779,10 @@ class Machine:
         for t in rest:
             t_leaves, t_treedef = self.tree_flatten(t)
             assert t_treedef == treedef
-            all_leaves += [t_leaves] 
-        return self.tree_unflatten(treedef, tuple(f(*all_leaves)))
+            all_leaves += [t_leaves]
+        # return self.tree_unflatten(treedef, f(*all_leaves))
+        # return self.tree_unflatten(treedef, self.tree_flatten(f(*all_leaves))[0])
+        return self.tree_unflatten(treedef, self.tree_flatten(f(*[l[0] for l in all_leaves]))[0])
     
 
     @contextmanager

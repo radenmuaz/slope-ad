@@ -1,7 +1,7 @@
 from slope import core
 import os
 
-SLOPE_DEBUG = os.environ.get("SLOPE_DEBUG", False)
+SLOPE_DEBUG = os.environ.get("SLOPE_DEBUG", 1)
 
 
 class LazyInitMachine:
@@ -16,16 +16,10 @@ class LazyInitEnvironment:
     def __getattr__(self, attr):
         return getattr(M().environment, attr)
 
-
-environment = LazyInitEnvironment()
-sev = environment  # Slope EnVironment
-numpy = environment
-
-
 def M():
     global machine
     if type(machine) is LazyInitMachine:
-        if SLOPE_DEBUG:
+        if SLOPE_DEBUG > 0:
             import inspect
 
             print("Initializing slope.machine with")
@@ -51,26 +45,19 @@ def set_slope_init(fn):
 
 
 def __getattr__(attr):
-    if attr in (
-        "jvp",
-        "vmap",
-        "jit",
-        "linearize",
-        "vjp",
-        "grad",
-        "register_node",
-        "tree_flatten",
-        "tree_unflatten",
-        "tree_map"
-    ):
+    if attr in vars(core.Machine):
         return getattr(machine, attr)
-    else:
-        return getattr(globals(), attr)
-
-
-float32 = core.Tensor.float32
-float16 = core.Tensor.float16
-int8 = core.Tensor.int8
-int32 = core.Tensor.int32
-int64 = core.Tensor.int64
-uint8 = core.Tensor.uint8
+    M()
+    if attr in vars(machine.environment.operator_set):
+        return getattr(machine.environment.operator_set, attr)
+    elif attr in vars(machine.environment.procedure_set):
+        return getattr(machine.environment.procedure_set, attr)
+    elif attr in [a for a in dir(machine.environment) if a[:2] != '__']:
+        return getattr(machine.environment, attr)
+    elif attr in core.Tensor.dtype_names.keys():
+        return core.Tensor.dtype_names[attr]
+    elif attr in core.Tensor.dtype_short_names.keys():
+        return core.Tensor.dtype_short_names[attr]
+    elif attr in (globals_dict:=globals()):
+        return globals_dict[attr]
+    raise NameError(attr)

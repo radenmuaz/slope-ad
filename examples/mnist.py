@@ -90,8 +90,8 @@ def mnist(permute_train=False):
 
 class Linear(slope.core.Module):
     def __init__(self, in_dim, out_dim, bias=False):
-        self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros(out_dim) if bias else None
+        self.weight = slope.randn((out_dim, in_dim))
+        self.bias = slope.zeros(out_dim) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
@@ -149,7 +149,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield sev.tensor(train_images[batch_idx]), sev.tensor(train_labels[batch_idx])
+                yield slope.tensor(train_images[batch_idx]), slope.tensor(train_labels[batch_idx])
 
     batches = data_stream()
     g_loss_fn = slope.grad(loss_fn, ret_fval=True)
@@ -174,8 +174,8 @@ if __name__ == "__main__":
         test_acc = accuracy(
             params,
             (
-                sev.tensor(test_images),
-                sev.tensor(test_labels),
+                slope.tensor(test_images),
+                slope.tensor(test_labels),
             ),
         )
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")

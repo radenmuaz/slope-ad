@@ -5,8 +5,8 @@ import math
 
 class Linear(slope.core.Module):
     def __init__(self, in_dim, out_dim, bias=False):
-        self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros(out_dim) if bias else None
+        self.weight = slope.randn((out_dim, in_dim))
+        self.bias = slope.zeros(out_dim) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
@@ -15,7 +15,7 @@ class Linear(slope.core.Module):
 
 class MLP(slope.core.Module):
     def __init__(self, in_dim, hid_dim, out_dim):
-        self.t = sev.randn(1)
+        self.t = slope.randn(1)
         self.linear1 = Linear(in_dim, hid_dim)
         self.linear2 = Linear(hid_dim, out_dim)
 
@@ -26,8 +26,8 @@ class MLP(slope.core.Module):
         return x
 
 
-x = sev.ones((1, 2))
-y = sev.full((1,), 1)
+x = slope.ones((1, 2))
+y = slope.full((1,), 1)
 
 # # model = Linear(2, 1)
 # model = MLP(2, 3, 1)

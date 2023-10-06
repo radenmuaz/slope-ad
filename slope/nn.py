@@ -10,8 +10,8 @@ class Optimizer(Module):
         self.params = params
         self.state = Module()
         self.hp = Module()
-        self.hp.lr = sev.full((), lr)
-        self.iters = sev.zeros(())
+        self.hp.lr = slope.full((), lr)
+        self.iters = slope.zeros(())
 
     
     def step(self, p, g, *state_attrs):
@@ -78,7 +78,7 @@ class LAMB(Optimizer):
         if not adam:
             r1 = p.square().sum().sqrt()
             r2 = up.square().sum().sqrt()
-            r = sev.where(r1 > 0, sev.where(r2 > 0, r1 / r2, 1.0), 1.0)
+            r = slope.where(r1 > 0, slope.where(r2 > 0, r1 / r2, 1.0), 1.0)
         else:
             r = 1.0
         p = p * lr * r * up

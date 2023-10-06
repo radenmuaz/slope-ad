@@ -13,8 +13,8 @@ def g(x):
     return x.cos() * 2.0
 
 
-x = sev.tensor(3.0)
-x_dot = sev.tensor(1.0)
+x = slope.tensor(3.0)
+x_dot = slope.tensor(1.0)
 
 ans1 = f(x)  # ; print(f"{ans1=}")
 ans2 = jit(f)(x)  # BUG: jit cache not cleared when jvp jit ;# print(f"{ans2=}")

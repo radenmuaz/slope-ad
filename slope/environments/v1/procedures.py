@@ -1,5 +1,4 @@
 import slope
-from slope import environment as sev
 from slope.core import ProcedureSet, Tensor
 from slope.environments.v1.operators import operator_set
 import math
@@ -23,17 +22,17 @@ def flatten_seq(l: Iterator):
 
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
-    return sev.full(shape, 0.0, dtype)
+    return slope.full(shape, 0.0, dtype)
 
 
 @procedure_set.register(static_argnames="shape dtype")
 def ones(shape, dtype=Tensor.float32):
-    return sev.full(shape=shape, fill_value=1.0, dtype=dtype)
+    return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
 @procedure_set.register(static_argnames="fill_value")
 def full_like(y, fill_value):
-    return sev.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
+    return slope.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
 
 @procedure_set.register()
@@ -43,20 +42,20 @@ def zeros_like(y):
 
 @procedure_set.register()
 def ones_like(y):
-    return sev.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
+    return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
 
 # @procedure_set.register(not_op=True)
 @procedure_set.register()
 def relu(x):
-    return x.maximum(sev.zeros_like(x))
+    return x.maximum(slope.zeros_like(x))
 
 
 @procedure_set.register()
-def where(x, trueval, falseval):
+def where(x, trueval, falslopeal):
     cond = x != 0.0
     cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
-    return cond * trueval + (1.0 - cond) * falseval
+    return cond * trueval + (1.0 - cond) * falslopeal
 
 
 @procedure_set.register(static_argnames="axes keepdims")
@@ -94,7 +93,7 @@ def min(x, axes=None, keepdims=False):
 @procedure_set.register(static_argnames="axes keepdims")
 def argmax(x, axes=None, keepdims=False):
     if axes is None:
-        idx = (x == x.max(axes)) * sev.arange(
+        idx = (x == x.max(axes)) * slope.arange(
             math.prod(x.shape) - 1,
             -1,
             -1,
@@ -103,7 +102,7 @@ def argmax(x, axes=None, keepdims=False):
         return math.prod(x.shape) - idx.max() - 1
     axis = axes + len(x.shape) if axes < 0 else axes
     m = x == x.max(axis=axis, keepdim=True)
-    idx = m * sev.arange(x.shape[axis] - 1, -1, -1, dtype=slope.int32).reshape(
+    idx = m * slope.arange(x.shape[axis] - 1, -1, -1, dtype=slope.int32).reshape(
         x.shape[axis], *[1] * (x.ndim - axis - 1)
     )
     return x.shape[axis] - idx.max(axes=axes, keepdim=keepdims) - 1
@@ -242,7 +241,7 @@ def getitem(self, val):
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
         slice_arange = [
-            sev.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=self.device).reshape(
+            slope.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=self.device).reshape(
                 *[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1)
             )
             for n, (sd, d) in enumerate(zip(sum_dim, dim))
@@ -321,7 +320,7 @@ def gather(x, idx, dim: int):
         (
             (
                 idx
-                == sev.arange(
+                == slope.arange(
                     x.shape[dim],
                     dtype=slope.int32,
                     requires_grad=False,

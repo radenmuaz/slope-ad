@@ -1,8 +1,8 @@
 import slope
 from slope import environment as sev
 
-x = sev.ones((3,))
-x_dot = sev.ones((3,))
+x = slope.ones((3,))
+x_dot = slope.ones((3,))
 
 # Concat
 
@@ -10,7 +10,7 @@ x_dot = sev.ones((3,))
 @slope.jit
 def f(x):
     y = x
-    y = sev.concatenate([x, x])
+    y = slope.concatenate([x, x])
     y = y.sum()
     return y
 

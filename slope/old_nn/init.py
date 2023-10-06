@@ -31,7 +31,7 @@ def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
 
 def normal(dtype=np.float32) -> Callable:
     def init(shape, dtype=dtype):
-        return sev.randn(shape)
+        return slope.randn(shape)
 
     return init
 
@@ -55,11 +55,11 @@ def variance_scaling(
             denominator = (fan_in + fan_out) / 2
         else:
             raise ValueError(f"invalid mode for variance scaling initializer: {mode}")
-        variance = sev.tensor(scale / denominator, dtype=dtype)
+        variance = slope.tensor(scale / denominator, dtype=dtype)
         if distribution == "normal":
-            return sev.randn(shape) * variance.sqrt()
+            return slope.randn(shape) * variance.sqrt()
         elif distribution == "uniform":
-            return sev.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
+            return slope.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
 
         else:
             raise ValueError(f"invalid distribution for variance scaling initializer: {distribution}")

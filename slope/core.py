@@ -162,6 +162,7 @@ class DType(NamedTuple):
     priority: int
     itemsize: int
     name: str
+    short_name: str
     np: type
 
     def __repr__(self):
@@ -174,24 +175,19 @@ class TensorBuffer:
 
 
 class Tensor:
-    bool: Final[DType] = DType(0, 1, "bool", np.bool_)
-    float16: Final[DType] = DType(0, 2, "f16", np.float16)
-    float32: Final[DType] = DType(4, 4, "f32", np.float32)
-    int8: Final[DType] = DType(0, 1, "i8", np.int8)
-    int32: Final[DType] = DType(1, 4, "i32", np.int32)
-    int64: Final[DType] = DType(2, 8, "i64", np.int64)
-    uint8: Final[DType] = DType(0, 1, "u8", np.uint8)
+    bool: Final[DType] = DType(0, 1, "bool", "i1", np.bool_)
+    float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)
+    float32: Final[DType] = DType(4, 4, "float32", "f32", np.float32)
+    int8: Final[DType] = DType(0, 1, "int8", "i8", np.int8)
+    int32: Final[DType] = DType(1, 4, "int32", "i32", np.int32)
+    int64: Final[DType] = DType(2, 8, "int64", "i64", np.int64)
+    uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
 
-    dtypes = {
-        "bool": bool,
-        "f16": float16,
-        "f32": float32,
-        "u8": uint8,
-        "i8": int8,
-        "i32": int32,
-        "i64": int64,
-    }
-    dtypes_inv = {v: k for k, v in dtypes.items()}
+    dtypes = (bool, float16, float32, int8, int32, int64, uint8)
+    dtype_names= {k.name: k for k in dtypes}
+    dtype_names_inv = {v: k for k, v in dtype_names.items()}
+    dtype_short_names= {k.short_name: k for k in dtypes}
+    dtype_short_names_inv = {v: k for k, v in dtype_short_names.items()}
 
     @property
     def default_dtype(self):
@@ -214,7 +210,7 @@ class Tensor:
             return partial(op, self)
         elif attr in vars(slope.environment.procedure_set).keys():
             procedure = getattr(slope.environment.procedure_set, attr)
-            assert not isinstance(procedure, classmethod), f"use sev.{attr} instead of self.{attr}"
+            assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
             return partial(procedure, self)
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
 

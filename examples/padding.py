@@ -10,8 +10,8 @@ def f(x):
     return out
 
 
-x = sev.ones(3)
-x_dot = sev.ones(3)
+x = slope.ones(3)
+x_dot = slope.ones(3)
 # print(f(x))
 # print(slope.jvp(f, (x,), (x_dot,)))
 print(slope.grad(f)(x))
@@ -24,8 +24,8 @@ print(slope.grad(f)(x))
 #     out = out.sum()
 #     return out
 
-# x = sev.ones((2, 3))
-# x_dot = sev.ones((2,3))
+# x = slope.ones((2, 3))
+# x_dot = slope.ones((2,3))
 # # print(f(x))
 # # print(slope.jvp(f, (x,), (x_dot,)))
 # print(slope.grad(f)(x))

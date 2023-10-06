@@ -1,5 +1,4 @@
 import slope
-from slope import environment as sev
 
 
 @slope.jit
@@ -15,11 +14,12 @@ def g(x):
     return x + 1, x
 
 
-x = sev.ones(())
-x_dot = sev.ones(())
+x = slope.ones(())
+# x = slope.ones(())
+x_dot = slope.ones(())
 out = f(x)
-print(out)
-out = slope.jit(f)(x)
+# print(out)
+# out = slope.jit(f)(x)
 # print(out)
 
 # out, jvp_out = slope.jvp(f, (x,), (x_dot,)); print(out, jvp_out)

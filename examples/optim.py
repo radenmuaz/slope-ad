@@ -6,8 +6,8 @@ import math
 # def f(x, y):
 #     return x + y
 
-# x = sev.full((1,), 1)
-# y = sev.full((1,), 2)
+# x = slope.full((1,), 1)
+# y = slope.full((1,), 2)
 
 # xs = (x, (x, x))
 # ys = (y, (y, y))
@@ -17,15 +17,15 @@ import math
 
 class Linear(slope.core.Module):
     def __init__(self, in_dim, out_dim, bias=False):
-        self.weight = sev.randn((out_dim, in_dim))
-        self.bias = sev.zeros(out_dim) if bias else None
+        self.weight = slope.randn((out_dim, in_dim))
+        self.bias = slope.zeros(out_dim) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
         return x + self.bias if self.bias is not None else x
 
-# x = sev.ones((1, 2))
-# y = sev.full((1,), 1)
+# x = slope.ones((1, 2))
+# y = slope.full((1,), 1)
 
 # model = Linear(2, 3, 1)
 # g_model = Linear(2, 3, 1)
@@ -51,8 +51,8 @@ def train_step(model, batch, optim):
     return model, optim
 
 
-x = sev.ones((1, 2))
-y = sev.ones((1, 1))
+x = slope.ones((1, 2))
+y = slope.ones((1, 1))
 model = Linear(2, 3, 1)
 sgd = nn.SGD(model)
 # print(loss_fn(model, (x, y)))

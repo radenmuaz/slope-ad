@@ -181,8 +181,8 @@ def adam(step_size, b1=0.9, b2=0.999, eps=1e-2):
     step_size = make_schedule(step_size)
 
     def init(x0):
-        m0 = sev.zeros_like(x0)
-        v0 = sev.zeros_like(x0)
+        m0 = slope.zeros_like(x0)
+        v0 = slope.zeros_like(x0)
         return x0, m0, v0
 
     def update(i, g, state):
@@ -235,7 +235,7 @@ def inverse_time_decay(step_size, decay_steps, decay_rate, staircase=False):
 
 def polynomial_decay(step_size, decay_steps, final_step_size, power=1.0):
     def schedule(step_num):
-        step_num = sev.minimum(step_num, decay_steps)
+        step_num = slope.minimum(step_num, decay_steps)
         step_mult = (1 - step_num / decay_steps) ** power
         return step_mult * (step_size - final_step_size) + final_step_size
 

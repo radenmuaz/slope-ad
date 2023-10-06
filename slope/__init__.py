@@ -11,11 +11,6 @@ class LazyInitMachine:
 
 machine = LazyInitMachine()
 
-
-class LazyInitEnvironment:
-    def __getattr__(self, attr):
-        return getattr(M().environment, attr)
-
 def M():
     global machine
     if type(machine) is LazyInitMachine:
@@ -25,8 +20,6 @@ def M():
             print("Initializing slope.machine with")
             print(inspect.getsource(slope_init))
         machine = slope_init()
-        global environment
-        environment = machine.environment
     return machine
 
 

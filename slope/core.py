@@ -205,11 +205,11 @@ class Tensor:
     def __getattr__(self, attr):
         if attr in self.__dict__.keys():
             return self.__dict__[attr]
-        if attr in vars(slope.environment.operator_set).keys():
-            op = getattr(slope.environment.operator_set, attr)
+        if attr in vars(slope.M().environment.operator_set).keys():
+            op = getattr(slope.M().environment.operator_set, attr)
             return partial(op, self)
-        elif attr in vars(slope.environment.procedure_set).keys():
-            procedure = getattr(slope.environment.procedure_set, attr)
+        elif attr in vars(slope.M().environment.procedure_set).keys():
+            procedure = getattr(slope.M().environment.procedure_set, attr)
             assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
             return partial(procedure, self)
         raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
@@ -441,9 +441,9 @@ class Operator:
                 return (x, y), params
 
             if type(x) in Tracor.PYTHON_TYPES:
-                x = slope.environment.tensor(x, dtype=y.dtype)
+                x = slope.M().environment.tensor(x, dtype=y.dtype)
             elif type(y) in Tracor.PYTHON_TYPES:
-                y = slope.environment.tensor(y, dtype=x.dtype)
+                y = slope.M().environment.tensor(y, dtype=x.dtype)
 
             if type(x) is Tensor and isinstance(y, Tracor):
                 x = y._trace.pure(x)
@@ -986,7 +986,7 @@ class JitFn:
             print(self.code)
             breakpoint()
             raise
-        return [slope.environment.tensor(TensorBuffer(o)) for o in outs]
+        return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
 
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
@@ -1447,21 +1447,11 @@ class JVPTrace(Trace):
     def pure(self, val):
         if isinstance(val, PartialEvalTrace):
             val = val.pval.const
-        return JVPTracor(self, val, slope.environment.zeros_like(val))
+        return JVPTracor(self, val, slope.M().environment.zeros_like(val))
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        # if not op.nary_inputs:
-        #     primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
-        #     primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        # else:
-        #     M = slope.M()
-        #     tracers_seq, treedef = M.tree_flatten(tracers)
-        #     primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers_seq)
-        #     primals_in = M.tree_unflatten(treedef, primals_in)
-        #     tangents_in = M.tree_unflatten(treedef, tangents_in)
-        #     primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
         return [JVPTracor(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
 

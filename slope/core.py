@@ -430,14 +430,8 @@ class Operator:
 
         @op.set_method
         def args_fixer(self, x, y, **params):
-            if type(x) is PrimalProxy and type(y) is PrimalProxy:
-                assert x.aval.shape == y.aval.shape
-                return (x, y), params
-            elif type(x) is PrimalProxy:
-                assert x.aval.shape == y.shape
-                return (x, y), params
-            elif type(y) is PrimalProxy:
-                assert y.aval.shape == x.shape
+            if type(x) is PrimalProxy or type(y) is PrimalProxy:
+                assert x.shape == y.shape
                 return (x, y), params
 
             if type(x) in Tracor.PYTHON_TYPES:
@@ -1110,33 +1104,18 @@ class Module:
             static_dict=static_dict,
         )
     
-    def get_tensors(self):
-        tensor_attrs = set()
+    def get_attrs(self, attr_types, with_name=False):
+        attrs = dict()
         for k, v in self.__dict__.items():
-            if isinstance(v, (Tensor, Typecheckor)):
-                tensor_attrs.add(v)
-        return tuple(tensor_attrs)
-    
-    def get_modules(self):
-        module_attrs = set()
-        for k, v in self.__dict__.items():
-            if isinstance(v, Module):
-                module_attrs.add(v)
-        return tuple(module_attrs)
+            if isinstance(v, attr_types):
+                attrs[k] = v
+        return attrs if with_name else tuple(attrs.values())
 
-    def get_named_tensors(self):
-        tensor_attrs = set()
-        for k, v in self.__dict__.items():
-            if isinstance(v, (Tensor, Typecheckor)):
-                tensor_attrs.add((k, v))
-        return tuple(tensor_attrs)
+    def get_tensors(self, with_name=False):
+        return self.get_attrs((Tensor, Typecheckor), with_name)
     
-    def get_named_modules(self):
-        module_attrs = set()
-        for k, v in self.__dict__.items():
-            if isinstance(v, Module):
-                module_attrs.add((k, v))
-        return tuple(module_attrs)
+    def get_modules(self, with_name=False):
+        return self.get_attrs(Module, with_name)
 
     def flatten(self):
         metadata = self.get_metadata()
@@ -1583,6 +1562,7 @@ class PrimalProxy(NamedTuple):
         return self.aval.dtype
 
 
+
 class PartialValue(NamedTuple):
     aval: Typecheckor
     const: Optional[Any]
@@ -1756,7 +1736,6 @@ class Machine:
             name = str(ty)
         self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
-    
     def tree_map(self, f: Callable[..., Any], tree, *rest) -> Any:
         leaves, treedef = self.tree_flatten(tree)
         if len(rest)==0:
@@ -1766,10 +1745,13 @@ class Machine:
             t_leaves, t_treedef = self.tree_flatten(t)
             assert t_treedef == treedef
             all_leaves += [t_leaves]
-        # return self.tree_unflatten(treedef, f(*all_leaves))
-        # return self.tree_unflatten(treedef, self.tree_flatten(f(*all_leaves))[0])
-        return self.tree_unflatten(treedef, self.tree_flatten(f(*[l[0] for l in all_leaves]))[0])
-    
+        ret_flat = f(*[l[0] for l in all_leaves])
+        # ret_flat = tuple((r,) for r in f(*[l[0] for l in all_leaves]))
+        def unflat_ret(r):
+            return self.tree_unflatten(treedef, (r,))
+        ret = self.tree_map(unflat_ret, ret_flat)
+        # ret = self.tree_unflatten(treedef, ret_flat)
+        return ret
 
     @contextmanager
     def new_main(self, trace_type: Type["Trace"], global_data=None):
@@ -2282,13 +2264,10 @@ class Machine:
                 raise TypeError
             x_bars = f_vjp(self.environment.ones(()))
 
-            if ret_fval:
-                return y, x_bars
-            else:
-                ret = tuple(x_bars[i] for i in argnums)
-                if len(ret) == 1:
-                    ret = ret[0]
-                return ret
+            ret = tuple(x_bars[i] for i in argnums)
+            if len(ret) == 1:
+                ret = ret[0]
+            return y, ret if ret_fval else ret
 
         if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
             # unjit then jit back

@@ -44,7 +44,7 @@ def jvp(self, primals, tangents, **params):
 def T(self, cts, x):
     (z,) = cts
     assert type(x) is PrimalProxy
-    return [slope.environment.zeros_like(z)]
+    return [slope.zeros_like(z)]
 
 
 convert = Operator.unary("convert")
@@ -273,8 +273,8 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(slope.environment.ones_like(z), slope.environment.zeros_like(z))) / (
-            (y == z).where(slope.environment.full_like(z, 2), slope.environment.ones_like(z))
+        return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
+            (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -297,7 +297,7 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @equal.set_method
@@ -314,7 +314,7 @@ operator_set.register(not_equal)
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.not_equal(y)
-    return [out_primal], [slope.environment.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.zeros(out_primal.shape, out_primal.dtype)]
 
 
 @not_equal.set_method
@@ -803,8 +803,8 @@ operator_set.register(constant)
 
 @constant.set_method
 def jvp(self, primals, tangents, *, val, dtype=Tensor.float32):
-    out = slope.environment.tensor(val, dtype)
-    out_jvp = slope.environment.ones_like(out)
+    out = slope.tensor(val, dtype)
+    out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 

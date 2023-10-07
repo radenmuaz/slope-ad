@@ -1,5 +1,5 @@
 import slope
-from slope import environment as sev
+
 
 x = slope.ones((3,))
 x_dot = slope.ones((3,))

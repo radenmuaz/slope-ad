@@ -1,5 +1,4 @@
 import slope
-from slope import environment as sev
 from slope.old_nn import init, layers, optim
 
 import time

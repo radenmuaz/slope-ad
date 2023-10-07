@@ -1,5 +1,5 @@
 import slope
-from slope import environment as sev
+
 from typing import Any, Callable, NamedTuple, Tuple, Union
 import numpy as np
 from collections import namedtuple
@@ -124,7 +124,7 @@ def sgd_momentum(step_size: Schedule, mass: float):
     step_size = make_schedule(step_size)
 
     def init(x0):
-        v0 = slope.environment.zeros_like(x0)
+        v0 = slope.zeros_like(x0)
         return x0, v0
 
     def update(i, g, state):

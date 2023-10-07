@@ -7,7 +7,6 @@ from typing import (
 )
 import math
 import slope
-from slope import environment as sev
 
 
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):

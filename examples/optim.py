@@ -1,6 +1,6 @@
 import slope
 from slope import nn
-from slope import environment as sev
+
 import math
 
 # def f(x, y):

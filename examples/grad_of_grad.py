@@ -1,5 +1,5 @@
 import slope
-from slope import environment as sev
+
 from slope import jit, jvp, grad
 
 

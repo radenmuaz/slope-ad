@@ -1085,113 +1085,6 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 # ================
 
 
-class Module:
-    def get_metadata(self):
-        tensor_attrs = set()
-        module_attrs = set()
-
-        for k, v in self.__dict__.items():
-            if isinstance(v, (Tensor, Typecheckor)):
-                tensor_attrs.add(k)
-            elif isinstance(v, Module):
-                module_attrs.add(k)
-
-        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
-        return dict(
-            cls=self.__class__,
-            tensor_attrs=tuple(tensor_attrs),
-            module_attrs=tuple(module_attrs),
-            static_dict=static_dict,
-        )
-    
-    def get_attrs(self, attr_types, with_name=False):
-        attrs = dict()
-        for k, v in self.__dict__.items():
-            if isinstance(v, attr_types):
-                attrs[k] = v
-        return attrs if with_name else tuple(attrs.values())
-
-    def get_tensors(self, with_name=False):
-        return self.get_attrs((Tensor, Typecheckor), with_name)
-    
-    def get_modules(self, with_name=False):
-        return self.get_attrs(Module, with_name)
-
-    def flatten(self):
-        metadata = self.get_metadata()
-        tensors = tuple(getattr(self, attr) for attr in metadata["tensor_attrs"])
-        modules = tuple(getattr(self, attr) for attr in metadata["module_attrs"])
-        return metadata, (tensors, modules)
-
-    @staticmethod
-    def unflatten(metadata, tensors_modules):
-        mod = metadata["cls"].__new__(metadata["cls"])
-        mod.__dict__.update(metadata["static_dict"])
-        tensors, modules = tensors_modules
-        for k, v in zip(metadata["tensor_attrs"], tensors):
-            setattr(mod, k, v)
-        for k, v in zip(metadata["module_attrs"], modules):
-            setattr(mod, k, v)
-        return mod
-
-    def leaf_get_metadata(self):
-        tensor_attrs = set()
-        module_attrs = set()
-
-        def find(obj, prefix):
-            nonlocal tensor_attrs, module_attrs
-            if isinstance(obj, (Tensor, Typecheckor)):
-                tensor_attrs.add(prefix.strip("."))
-                return
-            if isinstance(obj, Module):
-                if obj is not self:
-                    module_attrs.add(prefix.strip("."))
-                for k, v in obj.__dict__.items():
-                    find(v, f"{prefix}{str(k)}.")
-
-        find(self, "")
-        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
-        return dict(
-            cls=self.__class__,
-            tensor_attrs=tuple(tensor_attrs),
-            module_attrs=tuple(module_attrs),
-            static_dict=static_dict,
-        )
-
-    def leaf_flatten(self):
-        metadata = self.get_metadata()
-        tensors = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
-        rest = dict()
-        for mod_attr in metadata["module_attrs"]:
-            mod = operator_py.attrgetter(mod_attr)(self)
-            mod_rest, _ = mod.flatten()
-            rest[mod_attr] = mod_rest
-
-        return (metadata, rest), tensors
-
-    @staticmethod
-    def leaf_unflatten(metadata_rest, tensors):
-        def reassamble(metadata, rest):
-            cls = metadata["cls"]
-            mod = cls.__new__(cls)
-            mod.__dict__.update(metadata["static_dict"])
-            for mod_attr, (metadata_, rest_) in rest.items():
-                setattr(mod, mod_attr, reassamble(metadata_, rest_))
-            return mod
-
-        metadata, rest = metadata_rest
-        mod = reassamble(metadata, rest)
-
-        def set_nested_attr(obj, attr, value):
-            nested_attrs = attr.split(".")
-            target_obj = obj
-            for a in nested_attrs[:-1]:
-                target_obj = getattr(target_obj, a)
-            setattr(target_obj, nested_attrs[-1], value)
-
-        for tensor, tensor_attr in list_zip(list(tensors), metadata["tensor_attrs"]):
-            set_nested_attr(mod, tensor_attr, tensor)
-        return mod
 
 class Backend:
     def __init__(self, name, default_dtype=Tensor.float32, deps=("numpy as np", "math")):
@@ -1641,6 +1534,12 @@ class Machine:
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
+        
+        self.environment = environment
+        self.environment.operator_set.register(jit_op)
+        self.environment.operator_set.register(procedure_op)
+        self.backend = self.environment.backends[default_backend]
+
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
         self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
@@ -1651,12 +1550,7 @@ class Machine:
             "dict",
         )
         self.register_node(PrimalProxy, lambda u: (u.aval, ()), lambda aval, _: PrimalProxy(aval), "PrimalProxy")
-        self.register_node(Module, Module.flatten, Module.unflatten, "Module")
 
-        self.environment = environment
-        self.environment.operator_set.register(jit_op)
-        self.environment.operator_set.register(procedure_op)
-        self.backend = self.environment.backends[default_backend]
 
     def __repr__(self):
         ret = f"{self.__class__.__name__}\n"

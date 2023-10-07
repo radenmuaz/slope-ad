@@ -9,7 +9,7 @@ def mnist_slope_init():
 
 slope.set_slope_init(mnist_slope_init)
 
-import slope.nn as spnn
+import slope.nn as nn
 
 import time
 import itertools
@@ -87,14 +87,13 @@ def mnist(permute_train=False):
 
     return train_images, train_labels, test_images, test_labels
 
-# @slope.jit
+def loss_fn(model, batch):
+    inputs, targets = batch
+    preds = model(inputs)
+    return -(preds * targets).sum()
+g_loss_fn = slope.grad(loss_fn, ret_fval=True)
+
 def train_step(model, batch, optimizer):
-    def loss_fn(model, batch):
-        inputs, targets = batch
-        preds = model(inputs)
-        return -(preds * targets).sum()
-    
-    g_loss_fn = slope.grad(loss_fn, ret_fval=True)
     loss, g_model = g_loss_fn(model, batch)
     model, optimizer = optimizer(model, g_model)
     return loss, model, optimizer
@@ -111,18 +110,22 @@ if __name__ == "__main__":
     step_size = 0.001
     num_epochs = 30
     batch_size = 200  # TODO: must be multiple of dataset.
-    momentum_mass = 0.9
 
-    model = spnn.Linear(784, 10)
-    # model = spnn.MLP(784, 100, 10)
-    # optimizer = spnn.SGD(model)
-    optimizer = spnn.SGDMomentum(model)
+    model = nn.Serial([
+        nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
+        # nn.MLP(784, 100, 10), 
+        nn.Linear(784, 10), 
+        # nn.Fn(lambda x: x.softmax(axes=-1))
+        nn.Fn(lambda x: x.log_softmax(axes=-1))
+        ])
+    optimizer = nn.SGD(model,lr =1e-5, momentum=0.9, weight_decay=0.)
 
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
-    log_interval = num_batches // 4
+    # log_interval = num_batches // 4
+    log_interval = 1
 
     def data_stream():
         rng = np.random.RandomState(0)
@@ -130,7 +133,8 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                yield slope.tensor(train_images[batch_idx].reshape(batch_size,-1)), slope.tensor(train_labels[batch_idx])
+                # yield slope.tensor(train_images[batch_idx].reshape(batch_size,-1)), slope.tensor(train_labels[batch_idx])
+                yield slope.tensor(train_images[batch_idx]), slope.tensor(train_labels[batch_idx])
 
     batches = data_stream()
     itercount = itertools.count()

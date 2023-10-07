@@ -95,8 +95,8 @@ def accuracy(params, batch):
 if __name__ == "__main__":
     init_random_params, predict = layers.serial(
         layers.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        layers.Dense(200),
-        layers.Fn(lambda x: x.relu()),
+        # layers.Dense(200),
+        # layers.Fn(lambda x: x.relu()),
         # layers.Fn(lambda x: x.maximum(slope.zeros_like(x))),
         layers.Dense(10),
         layers.Fn(lambda x: x.log_softmax(axes=-1)),
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     def update(i, opt_state, batch):
         params = get_params(opt_state)
         loss = loss_fn(params, batch)
-        loss, (g_params, _) = g_loss_fn(params, batch)
+        loss, g_params = g_loss_fn(params, batch)
         return loss, opt_update(i, g_params, opt_state)
 
     itercount = itertools.count()

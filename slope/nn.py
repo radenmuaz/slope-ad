@@ -308,7 +308,7 @@ class GD(Optimizer):
 
     def step(self, p, g, *state_attrs):
         lr = self.hp.lr
-        p = lr * g + p
+        p = p - lr * g
         return p, state_attrs
     
 
@@ -324,7 +324,7 @@ class SGD(Optimizer):
         lr, m, nesterov = self.hp.lr, self.hp.momentum, self.hp.nesterov
         b = m * b + g
         g = (g + m * b) if nesterov else b
-        p = lr * g + p
+        p = p - lr * g
         return p, (b,)
 
 def AdamW(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01):

@@ -112,20 +112,20 @@ if __name__ == "__main__":
     batch_size = 200  # TODO: must be multiple of dataset.
 
     model = nn.Serial([
-        nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
+        nn.Fn(lambda x: x.reshape((x.shape[0], math.prod(x.shape[1:])))),
         # nn.MLP(784, 100, 10), 
         nn.Linear(784, 10), 
         # nn.Fn(lambda x: x.softmax(axes=-1))
         nn.Fn(lambda x: x.log_softmax(axes=-1))
         ])
-    optimizer = nn.SGD(model,lr =1e-5, momentum=0.9, weight_decay=0.)
+    optimizer = nn.SGD(model,lr =1e-3, momentum=0.9, weight_decay=0.)
 
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
-    # log_interval = num_batches // 4
-    log_interval = 1
+    log_interval = num_batches // 4
+    # log_interval = 1
 
     def data_stream():
         rng = np.random.RandomState(0)

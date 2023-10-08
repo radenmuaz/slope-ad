@@ -93,6 +93,7 @@ def loss_fn(model, batch):
     return -(preds * targets).sum()
 g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
+@slope.jit
 def train_step(model, batch, optimizer):
     loss, g_model = g_loss_fn(model, batch)
     model, optimizer = optimizer(model, g_model)
@@ -112,10 +113,8 @@ if __name__ == "__main__":
     batch_size = 200  # TODO: must be multiple of dataset.
 
     model = nn.Serial([
-        nn.Fn(lambda x: x.reshape((x.shape[0], math.prod(x.shape[1:])))),
-        # nn.MLP(784, 100, 10), 
+        nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
         nn.Linear(784, 10), 
-        # nn.Fn(lambda x: x.softmax(axes=-1))
         nn.Fn(lambda x: x.log_softmax(axes=-1))
         ])
     optimizer = nn.SGD(model,lr =1e-3, momentum=0.9, weight_decay=0.)
@@ -124,8 +123,8 @@ if __name__ == "__main__":
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
-    log_interval = num_batches // 4
-    # log_interval = 1
+    # log_interval = num_batches // 4
+    log_interval = 1
 
     def data_stream():
         rng = np.random.RandomState(0)

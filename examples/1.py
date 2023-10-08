@@ -1,23 +1,30 @@
 import slope
 
-
 @slope.jit
 def f(x):
-    y = x * 3.0
-    # y = x.cos()
-    # z = g(y)
+    y = x.sum()
     return y
 
 
-@slope.jit
-def g(x):
-    return x + 1, x
-
 
 x = slope.ones(())
-# x = slope.ones(())
-x_dot = slope.ones(())
-out = f(x)
+print(f(x))
+print(f(x))
+
+
+
+# @slope.jit
+# def f(x):
+#     y = x * 3.0
+#     # y = x.cos()
+#     # z = g(y)
+#     return y
+
+
+# @slope.jit
+# def g(x):
+#     return x + 1, x
+
 # print(out)
 # out = slope.jit(f)(x)
 # print(out)

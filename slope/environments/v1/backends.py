@@ -51,7 +51,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
-    print(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
+    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
 
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
@@ -198,7 +198,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             )
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    print("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n")
+    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n")
     if fn_name == "main":
         del self.fn_count
     return dict(code_lines=code_lines, fn_defs=fn_defs)

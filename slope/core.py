@@ -38,16 +38,17 @@ import string
 import numpy as np
 import math
 import inspect
-from functools import partial, lru_cache
+import functools
+from functools import partial
 
+# from types import MappingProxyType
 import slope
 import importlib
+
 
 # ================
 #   Utils
 # ================
-
-
 def unzip2(pairs):
     lst1, lst2 = [], []
     for x1, x2 in pairs:
@@ -99,6 +100,24 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     for b, x in list_zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
+
+
+def lru_cache_verbose(maxsize=None, typed=False):
+    def decorator(func):
+        @functools.lru_cache(maxsize=maxsize, typed=typed)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        def decorated_function(*args, **kwargs):
+            result = wrapper(*args, **kwargs)
+            cache_info = wrapper.cache_info()
+            slope.dblog(f"{func.__name__}.{cache_info} {args.__hash__()}")
+            return result
+
+        decorated_function.cache_info = wrapper.cache_info
+        return decorated_function
+
+    return decorator
 
 
 class PPrint:
@@ -184,9 +203,9 @@ class Tensor:
     uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
 
     dtypes = (bool, float16, float32, int8, int32, int64, uint8)
-    dtype_names= {k.name: k for k in dtypes}
+    dtype_names = {k.name: k for k in dtypes}
     dtype_names_inv = {v: k for k, v in dtype_names.items()}
-    dtype_short_names= {k.short_name: k for k in dtypes}
+    dtype_short_names = {k.short_name: k for k in dtypes}
     dtype_short_names_inv = {v: k for k, v in dtype_short_names.items()}
 
     @property
@@ -284,8 +303,6 @@ class Typecheckor:
             dtype = aval.dtype
         return cls(shape, dtype)
 
-    
-
     @property
     def ndim(self):
         return len(self.shape)
@@ -294,6 +311,7 @@ class Typecheckor:
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
 
     def __hash__(self):
+        # return id(self)
         return hash((self.shape, self.dtype))
 
     def __eq__(self, other):
@@ -303,6 +321,14 @@ class Typecheckor:
 
     def __repr__(self):
         return f"Typecheckor(shape={self.shape}, dtype={self.dtype})"
+
+    @staticmethod
+    def _bool(tracer):
+        raise Exception("Typecheckor can't be unambiguously converted to bool")
+
+    @staticmethod
+    def _nonzero(tracer):
+        raise Exception("Typecheckor can't be unambiguously converted to bool")
 
 
 # ================
@@ -561,7 +587,8 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, static_argnames=(), not_op=False):
+    def register(self, static_argnames=(), not_op=True):
+        # def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -1085,7 +1112,6 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 # ================
 
 
-
 class Backend:
     def __init__(self, name, default_dtype=Tensor.float32, deps=("numpy as np", "math")):
         self.name = name
@@ -1114,7 +1140,7 @@ class Backend:
     def numpy_of(self, tensor):
         raise NotImplementedError
 
-    @lru_cache
+    @lru_cache_verbose()
     def gen_jit_fn(
         self,
         hashed_program: Hashed,
@@ -1455,7 +1481,6 @@ class PrimalProxy(NamedTuple):
         return self.aval.dtype
 
 
-
 class PartialValue(NamedTuple):
     aval: Typecheckor
     const: Optional[Any]
@@ -1534,7 +1559,7 @@ class Machine:
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
-        
+
         self.environment = environment
         self.environment.operator_set.register(jit_op)
         self.environment.operator_set.register(procedure_op)
@@ -1550,7 +1575,6 @@ class Machine:
             "dict",
         )
         self.register_node(PrimalProxy, lambda u: (u.aval, ()), lambda aval, _: PrimalProxy(aval), "PrimalProxy")
-
 
     def __repr__(self):
         ret = f"{self.__class__.__name__}\n"
@@ -1632,7 +1656,7 @@ class Machine:
 
     def tree_map(self, f: Callable[..., Any], tree, *rest) -> Any:
         leaves, treedef = self.tree_flatten(tree)
-        if len(rest)==0:
+        if len(rest) == 0:
             return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
         all_leaves = [leaves]
         for t in rest:
@@ -1640,9 +1664,11 @@ class Machine:
             assert t_treedef == treedef
             all_leaves += [t_leaves]
         ret_flat = f(*[l[0] for l in all_leaves])
+
         # ret_flat = tuple((r,) for r in f(*[l[0] for l in all_leaves]))
         def unflat_ret(r):
             return self.tree_unflatten(treedef, (r,))
+
         ret = self.tree_map(unflat_ret, ret_flat)
         # ret = self.tree_unflatten(treedef, ret_flat)
         return ret
@@ -1826,7 +1852,7 @@ class Machine:
         vecs_in = self.environment.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
-    @lru_cache
+    @lru_cache_verbose()
     def make_program(
         self, f: Callable, *avals_in: Typecheckor, static_args, name
     ) -> Tuple[Program, List[Any], PyTreeDef]:
@@ -1844,7 +1870,7 @@ class Machine:
 
         return program, consts, out_tree_store()
 
-    @lru_cache
+    @lru_cache_verbose()
     def jvp_program(self, program: Program, static_args=()) -> Tuple[Program, List[Any]]:
         def jvp_traceable(*primals_and_tangents):
             n = len(primals_and_tangents) // 2
@@ -2139,7 +2165,7 @@ class Machine:
 
         return ret
 
-    @lru_cache
+    @lru_cache_verbose()
     def transpose_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
         traceable = partial(self.run_program_transposed, program)
@@ -2195,9 +2221,8 @@ class Machine:
             # assert len(args) == len(args_strs)
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
-            program, consts, out_tree = self.make_program(
-                f, *avals_in, static_args=static_args, name=f"{f.__name__}_jit"
-            )
+            name = f"jit_{hash((f, avals_in, static_args))}"
+            program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)
             outs = self.bind(

@@ -11,13 +11,24 @@ from typing import (
     Callable,
 )
 import math
-
 import numpy as np
+
 #
 # Module
 #
 
+
 class Module:
+    def __hash__(self):
+        # (metadata, rest), tensors = self.leaf_flatten()
+        self_flat, _ = slope.tree_flatten(self)
+        return hash(self_flat)
+
+    def __eq__(self, other):
+        if type(self) != type(other):
+            return False
+        return hash(self) == hash(other)
+
     def get_metadata(self):
         tensor_attrs = set()
         module_attrs = set()
@@ -35,7 +46,7 @@ class Module:
             module_attrs=tuple(module_attrs),
             static_dict=static_dict,
         )
-    
+
     def get_attrs(self, attr_types, with_name=False):
         attrs = dict()
         for k, v in self.__dict__.items():
@@ -45,7 +56,7 @@ class Module:
 
     def get_tensors(self, with_name=False):
         return self.get_attrs((Tensor, Typecheckor), with_name)
-    
+
     def get_modules(self, with_name=False):
         return self.get_attrs(Module, with_name)
 
@@ -124,6 +135,7 @@ class Module:
         for tensor, tensor_attr in tuple(zip(tuple(tensors), metadata["tensor_attrs"])):
             set_nested_attr(mod, tensor_attr, tensor)
         return mod
+
 
 slope.M().register_node(Module, Module.flatten, Module.unflatten, "Module")
 
@@ -223,15 +235,14 @@ def glorot_uniform(
         dtype=dtype,
     )
 
-   
 
 #
 # Layers
 #
 
+
 class Linear(Module):
-    def __init__(self, in_dim, out_dim, bias=False, 
-                 W_init=glorot_normal(), b_init=normal()):
+    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
         self.weight = W_init((out_dim, in_dim))
         self.bias = b_init((out_dim,)) if bias else None
 
@@ -259,7 +270,8 @@ class Fn(Module):
 
     def __call__(self, x):
         return self.fn(x)
-    
+
+
 class Serial(Module):
     def __init__(self, modules):
         self.num_modules = len(modules)
@@ -271,9 +283,11 @@ class Serial(Module):
             x = getattr(self, f"m{i}")(x)
         return x
 
+
 #
 # Optimizers
 #
+
 
 class Optimizer(Module):
     def __init__(self, params, lr: float):
@@ -283,13 +297,12 @@ class Optimizer(Module):
         self.hp.lr = slope.full((), lr)
         self.iters = slope.zeros(())
 
-    
     def step(self, p, g, *state_attrs):
         state = Module()
         for i, a in enumerate(state_attrs):
-            setattr(state, f'attr{i}', a)
+            setattr(state, f"attr{i}", a)
         return p, g, state
-    
+
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         out_params, state_attrs = slope.tree_map(self.step, params, *(g_params, *state_attrs))
@@ -298,9 +311,8 @@ class Optimizer(Module):
             setattr(state, k, v)
         self.state = state
         self.iters = self.iters + 1
-        return out_params, self
-        # return ((out_params,), (self,))
- 
+        return (out_params, self)
+
 
 class GD(Optimizer):
     def __init__(self, params, lr=0.001):
@@ -310,25 +322,28 @@ class GD(Optimizer):
         lr = self.hp.lr
         p = p - lr * g
         return p, state_attrs
-    
+
 
 class SGD(Optimizer):
-    def __init__(self, params, lr=0.001, momentum: float=0.9, weight_decay=0.0, nesterov=False):
+    def __init__(self, params, lr=0.001, momentum: float = 0.9, weight_decay=0.0, nesterov=False):
         super().__init__(params, lr)
         self.hp.momentum = momentum
-        self.hp.wd = weight_decay
+        self.hp.weight_decay = weight_decay
         self.hp.nesterov = nesterov
         self.state.b = slope.tree_map(lambda x: x.zeros_like(), self.params)
 
     def step(self, p, g, b):
-        lr, m, nesterov = self.hp.lr, self.hp.momentum, self.hp.nesterov
+        lr, m, wd = self.hp.lr, self.hp.momentum, self.hp.weight_decay
+        g = p + wd * p
         b = m * b + g
-        g = (g + m * b) if nesterov else b
+        g = (g + m * b) if self.hp.nesterov else b
         p = p - lr * g
         return p, (b,)
 
+
 def AdamW(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01):
     return LAMB(params, lr, b1, b2, eps, wd, adam=True)
+
 
 def Adam(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
     return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)

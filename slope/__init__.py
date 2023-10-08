@@ -1,7 +1,16 @@
 from slope import core
 import os
 
-SLOPE_DEBUG = os.environ.get("SLOPE_DEBUG", 1)
+SLOPE_DEBUG = int(os.environ.get("SLOPE_DEBUG", 0))
+
+
+def log(*msg):
+    print(*msg)
+
+
+def dblog(*msg):
+    if SLOPE_DEBUG > 0:
+        print(*msg)
 
 
 class LazyInitMachine:
@@ -10,6 +19,7 @@ class LazyInitMachine:
 
 
 machine = LazyInitMachine()
+
 
 def M():
     global machine
@@ -45,12 +55,12 @@ def __getattr__(attr):
         return getattr(machine.environment.operator_set, attr)
     elif attr in vars(machine.environment.procedure_set):
         return getattr(machine.environment.procedure_set, attr)
-    elif attr in [a for a in dir(machine.environment) if a[:2] != '__']:
+    elif attr in [a for a in dir(machine.environment) if a[:2] != "__"]:
         return getattr(machine.environment, attr)
     elif attr in core.Tensor.dtype_names.keys():
         return core.Tensor.dtype_names[attr]
     elif attr in core.Tensor.dtype_short_names.keys():
         return core.Tensor.dtype_short_names[attr]
-    elif attr in (globals_dict:=globals()):
+    elif attr in (globals_dict := globals()):
         return globals_dict[attr]
     raise NameError(attr)

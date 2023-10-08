@@ -138,6 +138,7 @@ class Module:
 
 
 slope.M().register_node(Module, Module.flatten, Module.unflatten, "Module")
+# slope.M().register_node(Module, Module.leaf_flatten, Module.leaf_unflatten, "Module")
 
 
 #
@@ -242,14 +243,13 @@ def glorot_uniform(
 
 
 class Linear(Module):
-    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
+    def __init__(self, in_dim, out_dim, bias=True, W_init=glorot_normal(), b_init=normal()):
         self.weight = W_init((out_dim, in_dim))
-        self.bias = b_init((out_dim,)) if bias else None
+        # self.bias = b_init((out_dim,))# if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
-        return x
-        # return x + self.bias.broadcast_in_dim((1, *self.bias.shape), (0,)) if self.bias is not None else x
+        return x# + self.bias.broadcast_in_dim((1, *self.bias.shape), (0,))# if self.bias is not None else x
 
 
 class MLP(Module):
@@ -298,10 +298,7 @@ class Optimizer(Module):
         self.iters = slope.zeros(())
 
     def step(self, p, g, *state_attrs):
-        state = Module()
-        for i, a in enumerate(state_attrs):
-            setattr(state, f"attr{i}", a)
-        return p, g, state
+        return p, state_attrs
 
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
@@ -334,7 +331,7 @@ class SGD(Optimizer):
 
     def step(self, p, g, b):
         lr, m, wd = self.hp.lr, self.hp.momentum, self.hp.weight_decay
-        g = p + wd * p
+        g = g + wd * p
         b = m * b + g
         g = (g + m * b) if self.hp.nesterov else b
         p = p - lr * g

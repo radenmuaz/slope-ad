@@ -24,11 +24,13 @@ import math
 model = nn.Module()
 model.w = slope.ones(3)
 
-@slope.jit
 def loss_fn(model):
     loss = model.w.sum()
     return loss
-print(loss_fn(model))
+
+# g_loss_fn = slope.grad(loss_fn, ret_fval=True)
+# def train_step(model):
+#     lo
 print(loss_fn(model))
 
 

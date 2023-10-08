@@ -96,7 +96,6 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     lst1: List[Any] = []
     lst2: List[Any] = []
     lists = lst1, lst2
-    # lists = lst1: List[Any], lst2: List[Any] = list(), list()
     for b, x in list_zip(bs, l):
         lists[b].append(x)
     return lst1, lst2
@@ -111,7 +110,7 @@ def lru_cache_verbose(maxsize=None, typed=False):
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
-            slope.dblog(f"{func.__name__}.{cache_info} {args.__hash__()}")
+            slope.dblog(f"{func.__name__}.{cache_info} {args.__hash__()}", level=2)
             return result
 
         decorated_function.cache_info = wrapper.cache_info
@@ -587,8 +586,8 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, static_argnames=(), not_op=True):
-        # def register(self, static_argnames=(), not_op=False):
+    # def register(self, static_argnames=(), not_op=True):
+    def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -2184,6 +2183,7 @@ class Machine:
                 raise TypeError
             x_bars = f_vjp(self.environment.ones(()))
 
+            # ret = x_bars
             ret = tuple(x_bars[i] for i in argnums)
             if len(ret) == 1:
                 ret = ret[0]

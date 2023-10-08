@@ -93,11 +93,11 @@ def loss_fn(model, batch):
     return -(preds * targets).sum()
 g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
-@slope.jit
+# @slope.jit
 def train_step(model, batch, optimizer):
     loss, g_model = g_loss_fn(model, batch)
-    model, optimizer = optimizer(model, g_model)
-    return loss, model, optimizer
+    new_model, new_optimizer = optimizer(model, g_model)
+    return loss, new_model, new_optimizer
 
 
 def accuracy(model, batch):
@@ -108,23 +108,22 @@ def accuracy(model, batch):
 
 
 if __name__ == "__main__":
-    step_size = 0.001
     num_epochs = 30
     batch_size = 200  # TODO: must be multiple of dataset.
 
-    model = nn.Serial([
-        nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-        nn.Linear(784, 10), 
-        nn.Fn(lambda x: x.log_softmax(axes=-1))
-        ])
-    optimizer = nn.SGD(model,lr =1e-3, momentum=0.9, weight_decay=0.)
-
+   
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
-    # log_interval = num_batches // 4
-    log_interval = 1
+    log_interval = num_batches // 4
+    model = nn.Serial([
+            nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
+            # nn.MLP(784, 100,10), 
+            nn.Linear(784, 10), 
+            nn.Fn(lambda x: x.log_softmax(axes=-1))
+            ])
+    optimizer = nn.SGD(model,lr =1e-3, momentum=0.8, weight_decay=1e-5)
 
     def data_stream():
         rng = np.random.RandomState(0)
@@ -132,7 +131,6 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                # yield slope.tensor(train_images[batch_idx].reshape(batch_size,-1)), slope.tensor(train_labels[batch_idx])
                 yield slope.tensor(train_images[batch_idx]), slope.tensor(train_labels[batch_idx])
 
     batches = data_stream()

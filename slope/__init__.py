@@ -4,12 +4,8 @@ import os
 SLOPE_DEBUG = int(os.environ.get("SLOPE_DEBUG", 0))
 
 
-def log(*msg):
-    print(*msg)
-
-
-def dblog(*msg):
-    if SLOPE_DEBUG > 0:
+def dblog(*msg, level=0):
+    if SLOPE_DEBUG >= level:
         print(*msg)
 
 

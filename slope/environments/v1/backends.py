@@ -27,7 +27,7 @@ default_dtype_backend = numpy_backend.default_dtype_value
 
 
 @numpy_backend.set_method
-def set_numpy_of(self, tensor):
+def numpy_of(self, tensor):
     return tensor.buf.val
 
 
@@ -51,7 +51,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
-    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==")
+    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=1)
 
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
@@ -198,7 +198,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             )
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n")
+    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=1)
     if fn_name == "main":
         del self.fn_count
     return dict(code_lines=code_lines, fn_defs=fn_defs)

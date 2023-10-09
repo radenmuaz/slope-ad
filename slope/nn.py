@@ -9,6 +9,7 @@ from typing import (
     Callable,
     Union,
     Callable,
+    NamedTuple
 )
 import math
 import numpy as np
@@ -36,6 +37,10 @@ class Module:
         for k, v in self.__dict__.items():
             if isinstance(v, (Tensor, Typecheckor)):
                 tensor_attrs.add(k)
+            elif isinstance(v, (list, tuple)):
+                v_flat, v_treedef = slope.tree_flatten(v)
+                if all(isinstance(vi, (Tensor, Typecheckor)) for vi in v_flat):
+                    tensor_attrs.add(k)
             elif isinstance(v, Module):
                 module_attrs.add(k)
 
@@ -52,6 +57,10 @@ class Module:
         for k, v in self.__dict__.items():
             if isinstance(v, attr_types):
                 attrs[k] = v
+            # elif isinstance(v, (list, tuple)):
+            #     v_flat, v_treedef = slope.tree_flatten(v)
+            #     if all(isinstance(vi, attr_types) for vi in v_flat):
+            #         attrs[k] = v
         return attrs if with_name else tuple(attrs.values())
 
     def get_tensors(self, with_name=False):
@@ -245,11 +254,11 @@ def glorot_uniform(
 class Linear(Module):
     def __init__(self, in_dim, out_dim, bias=True, W_init=glorot_normal(), b_init=normal()):
         self.weight = W_init((out_dim, in_dim))
-        # self.bias = b_init((out_dim,))# if bias else None
+        self.bias = b_init((out_dim,)) if bias else None
 
     def __call__(self, x):
         x = x.dot(self.weight.T())
-        return x# + self.bias.broadcast_in_dim((1, *self.bias.shape), (0,))# if self.bias is not None else x
+        return x + self.bias[None, ...] if self.bias is not None else x
 
 
 class MLP(Module):
@@ -292,6 +301,7 @@ class Serial(Module):
 class Optimizer(Module):
     def __init__(self, params, lr: float):
         self.params = params
+        self.params_flat, self.params_treedef = slope.tree_flatten(params)
         self.state = Module()
         self.hp = Module()
         self.hp.lr = slope.full((), lr)
@@ -302,13 +312,17 @@ class Optimizer(Module):
 
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
-        out_params, state_attrs = slope.tree_map(self.step, params, *(g_params, *state_attrs))
+        step_out, (leaf0, leaf0_treedef) = (
+            slope.tree_map(self.step, params, *(g_params, *state_attrs), 
+                           out_leaf=True))
+        step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
+        params_out, state_attrs_out = step_out_T
         state = Module()
-        for k, v in zip(state_names, state_attrs):
+        for k, v in zip(state_names, state_attrs_out):
             setattr(state, k, v)
         self.state = state
         self.iters = self.iters + 1
-        return (out_params, self)
+        return (params_out, self)
 
 
 class GD(Optimizer):
@@ -335,7 +349,7 @@ class SGD(Optimizer):
         b = m * b + g
         g = (g + m * b) if self.hp.nesterov else b
         p = p - lr * g
-        return p, (b,)
+        return (p, (b,))
 
 
 def AdamW(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01):

@@ -119,8 +119,7 @@ if __name__ == "__main__":
     log_interval = num_batches // 4
     model = nn.Serial([
             nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-            # nn.MLP(784, 100,10), 
-            nn.Linear(784, 10), 
+            nn.MLP(784, 100, 10), 
             nn.Fn(lambda x: x.log_softmax(axes=-1))
             ])
     optimizer = nn.SGD(model,lr =1e-3, momentum=0.8, weight_decay=1e-5)

@@ -955,6 +955,15 @@ class PyTreeDef(NamedTuple):
         # ret = f"tree {self.node_type.name}\n"
         # for i, c in enumerate(self.child_treedefs):
         #     ret += f"{i} {c}\n"
+    
+    @property
+    def num_leaves(self):
+        def _get_num_leaves(x_):
+            if x_ is leaf:
+                return 1
+            else:
+                return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
+        return sum(_get_num_leaves(x) for x in self.child_treedefs)
 
     def pretty_print(self, indent=0):
         indent_str = " " * indent
@@ -1605,6 +1614,7 @@ class Machine:
             for k in self.node_types.keys():
                 if isinstance(x_, k):
                     node_type = self.node_types[k]
+            # node_type = self.node_types.get(type(x_), None)
 
             if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
@@ -1635,6 +1645,20 @@ class Machine:
 
         # print(f'unflattening {treedef}')
         return _tree_unflatten(treedef, iter(xs))
+    
+    def tree_transpose(self, outer_treedef: PyTreeDef,
+                   inner_treedef: PyTreeDef,
+                   pytree_to_transpose: Any) -> Any:
+        flat, treedef = self.tree_flatten(pytree_to_transpose)
+        inner_size = inner_treedef.num_leaves
+        outer_size = outer_treedef.num_leaves
+        if treedef.num_leaves != (inner_size * outer_size):
+            raise TypeError
+        iter_flat = iter(flat)
+        lol = [[next(iter_flat) for _ in range(inner_size)] for __ in range(outer_size)]
+        transposed_lol = zip(*lol)
+        subtrees = map(partial(self.tree_unflatten, outer_treedef), transposed_lol)
+        return self.tree_unflatten(inner_treedef, subtrees)
 
     def flatten_fn(self, f, in_tree):
         store = Store()
@@ -1653,23 +1677,23 @@ class Machine:
             name = str(ty)
         self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
-    def tree_map(self, f: Callable[..., Any], tree, *rest) -> Any:
+    def tree_map(self, f: Callable[..., Any], tree, *rest, out_leaf=False) -> Any:
         leaves, treedef = self.tree_flatten(tree)
         if len(rest) == 0:
-            return self.tree_unflatten(treedef, tuple(f(leaf) for leaf in leaves))
-        all_leaves = [leaves]
-        for t in rest:
-            t_leaves, t_treedef = self.tree_flatten(t)
-            assert t_treedef == treedef
-            all_leaves += [t_leaves]
-        ret_flat = f(*[l[0] for l in all_leaves])
-
-        # ret_flat = tuple((r,) for r in f(*[l[0] for l in all_leaves]))
-        def unflat_ret(r):
-            return self.tree_unflatten(treedef, (r,))
-
-        ret = self.tree_map(unflat_ret, ret_flat)
-        # ret = self.tree_unflatten(treedef, ret_flat)
+            out_tree_flat = tuple(f(leaf) for leaf in leaves)
+            out_tree =  self.tree_unflatten(treedef, out_tree_flat)
+        else:
+            all_leaves = [leaves]
+            for t in rest:
+                t_leaves, t_treedef = self.tree_flatten(t)
+                assert t_treedef == treedef
+                all_leaves += [t_leaves]
+                
+            out_tree_flat = tuple(f(*xs) for xs in zip(*all_leaves))
+            out_tree = self.tree_unflatten(treedef, out_tree_flat)
+        ret = out_tree
+        if out_leaf:
+            ret = (ret, self.tree_flatten(out_tree_flat[0]))
         return ret
 
     @contextmanager

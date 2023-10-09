@@ -955,7 +955,7 @@ class PyTreeDef(NamedTuple):
         # ret = f"tree {self.node_type.name}\n"
         # for i, c in enumerate(self.child_treedefs):
         #     ret += f"{i} {c}\n"
-    
+
     @property
     def num_leaves(self):
         def _get_num_leaves(x_):
@@ -963,6 +963,7 @@ class PyTreeDef(NamedTuple):
                 return 1
             else:
                 return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
+
         return sum(_get_num_leaves(x) for x in self.child_treedefs)
 
     def pretty_print(self, indent=0):
@@ -1645,10 +1646,8 @@ class Machine:
 
         # print(f'unflattening {treedef}')
         return _tree_unflatten(treedef, iter(xs))
-    
-    def tree_transpose(self, outer_treedef: PyTreeDef,
-                   inner_treedef: PyTreeDef,
-                   pytree_to_transpose: Any) -> Any:
+
+    def tree_transpose(self, outer_treedef: PyTreeDef, inner_treedef: PyTreeDef, pytree_to_transpose: Any) -> Any:
         flat, treedef = self.tree_flatten(pytree_to_transpose)
         inner_size = inner_treedef.num_leaves
         outer_size = outer_treedef.num_leaves
@@ -1681,14 +1680,14 @@ class Machine:
         leaves, treedef = self.tree_flatten(tree)
         if len(rest) == 0:
             out_tree_flat = tuple(f(leaf) for leaf in leaves)
-            out_tree =  self.tree_unflatten(treedef, out_tree_flat)
+            out_tree = self.tree_unflatten(treedef, out_tree_flat)
         else:
             all_leaves = [leaves]
             for t in rest:
                 t_leaves, t_treedef = self.tree_flatten(t)
                 assert t_treedef == treedef
                 all_leaves += [t_leaves]
-                
+
             out_tree_flat = tuple(f(*xs) for xs in zip(*all_leaves))
             out_tree = self.tree_unflatten(treedef, out_tree_flat)
         ret = out_tree

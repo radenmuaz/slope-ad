@@ -87,13 +87,17 @@ def mnist(permute_train=False):
 
     return train_images, train_labels, test_images, test_labels
 
+
 def loss_fn(model, batch):
     inputs, targets = batch
     preds = model(inputs)
     return -(preds * targets).sum()
+
+
 g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
-# @slope.jit
+
+@slope.jit
 def train_step(model, batch, optimizer):
     loss, g_model = g_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, g_model)
@@ -108,21 +112,22 @@ def accuracy(model, batch):
 
 
 if __name__ == "__main__":
-    num_epochs = 30
+    num_epochs = 3
     batch_size = 200  # TODO: must be multiple of dataset.
 
-   
     train_images, train_labels, test_images, test_labels = mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
     log_interval = num_batches // 4
-    model = nn.Serial([
+    model = nn.Serial(
+        [
             nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-            nn.MLP(784, 100, 10), 
-            nn.Fn(lambda x: x.log_softmax(axes=-1))
-            ])
-    optimizer = nn.SGD(model,lr =1e-3, momentum=0.8, weight_decay=1e-5)
+            nn.MLP(784, 100, 10),
+            nn.Fn(lambda x: x.log_softmax(axes=-1)),
+        ]
+    )
+    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
 
     def data_stream():
         rng = np.random.RandomState(0)

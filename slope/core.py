@@ -341,6 +341,7 @@ class OperatorType(Enum):
     Reduce = auto()
     Shape = auto()
     Load = auto()
+    BinaryReduce = auto()
     Meta = auto()
 
 
@@ -499,7 +500,10 @@ class Operator:
 
         @op.set_method
         def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
-            if not type(x) in (Tensor, Typecheckor) or not type(x) in (Tensor, Typecheckor):
+            if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+                Tensor,
+                Typecheckor,
+            ):
                 raise TypeError
             void_x = Typecheckor.like(x)
             void_y = Typecheckor.like(y)
@@ -567,6 +571,11 @@ class Operator:
     @classmethod
     def shape(cls, name, **kwargs):
         op = cls(name, OperatorType.Shape, **kwargs)
+        return op
+
+    @classmethod
+    def binary_reduce(cls, name, **kwargs):
+        op = cls(name, OperatorType.binary_reduce, **kwargs)
         return op
 
     @classmethod
@@ -1583,7 +1592,12 @@ class Machine:
             lambda keys, vals: dict(list_zip(keys, vals)),
             "dict",
         )
-        self.register_node(PrimalProxy, lambda u: (u.aval, ()), lambda aval, _: PrimalProxy(aval), "PrimalProxy")
+        self.register_node(
+            PrimalProxy,
+            lambda u: (u.aval, ()),
+            lambda aval, _: PrimalProxy(aval),
+            "PrimalProxy",
+        )
 
     def __repr__(self):
         ret = f"{self.__class__.__name__}\n"
@@ -1647,7 +1661,12 @@ class Machine:
         # print(f'unflattening {treedef}')
         return _tree_unflatten(treedef, iter(xs))
 
-    def tree_transpose(self, outer_treedef: PyTreeDef, inner_treedef: PyTreeDef, pytree_to_transpose: Any) -> Any:
+    def tree_transpose(
+        self,
+        outer_treedef: PyTreeDef,
+        inner_treedef: PyTreeDef,
+        pytree_to_transpose: Any,
+    ) -> Any:
         flat, treedef = self.tree_flatten(pytree_to_transpose)
         inner_size = inner_treedef.num_leaves
         outer_size = outer_treedef.num_leaves
@@ -1901,7 +1920,11 @@ class Machine:
 
         in_avals = self.tree_map(lambda v: v.aval, program.in_binders)
         new_program, new_consts, _ = self.make_program(
-            jvp_traceable, *in_avals, *in_avals, static_args=static_args, name=f"{program.name}_jvp"
+            jvp_traceable,
+            *in_avals,
+            *in_avals,
+            static_args=static_args,
+            name=f"{program.name}_jvp",
         )
         return new_program, new_consts
 
@@ -1921,7 +1944,10 @@ class Machine:
         return program, pvals_out, consts
 
     def partial_run_program(
-        self, program: Program, in_unknowns: List[bool], instantiate: Optional[List[bool]] = None
+        self,
+        program: Program,
+        in_unknowns: List[bool],
+        instantiate: Optional[List[bool]] = None,
     ) -> Tuple[Program, Program, List[bool], int]:
         environment: Dict[Var, bool] = {}
         residuals: Set[Var] = set()
@@ -1965,8 +1991,22 @@ class Machine:
         ins1, ins2 = partition_list(in_unknowns, program.in_binders)
         outs1, outs2 = partition_list(out_unknowns, program.outs)
 
-        program1 = Program(ins1, instructions1, outs1 + residuals, 0, program.static_args, f"{program.name}_partial1")
-        program2 = Program(residuals + ins2, instructions2, outs2, 0, program.static_args, f"{program.name}_partial2")
+        program1 = Program(
+            ins1,
+            instructions1,
+            outs1 + residuals,
+            0,
+            program.static_args,
+            f"{program.name}_partial1",
+        )
+        program2 = Program(
+            residuals + ins2,
+            instructions2,
+            outs2,
+            0,
+            program.static_args,
+            f"{program.name}_partial2",
+        )
         self.typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, program2)
 
         return program1, program2, out_unknowns, num_res
@@ -2193,7 +2233,11 @@ class Machine:
         traceable = partial(self.run_program_transposed, program)
         args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
-            traceable, tuple(args), tuple(avals_out), static_args=program.static_args, name=f"{program.name}_T"
+            traceable,
+            tuple(args),
+            tuple(avals_out),
+            static_args=program.static_args,
+            name=f"{program.name}_T",
         )
         self.typecheck_program(trans_program)
 
@@ -2277,3 +2321,6 @@ class Machine:
         for t in outs2:
             t.draft = draft
         return merge_lists(out_unknowns, outs1, outs2)
+
+
+#

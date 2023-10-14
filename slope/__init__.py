@@ -1,4 +1,5 @@
 from slope import core
+
 import os
 
 SLOPE_DEBUG = int(os.environ.get("SLOPE_DEBUG", 0))
@@ -23,8 +24,8 @@ def M():
         if SLOPE_DEBUG > 0:
             import inspect
 
-            print("Initializing slope.machine with")
-            print(inspect.getsource(slope_init))
+            dblog("Initializing slope.machine with")
+            dblog(inspect.getsource(slope_init))
         machine = slope_init()
     return machine
 
@@ -44,19 +45,23 @@ def set_slope_init(fn):
 
 
 def __getattr__(attr):
+    if attr in (globals_dict := globals()):
+        return globals_dict[attr]
+    M()
+
     if attr in vars(core.Machine):
         return getattr(machine, attr)
-    M()
+
     if attr in vars(machine.environment.operator_set):
         return getattr(machine.environment.operator_set, attr)
     elif attr in vars(machine.environment.procedure_set):
         return getattr(machine.environment.procedure_set, attr)
-    elif attr in [a for a in dir(machine.environment) if a[:2] != "__"]:
+    elif attr in vars(core.Environment):
         return getattr(machine.environment, attr)
+
     elif attr in core.Tensor.dtype_names.keys():
         return core.Tensor.dtype_names[attr]
     elif attr in core.Tensor.dtype_short_names.keys():
         return core.Tensor.dtype_short_names[attr]
-    elif attr in (globals_dict := globals()):
-        return globals_dict[attr]
+
     raise NameError(attr)

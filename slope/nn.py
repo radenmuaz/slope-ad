@@ -8,9 +8,9 @@ from typing import Sequence, Callable, Union, Callable, NamedTuple
 import math
 import numpy as np
 
-#
+# ====================
 # Module
-#
+# ====================
 
 
 class Module:
@@ -144,9 +144,9 @@ slope.M().register_node(Module, Module.flatten, Module.unflatten, "Module")
 # slope.M().register_node(Module, Module.leaf_flatten, Module.leaf_unflatten, "Module")
 
 
-#
+# ====================
 # Init
-#
+# ====================
 
 
 def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
@@ -240,9 +240,9 @@ def glorot_uniform(
     )
 
 
-#
+# ====================
 # Layers
-#
+# ====================
 
 
 class Linear(Module):

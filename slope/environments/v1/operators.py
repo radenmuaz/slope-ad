@@ -26,7 +26,7 @@ sum_py = sum
 operator_set = OperatorSet()
 
 # -----------------------
-# UnaryOps
+# Unary
 # -----------------------
 
 # TODO: in run_program_transposed, try skip run stop_gradient Operator
@@ -191,7 +191,7 @@ def T(self, cts, x):
 #     return [-z]
 
 # -----------------------
-# BinaryOps
+# Binary
 # -----------------------
 
 
@@ -366,7 +366,80 @@ def T(self, cts, x, *, axes=None, keepdims=False):
 
 
 # -----------------------
-# ShapeOps
+# BinaryReduce
+# -----------------------
+
+
+dot = Operator.binary_reduce("dot")
+
+
+@dot.set_method
+def typecheck(self, x, y):
+    # matrix-matrix
+    if x.ndim == y.ndim:
+        assert x.shape[-1] == y.shape[-2]
+        if x.ndim >= 3:
+            assert x.shape[0:-2] == y.shape[0:-2]
+        shape = (x.shape[0:-1]) + (y.shape[-2],)
+    # matrix-vector
+    elif x.ndim == y.ndim - 1:
+        assert x.shape[-1] == y.shape[-1]
+        if x.ndim >= 3:
+            assert x.shape[0:-1] == y.shape[0:-1]
+        shape = (x.shape[0:-1]) + (y.shape[-1],)
+    else:
+        raise ValueError
+    # matrix-matrix, vector-matrix, matrix-vector
+    return [Typecheckor(shape, x.dtype)]
+
+
+@dot.set_method
+def jvp(self, primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
+
+
+@dot.set_method
+def T(self, cts, x, y):
+    (z_bar,) = cts
+    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
+    if type(x) is PrimalProxy:
+        return [z_bar.dot(y), None]
+    elif type(y) is PrimalProxy:
+        return [None, x.dot(z_bar)]
+
+
+conv = Operator.binary_reduce("conv")
+
+
+def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
+    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+
+@conv.set_method
+def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+    return [x.conv(y)], [jvp1 + jvp2]
+
+
+@conv.set_method
+def T(self, cts, x, y, *, groups, stride, dilation, padding):
+    (z_bar,) = cts
+    if type(x) is PrimalProxy:
+        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        return [gx, None]
+    elif type(y) is PrimalProxy:
+        x_T = x.swapaxes(0, 1)
+        z_bar_T = z_bar.swapaxes(0, 1)
+        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
+        return [None, gy]
+
+
+# -----------------------
+# Shape
 # -----------------------
 
 broadcast_in_dim = Operator.shape("broadcast_in_dim")

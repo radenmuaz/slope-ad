@@ -248,11 +248,19 @@ def getitem(self, val):
         ]
         first_idx = [
             idx[0].reshape(
-                *[1] * dim[0], *[1] * (1 + max_dim - idx[0].ndim), *idx[0].shape, *[1] * (ret.ndim - dim[0] - 1)
+                *[1] * dim[0],
+                *[1] * (1 + max_dim - idx[0].ndim),
+                *idx[0].shape,
+                *[1] * (ret.ndim - dim[0] - 1),
             )
         ]
         rest_idx = [
-            i.reshape(*[1] * dim[0], *[1] * (max_dim - i.ndim), *i.shape, *[1] * (ret.ndim - dim[0] - n))
+            i.reshape(
+                *[1] * dim[0],
+                *[1] * (max_dim - i.ndim),
+                *i.shape,
+                *[1] * (ret.ndim - dim[0] - n),
+            )
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx

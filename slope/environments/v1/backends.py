@@ -183,6 +183,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                         kwarg = self.dtype_map[kwarg]
                     rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
         code_line = f"{lhs} = {rhs}"
+        if '(, ' in code_line:
+            code_line = code_line.replace('(, ', '(')
         code_lines += [indent(code_line, il1)]
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
@@ -294,27 +296,32 @@ def f(self, x, *, axes=None, keepdims=False):
 
 
 @numpy_backend.set_impl(operator_set.constant)
-def f(self, val, *, dtype=default_dtype_backend):
-    return np.array(val, dtype=dtype)
+def f(self, *, val, dtype):
+    # if type(val) is bytes:
+    #     ret = np.frombuffer(val, dtype)
+    # else:
+    #     ret = np.array(val, dtype=dtype)
+    ret = np.array(val, dtype=dtype)
+    return ret
 
 
 @numpy_backend.set_impl(operator_set.arange)
-def f(self, *, start, stop, stride, dtype=default_dtype_backend):
+def f(self, *, start, stop, stride, dtype):
     return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.full)
-def f(self, *, shape, fill_value, dtype=default_dtype_backend):
+def f(self, *, shape, fill_value, dtype):
     return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.random_uniform)
-def f(self, *, shape, dtype=default_dtype_backend):
+def f(self, *, shape, dtype):
     return np.random.uniform(size=shape).astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.random_normal)
-def f(self, *, shape, dtype=default_dtype_backend):
+def f(self, *, shape, dtype):
     return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
 
 

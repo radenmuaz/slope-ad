@@ -370,74 +370,6 @@ def T(self, cts, x, *, axes=None, keepdims=False):
 # -----------------------
 
 
-dot = Operator.binary_reduce("dot")
-
-
-@dot.set_method
-def typecheck(self, x, y):
-    # matrix-matrix
-    if x.ndim == y.ndim:
-        assert x.shape[-1] == y.shape[-2]
-        if x.ndim >= 3:
-            assert x.shape[0:-2] == y.shape[0:-2]
-        shape = (x.shape[0:-1]) + (y.shape[-2],)
-    # matrix-vector
-    elif x.ndim == y.ndim - 1:
-        assert x.shape[-1] == y.shape[-1]
-        if x.ndim >= 3:
-            assert x.shape[0:-1] == y.shape[0:-1]
-        shape = (x.shape[0:-1]) + (y.shape[-1],)
-    else:
-        raise ValueError
-    # matrix-matrix, vector-matrix, matrix-vector
-    return [Typecheckor(shape, x.dtype)]
-
-
-@dot.set_method
-def jvp(self, primals, tangents):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
-
-
-@dot.set_method
-def T(self, cts, x, y):
-    (z_bar,) = cts
-    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
-    if type(x) is PrimalProxy:
-        return [z_bar.dot(y), None]
-    elif type(y) is PrimalProxy:
-        return [None, x.dot(z_bar)]
-
-
-conv = Operator.binary_reduce("conv")
-
-
-def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
-    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-
-@conv.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-    return [x.conv(y)], [jvp1 + jvp2]
-
-
-@conv.set_method
-def T(self, cts, x, y, *, groups, stride, dilation, padding):
-    (z_bar,) = cts
-    if type(x) is PrimalProxy:
-        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [gx, None]
-    elif type(y) is PrimalProxy:
-        x_T = x.swapaxes(0, 1)
-        z_bar_T = z_bar.swapaxes(0, 1)
-        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
-        return [None, gy]
-
-
 # -----------------------
 # Shape
 # -----------------------
@@ -562,7 +494,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, perm):
     assert x_bdim >= 0
     # perm = [d - int(i >= x_bdim) for i, d in enumerate(perm)]
     perm = perm[:x_bdim] + [x_bdim] + perm[x_bdim:]
-    perm = [d + int(d >= x_bdim) if i != x_bdim else d for i, d in enumerate(perm)]
+    perm = tuple(d + int(d >= x_bdim) if i != x_bdim else d for i, d in enumerate(perm))
     assert len(set(perm)) == len(perm)
     # perm[:x_bdim] = perm[:x_bdim][::-1]
     # breakpoint()
@@ -720,17 +652,17 @@ def T(self, cts, x, *, starts, limits, strides=None):
     if strides is None or np.all(np.equal(strides, 1)):
         lo, hi, interior = (
             starts,
-            np.subtract(x.aval.shape, limits),
+            tuple(np.subtract(x.aval.shape, limits)),
             (0,) * len(starts),
         )
     else:
         real_limits = np.add(
             starts,
-            np.where(
-                np.tensor(x.shape) == 0,
+            tuple(np.where(
+                np.array(x.shape) == 0,
                 0,
                 np.add(1, np.multiply(np.subtract(t.shape, 1), strides)),
-            ),
+            )),
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
 
@@ -875,25 +807,62 @@ operator_set.register(constant)
 
 
 @constant.set_method
-def jvp(self, primals, tangents, *, val, dtype=Tensor.float32):
-    out = slope.tensor(val, dtype)
+def args_fixer(self, *, val, dtype=Tensor.float32):
+    if isinstance(val, np.ndarray):
+        # val = val.tobytes()
+        def list_to_tuple(lst):
+            return tuple(list_to_tuple(item) for item in lst) if isinstance(lst, list) else lst
+        val = list_to_tuple(val.tolist())
+    return (), dict(val=val, dtype=dtype)
+
+
+@constant.set_method
+def jvp(self, primals, tangents, *, val, dtype):
+    out = self(val, dtype)
     out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @constant.set_method
-def T(self, cts, *, val, dtype=Tensor.float32):
+def T(self, cts, *, val, dtype):
     return [cts[0]]
 
 
 @constant.set_method
-def typecheck(self, *, val, dtype=Tensor.float32):
+def typecheck(self, *, val, dtype):
     # TODO: not using numpy to extract shape
-    return [Typecheckor(np.tensor(val).shape, dtype)]
+    return [Typecheckor(np.array(val).shape, dtype)]
 
 
 full = Operator.load("full")
 operator_set.register(full)
+
+
+# constant = Operator.load("constant")
+# operator_set.register(constant)
+
+
+# @constant.set_method
+# def args_fixer(self, val, *, dtype=Tensor.float32):
+#     return (val,), dict(dtype=dtype)
+
+
+# @constant.set_method
+# def jvp(self, primals, tangents, *, dtype):
+#     (val,), (val_dot) = primals, tangents
+#     out = self(val, dtype)
+#     return [out], [val_dot]
+
+
+# @constant.set_method
+# def T(self, cts, val, *, dtype):
+#     return [cts[0]]
+
+
+# @constant.set_method
+# def typecheck(self, val, *, dtype):
+#     # TODO: not using numpy to extract shape
+#     return [Typecheckor(np.array(val).shape, dtype)]
 
 
 @full.set_method
@@ -907,7 +876,7 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
 
 @full.set_method
 def jvp(self, primals, tangents, *, shape, fill_value, dtype):
-    out = slope.M().backend.run_impl(self, shape=shape, fill_value=fill_value, dtype=dtype)
+    out = self(shape=shape, fill_value=fill_value, dtype=dtype)
     out_jvp = slope.M().ones_like(out)
     return [out], [out_jvp]
 

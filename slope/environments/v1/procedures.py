@@ -117,7 +117,7 @@ def argmin(x, axes=None, keepdims=False):
 def T(x):
     perm = list(range(x.ndim))
     perm[-2], perm[-1] = perm[-1], perm[-2]
-    return x.transpose(perm)
+    return x.transpose(tuple(perm))
 
 
 @procedure_set.register(static_argnames="axes")

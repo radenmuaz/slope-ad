@@ -595,8 +595,8 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    # def register(self, static_argnames=(), not_op=True):
-    def register(self, static_argnames=(), not_op=False):
+    def register(self, static_argnames=(), not_op=True):
+    # def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -788,11 +788,12 @@ class Environment:
         val: Union[list, tuple, np.ndarray, "TensorBuffer"] = None,
         dtype: Optional[Any] = Tensor.float32,
     ):
-        return (
-            Tensor(val)
-            if isinstance(val, TensorBuffer)
-            else slope.M().backend.run_impl(self.operator_set.constant, val=val, dtype=dtype)
-        )
+        if isinstance(val, TensorBuffer):
+            return Tensor(val)
+        else:
+            # if isinstance(val, np.ndarray):
+            #     val = tuple(val)
+            return self.operator_set.constant(val=val, dtype=dtype)
 
     def save(arr: "Tensor", filename: str):
         # TODO
@@ -1194,26 +1195,27 @@ class Backend:
     def run_impl(self, op: Operator, *args, **params):
         if op.op_type is OperatorType.Meta:
             return op.impl(*args, **params)
-        else:
-            args_, params_ = args, params
+        raise ValueError
+        # else:
+        #     args_, params_ = args, params
 
-            def extract_arg(a):
-                return (
-                    a.val
-                    if isinstance(a, Tensor)
-                    else self.dtype_map[a]
-                    if isinstance(a, DType)
-                    else tuple(extract_arg(aa) for aa in a)
-                    if type(a) in (list, tuple)
-                    else a
-                )
+        #     def extract_arg(a):
+        #         return (
+        #             a.val
+        #             if isinstance(a, Tensor)
+        #             else self.dtype_map[a]
+        #             if isinstance(a, DType)
+        #             else tuple(extract_arg(aa) for aa in a)
+        #             if type(a) in (list, tuple)
+        #             else a
+        #         )
 
-            args = tuple([extract_arg(a) for a in args])
-            params = {k: extract_arg(v) for k, v in params.items()}
-            # if op.nary_inputs:
-            # val = self.impls[op](args, **params)
-            val = self.impls[op](*args, **params)
-            return Tensor(TensorBuffer(val))
+        #     args = tuple([extract_arg(a) for a in args])
+        #     params = {k: extract_arg(v) for k, v in params.items()}
+        #     # if op.nary_inputs:
+        #     # val = self.impls[op](args, **params)
+        #     val = self.impls[op](*args, **params)
+        #     return Tensor(TensorBuffer(val))
 
 
 class MainTrace(NamedTuple):
@@ -1240,13 +1242,23 @@ class EvalTrace(Trace):
     pure = lambda self, x: x
 
     def run_op(self, op: Operator, args, params):
-        args_ = args
-        args, params = op.reorg_args(args, params)
-        args, params = op.args_fixer(*args, **params)
-        ret = slope.M().backend.run_impl(op, *args, **params)
-        if op.op_type is not OperatorType.Meta:
-            ret = [ret]
+        if op.op_type is OperatorType.Meta:
+            args, params = op.reorg_args(args, params)
+            args, params = op.args_fixer(*args, **params)
+            ret = [slope.M().backend.run_impl(op, *args, **params)]
+            return ret
+        
+        ret = slope.M().jit(op, static_argnames=('params',))(*args,**params)
         return ret
+    
+    # def run_op(self, op: Operator, args, params):
+    #     args, params = op.reorg_args(args, params)
+    #     args, params = op.args_fixer(*args, **params)
+    #     ret = slope.M().backend.run_impl(op, *args, **params)
+    #     if op.op_type is not OperatorType.Meta:
+    #         ret = [ret]
+    #     return ret
+
 
 
 class Tracor(Tensor):
@@ -2267,25 +2279,24 @@ class Machine:
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
         def f_jitted(*args, **static_args):
-            static_args = tuple(static_args.items())
-            for k, v in static_args:
-                if k not in static_argnames:
-                    raise TypeError("keyword args reserved for static_args")
-            # sig = inspect.signature(f)
-            # args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
-            # static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
+            _args = args
+            sig = inspect.signature(f)
+            if all('*' not in repr(v) for v in sig.parameters.values()):
+                args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
+                static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
 
-            # if args:
-            #     if len(args) > len(args_strs):
-            #         assert static_args_strs
-            #         args, rest = args[: len(args_strs)], args[len(args_strs) :]
-            #         new_static_args = {
-            #             k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
-            #         }
-            #         static_args = {**new_static_args, **static_args}
-            # else:
-            #     args = [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
-            # assert len(args) == len(args_strs)
+                if args:
+                    if len(args) > len(args_strs):
+                        assert static_args_strs
+                        args, rest = args[: len(args_strs)], args[len(args_strs) :]
+                        new_static_args = {
+                            k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
+                        }
+                        static_args = {**new_static_args, **static_args}
+                else:
+                    args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
+            
+            static_args = tuple(static_args.items())
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
             name = f"jit_{hash((f, avals_in, static_args))}"

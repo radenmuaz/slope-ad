@@ -97,7 +97,7 @@ def loss_fn(model, batch):
 g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
 
-@slope.jit
+# @slope.jit
 def train_step(model, batch, optimizer):
     loss, g_model = g_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, g_model)

@@ -1,15 +1,19 @@
 import slope
+import numpy as np
+x = slope.constant(np.array([1,2,3]))
+# print(x)
+# @slope.jit
 
-@slope.jit
-def f(x):
-    y = x.sum()
-    return y
+# def f(x):
+#     y = x.sum()
+#     return y
 
 
 
-x = slope.ones(())
-print(f(x))
-print(f(x))
+# x = slope.ones(())
+# print(x)
+# print(f(x))
+# print(f(x))
 
 
 

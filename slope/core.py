@@ -102,18 +102,19 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
 
 
 def lru_cache_verbose(maxsize=None, typed=False):
-    def decorator(func):
+    def decorator(fn):
         @functools.lru_cache(maxsize=maxsize, typed=typed)
         def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+            return fn(*args, **kwargs)
 
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
-            slope.dblog(f"{func.__name__}.{cache_info} {args.__hash__()}", level=2)
+            slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", level=2)
             return result
 
         decorated_function.cache_info = wrapper.cache_info
+        decorated_function.fn = fn
         return decorated_function
 
     return decorator
@@ -791,9 +792,8 @@ class Environment:
         if isinstance(val, TensorBuffer):
             return Tensor(val)
         else:
-            # if isinstance(val, np.ndarray):
-            #     val = tuple(val)
-            return self.operator_set.constant(val=val, dtype=dtype)
+            return slope.M().backend.tensor(val, dtype)
+            # return self.operator_set.constant(val=val, dtype=dtype)
 
     def save(arr: "Tensor", filename: str):
         # TODO
@@ -1156,6 +1156,9 @@ class Backend:
     def default_dtype_value(self):
         return self.dtype_map[self.default_dtype]
 
+    def tensor(self, val):
+        raise NotImplementedError
+    
     def numpy_of(self, tensor):
         raise NotImplementedError
 
@@ -1196,26 +1199,6 @@ class Backend:
         if op.op_type is OperatorType.Meta:
             return op.impl(*args, **params)
         raise ValueError
-        # else:
-        #     args_, params_ = args, params
-
-        #     def extract_arg(a):
-        #         return (
-        #             a.val
-        #             if isinstance(a, Tensor)
-        #             else self.dtype_map[a]
-        #             if isinstance(a, DType)
-        #             else tuple(extract_arg(aa) for aa in a)
-        #             if type(a) in (list, tuple)
-        #             else a
-        #         )
-
-        #     args = tuple([extract_arg(a) for a in args])
-        #     params = {k: extract_arg(v) for k, v in params.items()}
-        #     # if op.nary_inputs:
-        #     # val = self.impls[op](args, **params)
-        #     val = self.impls[op](*args, **params)
-        #     return Tensor(TensorBuffer(val))
 
 
 class MainTrace(NamedTuple):
@@ -1248,18 +1231,9 @@ class RunTrace(Trace):
             ret = [slope.M().backend.run_impl(op, *args, **params)]
             return ret
         
+        # ret = slope.M().jit(op, static_argnames=('params',), no_cache=op.name=="constant")(*args,**params)
         ret = slope.M().jit(op, static_argnames=('params',))(*args,**params)
         return ret
-    
-    # def run_op(self, op: Operator, args, params):
-    #     args, params = op.reorg_args(args, params)
-    #     args, params = op.args_fixer(*args, **params)
-    #     ret = slope.M().backend.run_impl(op, *args, **params)
-    #     if op.op_type is not OperatorType.Meta:
-    #         ret = [ret]
-    #     return ret
-
-
 
 class Tracor(Tensor):
     PYTHON_TYPES = {
@@ -2275,7 +2249,7 @@ class Machine:
         else:
             return gradfun
 
-    def jit(self, f, static_argnames=()):
+    def jit(self, f, static_argnames=(), no_cache=False):
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
         def f_jitted(*args, **static_args):
@@ -2300,6 +2274,8 @@ class Machine:
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
             name = f"jit_{hash((f, avals_in, static_args))}"
+            # make_program_fn = self.make_program if not no_cache else partial(self.make_program.fn, self)
+            # program, consts, out_tree = make_program_fn(f, *avals_in, static_args=static_args, name=name)
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)

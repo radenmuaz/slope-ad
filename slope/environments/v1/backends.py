@@ -1,6 +1,6 @@
 import slope
 from slope.environments.v1.operators import operator_set
-from slope.core import Backend, Tensor, Typecheckor, list_zip, list_map
+from slope.core import Backend, Tensor, TensorBuffer, Typecheckor, list_zip, list_map
 import numpy as np
 from typing import (
     List,
@@ -25,6 +25,12 @@ numpy_backend.set_dtype_map(numpy_dtype_map)
 
 default_dtype_backend = numpy_backend.default_dtype_value
 
+
+
+@numpy_backend.set_method
+def tensor(self, val, dtype=default_dtype_backend):
+    val = np.array(val, dtype=numpy_dtype_map[dtype])
+    return Tensor(TensorBuffer(val))
 
 @numpy_backend.set_method
 def numpy_of(self, tensor):
@@ -51,7 +57,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
-    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=1)
+    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=3)
 
     def indent(code_line, amount):
         spaces = " " * (len(code_line) - len(code_line.lstrip()))
@@ -200,7 +206,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             )
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=1)
+    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=3)
     if fn_name == "main":
         del self.fn_count
     return dict(code_lines=code_lines, fn_defs=fn_defs)
@@ -293,17 +299,6 @@ def f(self, x, *, axes=None, keepdims=False):
 @numpy_backend.set_impl(operator_set.max)
 def f(self, x, *, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
-
-
-@numpy_backend.set_impl(operator_set.constant)
-def f(self, *, val, dtype):
-    # if type(val) is bytes:
-    #     ret = np.frombuffer(val, dtype)
-    # else:
-    #     ret = np.array(val, dtype=dtype)
-    ret = np.array(val, dtype=dtype)
-    return ret
-
 
 @numpy_backend.set_impl(operator_set.arange)
 def f(self, *, start, stop, stride, dtype):

@@ -29,7 +29,6 @@ operator_set = OperatorSet()
 # Unary
 # -----------------------
 
-# TODO: in run_program_transposed, try skip run stop_gradient Operator
 stop_gradient = Operator.unary("stop_gradient")
 operator_set.register(stop_gradient)
 
@@ -192,8 +191,6 @@ operator_set.register(mul)
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x * y], [(x_dot * y) + (y_dot * x)]
-    # return [y * x], [(y * x_dot) + (y_dot * x)]
-    # jvp_out = (y * x_dot) + (y_dot * x) # order problem, x*y_dot fails
 
 
 @mul.set_method
@@ -214,7 +211,6 @@ operator_set.register(div)
 def jvp(self, primals, tangents):
     (x, y), (x_dot, y_dot) = primals, tangents
     return [x / y], [(x_dot / y) + (-y_dot * x * 1 / (y * y))]
-    # return [x / y], [(x_dot / y) + (-y_dot * x * (y**-2))]
 
 
 @div.set_method
@@ -349,17 +345,12 @@ def args_fixer(self, x, *, shape, axes=None):
 @broadcast_in_dim.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
     (x,), (x_bdim,) = vals_in, dims_in
-    # x1s = [d for i,d in enumerate(x.shape) if i != x_bdim]
-    shape_ = list(shape)
-    axes_ = list(axes)
     shape = list(shape)
     axes = [a + int(a >= (x_bdim)) for a in axes]
     if all([a < x_bdim for a in axes]):
         x_bdim += 1
 
     shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
-    # if sum(int(a<x_bdim) for a in axes) != 0:
-    #     breakpoint()
 
     return [x.broadcast_in_dim(shape, axes)], [x_bdim]
 
@@ -759,67 +750,8 @@ def T(self, cts, *xs, axis=0):
 # LoadOps
 # -----------------------
 
-constant = Operator.load("constant")
-operator_set.register(constant)
-
-
-@constant.set_method
-def args_fixer(self, *, val, dtype=Tensor.float32):
-    if isinstance(val, np.ndarray):
-        def list_to_tuple(lst):
-            return tuple(list_to_tuple(item) for item in lst) if isinstance(lst, list) else lst
-        val = list_to_tuple(val.tolist())
-    return (), dict(val=val, dtype=dtype)
-
-
-@constant.set_method
-def jvp(self, primals, tangents, *, val, dtype):
-    out = self(val, dtype)
-    out_jvp = slope.ones_like(out)
-    return [out], [out_jvp]
-
-
-@constant.set_method
-def T(self, cts, *, val, dtype):
-    return [cts[0]]
-
-
-@constant.set_method
-def typecheck(self, *, val, dtype):
-    # TODO: not using numpy to extract shape
-    return [Typecheckor(np.array(val).shape, dtype)]
-
-
 full = Operator.load("full")
 operator_set.register(full)
-
-
-# constant = Operator.load("constant")
-# operator_set.register(constant)
-
-
-# @constant.set_method
-# def args_fixer(self, val, *, dtype=Tensor.float32):
-#     return (val,), dict(dtype=dtype)
-
-
-# @constant.set_method
-# def jvp(self, primals, tangents, *, dtype):
-#     (val,), (val_dot) = primals, tangents
-#     out = self(val, dtype)
-#     return [out], [val_dot]
-
-
-# @constant.set_method
-# def T(self, cts, val, *, dtype):
-#     return [cts[0]]
-
-
-# @constant.set_method
-# def typecheck(self, val, *, dtype):
-#     # TODO: not using numpy to extract shape
-#     return [Typecheckor(np.array(val).shape, dtype)]
-
 
 @full.set_method
 def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):

@@ -147,49 +147,6 @@ def T(self, cts, x):
     (z,) = cts
     return [-z]
 
-
-# relu = Operator.unary("relu")
-# operator_set.register(relu)
-
-
-# # @relu.set_run
-# # def f(self, x):
-# #     breakpoint()
-# #     return [x.maximum(0)]
-
-
-# # @relu.set_jvp
-# # def f(self, primals, tangents, **params):
-# #     (x,), (x_dot,) = primals, tangents
-# #     return [x.maximum(0)], [x_dot.maximum(0)]
-
-
-# @relu.set_run
-# def f(self, x):
-#     breakpoint()
-#     return [x.maximum(0)]
-
-
-# @relu.set_jvp
-# def f(self, primals, tangents, **params):
-#     (x,), (x_dot,) = primals, tangents
-#     def sign(z):
-#         def abs(z):
-#             return z.maximum(0) + (-z).maximum(0)
-#         breakpoint()
-#         return z * (abs(z) + 1e-10)
-#     return [x.maximum(0)], [x.maximum(0)]
-#     # return [x.maximum(0)], [sign(x_dot)]
-#     # return [x.maximum(0)], [ x_dot.maximum(0) + (-x_dot).maximum(0)]
-#     # return [x.relu()], [x_dot.relu()]
-
-
-# @relu.set_T
-# def f(self, cts, x):
-#     breakpoint()
-#     (z,) = cts
-#     return [-z]
-
 # -----------------------
 # Binary
 # -----------------------
@@ -809,7 +766,6 @@ operator_set.register(constant)
 @constant.set_method
 def args_fixer(self, *, val, dtype=Tensor.float32):
     if isinstance(val, np.ndarray):
-        # val = val.tobytes()
         def list_to_tuple(lst):
             return tuple(list_to_tuple(item) for item in lst) if isinstance(lst, list) else lst
         val = list_to_tuple(val.tolist())

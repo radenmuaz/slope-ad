@@ -1238,7 +1238,7 @@ class Trace:
         raise NotImplementedError
 
 
-class EvalTrace(Trace):
+class RunTrace(Trace):
     pure = lambda self, x: x
 
     def run_op(self, op: Operator, args, params):
@@ -1373,7 +1373,7 @@ class JVPTracor(Tracor):
 
 class JVPTrace(Trace):
     def pure(self, val):
-        if isinstance(val, PartialEvalTrace):
+        if isinstance(val, PartialRunTrace):
             val = val.pval.const
         return JVPTracor(self, val, slope.M().environment.zeros_like(val))
 
@@ -1553,7 +1553,7 @@ class PartialEvalTracor(Tracor):
         return self
 
 
-class PartialEvalTrace(Trace):
+class PartialRunTrace(Trace):
     def new_arg(self, pval: PartialValue) -> Any:
         return PartialEvalTracor(self, pval, LambdaBindingDraft())
 
@@ -1588,7 +1588,7 @@ class Machine:
     ):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
-        self.trace_stack += [MainTrace(self, 0, EvalTrace, None)]
+        self.trace_stack += [MainTrace(self, 0, RunTrace, None)]
 
         self.environment = environment
         self.environment.operator_set.register(jit_op)
@@ -1943,8 +1943,8 @@ class Machine:
     def partial_run_flat(
         self, f: Callable, pvals_in: List["PartialValue"], global_data=None
     ) -> Tuple[Program, List["PartialValue"], List[Any]]:
-        with self.new_main(PartialEvalTrace, global_data) as main:
-            trace = PartialEvalTrace(main)
+        with self.new_main(PartialRunTrace, global_data) as main:
+            trace = PartialRunTrace(main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]

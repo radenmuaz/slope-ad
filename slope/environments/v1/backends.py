@@ -26,11 +26,11 @@ numpy_backend.set_dtype_map(numpy_dtype_map)
 default_dtype_backend = numpy_backend.default_dtype_value
 
 
-
 @numpy_backend.set_method
 def tensor(self, val, dtype=default_dtype_backend):
     val = np.array(val, dtype=numpy_dtype_map[dtype])
     return Tensor(TensorBuffer(val))
+
 
 @numpy_backend.set_method
 def numpy_of(self, tensor):
@@ -38,7 +38,7 @@ def numpy_of(self, tensor):
 
 
 @numpy_backend.set_method
-def set_device_of(self, tensor):
+def device_of(self, tensor):
     return "cpu"
 
 
@@ -66,7 +66,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
-    il1 = 4
+    il1 = 4 # indent length 1
     ncs = 0
     nxs = 0
     nzs = 0
@@ -99,9 +99,11 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
+                if len(out_vals) == 0:  # return None functions
+                    continue
                 proc_program = instruction.params["program"]
-                self.fn_count += 1
                 proc_name = f"{proc_program.name}_{self.fn_count}"
+                self.fn_count += 1
                 proc_codegen_out = self.codegen(
                     proc_program,
                     args,
@@ -110,29 +112,11 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 )
                 fn_defs[proc_name] = proc_codegen_out["code_lines"]
                 fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-                # if proc_key not in fn_defs.keys():
-                #     proc_name = f"{proc_program.name}_{len(fn_defs)}"
-                #     proc_codegen_out = self.codegen(
-                #         proc_program,
-                #         args,
-                #         fn_name=proc_name,
-                #         fn_defs=fn_defs,
-                #     )
-                #     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-                #     fn_defs[proc_key] = proc_codegen_out["code_lines"]
-                # else:
-                #     proc_code_lines = fn_defs[proc_key]
-                #     proc_name = proc_code_lines[0].split()[1].split("(")[0]
-
-                # if proc_name == "zeros_partial2_T_5":
-                #     breakpoint()
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+                
                 rhs = f"{proc_name}({args_str})"
-                if len(lhs) == 0:  # return None functions
-                    continue
-
             elif instruction.op is slope.core.jit_op:
                 jit_program = instruction.params["program"]
                 jit_name = f"{program.name}_{len(fn_defs)}"
@@ -149,7 +133,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
                 rhs = f"{jit_name}({args_str})"
             else:
-                raise
+                raise NotImplementedError
         else:
             impl = slope.M().backend.impls[instruction.op]
             args_str = ", ".join(in_vals)
@@ -189,14 +173,12 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                         kwarg = self.dtype_map[kwarg]
                     rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
         code_line = f"{lhs} = {rhs}"
-        if '(, ' in code_line:
-            code_line = code_line.replace('(, ', '(')
+        if "(, " in code_line:
+            code_line = code_line.replace("(, ", "(")
         code_lines += [indent(code_line, il1)]
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
-    # if fn_name == "cos_jvp_partial2_T_jvp_partial2_T_5":
-    #     breakpoint()
     if fn_name == "main":
         if len(fn_defs) > 0:
             code_lines = (
@@ -213,6 +195,12 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 
 ### Operator Impls
+
+
+@numpy_backend.set_impl(slope.core.jit_op)
+def f(self, x, *, dtype):
+    ret = x
+    return ret.astype(dtype=dtype)
 
 
 @numpy_backend.set_impl(operator_set.convert)
@@ -299,6 +287,7 @@ def f(self, x, *, axes=None, keepdims=False):
 @numpy_backend.set_impl(operator_set.max)
 def f(self, x, *, axes=None, keepdims=False):
     return np.max(x, axis=axes, keepdims=keepdims)
+
 
 @numpy_backend.set_impl(operator_set.arange)
 def f(self, *, start, stop, stride, dtype):

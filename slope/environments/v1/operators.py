@@ -146,6 +146,7 @@ def T(self, cts, x):
     (z,) = cts
     return [-z]
 
+
 # -----------------------
 # Binary
 # -----------------------
@@ -606,11 +607,13 @@ def T(self, cts, x, *, starts, limits, strides=None):
     else:
         real_limits = np.add(
             starts,
-            tuple(np.where(
-                np.array(x.shape) == 0,
-                0,
-                np.add(1, np.multiply(np.subtract(t.shape, 1), strides)),
-            )),
+            tuple(
+                np.where(
+                    np.array(x.shape) == 0,
+                    0,
+                    np.add(1, np.multiply(np.subtract(t.shape, 1), strides)),
+                )
+            ),
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
 
@@ -752,6 +755,7 @@ def T(self, cts, *xs, axis=0):
 
 full = Operator.load("full")
 operator_set.register(full)
+
 
 @full.set_method
 def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):

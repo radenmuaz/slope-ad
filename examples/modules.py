@@ -1,8 +1,8 @@
 import slope
 import slope.nn as nn
 import math
-# x = slope.ones((1, 2))
-# y = slope.full((1,), 1)
+x = slope.ones((1, 2))
+y = slope.full((1,), 1)
 model = nn.Linear(2, 1)
 # # model = MLP(2, 3, 1)
 
@@ -11,19 +11,17 @@ model = nn.Linear(2, 1)
 # print(model == model2)
 # print(model2.bias)
 
-models = (model, (model,))
-models_flat, models_treedef = slope.tree_flatten(models)
-breakpoint()
+# models = (model, (model,))
+# models_flat, models_treedef = slope.tree_flatten(models)
+# breakpoint()
 # @slope.jit
-# def loss_fn(model, batch):
-#     x, y = batch
-#     y_hat = model(x)
-#     loss = (y - y_hat).sum()
-#     return loss
+def loss_fn(model, batch):
+    x, y = batch
+    y_hat = model(x)
+    loss = (y - y_hat).sum()
+    return loss
 # print(loss_fn(model, (x, y)))
-# print(slope.M().backend.gen_jit_fn.cache_info())
 # print(loss_fn(model, (x, y)))
-# print(slope.M().backend.gen_jit_fn.cache_info())
 
 
 # model = nn.Module()
@@ -36,9 +34,10 @@ breakpoint()
 # print(loss_fn(model))
 
 
-# # print(loss_fn(model, (x, y)))
-# g_loss_fn = slope.grad(loss_fn)
-# print(g_loss_fn(model, (x, y)).flatten())
+print(loss_fn(model, (x, y)))
+g_loss_fn = slope.grad(loss_fn)
+# g_loss_fn = slope.jit(slope.grad(loss_fn))
+print(g_loss_fn(model, (x, y)).flatten())
 
 
 

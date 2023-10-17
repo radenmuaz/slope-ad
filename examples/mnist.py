@@ -97,7 +97,7 @@ def loss_fn(model, batch):
 g_loss_fn = slope.grad(loss_fn, ret_fval=True)
 
 
-# @slope.jit
+@slope.jit
 def train_step(model, batch, optimizer):
     loss, g_model = g_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, g_model)
@@ -123,6 +123,7 @@ if __name__ == "__main__":
     model = nn.Serial(
         [
             nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
+            # nn.Linear(784, 10),
             nn.MLP(784, 100, 10),
             nn.Fn(lambda x: x.log_softmax(axes=-1)),
         ]

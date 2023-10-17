@@ -1,12 +1,13 @@
 import slope
 import numpy as np
-x = slope.constant(np.array([1,2,3]))
+# x = slope.tensor(np.array([1,2,3]))
+x = slope.ones((3,))
 # print(x)
-# @slope.jit
 
-# def f(x):
-#     y = x.sum()
-#     return y
+@slope.jit
+def f(x):
+    y = x.sum()
+    return y
 
 
 
@@ -37,12 +38,10 @@ x = slope.constant(np.array([1,2,3]))
 # out, f_lin = slope.linearize(f, x); print(out)
 # out_jvp = f_lin(x_dot); print(out_jvp)
 # print(jvp_out)
-# out = f(x)
+# out = f(x); print(out)
 
+g_out = slope.grad(f)(x); print(g_out)
 # g_out = slope.grad(f)(x); print(g_out)
-# print(slope.machine.backend.gen_jit_fn.cache_info())
-# g_out = slope.grad(f)(x); print(g_out)
-# print(slope.machine.backend.gen_jit_fn.cache_info())
 
 # print(f(x))
 # print(slope.machine.backend.callable.cache_info())

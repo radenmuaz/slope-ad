@@ -597,7 +597,7 @@ class OperatorSet:
 
 class ProcedureSet:
     def register(self, static_argnames=(), not_op=True):
-    # def register(self, static_argnames=(), not_op=False):
+        # def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -772,16 +772,16 @@ class Environment:
 
     def __getattr__(self, attr):
         try:
-            # print(f"looking {attr} in operator_set")
+            slope.dblog(f"{self} looking {attr} in operator_set", level=2)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            # print(f"looking {attr} in procedure_set")
+            slope.dblog(f"{self} looking {attr} in procedure_set", level=2)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        # print(f"fallback to default getattribute")
+        slope.dblog(f"{self} fallback to default getattribute", level=2)
         super().__getattribute__(attr)
 
     def tensor(
@@ -793,7 +793,6 @@ class Environment:
             return Tensor(val)
         else:
             return slope.M().backend.tensor(val, dtype)
-            # return self.operator_set.constant(val=val, dtype=dtype)
 
     def save(arr: "Tensor", filename: str):
         # TODO
@@ -1023,8 +1022,7 @@ class JitFn:
         try:
             outs = self.fn(*args, **params)
         except Exception as e:
-            print(self.code)
-            breakpoint()
+            slope.dblog(self.code, level=3)
             raise
         return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
 
@@ -1138,9 +1136,9 @@ class Backend:
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()
+
+        # TODO: this is used if exec is used, e.g. for numpy backend
         self.deps_dict = dict()
-        self.codegen_depth = 0
-        self.codegen_idx = 0
         for dep in deps:
             if " as " in dep:  # e.g. "numpy as np"
                 dep, _, dep_alias = dep.split(" ")
@@ -1158,7 +1156,7 @@ class Backend:
 
     def tensor(self, val):
         raise NotImplementedError
-    
+
     def numpy_of(self, tensor):
         raise NotImplementedError
 
@@ -1178,11 +1176,11 @@ class Backend:
         return compiled
 
     def codegen(self, program, args, in_avals, name: str):
-        "Returns IR from the Program"
+        "Returns backend IR from the Program"
         raise NotImplementedError
 
     def compile(self, program, args, in_avals, name: str):
-        "Compiles IR to a Python callable function"
+        "Compiles backend IR to a Python callable function"
         raise NotImplementedError
 
     def set_dtype_map(self, dtype_map):
@@ -1195,10 +1193,7 @@ class Backend:
 
         return set_impl_
 
-    def run_impl(self, op: Operator, *args, **params):
-        if op.op_type is OperatorType.Meta:
-            return op.impl(*args, **params)
-        raise ValueError
+
 
 
 class MainTrace(NamedTuple):
@@ -1228,12 +1223,12 @@ class RunTrace(Trace):
         if op.op_type is OperatorType.Meta:
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
-            ret = [slope.M().backend.run_impl(op, *args, **params)]
-            return ret
-        
-        # ret = slope.M().jit(op, static_argnames=('params',), no_cache=op.name=="constant")(*args,**params)
-        ret = slope.M().jit(op, static_argnames=('params',))(*args,**params)
+            ret = [op.impl(*args, **params)]
+        else:
+            ret = slope.M().jit(op, static_argnames=("params",), is_op=True)(*args, **params)
+            # ret = slope.M().jit(op, static_argnames=("params",))(*args, **params)
         return ret
+
 
 class Tracor(Tensor):
     PYTHON_TYPES = {
@@ -1636,15 +1631,15 @@ class Machine:
     def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
-                # print(f'    tree leaf found: {xs_}\n')
+                slope.dblog(f'    tree leaf found: {xs_}\n', level=2)
                 return next(xs_)
             else:
-                # print(f"    now\n  {treedef_}")
+                slope.dblog(f"    now\n  {treedef_}", level=2)
                 children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-                # print(f"{children=}\n")
+                slope.dblog(f"{children=}\n", level=2)
                 return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-        # print(f'unflattening {treedef}')
+        slope.dblog(f'unflattening {treedef}', level=2)
         return _tree_unflatten(treedef, iter(xs))
 
     def tree_transpose(
@@ -2249,13 +2244,13 @@ class Machine:
         else:
             return gradfun
 
-    def jit(self, f, static_argnames=(), no_cache=False):
+    def jit(self, f, static_argnames=(), is_op=False):
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
-        def f_jitted(*args, **static_args):
+        def f_jitted(*args,**static_args):
             _args = args
             sig = inspect.signature(f)
-            if all('*' not in repr(v) for v in sig.parameters.values()):
+            if all("*" not in repr(v) for v in sig.parameters.values()):
                 args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
                 static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
 
@@ -2269,13 +2264,11 @@ class Machine:
                         static_args = {**new_static_args, **static_args}
                 else:
                     args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
-            
+
             static_args = tuple(static_args.items())
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
-            name = f"jit_{hash((f, avals_in, static_args))}"
-            # make_program_fn = self.make_program if not no_cache else partial(self.make_program.fn, self)
-            # program, consts, out_tree = make_program_fn(f, *avals_in, static_args=static_args, name=name)
+            name = f"jit_{str(hash((f, avals_in, static_args)))[:3]}"
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)
@@ -2285,6 +2278,8 @@ class Machine:
                 *args,
                 program=program,
             )
+            if not is_op: # TODO: cleaner way
+                outs = outs[0]
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted

@@ -1223,14 +1223,12 @@ class RunTrace(Trace):
         if op.op_type is OperatorType.Meta:
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
-            ret = [op.impl(*args, **params)]
+            ret = op.impl(*args, **params)
         else:
-            # ret = slope.M().jit(op, static_argnames=("params",), is_op=True)(*args, **params)
             def fn(*args, **params):
                 return [op(*args, **params)]
-            ret = [slope.M().jit(op, static_argnames=("params",))(*args, **params)]
+            ret = slope.M().jit(fn, static_argnames=("params",))(*args, **params)
             
-
         return ret
 
 
@@ -2282,7 +2280,6 @@ class Machine:
                 *args,
                 program=program,
             )
-            outs = outs[0]
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted

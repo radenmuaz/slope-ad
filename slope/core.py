@@ -1225,8 +1225,12 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = [op.impl(*args, **params)]
         else:
-            ret = slope.M().jit(op, static_argnames=("params",), is_op=True)(*args, **params)
-            # ret = slope.M().jit(op, static_argnames=("params",))(*args, **params)
+            # ret = slope.M().jit(op, static_argnames=("params",), is_op=True)(*args, **params)
+            def fn(*args, **params):
+                return [op(*args, **params)]
+            ret = [slope.M().jit(op, static_argnames=("params",))(*args, **params)]
+            
+
         return ret
 
 
@@ -2244,7 +2248,7 @@ class Machine:
         else:
             return gradfun
 
-    def jit(self, f, static_argnames=(), is_op=False):
+    def jit(self, f, static_argnames=()):
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
         def f_jitted(*args,**static_args):
@@ -2278,8 +2282,7 @@ class Machine:
                 *args,
                 program=program,
             )
-            if not is_op: # TODO: cleaner way
-                outs = outs[0]
+            outs = outs[0]
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted

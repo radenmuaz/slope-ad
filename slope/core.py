@@ -1194,8 +1194,6 @@ class Backend:
         return set_impl_
 
 
-
-
 class MainTrace(NamedTuple):
     rt: "Machine"
     level: int
@@ -1225,10 +1223,12 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = op.impl(*args, **params)
         else:
+
             def fn(*args, **params):
                 return [op(*args, **params)]
+
             ret = slope.M().jit(fn, static_argnames=("params",))(*args, **params)
-            
+
         return ret
 
 
@@ -1633,7 +1633,7 @@ class Machine:
     def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
-                slope.dblog(f'    tree leaf found: {xs_}\n', level=2)
+                slope.dblog(f"    tree leaf found: {xs_}\n", level=2)
                 return next(xs_)
             else:
                 slope.dblog(f"    now\n  {treedef_}", level=2)
@@ -1641,7 +1641,7 @@ class Machine:
                 slope.dblog(f"{children=}\n", level=2)
                 return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-        slope.dblog(f'unflattening {treedef}', level=2)
+        slope.dblog(f"unflattening {treedef}", level=2)
         return _tree_unflatten(treedef, iter(xs))
 
     def tree_transpose(
@@ -2226,30 +2226,31 @@ class Machine:
 
         return trans_program, consts
 
-    def grad(self, f, *, ret_fval=False, argnums=(0,)):
-        def gradfun(x, *xs, **static_args):
+    def value_and_grad(self, f):
+        def value_and_grad_fn(x, *xs, **static_args):
             y, f_vjp = self.vjp(f, x, *xs, **static_args)
             if np.shape(y) != ():
-                raise TypeError
+                raise TypeError("grad output must be 0-dim scalar with shape ()")
             x_bars = f_vjp(self.environment.ones(()))
+            return y, x_bars
 
-            # ret = x_bars
-            ret = tuple(x_bars[i] for i in argnums)
-            if len(ret) == 1:
-                ret = ret[0]
-            return y, ret if ret_fval else ret
-
+        # TODO: if nested jit, rejit, find cleaner way
         if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
-            # unjit then jit back
             f = f.__closure__[0].cell_contents
-            return self.jit(gradfun)
+            return self.jit(value_and_grad_fn)
         else:
-            return gradfun
+            return value_and_grad_fn
+
+    def grad(self, f):
+        def grad_fn(x, *xs, **static_args):
+            return self.value_and_grad(f)(x, *xs, **static_args)[1]
+
+        return grad_fn
 
     def jit(self, f, static_argnames=()):
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
-        def f_jitted(*args,**static_args):
+        def f_jitted(*args, **static_args):
             _args = args
             sig = inspect.signature(f)
             if all("*" not in repr(v) for v in sig.parameters.values()):

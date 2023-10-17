@@ -1,13 +1,13 @@
 import slope
 
 
-def mnist_slope_init():
-    from slope.environments.v1 import v1_environment
+# def mnist_slope_init():
+#     from slope.environments.v1 import v1_environment
 
-    return slope.core.Machine(environment=v1_environment)
+#     return slope.core.Machine(environment=v1_environment)
 
 
-slope.set_slope_init(mnist_slope_init)
+# slope.set_slope_init(mnist_slope_init)
 
 import slope.nn as nn
 
@@ -94,12 +94,12 @@ def loss_fn(model, batch):
     return -(preds * targets).sum()
 
 
-g_loss_fn = slope.grad(loss_fn, ret_fval=True)
+g_loss_fn = slope.value_and_grad(loss_fn)
 
 
 @slope.jit
 def train_step(model, batch, optimizer):
-    loss, g_model = g_loss_fn(model, batch)
+    loss, (g_model, _) = g_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, g_model)
     return loss, new_model, new_optimizer
 

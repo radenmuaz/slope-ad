@@ -246,7 +246,8 @@ def glorot_uniform(
 
 
 class Linear(Module):
-    def __init__(self, in_dim, out_dim, bias=True, W_init=glorot_normal(), b_init=normal()):
+    # def __init__(self, in_dim, out_dim, bias=True, W_init=glorot_normal(), b_init=normal()):
+    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
         self.weight = W_init((out_dim, in_dim))
         self.bias = b_init((out_dim,)) if bias else None
 

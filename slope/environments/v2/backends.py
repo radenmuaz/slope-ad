@@ -38,18 +38,21 @@ def numpy_of(self, tensor):
 def set_device_of(self, tensor):
     return "cpu"
 
+
 def create_session(model: str) -> onnxruntime.InferenceSession:
-    providers = ['CPUExecutionProvider']
-    providers.insert(0, 'CUDAExecutionProvider')
+    providers = ["CPUExecutionProvider"]
+    providers.insert(0, "CUDAExecutionProvider")
     return onnxruntime.InferenceSession(model, providers=providers)
 
-# Run the model on CPU consuming and producing numpy arrays 
+
+# Run the model on CPU consuming and producing numpy arrays
 def run(x: np.array, y: np.array) -> np.array:
     session = create_session(MODEL_FILE)
 
     z = session.run(["z"], {"x": x, "y": y})
-    
-    return z[0]   
+
+    return z[0]
+
 
 # Run the model on device consuming and producing ORTValues
 def run_with_data_on_device(x: np.array, y: np.array) -> onnxruntime.OrtValue:
@@ -59,9 +62,29 @@ def run_with_data_on_device(x: np.array, y: np.array) -> onnxruntime.OrtValue:
     y_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(y, DEVICE_NAME, DEVICE_INDEX)
 
     io_binding = session.io_binding()
-    io_binding.bind_input(name='x', device_type=x_ortvalue.device_name(), device_id=0, element_type=x.dtype, shape=x_ortvalue.shape(), buffer_ptr=x_ortvalue.data_ptr())
-    io_binding.bind_input(name='y', device_type=y_ortvalue.device_name(), device_id=0, element_type=y.dtype, shape=y_ortvalue.shape(), buffer_ptr=y_ortvalue.data_ptr())
-    io_binding.bind_output(name='z', device_type=DEVICE_NAME, device_id=DEVICE_INDEX, element_type=x.dtype, shape=x_ortvalue.shape())
+    io_binding.bind_input(
+        name="x",
+        device_type=x_ortvalue.device_name(),
+        device_id=0,
+        element_type=x.dtype,
+        shape=x_ortvalue.shape(),
+        buffer_ptr=x_ortvalue.data_ptr(),
+    )
+    io_binding.bind_input(
+        name="y",
+        device_type=y_ortvalue.device_name(),
+        device_id=0,
+        element_type=y.dtype,
+        shape=y_ortvalue.shape(),
+        buffer_ptr=y_ortvalue.data_ptr(),
+    )
+    io_binding.bind_output(
+        name="z",
+        device_type=DEVICE_NAME,
+        device_id=DEVICE_INDEX,
+        element_type=x.dtype,
+        shape=x_ortvalue.shape(),
+    )
     session.run_with_iobinding(io_binding)
 
     z = io_binding.get_outputs()
@@ -81,29 +104,30 @@ def compile(self, codegen_out):
     onnx.checker.check_model(model)
 
     def run(*args):
-        #X is numpy array on cpu
-        X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(X, 'cuda', 0)
-        # Y_ortvalue = onnxruntime.OrtValue.ortvalue_from_shape_and_type([3, 2], np.float32, 'cuda', 0) 
+        # X is numpy array on cpu
+        X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(X, "cuda", 0)
+        # Y_ortvalue = onnxruntime.OrtValue.ortvalue_from_shape_and_type([3, 2], np.float32, 'cuda', 0)
         session = onnxruntime.InferenceSession(
-                'model.onnx',
-                providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+            "model.onnx", providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+        )
         io_binding = session.io_binding()
         io_binding.bind_input(
-                name='input',
-                device_type=X_ortvalue.device_name(),
-                device_id=0,
-                element_type=np.float32,
-                shape=X_ortvalue.shape(),
-                buffer_ptr=X_ortvalue.data_ptr()
+            name="input",
+            device_type=X_ortvalue.device_name(),
+            device_id=0,
+            element_type=np.float32,
+            shape=X_ortvalue.shape(),
+            buffer_ptr=X_ortvalue.data_ptr(),
         )
-        #Request ONNX Runtime to bind and allocate memory on CUDA for 'output'
-        io_binding.bind_output('output', 'cuda')
+        # Request ONNX Runtime to bind and allocate memory on CUDA for 'output'
+        io_binding.bind_output("output", "cuda")
         # io_binding.bind_ortvalue_input('input', X_ortvalue)
         # io_binding.bind_ortvalue_output('output', Y_ortvalue)
         session.run_with_iobinding(io_binding)
         # The following call returns an OrtValue which has data allocated by ONNX Runtime on CUDA
         ort_output = io_binding.get_outputs()[0]
         return ort_output
+
     return fn, code
 
 
@@ -128,9 +152,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     inb_args = []
     inb_consts = []
 
-
-    input = (
-"""
+    input = """
 <
     ir_version: 7,
     opset_import: ["" : 10]
@@ -142,7 +164,6 @@ name (float[N, 128] X, float[128, 10] W, float[10] B) => (float[N, 10] C)
     C = Softmax(S)
 }
 """
-)
     model = onnx.parser.parse_model(input)
 
     for inb in program.in_binders:
@@ -279,7 +300,7 @@ name (float[N, 128] X, float[128, 10] W, float[10] B) => (float[N, 10] C)
     slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=1)
     if fn_name == "main":
         del self.fn_count
-    
+
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 
@@ -305,6 +326,7 @@ def f(self, x):
 @onnxruntime_backend.set_impl(operator_set.sqrt)
 def f(self, x):
     return np.sqrt(x)
+
 
 @onnxruntime_backend.set_impl(operator_set.exp)
 def f(self, x):

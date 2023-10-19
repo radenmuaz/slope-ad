@@ -2271,7 +2271,7 @@ class Machine:
             static_args = tuple(static_args.items())
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
-            name = f"jit_{str(hash((f, avals_in, static_args)))[:3]}"
+            name = f"jit_{str(hash((f, avals_in, static_args)))[1:]}"
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)

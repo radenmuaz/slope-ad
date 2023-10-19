@@ -18,6 +18,7 @@ import numpy as np
 from typing import (
     Tuple,
     List,
+    Dict,
     Any,
     Optional,
     Sequence,
@@ -30,6 +31,10 @@ from functools import partial
 
 sum_py = sum
 slice_py = slice
+
+# --------------
+# Operator
+# --------------
 
 operator_set = OperatorSet()
 
@@ -154,6 +159,62 @@ def T(self, cts, x):
     (z,) = cts
     return [-z]
 
+
+# pow = Operator.unary("pow")
+# operator_set.register(pow)
+
+
+# @pow.set_method
+# def jvp(self, primals, tangents, **params):
+#     (x,), (x_dot,) = primals, tangents
+#     ans = x.log()
+#     return [ans], [x_dot / x]
+
+
+# @pow.set_method
+# def T(self, cts, x):
+#     (z,) = cts
+#     return [1 / z]
+
+
+# def _pow_jvp_lhs(g, ans, x, y):
+#   return mul(g, mul(y, pow(x, sub(y, _ones(y)))))
+
+# def _pow_jvp_rhs(g, ans, x, y):
+#   return mul(g, mul(log(_replace_zero(x)), ans))
+
+# def _integer_pow_dtype_rule(x, *, y):
+#   dtype = unop_dtype_rule(_identity, _int | _float | _complex, 'integer_pow', x)
+#   if y < 0 and dtypes.issubdtype(dtype, np.integer):
+#     raise TypeError("Integers cannot be raised to negative powers, got "
+#                     f"integer_pow({x}, {y})")
+#   return dtype
+
+# def _integer_pow_jvp(g, x, *, y):
+#   return _zeros(g) if y == 0 else mul(g, mul(_const(x, y), integer_pow(x, y - 1)))
+
+# integer_pow_p = standard_primitive(
+#   _attrgetter('shape'), _integer_pow_dtype_rule, 'integer_pow')
+# batching.defvectorized(integer_pow_p)
+# ad.defjvp(integer_pow_p, _integer_pow_jvp)
+# pe.def_trivial_padding(integer_pow_p)
+
+# def _integer_pow(x, *, y):
+#   # This should be kept in sync with the jax2tf translation rule.
+#   if y == 0:
+#     return full_like(x, 1)
+#   is_reciprocal = y < 0
+#   if is_reciprocal:
+#     y = -y
+#   acc = None
+#   while y > 0:
+#     if y & 1:
+#       acc = x if acc is None else mul(acc, x)
+#     y >>= 1
+#     if y > 0:
+#       # We don't call square because it calls integer_pow.
+#       x = mul(x, x)
+#   return div(full_like(acc, 1), acc) if is_reciprocal else acc
 
 # -----------------------
 # Binary
@@ -886,7 +947,9 @@ def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[T
     return [Typecheckor(tuple((stop - start) * stride), dtype)]
 
 
+# --------------
 # Backend
+# --------------
 
 
 compile_py = compile
@@ -935,14 +998,14 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         self.fn_count = 0
     slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=3)
 
-    def indent(code_line, amount):
-        spaces = " " * (len(code_line) - len(code_line.lstrip()))
+    def indent(code, amount):
+        spaces = " " * (len(code) - len(code.lstrip()))
         spaces += " " * amount
-        return "\n".join([spaces + line for line in code_line.strip().split("\n")])
+        return "\n".join([spaces + line for line in code.strip().split("\n")])
 
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
-    il1 = 4  # indent length 1
+    il1 = 4 # indent length
     ncs = 0
     nxs = 0
     nzs = 0
@@ -1011,46 +1074,21 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             else:
                 raise NotImplementedError
         else:
-            impl = slope.M().backend.impls[instruction.op]
+            impl = self.impls[instruction.op]
             args_str = ", ".join(in_vals)
             lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+            rhs = impl(*in_vals, **instruction.params)
+            if "\n" in rhs:
+                impl_lines = rhs.strip().split("\n")
+                lhs = "\n".join(impl_lines[:-1] + [lhs])
+                rhs = impl_lines[-1]
+            rhs = rhs.replace("return ", "")
+            
 
-            impl_lines = inspect.getsourcelines(impl)[0]
-            if impl_lines[0][0] == "@":  # delete decorator line
-                impl_lines = impl_lines[1:]
-
-            if len(impl_lines) > 2:
-                params = {
-                    k: v if not isinstance(v, slope.core.DType) else self.dtype_map[v]
-                    for k, v in instruction.params.items()
-                }
-                kwargs_str = ", ".join([f"{k}={v}" for k, v in params.items()])
-                rhs = f"{instruction.op.name}({args_str}, {kwargs_str})"
-
-                if instruction.op.name not in fn_defs.keys():
-                    def_str = impl_lines[0]
-                    impl_lines[0] = f"def {instruction.op.name}{def_str[def_str.find('('):]}"
-                    impl_lines[0] = impl_lines[0].replace("self, ", "")
-                    fn_defs[instruction.op.name] = impl_lines
-            else:
-                sig = inspect.signature(impl)
-                args_strs = [
-                    k
-                    for k, v in sig.parameters.items()
-                    if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
-                ]
-                rhs = impl_lines[1].replace("return", "").strip()
-
-                for argname, arg in list_zip(args_strs, in_vals):
-                    mark = "," if argname != args_strs[-1] or len(instruction.params) > 0 else ")"
-                    rhs = rhs.replace(f"{argname}{mark}", f"{arg}{mark}")
-                for kwargname, kwarg in instruction.params.items():
-                    if isinstance(kwarg, slope.core.DType):
-                        kwarg = self.dtype_map[kwarg]
-                    rhs = rhs.replace(f"={kwargname}", f"={kwarg}")
         code_line = f"{lhs} = {rhs}"
         if "(, " in code_line:
             code_line = code_line.replace("(, ", "(")
+        
         code_lines += [indent(code_line, il1)]
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
@@ -1062,9 +1100,11 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 + [indent(line, il1) for impl_lines in fn_defs.values() for line in impl_lines]
                 + code_lines[1:]
             )
+
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
     slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=3)
+
     if fn_name == "main":
         del self.fn_count
     return dict(code_lines=code_lines, fn_defs=fn_defs)
@@ -1072,174 +1112,67 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 ### Operator Impls
 
+numpy_backend.set_impl(operator_set.convert)(lambda self, x, *, dtype: f"return {x}.astype(dtype={dtype})")
+numpy_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"return {x}")
+numpy_backend.set_impl(operator_set.neg)(lambda self, x: f"return np.negative({x})")
+numpy_backend.set_impl(operator_set.sqrt)(lambda self, x: f"return np.sqrt({x})")
+numpy_backend.set_impl(operator_set.exp)(lambda self, x: f"return np.exp({x})")
+numpy_backend.set_impl(operator_set.log)(lambda self, x: f"return np.log({x})")
+numpy_backend.set_impl(operator_set.sin)(lambda self, x: f"return np.sin({x})")
+numpy_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"return np.add({x1}, {x2})")
+numpy_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"return np.subtract({x1}, {x2})")
+numpy_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"return np.multiply({x1}, {x2})")
+numpy_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"return np.divide({x1}, {x2})")
+numpy_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"return np.equal({x1}, {x2})")
+numpy_backend.set_impl(operator_set.not_equal)(lambda self, x1, x2: f"return np.not_equal({x1}, {x2})")
+numpy_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"return np.maximum({x1}, {x2})")
+numpy_backend.set_impl(operator_set.sum)(
+    lambda self, x, *, axes, keepdims: f"return np.sum({x}, axis={axes}, keepdims={keepdims})"
+)
+numpy_backend.set_impl(operator_set.max)(
+    lambda self, x, *, axes, keepdims: f"return np.max({x}, axis={axes}, keepdims={keepdims})"
+)
+numpy_backend.set_impl(operator_set.arange)(
+    lambda self, *, start, stop, stride, dtype: f"return np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+)
+numpy_backend.set_impl(operator_set.full)(
+    lambda self, *, shape, fill_value, dtype: f"return np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
+)
 
-@numpy_backend.set_impl(slope.core.jit_op)
-def f(self, x, *, dtype):
-    ret = x
-    return ret.astype(dtype=dtype)
+numpy_backend.set_impl(operator_set.random_uniform)(
+    lambda self, *, shape, dtype: f"return np.random.uniform(size={shape}).astype(dtype={dtype})"
+)
+numpy_backend.set_impl(operator_set.random_normal)(
+    lambda self, *, shape, dtype: f"return np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+)
+numpy_backend.set_impl(operator_set.broadcast_in_dim)(
+    lambda self, x, *, shape, axes=(): f"""
+ret = {x}
+for a in sorted({axes}): ret = np.expand_dims(ret, a)
+return np.broadcast_to(ret, shape={shape})
+""",
+)
 
-
-@numpy_backend.set_impl(operator_set.convert)
-def f(self, x, *, dtype):
-    ret = x
-    return ret.astype(dtype=dtype)
-
-
-@numpy_backend.set_impl(operator_set.stop_gradient)
-def f(self, x, *, dtype):
-    return x
-
-
-@numpy_backend.set_impl(operator_set.neg)
-def f(self, x):
-    return np.negative(x)
-
-
-@numpy_backend.set_impl(operator_set.sqrt)
-def f(self, x):
-    return np.sqrt(x)
-
-
-@numpy_backend.set_impl(operator_set.exp)
-def f(self, x):
-    return np.exp(x)
-
-
-@numpy_backend.set_impl(operator_set.log)
-def f(self, x):
-    return np.log(x)
-
-
-@numpy_backend.set_impl(operator_set.sin)
-def f(self, x):
-    return np.sin(x)
-
-
-@numpy_backend.set_impl(operator_set.add)
-def f(self, x, y):
-    return np.add(x, y)
-
-
-@numpy_backend.set_impl(operator_set.sub)
-def f(self, x, y):
-    return np.subtract(x, y)
+numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})")
+numpy_backend.set_impl(operator_set.pad_hlo)(
+    lambda self, x, *, lo, hi, interior, value: f"return np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+)
 
 
-@numpy_backend.set_impl(operator_set.mul)
-def f(self, x, y):
-    return np.multiply(x, y)
+numpy_backend.set_impl(operator_set.slice_hlo)(
+    lambda self, x, *, starts, limits, strides: f"""
+slices = tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))
+return {x}[slices]
+"""
+)
 
+numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"return np.concatenate({xs}, axis={axis})")
+numpy_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"return np.transpose({x}, axes={perm})")
+numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"return np.flip({x}, axis={axes})")
 
-@numpy_backend.set_impl(operator_set.div)
-def f(self, x, y):
-    return np.divide(x, y)
-
-
-@numpy_backend.set_impl(operator_set.equal)
-def f(self, x, y):
-    return np.equal(x, y)
-
-
-@numpy_backend.set_impl(operator_set.not_equal)
-def f(self, x, y):
-    return np.not_equal(x, y)
-
-
-@numpy_backend.set_impl(operator_set.maximum)
-def f(self, x, y):
-    return np.maximum(x, y)
-
-
-@numpy_backend.set_impl(operator_set.sum)
-def f(self, x, *, axes=None, keepdims=False):
-    return np.sum(x, axis=axes, keepdims=keepdims)
-
-
-@numpy_backend.set_impl(operator_set.max)
-def f(self, x, *, axes=None, keepdims=False):
-    return np.max(x, axis=axes, keepdims=keepdims)
-
-
-@numpy_backend.set_impl(operator_set.arange)
-def f(self, *, start, stop, stride, dtype):
-    return np.arange(start=start, stop=stop, stride=stride, dtype=dtype)
-
-
-@numpy_backend.set_impl(operator_set.full)
-def f(self, *, shape, fill_value, dtype):
-    return np.full(shape=shape, fill_value=fill_value, dtype=dtype)
-
-
-@numpy_backend.set_impl(operator_set.random_uniform)
-def f(self, *, shape, dtype):
-    return np.random.uniform(size=shape).astype(dtype=dtype)
-
-
-@numpy_backend.set_impl(operator_set.random_normal)
-def f(self, *, shape, dtype):
-    return np.random.normal(loc=np.zeros(shape=shape)).astype(dtype=dtype)
-
-
-@numpy_backend.set_impl(operator_set.broadcast_in_dim)
-def f(self, x, *, shape, axes=()):
-    ret = x
-    for a in sorted(axes):
-        ret = np.expand_dims(ret, a)
-    ret = np.broadcast_to(ret, shape)
-    return ret
-
-
-@numpy_backend.set_impl(operator_set.reshape)
-def f(self, x, *, shape):
-    return np.reshape(x, newshape=shape)
-
-
-@numpy_backend.set_impl(operator_set.pad_hlo)
-def f(self, x, *, lo, hi, interior, value):
-    # TODO: implement interior pad
-    return np.pad(x, list(zip(lo, hi)), constant_values=value)
-
-
-@numpy_backend.set_impl(operator_set.slice_hlo)
-def f(self, x, *, starts, limits, strides):
-    slices = tuple(slice(s, l, st) for s, l, st in zip(starts, limits, strides))
-    return x[slices]
-
-
-@numpy_backend.set_impl(operator_set.concatenate)
-def f(self, *xs, axis):
-    assert len(xs) > 1
-    return np.concatenate(xs, axis)
-
-
-@numpy_backend.set_impl(operator_set.transpose)
-def f(self, x, *, perm):  # NOTE: np.transpose is like torch.permute
-    return np.transpose(x, axes=perm)
-
-
-@numpy_backend.set_impl(operator_set.flip)
-def f(self, x, *, axes):
-    return np.flip(x, axis=axes)
-
-
-# def inline():
-# if instruction.op.op_dtype is slope.core.OperatorType.Meta:
-#     # TODO: generalize interface to other than jit_op
-#     raise NotImplementedError
-#     breakpoint()
-#     op_out = impl(in_vals, in_avals, params=instruction.params)
-#     co = op_out["codegen_out"]
-#     outs = co["outs"]
-#     rhs = f"{outs[0] if len(outs) == 1 else ', '.join([o for o in outs])}"
-#     op_code_lines = co["code_lines"]
-#     input_lhs = ", ".join((co["inb_args"] + co["inb_consts"]))
-#     input_code_line = f"{input_lhs} = {args_str}"
-#     output_code_line = f"{lhs} = {rhs}"
-#     code_lines += [input_code_line] + op_code_lines + [output_code_line]
-#     continue
-
+# --------------
 # Procedure
-# from slope.environments.v1_procedures import *
+# --------------
 
 procedure_set = ProcedureSet()
 
@@ -1348,6 +1281,193 @@ def argmax(x, axes=None, keepdims=False):
 @procedure_set.register(static_argnames="axes keepdims")
 def argmin(x, axes=None, keepdims=False):
     return (-x).argmax(axes=axes, keepdims=keepdims)
+
+
+def pow(self, x: Union[Tensor, float], reverse=False) -> Tensor:
+    if x.__class__ is not Tensor and not reverse:
+        # simple pow identities
+        if x < 0:
+            return (1 / self).pow(-x)
+        if x == 3.0:
+            return self * self * self
+        if x == 2.0:
+            return self * self
+        if x == 1.0:
+            return self
+        if x == 0.5:
+            return self.sqrt()
+    if not isinstance(x, Tensor) and reverse and x > 0:
+        return self.mul(math.log(x)).exp()
+    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs(x))).exp()
+    # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
+    sign = (
+        (x * math.pi).cos()
+        if isinstance(x, Tensor)
+        else math.cos(x * math.pi)
+        if not reverse
+        else (self * math.pi).cos()
+    )
+    # we only need to correct the sign if the base is negative
+    base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
+    # we need 0 to be positive so we need to correct base_sign when the base is 0
+    base_sign = base_sign - (
+        1.5
+        * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs(int(bool(x)))))
+    )
+    # inject nan if the base is negative and the power is not an integer
+    to_nan = (
+        ((x - x.trunc()) * 1e10).abs().clip(0, 1)
+        if isinstance(x, Tensor)
+        else int(bool(x - int(x)))
+        if not reverse
+        else ((self - self.trunc()) * 1e10).abs().clip(0, 1)
+    ) * base_sign
+    inject_nan = (
+        ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
+    )
+    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
+
+
+@procedure_set.register()
+def log2(x):
+    return x.log() / math.log(2)
+
+
+@procedure_set.register()
+def sigmoid(self):
+    return 1 / (1 + (-self).exp())
+
+@procedure_set.register()
+@staticmethod
+def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
+    return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
+        0
+    ).expand(r, c)
+
+
+@procedure_set.register()
+def triu(self, k: int = 0) -> Tensor:
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(
+        self, Tensor.zeros_like(self)
+    )
+
+
+@procedure_set.register()
+def tril(self, k: int = 0) -> Tensor:
+    return Tensor._tri(self.shape[-2], self.shape[-1], k=k + 1, dtype=self.dtype, device=self.device).where(
+        Tensor.zeros_like(self), self
+    )
+
+
+@procedure_set.register()
+def trunc(self: Tensor) -> Tensor:
+    return self.convert(slope.int32).convert(self.dtype)
+
+
+@procedure_set.register()
+def ceil(self: Tensor) -> Tensor:
+    return (self > (b := self.trunc())).where(b + 1, b)
+
+
+@procedure_set.register()
+def floor(self: Tensor) -> Tensor:
+    return (self < (b := self.trunc())).where(b - 1, b)
+
+
+@procedure_set.register()
+def square(self):
+    return self * self
+
+
+@procedure_set.register()
+def clip(self, min_, max_):
+    return self.maximum(min_).minimum(max_)
+
+
+@procedure_set.register()
+def abs(self):
+    return self.relu() + (-self).relu()
+
+
+@procedure_set.register()
+def sign(self):
+    return self / (self.abs() + 1e-10)
+
+
+@procedure_set.register()
+def reciprocal(self):
+    return 1.0 / self
+
+
+# # ***** activation functions (unary) *****
+@procedure_set.register()
+def elu(self, alpha=1.0):
+    return self.relu() - alpha * (1 - self.exp()).relu()
+
+
+@procedure_set.register()
+def celu(self, alpha=1.0):
+    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+
+
+@procedure_set.register()
+def swish(self):
+    return self * self.sigmoid()
+
+
+@procedure_set.register()
+def silu(self):
+    return self.swish()  # The SiLU function is also known as the swish function.
+
+
+@procedure_set.register()
+def relu6(self):
+    return self.relu() - (self - 6).relu()
+
+
+@procedure_set.register()
+def hardswish(self):
+    return self * (self + 3).relu6() * (1 / 6)
+
+
+@procedure_set.register()
+def tanh(self):
+    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
+
+@procedure_set.register()
+def hardtanh(self, min_val=-1, max_val=1):
+    return self.clip(min_val, max_val)
+
+
+@procedure_set.register()
+def gelu(self):
+    return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
+
+
+@procedure_set.register()
+def quick_gelu(self):
+    return self * (self * 1.702).sigmoid()
+
+
+@procedure_set.register()
+def leakyrelu(self, neg_slope=0.01):
+    return self.relu() - (-neg_slope * self).relu()
+
+
+@procedure_set.register()
+def mish(self):
+    return self * self.softplus().tanh()
+
+
+@procedure_set.register()
+def softplus(self, beta=1):
+    return (1 / beta) * (1 + (self * beta).exp()).log()
+
+
+@procedure_set.register()
+def softsign(self):
+    return self / (1 + self.abs())
 
 
 @procedure_set.register()
@@ -1473,7 +1593,7 @@ def getitem(self, val):
 
     if tensors:  # Fancy/tensor indexing
         # normalize idx
-        idx = [t.sign().neg().contiguous().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
+        idx = [t.sign().neg().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
         max_dim = max(i.ndim for i in idx)
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]

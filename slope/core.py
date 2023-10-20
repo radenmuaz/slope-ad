@@ -596,8 +596,8 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, static_argnames=(), not_op=True):
-        # def register(self, static_argnames=(), not_op=False):
+    # def register(self, static_argnames=(), not_op=True):
+    def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -1130,22 +1130,12 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Backend:
-    def __init__(self, name, default_dtype=Tensor.float32, deps=("numpy as np", "math")):
+    def __init__(self, name, default_dtype=Tensor.float32,):
         self.name = name
         self.default_dtype = default_dtype
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()
-
-        # TODO: this is used if exec is used, e.g. for numpy backend
-        self.deps_dict = dict()
-        for dep in deps:
-            if " as " in dep:  # e.g. "numpy as np"
-                dep, _, dep_alias = dep.split(" ")
-                self.deps_dict[dep] = importlib.import_module(dep)
-                self.deps_dict[dep_alias] = self.deps_dict[dep]
-            else:
-                self.deps_dict[dep] = importlib.import_module(dep)
 
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
@@ -1313,7 +1303,7 @@ class BatchTrace(Trace):
                 out_ndim += 1
             reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
             x = x.reshape(reshape_shape)
-            x = x.broadcast_in_dim(target_shape)
+            x = x.broadcast_to(target_shape)
             return x
         elif src == dst:
             return x

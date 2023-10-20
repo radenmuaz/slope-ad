@@ -26,9 +26,7 @@ from typing import (
     Iterator,
 )
 from collections import defaultdict
-import inspect
-from functools import partial
-
+import importlib
 sum_py = sum
 slice_py = slice
 
@@ -374,7 +372,7 @@ operator_set.register(sum)
 
 
 @sum.set_method
-def jvp(self, primals, tangents, *, axes=(), keepdims=False):
+def jvp(self, primals, tangents, *, axes, keepdims):
     (x,), (x_dot,) = primals, tangents
     run_out = x.sum(axes, keepdims)
     jvp_out = x_dot.sum(axes, keepdims)
@@ -382,9 +380,15 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
 
 
 @sum.set_method
-def T(self, cts, x, *, axes=None, keepdims=False):
+def T(self, cts, x, *, axes, keepdims):
     (z,) = cts
-    out = z.broadcast_in_dim(x.aval.shape, () if keepdims else axes)
+    out = z
+    if not keepdims:
+        axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
+        for a in reversed(sorted(axes)):
+            out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
+    out = out.broadcast_to(x.aval.shape)
+    
     return [out]
 
 
@@ -397,77 +401,131 @@ def T(self, cts, x, *, axes=None, keepdims=False):
 # Shape
 # -----------------------
 
-broadcast_in_dim = Operator.shape("broadcast_in_dim")
-operator_set.register(broadcast_in_dim)
+# broadcast_in_dim = Operator.shape("broadcast_in_dim")
+# operator_set.register(broadcast_in_dim)
 
 
-@broadcast_in_dim.set_method
-def args_fixer(self, x, *, shape, axes=None):
-    if isinstance(axes, int):
-        axes = (axes,)
-    elif axes is None:
-        axes = ()
-    else:
-        axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-    return (x,), dict(shape=shape, axes=axes)
+# @broadcast_in_dim.set_method
+# def args_fixer(self, x, *, shape, axes=None):
+#     if isinstance(axes, int):
+#         axes = (axes,)
+#     elif axes is None:
+#         axes = ()
+#     else:
+#         axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
+#     return (x,), dict(shape=shape, axes=axes)
 
 
-@broadcast_in_dim.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
+# @broadcast_in_dim.set_method
+# def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
+#     (x,), (x_bdim,) = vals_in, dims_in
+#     shape = list(shape)
+#     axes = [a + int(a >= (x_bdim)) for a in axes]
+#     if all([a < x_bdim for a in axes]):
+#         x_bdim += 1
+
+#     shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
+
+#     return [self(x, shape, axes)], [x_bdim]
+
+
+# @broadcast_in_dim.set_method
+# def jvp(self, primals, tangents, *, shape, axes=None):
+#     (x,), (x_dot,) = primals, tangents
+#     return (
+#         [self(x, shape=shape, axes=axes)],
+#         [self(x_dot, shape=shape, axes=axes)],
+#     )
+
+
+# @broadcast_in_dim.set_method
+# def typecheck(self, x: Typecheckor, *, shape: Sequence[int], axes=()) -> List[Typecheckor]:
+#     e_shape = list(x.shape)
+#     for a in axes:
+#         e_shape.insert(a, 1)
+#     assert len(e_shape) == len(shape)
+#     assert all(a <= b for a, b in zip(e_shape, shape))
+#     return [Typecheckor(tuple(shape), x.dtype)]
+
+
+# @broadcast_in_dim.set_method
+# def T(self, cts, x, *, shape, axes):
+#     (z,) = cts
+#     out = z
+#     if x.aval.shape == z.shape:
+#         return [out]
+
+#     if len(x.aval.shape) < out.ndim:
+#         b_axes = []
+#         for i, dim in enumerate(out.shape):
+#             if dim not in x.aval.shape:
+#                 b_axes += [i]
+#         out = out.sum(tuple(b_axes), keepdims=False)
+
+#     elif x.aval.shape != out.shape:
+#         b_axes = []
+#         for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):
+#             if dz > dx and i not in axes:
+#                 b_axes += [i]
+#         out = out.sum(axes=tuple(b_axes), keepdims=True)
+#     if out.shape != x.aval.shape:
+#         raise ValueError(f"not same {out.shape=}, {x.aval.shape=}")
+#     return [out]
+
+
+broadcast_to = Operator.shape("broadcast_to")
+operator_set.register(broadcast_to)
+
+
+@broadcast_to.set_method
+def args_fixer(self, x, *, shape):
+    return (x,), dict(shape=shape)
+
+
+@broadcast_to.set_method
+def vmap(self, axis_size, vals_in, dims_in, *, shape):
     (x,), (x_bdim,) = vals_in, dims_in
     shape = list(shape)
-    axes = [a + int(a >= (x_bdim)) for a in axes]
-    if all([a < x_bdim for a in axes]):
-        x_bdim += 1
 
     shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
 
-    return [x.broadcast_in_dim(shape, axes)], [x_bdim]
+    return [self(x, shape)], [x_bdim]
 
 
-@broadcast_in_dim.set_method
+@broadcast_to.set_method
 def jvp(self, primals, tangents, *, shape, axes=None):
     (x,), (x_dot,) = primals, tangents
     return (
-        [x.broadcast_in_dim(shape=shape, axes=axes)],
-        [x_dot.broadcast_in_dim(shape=shape, axes=axes)],
+        [self(x, shape=shape)],
+        [self(x_dot, shape=shape)],
     )
 
 
-@broadcast_in_dim.set_method
-def typecheck(self, x: Typecheckor, *, shape: Sequence[int], axes=()) -> List[Typecheckor]:
+@broadcast_to.set_method
+def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
     e_shape = list(x.shape)
-    for a in axes:
-        e_shape.insert(a, 1)
     assert len(e_shape) == len(shape)
     assert all(a <= b for a, b in zip(e_shape, shape))
     return [Typecheckor(tuple(shape), x.dtype)]
 
 
-@broadcast_in_dim.set_method
-def T(self, cts, x, *, shape, axes):
+@broadcast_to.set_method
+def T(self, cts, x, *, shape):
     (z,) = cts
     out = z
-    if x.aval.shape == z.shape:
+    if x.aval.shape == out.shape:
         return [out]
-
-    if len(x.aval.shape) < out.ndim:
+    else:
         b_axes = []
-        for i, dim in enumerate(out.shape):
-            if dim not in x.aval.shape:
-                b_axes += [i]
-        out = out.sum(tuple(b_axes), keepdims=False)
-
-    elif x.aval.shape != out.shape:
-        b_axes = []
-        for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):
-            if dz > dx and i not in axes:
+        assert len(x.aval.shape) == len(out.shape)
+        for i, (xd, od) in enumerate(zip(x.aval.shape, out.shape)):
+            if xd != od:
                 b_axes += [i]
         out = out.sum(axes=tuple(b_axes), keepdims=True)
     if out.shape != x.aval.shape:
-        print(f"not same {out.shape=}, {x.aval.shape=}")
-        breakpoint()
+        raise ValueError(f"not same {out.shape=}, {x.aval.shape=}")
     return [out]
+
 
 
 reshape = Operator.shape("reshape")
@@ -739,30 +797,6 @@ def args_fixer(self, *xs, axis=0):
         xs = xs[0]
     xs = tuple(xs)
     return xs, dict(axis=axis)
-    # return xs, dict(axis=axis)
-
-
-# @concatenate.set_method
-# def reorg_args(self, *args, **params):
-#     return args, params
-#     args_, params_ = args, params
-#     sig = inspect.signature(self.typecheck)
-#     args_strs = [
-#         k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
-#     ]
-#     params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
-
-#     if args:
-#         if len(args) > len(args_strs):
-#             args, rest = args[: len(args_strs)], args[len(args_strs) :]
-#             if params_strs:
-#                 new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
-#                 params = {**new_params, **params}
-#         else:
-#             args = [params[k] if k in params else arg for k, arg in zip(args_strs, args)]
-#             assert len(args) == len(args_strs)
-#     return args, params
-
 
 @concatenate.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
@@ -953,21 +987,17 @@ def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[T
 
 
 compile_py = compile
-numpy_backend = Backend(name="numpy", default_dtype=Tensor.float32, deps=("numpy as np", "math"))
-numpy_dtype_map = {
+numpy_backend = Backend(name="numpy", default_dtype=Tensor.float32)
+numpy_backend.set_dtype_map({
     Tensor.float32: np.dtype("float32"),
     Tensor.int64: np.dtype("int64"),
     Tensor.int8: np.dtype("int8"),
     Tensor.bool: np.dtype("bool"),
-}
-numpy_backend.set_dtype_map(numpy_dtype_map)
-
-default_dtype_backend = numpy_backend.default_dtype_value
-
+})
 
 @numpy_backend.set_method
-def tensor(self, val, dtype=default_dtype_backend):
-    val = np.array(val, dtype=numpy_dtype_map[dtype])
+def tensor(self, val, dtype=numpy_backend.default_dtype_value):
+    val = np.array(val, dtype=numpy_backend.dtype_map[dtype])
     return Tensor(TensorBuffer(val))
 
 
@@ -983,10 +1013,14 @@ def device_of(self, tensor):
 
 @numpy_backend.set_method
 def compile(self, codegen_out):
+    deps_dict = dict()
+    deps_dict['numpy'] = importlib.import_module('numpy')
+    deps_dict['np'] = deps_dict['numpy']
+    deps_dict['math'] = importlib.import_module('math')
     code_lines = codegen_out["code_lines"]
     exec_locals = {}
     code = "\n".join(code_lines)
-    exec(compile_py(code, "<string>", "exec"), self.deps_dict, exec_locals)
+    exec(compile_py(code, "<string>", "exec"), deps_dict, exec_locals)
     fn = exec_locals["main"]
     return fn, code
 
@@ -1038,7 +1072,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             if instruction.op is slope.core.procedure_op:
-                if len(out_vals) == 0:  # return None functions
+                if len(out_vals) == 0:  # functions return nothing
                     continue
                 proc_program = instruction.params["program"]
                 proc_name = f"{proc_program.name}_{self.fn_count}"
@@ -1054,19 +1088,18 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-
                 rhs = f"{proc_name}({args_str})"
             elif instruction.op is slope.core.jit_op:
                 jit_program = instruction.params["program"]
-                jit_name = f"{program.name}_{len(fn_defs)}"
+                jit_name = f"{program.name}"
                 jit_codegen_out = self.codegen(
                     jit_program,
                     args,
                     fn_name=jit_name,
                     fn_defs=fn_defs,
                 )
-                fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
                 fn_defs[jit_name] = jit_codegen_out["code_lines"]
+                fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
 
                 args_str = ", ".join(in_vals)
                 lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
@@ -1089,7 +1122,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         if "(, " in code_line:
             code_line = code_line.replace("(, ", "(")
         
-        code_lines += [indent(code_line, il1)]
+        for l in code_line.split("\n"):
+            code_lines += [indent(l, il1)]
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
@@ -1107,6 +1141,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     if fn_name == "main":
         del self.fn_count
+    
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 
@@ -1145,13 +1180,7 @@ numpy_backend.set_impl(operator_set.random_uniform)(
 numpy_backend.set_impl(operator_set.random_normal)(
     lambda self, *, shape, dtype: f"return np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
-numpy_backend.set_impl(operator_set.broadcast_in_dim)(
-    lambda self, x, *, shape, axes=(): f"""
-ret = {x}
-for a in sorted({axes}): ret = np.expand_dims(ret, a)
-return np.broadcast_to(ret, shape={shape})
-""",
-)
+numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"return np.broadcast_to({x}, shape={shape})")
 
 numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})")
 numpy_backend.set_impl(operator_set.pad_hlo)(
@@ -1160,10 +1189,7 @@ numpy_backend.set_impl(operator_set.pad_hlo)(
 
 
 numpy_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"""
-slices = tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))
-return {x}[slices]
-"""
+    lambda self, x, *, starts, limits, strides: f"return {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
 )
 
 numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"return np.concatenate({xs}, axis={axis})")
@@ -1195,10 +1221,6 @@ def zeros(shape, dtype=Tensor.float32):
 def ones(shape, dtype=Tensor.float32):
     return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
-
-@procedure_set.register(static_argnames="shape")
-def broadcast_to(x, shape):
-    return x.broadcast_in_dim(shape=shape, axes=None)
 
 
 @procedure_set.register(static_argnames="fill_value")

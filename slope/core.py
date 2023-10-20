@@ -596,8 +596,8 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    # def register(self, static_argnames=(), not_op=True):
-    def register(self, static_argnames=(), not_op=False):
+    def register(self, static_argnames=(), not_op=True):
+    # def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -1130,7 +1130,7 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Backend:
-    def __init__(self, name, default_dtype=Tensor.float32,):
+    def __init__(self, name, default_dtype=Tensor.float32):
         self.name = name
         self.default_dtype = default_dtype
         self.impls = dict()
@@ -1623,15 +1623,15 @@ class Machine:
     def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
-                slope.dblog(f"    tree leaf found: {xs_}\n", level=2)
+                slope.dblog(f"    tree leaf found: {xs_}\n", level=4)
                 return next(xs_)
             else:
-                slope.dblog(f"    now\n  {treedef_}", level=2)
+                slope.dblog(f"    now\n  {treedef_}", level=4)
                 children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-                slope.dblog(f"{children=}\n", level=2)
+                slope.dblog(f"{children=}\n", level=4)
                 return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-        slope.dblog(f"unflattening {treedef}", level=2)
+        slope.dblog(f"unflattening {treedef}", level=4)
         return _tree_unflatten(treedef, iter(xs))
 
     def tree_transpose(

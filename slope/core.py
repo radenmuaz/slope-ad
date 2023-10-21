@@ -110,6 +110,7 @@ def lru_cache_verbose(maxsize=None, typed=False):
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
+            # slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()} {args} {kwargs}", level=2)
             slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", level=2)
             return result
 
@@ -164,12 +165,19 @@ class Hashed:
         self.val = val
 
     def __hash__(self) -> int:
+        # return id(self.val)
         return hash((self.val,))
 
     def __eq__(self, other):
         if isinstance(other, Hashed):
+            if isinstance(self.val, Tensor) and isinstance(other.val, Tensor):
+                # because Tensor.__eq__ already for Tensor.equal
+                return id(self.val) == id(other.val)
             return self.val == other.val
         return False
+    
+    def __repr__(self):
+        return f"Hashed: {repr(self.val)}"
 
 
 # ================
@@ -311,7 +319,6 @@ class Typecheckor:
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
 
     def __hash__(self):
-        # return id(self)
         return hash((self.shape, self.dtype))
 
     def __eq__(self, other):
@@ -772,16 +779,16 @@ class Environment:
 
     def __getattr__(self, attr):
         try:
-            slope.dblog(f"{self} looking {attr} in operator_set", level=2)
+            slope.dblog(f"{self} looking {attr} in operator_set", level=4)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            slope.dblog(f"{self} looking {attr} in procedure_set", level=2)
+            slope.dblog(f"{self} looking {attr} in procedure_set", level=4)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        slope.dblog(f"{self} fallback to default getattribute", level=2)
+        slope.dblog(f"{self} fallback to default getattribute", level=4)
         super().__getattribute__(attr)
 
     def tensor(
@@ -1024,6 +1031,7 @@ class JitFn:
         except Exception as e:
             slope.dblog(self.code, level=3)
             raise
+        # print(self.code)
         return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
 
 
@@ -1217,7 +1225,19 @@ class RunTrace(Trace):
             def fn(*args, **params):
                 return [op(*args, **params)]
 
-            ret = slope.M().jit(fn, static_argnames=("params",))(*args, **params)
+            name = f"{op.name}_"
+            for t in args:
+                tc = Typecheckor.like(t)
+                name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
+            for k, v in params.items():
+                name += f"{k}_{v}_"
+            name = name.replace("(","_leftparen_")
+            name = name.replace(")","_rightparen_")
+            name = name.replace(",","_comma_")
+            name = name.replace(" ","")
+            name = name.replace(".","_dot_")
+                    
+            ret = slope.M().jit(fn, static_argnames=("params",), name=name)(*args, **params)
 
         return ret
 
@@ -2237,7 +2257,7 @@ class Machine:
 
         return grad_fn
 
-    def jit(self, f, static_argnames=()):
+    def jit(self, f, static_argnames=(), name=None):
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
 
         def f_jitted(*args, **static_args):
@@ -2261,7 +2281,9 @@ class Machine:
             static_args = tuple(static_args.items())
 
             avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
-            name = f"jit_{str(hash((f, avals_in, static_args)))[1:]}"
+            nonlocal name
+            if name is None:
+                name = f"jit_{str(hash((f, avals_in, static_args)))[1:5]}"
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)

@@ -52,10 +52,10 @@ def relu(x):
 
 
 @procedure_set.register()
-def where(x, trueval, falslopeal):
+def where(x, trueval, falseval):
     cond = x != 0.0
     cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
-    return cond * trueval + (1.0 - cond) * falslopeal
+    return cond * trueval + (1.0 - cond) * falseval
 
 
 @procedure_set.register(static_argnames="axes keepdims")

@@ -13,8 +13,9 @@ def f(x):
 
 # x = slope.ones(())
 # print(x)
-# print(f(x))
-# print(f(x))
+print(f(x))
+print(f(x))
+print(f(x))
 
 
 

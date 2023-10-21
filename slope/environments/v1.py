@@ -351,20 +351,30 @@ operator_set.register(max)
 @max.set_method
 def jvp(self, primals, tangents, *, axes=(), keepdims=False):
     (x,), (x_dot,) = primals, tangents
-    run_out = x.max(axes, keepdims)
-    locs = x.equal(run_out.broadcast_in_dim(x.shape, () if keepdims else axes))
+    out = x.max(axes, keepdims)
+    _out = out
+    if not keepdims:
+        axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
+        for a in reversed(sorted(axes)):
+            _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
+    locs = x.equal(_out.broadcast(x.shape))
     locs = locs.convert(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
-    jvp_out = jvp_out / counts.broadcast_in_dim(jvp_out.shape)
+    jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
 
-    return [run_out], [jvp_out]
+    return [out], [jvp_out]
 
 
 @max.set_method
 def T(self, cts, x, *, axes=None, keepdims=False):
     (z,) = cts
-    return [z.broadcast_in_dim(x.aval.shape, () if keepdims else axes)]
+    out = z
+    if not keepdims:
+        axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
+        for a in reversed(sorted(axes)):
+            out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
+    out = out.broadcast_to(x.aval.shape)
 
 
 sum = Operator.reduce("sum")
@@ -400,77 +410,6 @@ def T(self, cts, x, *, axes, keepdims):
 # -----------------------
 # Shape
 # -----------------------
-
-# broadcast_in_dim = Operator.shape("broadcast_in_dim")
-# operator_set.register(broadcast_in_dim)
-
-
-# @broadcast_in_dim.set_method
-# def args_fixer(self, x, *, shape, axes=None):
-#     if isinstance(axes, int):
-#         axes = (axes,)
-#     elif axes is None:
-#         axes = ()
-#     else:
-#         axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-#     return (x,), dict(shape=shape, axes=axes)
-
-
-# @broadcast_in_dim.set_method
-# def vmap(self, axis_size, vals_in, dims_in, *, shape, axes=None):
-#     (x,), (x_bdim,) = vals_in, dims_in
-#     shape = list(shape)
-#     axes = [a + int(a >= (x_bdim)) for a in axes]
-#     if all([a < x_bdim for a in axes]):
-#         x_bdim += 1
-
-#     shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
-
-#     return [self(x, shape, axes)], [x_bdim]
-
-
-# @broadcast_in_dim.set_method
-# def jvp(self, primals, tangents, *, shape, axes=None):
-#     (x,), (x_dot,) = primals, tangents
-#     return (
-#         [self(x, shape=shape, axes=axes)],
-#         [self(x_dot, shape=shape, axes=axes)],
-#     )
-
-
-# @broadcast_in_dim.set_method
-# def typecheck(self, x: Typecheckor, *, shape: Sequence[int], axes=()) -> List[Typecheckor]:
-#     e_shape = list(x.shape)
-#     for a in axes:
-#         e_shape.insert(a, 1)
-#     assert len(e_shape) == len(shape)
-#     assert all(a <= b for a, b in zip(e_shape, shape))
-#     return [Typecheckor(tuple(shape), x.dtype)]
-
-
-# @broadcast_in_dim.set_method
-# def T(self, cts, x, *, shape, axes):
-#     (z,) = cts
-#     out = z
-#     if x.aval.shape == z.shape:
-#         return [out]
-
-#     if len(x.aval.shape) < out.ndim:
-#         b_axes = []
-#         for i, dim in enumerate(out.shape):
-#             if dim not in x.aval.shape:
-#                 b_axes += [i]
-#         out = out.sum(tuple(b_axes), keepdims=False)
-
-#     elif x.aval.shape != out.shape:
-#         b_axes = []
-#         for i, (dx, dz) in enumerate(list_zip(x.aval.shape, out.shape)):
-#             if dz > dx and i not in axes:
-#                 b_axes += [i]
-#         out = out.sum(axes=tuple(b_axes), keepdims=True)
-#     if out.shape != x.aval.shape:
-#         raise ValueError(f"not same {out.shape=}, {x.aval.shape=}")
-#     return [out]
 
 
 broadcast_to = Operator.shape("broadcast_to")
@@ -1030,7 +969,6 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
-    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=3)
 
     def indent(code, amount):
         spaces = " " * (len(code) - len(code.lstrip()))
@@ -1137,7 +1075,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
         code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
-    slope.dblog("\n-- Code:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=3)
+    # slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", level=3)
+    slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", level=3)
 
     if fn_name == "main":
         del self.fn_count

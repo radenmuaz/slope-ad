@@ -939,6 +939,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     fn_args_strs += f"{', '.join(inb_args)}"
     code_lines += [f"def {fn_name}({fn_args_strs}):"]
     for instruction in program.instructions:
+        if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
+            continue
         in_vals = list_map(lambda x: environment[x], instruction.inputs)
         for outb in instruction.out_binders:
             if outb in program.outs:
@@ -949,8 +951,6 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 nzs += 1
 
         out_vals = list_map(lambda z: environment[z], instruction.out_binders)
-        if len(out_vals) == 0:  # skip codegen for function returns nothing
-            continue
 
         if len(out_vals) == 1:
             lhs = f"{out_vals[0]}"
@@ -1153,7 +1153,6 @@ def rsqrt(x):
 @procedure_set.register()
 def cos(x):
     return ((math.pi / 2) - x).sin()
-    # return x.sin()
 
 
 @procedure_set.register()

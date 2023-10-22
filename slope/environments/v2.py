@@ -15,8 +15,6 @@ from slope.core import (
 
 import math
 import numpy as np
-import onnx
-import onnxruntime
 from typing import (
     Tuple,
     List,
@@ -28,7 +26,8 @@ from typing import (
     Iterator,
 )
 from collections import defaultdict
-import importlib
+import onnx
+import onnxruntime
 
 sum_py = sum
 slice_py = slice
@@ -344,79 +343,6 @@ def T(self, cts, x, *, axes, keepdims):
     out = out.broadcast_to(x.aval.shape)
 
     return [out]
-
-
-# -----------------------
-# BinaryReduce
-# -----------------------
-
-
-dot = Operator.binary_reduce("dot")
-
-
-@dot.set_method
-def typecheck(self, x, y):
-    # matrix-matrix
-    if x.ndim == y.ndim:
-        assert x.shape[-1] == y.shape[-2]
-        if x.ndim >= 3:
-            assert x.shape[0:-2] == y.shape[0:-2]
-        shape = (x.shape[0:-1]) + (y.shape[-2],)
-    # matrix-vector
-    elif x.ndim == y.ndim - 1:
-        assert x.shape[-1] == y.shape[-1]
-        if x.ndim >= 3:
-            assert x.shape[0:-1] == y.shape[0:-1]
-        shape = (x.shape[0:-1]) + (y.shape[-1],)
-    else:
-        raise ValueError
-    # matrix-matrix, vector-matrix, matrix-vector
-    return [Typecheckor(shape, x.dtype)]
-
-
-@dot.set_method
-def jvp(self, primals, tangents):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
-
-
-@dot.set_method
-def T(self, cts, x, y):
-    (z_bar,) = cts
-    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
-    if type(x) is PrimalProxy:
-        return [z_bar.dot(y), None]
-    elif type(y) is PrimalProxy:
-        return [None, x.dot(z_bar)]
-
-
-conv = Operator.binary_reduce("conv")
-
-
-def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
-    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-
-@conv.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-    return [x.conv(y)], [jvp1 + jvp2]
-
-
-@conv.set_method
-def T(self, cts, x, y, *, groups, stride, dilation, padding):
-    (z_bar,) = cts
-    if type(x) is PrimalProxy:
-        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [gx, None]
-    elif type(y) is PrimalProxy:
-        x_T = x.swapaxes(0, 1)
-        z_bar_T = z_bar.swapaxes(0, 1)
-        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
-        return [None, gy]
 
 
 # -----------------------
@@ -820,13 +746,13 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
 @full.set_method
 def jvp(self, primals, tangents, *, shape, fill_value, dtype):
     out = self(shape=shape, fill_value=fill_value, dtype=dtype)
-    out_jvp = slope.M().ones_like(out)
+    out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @full.set_method
 def T(self, cts, *, shape, fill_value, dtype):
-    return [cts[0]]
+    return [None]
 
 
 @full.set_method
@@ -851,14 +777,14 @@ def args_fixer(self, *, shape, dtype=Tensor.float32):
 
 @random_uniform.set_method
 def jvp(self, primals, tangents, *, shape, dtype):
-    out = slope.M().environment.backend.run_impl(self, shape=shape, dtype=dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = self(shape=shape, dtype=dtype)
+    out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @random_uniform.set_method
 def T(self, cts, *, shape, dtype):
-    return [cts[0]]
+    return [None]
 
 
 @random_uniform.set_method
@@ -883,14 +809,14 @@ def args_fixer(self, *, shape, dtype=Tensor.float32):
 
 @random_normal.set_method
 def jvp(self, primals, tangents, *, shape, dtype=Tensor.float32):
-    out = slope.M().environment.backend.run_impl(random_normal, shape, dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = self(random_normal, shape, dtype)
+    out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @random_normal.set_method
 def T(self, cts, *, shape, dtype=Tensor.float32):
-    return [cts[0]]
+    return [None]
 
 
 @random_normal.set_method
@@ -914,14 +840,14 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
 
 @arange.set_method
 def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=Tensor.float32):
-    out = slope.M().environment.backend.run_impl(arange, start, stop, stride, dtype)
-    out_jvp = slope.M().ones_like(out)
+    out = self(arange, start, stop, stride, dtype)
+    out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_method
 def T(self, cts, *, start, stop, stride=None, dtype=Tensor.float32):
-    return [cts[0]]
+    return [None]
 
 
 @arange.set_method
@@ -929,13 +855,86 @@ def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[T
     return [Typecheckor(tuple((stop - start) * stride), dtype)]
 
 
+# -------------------
+# BinaryReduce
+# -------------------
+
+
+dot = Operator.binary_reduce("dot")
+
+
+@dot.set_method
+def typecheck(self, x, y):
+    # matrix-matrix
+    if x.ndim == y.ndim:
+        assert x.shape[-1] == y.shape[-2]
+        if x.ndim >= 3:
+            assert x.shape[0:-2] == y.shape[0:-2]
+        shape = (x.shape[0:-1]) + (y.shape[-2],)
+    # matrix-vector
+    elif x.ndim == y.ndim - 1:
+        assert x.shape[-1] == y.shape[-1]
+        if x.ndim >= 3:
+            assert x.shape[0:-1] == y.shape[0:-1]
+        shape = (x.shape[0:-1]) + (y.shape[-1],)
+    else:
+        raise ValueError
+    # matrix-matrix, vector-matrix, matrix-vector
+    return [Typecheckor(shape, x.dtype)]
+
+
+@dot.set_method
+def jvp(self, primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
+
+
+@dot.set_method
+def T(self, cts, x, y):
+    (z_bar,) = cts
+    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
+    if type(x) is PrimalProxy:
+        return [z_bar.dot(y), None]
+    elif type(y) is PrimalProxy:
+        return [None, x.dot(z_bar)]
+
+
+conv = Operator.binary_reduce("conv")
+
+
+def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
+    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+
+@conv.set_method
+def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+    return [x.conv(y)], [jvp1 + jvp2]
+
+
+@conv.set_method
+def T(self, cts, x, y, *, groups, stride, dilation, padding):
+    (z_bar,) = cts
+    if type(x) is PrimalProxy:
+        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        return [gx, None]
+    elif type(y) is PrimalProxy:
+        x_T = x.swapaxes(0, 1)
+        z_bar_T = z_bar.swapaxes(0, 1)
+        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
+        return [None, gy]
+
+
 # --------------
 # Backend
 # --------------
 
-#
 
-onnxruntime_backend = Backend(name="onnxruntime", default_dtype=Tensor.float32)
+compile_py = compile
+onnxruntime_backend = Backend(name="numpy", default_dtype=Tensor.float32)
 onnxruntime_backend.set_dtype_map(
     {
         Tensor.float32: np.dtype("float32"),
@@ -944,6 +943,22 @@ onnxruntime_backend.set_dtype_map(
         Tensor.bool: np.dtype("bool"),
     }
 )
+
+
+@onnxruntime_backend.set_method
+def tensor(self, val, dtype=onnxruntime_backend.default_dtype_value):
+    val = np.array(val, dtype=onnxruntime_backend.dtype_map[dtype])
+    return Tensor(TensorBuffer(val))
+
+
+@onnxruntime_backend.set_method
+def numpy_of(self, tensor):
+    return tensor.buf.val
+
+
+@onnxruntime_backend.set_method
+def device_of(self, tensor):
+    return "cpu"
 
 
 @onnxruntime_backend.set_method
@@ -985,28 +1000,7 @@ def compile(self, codegen_out):
     return fn, code
 
 
-@onnxruntime_backend.set_method
-def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
-    if fn_name == "main":
-        assert not hasattr(self, "fn_count")
-        self.fn_count = 0
-    slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", enable=1)
-
-    def indent(code_line, amount):
-        spaces = " " * (len(code_line) - len(code_line.lstrip()))
-        spaces += " " * amount
-        return "\n".join([spaces + line for line in code_line.strip().split("\n")])
-
-    # codegen is recursive if jit-of-jit happens
-    environment: Dict[slope.Var, Any] = {}
-    il1 = 4
-    ncs = 0
-    nxs = 0
-    nzs = 0
-    inb_args = []
-    inb_consts = []
-
-    input = """
+example_input = """
 <
     ir_version: 7,
     opset_import: ["" : 10]
@@ -1018,25 +1012,6 @@ name (float[N, 128] X, float[128, 10] W, float[10] B) => (float[N, 10] C)
     C = Softmax(S)
 }
 """
-
-
-#
-
-
-@onnxruntime_backend.set_method
-def tensor(self, val, dtype=onnxruntime_backend.default_dtype_value):
-    val = np.array(val, dtype=onnxruntime_backend.dtype_map[dtype])
-    return Tensor(TensorBuffer(val))
-
-
-@onnxruntime_backend.set_method
-def onnxruntime_of(self, tensor):
-    return tensor.buf.val
-
-
-@onnxruntime_backend.set_method
-def device_of(self, tensor):
-    return "cpu"
 
 
 @onnxruntime_backend.set_method
@@ -1053,89 +1028,68 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
     il1 = 4  # indent length
-    ncs = 0
-    nxs = 0
-    nzs = 0
+    ncs = 0  # n constant
+    nxs = 0  # n x inputs
+    nzs = 0  # n z intermediate variables
+    nys = 0  # n y outputs
     inb_args = []
+    inb_arg_types = []
     inb_consts = []
+    inb_const_types = []
 
     for inb in program.in_binders:
         if type(inb.aval) is not Typecheckor:
             environment[inb] = f"c{ncs}"
             inb_consts += [environment[inb]]
+            inb_const_types += []
             ncs += 1
         else:
             environment[inb] = f"x{nxs}"
             inb_args += [environment[inb]]
+            inb_arg_types += []
             nxs += 1
+    for out in program.outs:
+        inb_consts += [environment[out]]
+        inb_const_types += []
+        nys += 1
 
-    code_lines = []
-    fn_args_strs = f""
-    if inb_consts:
-        fn_args_strs += f"{', '.join(inb_consts)}, "
-    fn_args_strs += f"{', '.join(inb_args)}"
-    code_lines += [f"def {fn_name}({fn_args_strs}):"]
     for instruction in program.instructions:
         in_vals = list_map(lambda x: environment[x], instruction.inputs)
-        in_avals = [x.aval for x in instruction.inputs]
         for outb in instruction.out_binders:
-            environment[outb] = f"z{nzs}"
-            nzs += 1
-        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
-
-        if instruction.op.op_type is slope.core.OperatorType.Meta:
-            if instruction.op is slope.core.procedure_op:
-                if len(out_vals) == 0:  # functions return nothing
-                    continue
-                proc_program = instruction.params["program"]
-                proc_name = f"{proc_program.name}_{self.fn_count}"
-                self.fn_count += 1
-                proc_codegen_out = self.codegen(
-                    proc_program,
-                    args,
-                    fn_name=proc_name,
-                    fn_defs=fn_defs,
-                )
-                fn_defs[proc_name] = proc_codegen_out["code_lines"]
-                fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-
-                args_str = ", ".join(in_vals)
-                lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                rhs = f"{proc_name}({args_str})"
-            elif instruction.op is slope.core.jit_op:
-                jit_program = instruction.params["program"]
-                jit_name = f"{program.name}"
-                jit_codegen_out = self.codegen(
-                    jit_program,
-                    args,
-                    fn_name=jit_name,
-                    fn_defs=fn_defs,
-                )
-                fn_defs[jit_name] = jit_codegen_out["code_lines"]
-                fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-
-                args_str = ", ".join(in_vals)
-                lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-                rhs = f"{jit_name}({args_str})"
+            if outb in program.outs:
+                environment[outb] = f"y{nys}"
+                nys += 1
             else:
-                raise NotImplementedError
+                environment[outb] = f"z{nzs}"
+                nzs += 1
+
+        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
+        if len(out_vals) == 0:  # skip codegen for function returns nothing
+            continue
+
+        if len(out_vals) == 1:
+            lhs = f"{out_vals[0]}"
         else:
-            impl = self.impls[instruction.op]
-            args_str = ", ".join(in_vals)
-            lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-            rhs = impl(*in_vals, **instruction.params)
-            if "\n" in rhs:
+            lhs = ", ".join(out_vals)
+        if instruction.op.op_type is slope.core.OperatorType.Meta:
+            lhs += ", "
+            rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+        else:
+            rhs = self.impls[instruction.op](*in_vals, **instruction.params)
+            if "\n" in rhs:  # multi-line impls
                 impl_lines = rhs.strip().split("\n")
                 lhs = "\n".join(impl_lines[:-1] + [lhs])
                 rhs = impl_lines[-1]
             rhs = rhs.replace("return ", "")
-
+        if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
+            rhs = rhs.replace("(, ", "(")
+        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
+            rhs = rhs.replace(np_dtype.name, f"np.{np_dtype.name}")
         code_line = f"{lhs} = {rhs}"
-        if "(, " in code_line:
-            code_line = code_line.replace("(, ", "(")
 
-        for l in code_line.split("\n"):
-            code_lines += [indent(l, il1)]
+        for code_line_line in code_line.split("\n"):  # handle multi-line code
+            code_lines += [indent(code_line_line, il1)]
+
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
@@ -1147,10 +1101,21 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 + code_lines[1:]
             )
 
-        code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
+    head_code_lines = []
+    head_code_lines += ["<"]
+    head_code_lines += ["    ir_version: 7,"]
+    head_code_lines += ["    opset_import: [" " : 10]"]
+    head_code_lines += [">"]
+    fn_args_strs = f""
+    if inb_consts:
+        const_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)]
+        fn_args_strs += f"{', '.join(const_type_strs)}"
 
-    # slope.dblog(f"\n-- Codegen program {program.name} as {fn_name}\n", program, "\n ==", enable=3)
-    slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=3)
+    arg_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)]
+    fn_args_strs += f"{', '.join(arg_type_strs)}"
+    head_code_lines += [f"{fn_name} ({fn_args_strs}) =>"]
+
+    slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
         del self.fn_count
@@ -1171,8 +1136,8 @@ onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"return np.
 onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"return np.subtract({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"return np.multiply({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"return np.divide({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"return np.invert({x})")
 onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"return np.equal({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.not_equal)(lambda self, x1, x2: f"return np.not_equal({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"return np.maximum({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.sum)(
     lambda self, x, *, axes, keepdims: f"return np.sum({x}, axis={axes}, keepdims={keepdims})"
@@ -1200,7 +1165,7 @@ onnxruntime_backend.set_impl(operator_set.broadcast_to)(
 onnxruntime_backend.set_impl(operator_set.reshape)(
     lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})"
 )
-onnxruntime_backend.set_impl(operator_set.pad_hlo)(
+onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
     lambda self, x, *, lo, hi, interior, value: f"return np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
@@ -1214,6 +1179,43 @@ onnxruntime_backend.set_impl(operator_set.concatenate)(
 )
 onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"return np.transpose({x}, axes={perm})")
 onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"return np.flip({x}, axis={axes})")
+
+
+@onnxruntime_backend.set_impl(slope.core.jit_op)
+def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
+    jit_program = instruction.params["program"]
+    jit_name = f"{program.name}"
+    jit_codegen_out = self.codegen(
+        jit_program,
+        args,
+        fn_name=jit_name,
+        fn_defs=fn_defs,
+    )
+    assert jit_name not in fn_defs.keys()
+    fn_defs[jit_name] = jit_codegen_out["code_lines"]
+    fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
+    args_str = ", ".join(in_vals)
+    rhs = f"{jit_name}({args_str})"
+    return rhs, fn_defs
+
+
+@onnxruntime_backend.set_impl(slope.core.procedure_op)
+def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
+    proc_program = instruction.params["program"]
+    proc_name = f"{proc_program.name}_{self.fn_count}"
+    self.fn_count += 1
+    proc_codegen_out = self.codegen(
+        proc_program,
+        args,
+        fn_name=proc_name,
+        fn_defs=fn_defs,
+    )
+    fn_defs[proc_name] = proc_codegen_out["code_lines"]
+    fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
+    args_str = ", ".join(in_vals)
+    rhs = f"{proc_name}({args_str})"
+    return rhs, fn_defs
+
 
 # --------------
 # Procedure
@@ -1262,10 +1264,10 @@ def relu(x):
 
 
 @procedure_set.register()
-def where(x, trueval, falslopeal):
+def where(x, trueval, falseval):
     cond = x != 0.0
-    cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
-    return cond * trueval + (1.0 - cond) * falslopeal
+    cond = cond.convert(trueval.dtype)
+    return cond * trueval + (1.0 - cond) * falseval
 
 
 @procedure_set.register(static_argnames="axes keepdims")
@@ -1282,12 +1284,36 @@ def rsqrt(x):
 @procedure_set.register()
 def cos(x):
     return ((math.pi / 2) - x).sin()
-    # return x.sin()
 
 
 @procedure_set.register()
 def tan(x):
     return x.sin() / x.cos()
+
+
+@procedure_set.register()
+def not_equal(x, y):
+    return ~(x.equal(y))
+
+
+@procedure_set.register()
+def greater_equal(x, y):
+    return x.maximum(y).equal(y)
+
+
+@procedure_set.register()
+def less_equal(x, y):
+    return x.minimum(y).equal(y)
+
+
+@procedure_set.register()
+def greater(x, y):
+    return 1.0 - (x <= y)
+
+
+@procedure_set.register()
+def less(x, y):
+    return 1.0 - (x >= y)
 
 
 @procedure_set.register()
@@ -1512,10 +1538,13 @@ def softsign(self):
 
 
 @procedure_set.register()
-def dot(x, w):
+def matmul(x, w):
     x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
     w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
+
+
+procedure_set.alias(matmul, "dot")
 
 
 @procedure_set.register()
@@ -1964,8 +1993,7 @@ def conv_wino(x, weight, groups=1, stride=1, dilation=1, padding=0):
         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
 
-    # x = x.pad2d(padding_)._pool(
-    x = x.pad(padding_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+    x = x.padslice(padding_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
@@ -2065,4 +2093,4 @@ def cumsum(x, axis: int = 0):
     return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)
 
 
-v1_environment = Environment(operator_set, procedure_set, dict(numpy=onnxruntime_backend))
+v1_environment = Environment(operator_set, procedure_set, onnxruntime_backend)

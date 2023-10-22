@@ -358,10 +358,11 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False):
+    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False):
         self.name = name
         self.op_type = op_type
         self.nary_inputs = nary_inputs
+        self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
 
@@ -371,7 +372,10 @@ class Operator:
     def __call__(self, *args, **params):
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
-        return slope.M().bind1(self, *args, **params)
+        ret = slope.M().bind(self, *args, **params)
+        if not self.nary_outputs:
+            ret = ret[0]
+        return ret
 
     def __repr__(self) -> str:
         return f"<{self.name}>"
@@ -473,9 +477,9 @@ class Operator:
                 return (x, y), params
 
             if type(x) in Tracor.PYTHON_TYPES:
-                x = slope.M().environment.tensor(x, dtype=y.dtype)
+                x = slope.full(shape=(), fill_value=x, dtype=y.dtype)
             elif type(y) in Tracor.PYTHON_TYPES:
-                y = slope.M().environment.tensor(y, dtype=x.dtype)
+                y = slope.full(shape=(), fill_value=y, dtype=x.dtype)
 
             if type(x) is Tensor and isinstance(y, Tracor):
                 x = y._trace.pure(x)
@@ -607,8 +611,7 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, static_argnames=(), not_op=True):
-        # def register(self, static_argnames=(), not_op=False):
+    def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -645,6 +648,8 @@ class ProcedureSet:
             elif f.__name__ == "typecheck":
                 nonlocal typecheck_f
                 typecheck_f = f
+            else:
+                raise ValueError
 
         def f_procedured(*args, **static_args):
             nonlocal impl_f, jvp_f, T_f, vmap_f, typecheck_f
@@ -674,17 +679,23 @@ class ProcedureSet:
 
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
-            avals_in = M.tree_map(lambda x: Typecheckor.like(M.get_aval(x)), args)
-            program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args, name=f.__name__)
 
-            args, in_tree = M.tree_flatten(args)
-            outs = M.bind(
+            # fix for binary ops with python types, e.g. equal(x, 0.0)
+            args = tuple(slope.full(shape=(), fill_value=a) if type(a) in Tracor.PYTHON_TYPES else a for a in args)
+
+            avals_in = slope.M().tree_map(lambda x: Typecheckor.like(slope.M().get_aval(x)), args)
+            program, consts, out_tree = slope.M().make_program(
+                impl_f, *avals_in, static_args=static_args, name=f.__name__
+            )
+
+            args, in_tree = slope.M().tree_flatten(args)
+            outs = slope.M().bind(
                 procedure_op,
                 *consts,
                 *args,
                 program=program,
             )
-            return M.tree_unflatten(out_tree, outs)
+            return slope.M().tree_unflatten(out_tree, outs)
 
         f_procedured.override_rule = override_rule
         return f_procedured
@@ -714,8 +725,9 @@ def jvp(self, primals, tangents, *, program):
 def typecheck(self, *in_types, program):
     program_type = slope.M().typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+        slope.dblog(f"Typecheck error:")
         for i, j in zip(program_type.in_types, in_types):
-            print(i, j, i == j)
+            slope.dblog(f"{i == j=}: {i=}, {j=}")
         breakpoint()
         raise TypeError
     return program_type.out_types
@@ -1549,9 +1561,8 @@ class PartialRunTrace(Trace):
             return PartialEvalTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
-        conds = tuple(t.pval.is_known for t in tracers)
-        if all(conds):
-            # if all(t.pval.is_known for t in tracers):
+        is_knowns = tuple(t.pval.is_known for t in tracers)
+        if all(is_knowns):
             return slope.M().bind(op, *list_map(slope.M().full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
 
@@ -1606,6 +1617,7 @@ class Machine:
         if isinstance(x, Tracor):
             return x.aval
         elif type(x) in Tracor.PYTHON_TYPES:
+            # return Typecheckor.like(self.environment.tensor(x))
             return self.environment.tensor(x)
         elif isinstance(x, Tensor):
             return x
@@ -1732,9 +1744,6 @@ class Machine:
         # lowered = self.tree_map(self.full_lower, outs)
         lowered = tuple([self.full_lower(out) for out in outs])
         return lowered
-
-    def bind1(self, op, *args, **params):
-        return self.bind(op, *args, **params)[0]
 
     def find_top_trace(self, xs) -> Trace:
         arrs = []

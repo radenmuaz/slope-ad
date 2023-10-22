@@ -894,7 +894,7 @@ def compile(self, codegen_out):
     deps_dict["np"] = deps_dict["numpy"]
     deps_dict["math"] = importlib.import_module("math")
     code_lines = codegen_out["code_lines"]
-    exec_locals = {}
+    exec_locals = dict()
     code = "\n".join(code_lines)
     exec(compile_py(code, "<string>", "exec"), deps_dict, exec_locals)
     fn = exec_locals["main"]
@@ -915,9 +915,10 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
     il1 = 4  # indent length
-    ncs = 0
-    nxs = 0
-    nzs = 0
+    ncs = 0  # n constant
+    nxs = 0  # n x inputs
+    nzs = 0  # n z intermediate variables
+    nys = 0  # n y outputs
     inb_args = []
     inb_consts = []
 
@@ -939,32 +940,41 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     code_lines += [f"def {fn_name}({fn_args_strs}):"]
     for instruction in program.instructions:
         in_vals = list_map(lambda x: environment[x], instruction.inputs)
-        in_avals = [x.aval for x in instruction.inputs]
         for outb in instruction.out_binders:
-            environment[outb] = f"z{nzs}"
-            nzs += 1
+            if outb in program.outs:
+                environment[outb] = f"y{nys}"
+                nys += 1
+            else:
+                environment[outb] = f"z{nzs}"
+                nzs += 1
+
         out_vals = list_map(lambda z: environment[z], instruction.out_binders)
-        if len(out_vals) == 0:  # functions return nothing
+        if len(out_vals) == 0:  # skip codegen for function returns nothing
             continue
 
-        if instruction.op.op_type is slope.core.OperatorType.Meta:
-            lhs = f"{out_vals[0]+',' if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
-            fn_defs, rhs = self.impls[instruction.op](program, args, instruction, in_vals)
+        if len(out_vals) == 1:
+            lhs = f"{out_vals[0]}"
         else:
-            lhs = f"{out_vals[0] if len(out_vals) == 1 else ', '.join([o for o in out_vals])}"
+            lhs = ", ".join(out_vals)
+        if instruction.op.op_type is slope.core.OperatorType.Meta:
+            lhs += ", "
+            rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+        else:
             rhs = self.impls[instruction.op](*in_vals, **instruction.params)
-            if "\n" in rhs:
+            if "\n" in rhs:  # multi-line impls
                 impl_lines = rhs.strip().split("\n")
                 lhs = "\n".join(impl_lines[:-1] + [lhs])
                 rhs = impl_lines[-1]
             rhs = rhs.replace("return ", "")
-
+        if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
+            rhs = rhs.replace("(, ", "(")
+        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
+            rhs = rhs.replace(np_dtype.name, f"np.{np_dtype.name}")
         code_line = f"{lhs} = {rhs}"
-        if "(, " in code_line:
-            code_line = code_line.replace("(, ", "(")
 
-        for l in code_line.split("\n"):
-            code_lines += [indent(l, il1)]
+        for code_line_line in code_line.split("\n"):  # handle multi-line code
+            code_lines += [indent(code_line_line, il1)]
+
     outs = list_map(lambda x: environment[x], program.outs)
     ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
     code_lines += [indent(f"return {ret_str}", il1)]
@@ -976,7 +986,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 + code_lines[1:]
             )
 
-        code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
+        # code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
 
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
@@ -1026,7 +1036,7 @@ numpy_backend.set_impl(operator_set.broadcast_to)(
 )
 
 numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})")
-numpy_backend.set_impl(operator_set.pad_hlo)(
+numpy_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
     lambda self, x, *, lo, hi, interior, value: f"return np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
@@ -1041,7 +1051,7 @@ numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"return np.f
 
 
 @numpy_backend.set_impl(slope.core.jit_op)
-def jit_op_impl(self, program, args, instruction, in_vals):
+def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     jit_program = instruction.params["program"]
     jit_name = f"{program.name}"
     jit_codegen_out = self.codegen(
@@ -1050,16 +1060,16 @@ def jit_op_impl(self, program, args, instruction, in_vals):
         fn_name=jit_name,
         fn_defs=fn_defs,
     )
+    assert jit_name not in fn_defs.keys()
     fn_defs[jit_name] = jit_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-
     args_str = ", ".join(in_vals)
     rhs = f"{jit_name}({args_str})"
-    return fn_defs, rhs
+    return rhs, fn_defs
 
 
 @numpy_backend.set_impl(slope.core.procedure_op)
-def procedure_op_impl(self, program, args, instruction, in_vals):
+def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
     proc_program = instruction.params["program"]
     proc_name = f"{proc_program.name}_{self.fn_count}"
     self.fn_count += 1
@@ -1073,7 +1083,7 @@ def procedure_op_impl(self, program, args, instruction, in_vals):
     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
     rhs = f"{proc_name}({args_str})"
-    return fn_defs, rhs
+    return rhs, fn_defs
 
 
 # --------------
@@ -1123,10 +1133,10 @@ def relu(x):
 
 
 @procedure_set.register()
-def where(x, trueval, falslopeal):
+def where(x, trueval, falseval):
     cond = x != 0.0
-    cond = cond.convert(trueval.dtype)  # TODO: type promotion logic
-    return cond * trueval + (1.0 - cond) * falslopeal
+    cond = cond.convert(trueval.dtype)
+    return cond * trueval + (1.0 - cond) * falseval
 
 
 @procedure_set.register(static_argnames="axes keepdims")

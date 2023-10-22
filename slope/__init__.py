@@ -8,6 +8,7 @@ LOG_JIT = int(os.environ.get("LOG_JIT", 0))
 LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
 LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
+INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 
 
 def dblog(*msg, enable=True):

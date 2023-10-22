@@ -1,17 +1,12 @@
 from slope import core
 
 import os
-import inspect
 
-LOG_LRU = int(os.environ.get("LOG_LRU", 0))
-LOG_JIT = int(os.environ.get("LOG_JIT", 0))
-LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
-LOG_ENV = int(os.environ.get("LOG_ENV", 0))
-LOG_INIT = int(os.environ.get("LOG_INIT", 0))
+SLOPE_DEBUG = int(os.environ.get("SLOPE_DEBUG", 0))
 
 
-def dblog(*msg, enable=True):
-    if enable:
+def dblog(*msg, enable=0):
+    if SLOPE_DEBUG >= level:
         print(*msg)
 
 
@@ -26,8 +21,11 @@ machine = LazyInitMachine()
 def M():
     global machine
     if type(machine) is LazyInitMachine:
-        dblog("Initializing slope.machine with", enable=LOG_INIT)
-        dblog(inspect.getsource(slope_init), enable=LOG_INIT)
+        if SLOPE_DEBUG > 0:
+            import inspect
+
+            dblog("Initializing slope.machine with")
+            dblog(inspect.getsource(slope_init))
         machine = slope_init()
     return machine
 

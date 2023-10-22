@@ -110,8 +110,7 @@ def lru_cache_verbose(maxsize=None, typed=False):
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
-            # slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()} {args} {kwargs}", level=2)
-            slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", level=2)
+            slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
             return result
 
         decorated_function.cache_info = wrapper.cache_info
@@ -175,7 +174,7 @@ class Hashed:
                 return id(self.val) == id(other.val)
             return self.val == other.val
         return False
-    
+
     def __repr__(self):
         return f"Hashed: {repr(self.val)}"
 
@@ -218,7 +217,7 @@ class Tensor:
 
     @property
     def default_dtype(self):
-        return slope.M().backend.default_dtype
+        return slope.M().environment.backend.default_dtype
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -261,12 +260,17 @@ class Tensor:
     __rdiv__ = lambda self, other: self.div.func(other, self)
     __truediv__ = __div__
     __truerdiv__ = __rdiv__
+    __pow__ = lambda self, other: self.pow(other)
+    __rpow__ = lambda self, other: self.pow.func(other, self)
+    __matmul__ = lambda self, other: self.matmul(other)
+    __rmatmul__ = lambda self, other: self.matmul.func(other, self)
+    __invert__ = lambda self: self.invert()
     __eq__ = lambda self, other: self.equal(other)
     __ne__ = lambda self, other: self.not_equal(other)
-    __ge__ = lambda self, other: self.maximum(other).equal(self)
-    __le__ = lambda self, other: self.minimum(other).equal(self)
-    __gt__ = lambda self, other: 1.0 - (self <= other)
-    __lt__ = lambda self, other: 1.0 - (self >= other)
+    __ge__ = lambda self, other: self.greater_equal(other)
+    __le__ = lambda self, other: self.less_equal(other)
+    __gt__ = lambda self, other: self.greater(other)
+    __lt__ = lambda self, other: self.less(other)
 
     def __init__(self, val: TensorBuffer):
         assert isinstance(val, TensorBuffer)
@@ -279,14 +283,14 @@ class Tensor:
 
     @property
     def dtype(self):
-        return slope.M().backend.dtype_map_inv[self.buf.val.dtype]
+        return slope.M().environment.backend.dtype_map_inv[self.buf.val.dtype]
 
     @property
     def device(self):
-        return slope.M().backend.device_of(self)
+        return slope.M().environment.backend.device_of(self)
 
     def numpy(self):
-        return slope.M().backend.numpy_of(self)
+        return slope.M().environment.backend.numpy_of(self)
 
     shape = property(lambda self: self.buf.val.shape)
     ndim = property(lambda self: self.buf.val.ndim)
@@ -306,7 +310,7 @@ class Typecheckor:
     def like(cls, aval):
         shape = aval.shape
         if isinstance(aval, Tensor):
-            dtype = slope.M().backend.dtype_map_inv[aval.buf.val.dtype]
+            dtype = slope.M().environment.backend.dtype_map_inv[aval.buf.val.dtype]
         else:
             dtype = aval.dtype
         return cls(shape, dtype)
@@ -604,7 +608,7 @@ class OperatorSet:
 
 class ProcedureSet:
     def register(self, static_argnames=(), not_op=True):
-    # def register(self, static_argnames=(), not_op=False):
+        # def register(self, static_argnames=(), not_op=False):
         def wrap(f):
             f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
             assert f.__name__ not in vars(self)
@@ -614,7 +618,7 @@ class ProcedureSet:
         return wrap
 
     def alias(self, fn, name):
-        assert fn in vars(self)
+        assert fn in vars(self).values()
         setattr(self, name, fn)
 
     def new_procedure(self, f, static_argnames=()):
@@ -668,12 +672,9 @@ class ProcedureSet:
                         if type(vov) is list:
                             static_args[k][i] = tuple(static_args[k][i])
 
-            M = slope.M()
-            # static_args = M.tree_map(lambda x: tuple(x) if type(x) is list else x, static_args)
             static_args = tuple(static_args.items())
             assert all([k in static_argnames for k, v in static_args])
             avals_in = M.tree_map(lambda x: Typecheckor.like(M.get_aval(x)), args)
-            # top_trace = M.find_top_trace(args)
             program, consts, out_tree = M.make_program(impl_f, *avals_in, static_args=static_args, name=f.__name__)
 
             args, in_tree = M.tree_flatten(args)
@@ -693,7 +694,7 @@ procedure_op = Operator("procedure", op_type=OperatorType.Meta)
 
 
 @procedure_op.set_method
-def impl(self, *args, program):
+def run_impl(self, *args, program):
     num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     outs = slope.M().run_program(program, consts + args)
@@ -775,20 +776,20 @@ def reorg_args(self, args, params):
 class Environment:
     operator_set: OperatorSet
     procedure_set: ProcedureSet
-    backends: dict
+    backend: "Backend"
 
     def __getattr__(self, attr):
         try:
-            slope.dblog(f"{self} looking {attr} in operator_set", level=4)
+            slope.dblog(f"{self} looking {attr} in operator_set", enable=slope.LOG_ENV)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            slope.dblog(f"{self} looking {attr} in procedure_set", level=4)
+            slope.dblog(f"{self} looking {attr} in procedure_set", enable=slope.LOG_ENV)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        slope.dblog(f"{self} fallback to default getattribute", level=4)
+        slope.dblog(f"{self} fallback to default getattribute", enable=slope.LOG_ENV)
         super().__getattribute__(attr)
 
     def tensor(
@@ -799,7 +800,7 @@ class Environment:
         if isinstance(val, TensorBuffer):
             return Tensor(val)
         else:
-            return slope.M().backend.tensor(val, dtype)
+            return slope.M().environment.backend.tensor(val, dtype)
 
     def save(arr: "Tensor", filename: str):
         # TODO
@@ -1029,9 +1030,8 @@ class JitFn:
         try:
             outs = self.fn(*args, **params)
         except Exception as e:
-            slope.dblog(self.code, level=3)
+            slope.dblog(self.code, enable=slope.LOG_JIT)
             raise
-        # print(self.code)
         return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
 
 
@@ -1039,12 +1039,12 @@ jit_op = Operator("jit_op", op_type=OperatorType.Meta)
 
 
 @jit_op.set_method
-def impl(self, *args, program):
+def run_impl(self, *args, program):
     hashed_program = Hashed(program)
     num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    jit_fn = slope.M().backend.gen_jit_fn(hashed_program, hashed_consts)
+    jit_fn = slope.M().environment.backend.gen_jit_fn(hashed_program, hashed_consts)
     ret = jit_fn(*consts, *args)
     return ret
 
@@ -1219,7 +1219,7 @@ class RunTrace(Trace):
         if op.op_type is OperatorType.Meta:
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
-            ret = op.impl(*args, **params)
+            ret = op.run_impl(*args, **params)
         else:
 
             def fn(*args, **params):
@@ -1231,12 +1231,12 @@ class RunTrace(Trace):
                 name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
             for k, v in params.items():
                 name += f"{k}_{v}_"
-            name = name.replace("(","_leftparen_")
-            name = name.replace(")","_rightparen_")
-            name = name.replace(",","_comma_")
-            name = name.replace(" ","")
-            name = name.replace(".","_dot_")
-                    
+            name = name.replace("(", "_leftparen_")
+            name = name.replace(")", "_rightparen_")
+            name = name.replace(",", "_comma_")
+            name = name.replace(" ", "")
+            name = name.replace(".", "_dot_")
+
             ret = slope.M().jit(fn, static_argnames=("params",), name=name)(*args, **params)
 
         return ret
@@ -1565,7 +1565,6 @@ class Machine:
     def __init__(
         self,
         environment,
-        default_backend="numpy",
     ):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
@@ -1574,7 +1573,6 @@ class Machine:
         self.environment = environment
         self.environment.operator_set.register(jit_op)
         self.environment.operator_set.register(procedure_op)
-        self.backend = self.environment.backends[default_backend]
 
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
@@ -1643,15 +1641,15 @@ class Machine:
     def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
             if treedef_ is leaf:
-                slope.dblog(f"    tree leaf found: {xs_}\n", level=4)
+                slope.dblog(f"    tree leaf found: {xs_}\n", enable=slope.LOG_PYTREE)
                 return next(xs_)
             else:
-                slope.dblog(f"    now\n  {treedef_}", level=4)
+                slope.dblog(f"    now\n  {treedef_}", enable=slope.LOG_PYTREE)
                 children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-                slope.dblog(f"{children=}\n", level=4)
+                slope.dblog(f"{children=}\n", enable=slope.LOG_PYTREE)
                 return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-        slope.dblog(f"unflattening {treedef}", level=4)
+        slope.dblog(f"unflattening {treedef}", enable=slope.LOG_PYTREE)
         return _tree_unflatten(treedef, iter(xs))
 
     def tree_transpose(

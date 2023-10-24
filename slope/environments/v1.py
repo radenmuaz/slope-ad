@@ -58,21 +58,21 @@ def T(self, cts, x):
     return [slope.zeros_like(z)]
 
 
-convert = Operator.unary("convert")
-astype = convert
-operator_set.register(convert)
-operator_set.alias(convert, "astype")
+cast = Operator.unary("cast")
+astype = cast
+operator_set.register(cast)
+operator_set.alias(cast, "astype")
 
 
-@convert.set_method
+@cast.set_method
 def typecheck(self, x: Typecheckor, *, dtype) -> List[Typecheckor]:
     return [Typecheckor(x.shape, dtype)]
 
 
-@convert.set_method
+@cast.set_method
 def jvp(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
-    return [x.convert(dtype)], [x_dot.convert(dtype)]
+    return [x.cast(dtype)], [x_dot.cast(dtype)]
 
 
 sqrt = Operator.unary("sqrt")
@@ -300,7 +300,7 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
     locs = x.equal(_out.broadcast(x.shape))
-    locs = locs.convert(x_dot.dtype)
+    locs = locs.cast(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
     jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
@@ -965,7 +965,6 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 impl_lines = rhs.strip().split("\n")
                 lhs = "\n".join(impl_lines[:-1] + [lhs])
                 rhs = impl_lines[-1]
-            rhs = rhs.replace("return ", "")
         if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
             rhs = rhs.replace("(, ", "(")
         for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
@@ -998,56 +997,56 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 ### Operator Impls
 
-numpy_backend.set_impl(operator_set.convert)(lambda self, x, *, dtype: f"return {x}.astype(dtype={dtype})")
-numpy_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"return {x}")
-numpy_backend.set_impl(operator_set.neg)(lambda self, x: f"return np.negative({x})")
-numpy_backend.set_impl(operator_set.sqrt)(lambda self, x: f"return np.sqrt({x})")
-numpy_backend.set_impl(operator_set.exp)(lambda self, x: f"return np.exp({x})")
-numpy_backend.set_impl(operator_set.log)(lambda self, x: f"return np.log({x})")
-numpy_backend.set_impl(operator_set.sin)(lambda self, x: f"return np.sin({x})")
-numpy_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"return np.add({x1}, {x2})")
-numpy_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"return np.subtract({x1}, {x2})")
-numpy_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"return np.multiply({x1}, {x2})")
-numpy_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"return np.divide({x1}, {x2})")
-numpy_backend.set_impl(operator_set.invert)(lambda self, x: f"return np.invert({x})")
-numpy_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"return np.equal({x1}, {x2})")
-numpy_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"return np.maximum({x1}, {x2})")
+numpy_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"{x}.astype(dtype={dtype})")
+numpy_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"{x}")
+numpy_backend.set_impl(operator_set.neg)(lambda self, x: f"np.negative({x})")
+numpy_backend.set_impl(operator_set.sqrt)(lambda self, x: f"np.sqrt({x})")
+numpy_backend.set_impl(operator_set.exp)(lambda self, x: f"np.exp({x})")
+numpy_backend.set_impl(operator_set.log)(lambda self, x: f"np.log({x})")
+numpy_backend.set_impl(operator_set.sin)(lambda self, x: f"np.sin({x})")
+numpy_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"np.add({x1}, {x2})")
+numpy_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"np.subtract({x1}, {x2})")
+numpy_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"np.multiply({x1}, {x2})")
+numpy_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"np.divide({x1}, {x2})")
+numpy_backend.set_impl(operator_set.invert)(lambda self, x: f"np.invert({x})")
+numpy_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"np.equal({x1}, {x2})")
+numpy_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"np.maximum({x1}, {x2})")
 numpy_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: f"return np.sum({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"np.sum({x}, axis={axes}, keepdims={keepdims})"
 )
 numpy_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: f"return np.max({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"np.max({x}, axis={axes}, keepdims={keepdims})"
 )
 numpy_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"return np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
 )
 numpy_backend.set_impl(operator_set.full)(
-    lambda self, *, shape, fill_value, dtype: f"return np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
+    lambda self, *, shape, fill_value, dtype: f"np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
 )
 
 numpy_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"return np.random.uniform(size={shape}).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"np.random.uniform(size={shape}).astype(dtype={dtype})"
 )
 numpy_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"return np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
 numpy_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"return np.broadcast_to({x}, shape={shape})"
+    lambda self, x, *, shape: f"np.broadcast_to({x}, shape={shape})"
 )
 
-numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})")
+numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"np.reshape({x}, newshape={shape})")
 numpy_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"return np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
 numpy_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"return {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
+    lambda self, x, *, starts, limits, strides: f"{x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
 )
 
-numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"return np.concatenate({xs}, axis={axis})")
-numpy_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"return np.transpose({x}, axes={perm})")
-numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"return np.flip({x}, axis={axes})")
+numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"np.concatenate({xs}, axis={axis})")
+numpy_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"np.transpose({x}, axes={perm})")
+numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"np.flip({x}, axis={axes})")
 
 
 @numpy_backend.set_impl(slope.core.jit_op)
@@ -1135,7 +1134,7 @@ def relu(x):
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
-    cond = cond.convert(trueval.dtype)
+    cond = cond.cast(trueval.dtype)
     return cond * trueval + (1.0 - cond) * falseval
 
 
@@ -1297,7 +1296,7 @@ def tril(self, k: int = 0) -> Tensor:
 
 @procedure_set.register()
 def trunc(self: Tensor) -> Tensor:
-    return self.convert(slope.int32).convert(self.dtype)
+    return self.cast(slope.int32).cast(self.dtype)
 
 
 @procedure_set.register()

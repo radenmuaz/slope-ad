@@ -59,21 +59,21 @@ def T(self, cts, x):
     return [slope.zeros_like(z)]
 
 
-convert = Operator.unary("convert")
-astype = convert
-operator_set.register(convert)
-operator_set.alias(convert, "astype")
+cast = Operator.unary("cast")
+astype = cast
+operator_set.register(cast)
+operator_set.alias(cast, "astype")
 
 
-@convert.set_method
+@cast.set_method
 def typecheck(self, x: Typecheckor, *, dtype) -> List[Typecheckor]:
     return [Typecheckor(x.shape, dtype)]
 
 
-@convert.set_method
+@cast.set_method
 def jvp(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
-    return [x.convert(dtype)], [x_dot.convert(dtype)]
+    return [x.cast(dtype)], [x_dot.cast(dtype)]
 
 
 sqrt = Operator.unary("sqrt")
@@ -301,7 +301,7 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
     locs = x.equal(_out.broadcast(x.shape))
-    locs = locs.convert(x_dot.dtype)
+    locs = locs.cast(x_dot.dtype)
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
     jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
@@ -947,7 +947,9 @@ onnxruntime_backend.set_dtype_map(
 
 @onnxruntime_backend.set_method
 def tensor(self, val, dtype=onnxruntime_backend.default_dtype_value):
-    val = np.array(val, dtype=onnxruntime_backend.dtype_map[dtype])
+    val = onnxruntime.OrtValue.ortvalue_from_numpy(
+        np.array(val, dtype=onnxruntime_backend.dtype_map[dtype])
+    )
     return Tensor(TensorBuffer(val))
 
 
@@ -966,52 +968,36 @@ def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     exec_locals = {}
     code = "\n".join(code_lines)
-    # X is numpy array on cpu
-
     model = onnx.parser.parse_model(code_lines)
-    # text = onnx.printer.to_text(model)
+    slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
     onnx.checker.check_model(model)
-
-    def run(*args):
-        # X is numpy array on cpu
-        X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(X, "cuda", 0)
-        # Y_ortvalue = onnxruntime.OrtValue.ortvalue_from_shape_and_type([3, 2], np.float32, 'cuda', 0)
-        session = onnxruntime.InferenceSession(
-            "model.onnx", providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+    session = onnxruntime.InferenceSession(
+            model, providers=[
+                # "CUDAExecutionProvider", 
+                "CPUExecutionProvider"
+                ]
         )
+    def fn(*args):
+        # X_ortvalue = onnxruntime.OrtValue.ortvalue_from_numpy(X, "cuda", 0)
+        # Y_ortvalue = onnxruntime.OrtValue.ortvalue_from_shape_and_type([3, 2], np.float32, 'cuda', 0)
+        
         io_binding = session.io_binding()
-        io_binding.bind_input(
+        for a in args:
+            io_binding.bind_input(
             name="input",
-            device_type=X_ortvalue.device_name(),
+            device_type=a.device_name(),
             device_id=0,
             element_type=np.float32,
-            shape=X_ortvalue.shape(),
-            buffer_ptr=X_ortvalue.data_ptr(),
+            shape=a.shape(),
+            buffer_ptr=a.data_ptr(),
         )
-        # Request ONNX Runtime to bind and allocate memory on CUDA for 'output'
         io_binding.bind_output("output", "cuda")
-        # io_binding.bind_ortvalue_input('input', X_ortvalue)
-        # io_binding.bind_ortvalue_output('output', Y_ortvalue)
         session.run_with_iobinding(io_binding)
-        # The following call returns an OrtValue which has data allocated by ONNX Runtime on CUDA
-        ort_output = io_binding.get_outputs()[0]
+        ort_output = io_binding.get_outputs()
         return ort_output
 
     return fn, code
 
-
-example_input = """
-<
-    ir_version: 7,
-    opset_import: ["" : 10]
->
-name (float[N, 128] X, float[128, 10] W, float[10] B) => (float[N, 10] C)
-{
-    T = MatMul(X, W)
-    S = Add(T, B)
-    C = Softmax(S)
-}
-"""
 
 
 @onnxruntime_backend.set_method
@@ -1036,22 +1022,22 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     inb_arg_types = []
     inb_consts = []
     inb_const_types = []
+    outs = []
+    out_types = []
+
+    body_code_lines = []
 
     for inb in program.in_binders:
         if type(inb.aval) is not Typecheckor:
             environment[inb] = f"c{ncs}"
             inb_consts += [environment[inb]]
-            inb_const_types += []
+            inb_const_types += [inb.aval]
             ncs += 1
         else:
             environment[inb] = f"x{nxs}"
             inb_args += [environment[inb]]
-            inb_arg_types += []
+            inb_arg_types += [inb.aval]
             nxs += 1
-    for out in program.outs:
-        inb_consts += [environment[out]]
-        inb_const_types += []
-        nys += 1
 
     for instruction in program.instructions:
         in_vals = list_map(lambda x: environment[x], instruction.inputs)
@@ -1061,6 +1047,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 nys += 1
             else:
                 environment[outb] = f"z{nzs}"
+                outs += [environment[outb]]
+                out_types += [outb.aval]
                 nzs += 1
 
         out_vals = list_map(lambda z: environment[z], instruction.out_binders)
@@ -1080,7 +1068,6 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 impl_lines = rhs.strip().split("\n")
                 lhs = "\n".join(impl_lines[:-1] + [lhs])
                 rhs = impl_lines[-1]
-            rhs = rhs.replace("return ", "")
         if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
             rhs = rhs.replace("(, ", "(")
         for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
@@ -1088,32 +1075,38 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         code_line = f"{lhs} = {rhs}"
 
         for code_line_line in code_line.split("\n"):  # handle multi-line code
-            code_lines += [indent(code_line_line, il1)]
+            body_code_lines += [indent(code_line_line, il1)]
 
-    outs = list_map(lambda x: environment[x], program.outs)
-    ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
-    code_lines += [indent(f"return {ret_str}", il1)]
-    if fn_name == "main":
-        if len(fn_defs) > 0:
-            code_lines = (
-                code_lines[0:1]
-                + [indent(line, il1) for impl_lines in fn_defs.values() for line in impl_lines]
-                + code_lines[1:]
-            )
+   
 
     head_code_lines = []
     head_code_lines += ["<"]
     head_code_lines += ["    ir_version: 7,"]
     head_code_lines += ["    opset_import: [" " : 10]"]
     head_code_lines += [">"]
-    fn_args_strs = f""
+    fn_args_str = f""
     if inb_consts:
         const_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)]
-        fn_args_strs += f"{', '.join(const_type_strs)}"
+        fn_args_str = f"{', '.join(const_type_strs)}"
 
     arg_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)]
-    fn_args_strs += f"{', '.join(arg_type_strs)}"
-    head_code_lines += [f"{fn_name} ({fn_args_strs}) =>"]
+    fn_args_str += f"{', '.join(arg_type_strs)}"
+    out_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(outs, out_types)]
+    out_type_str = f"{', '.join(out_type_strs)}"
+    head_code_lines += [f"{fn_name} ({fn_args_str}) => {out_type_str}"]
+
+    # outs = list_map(lambda x: environment[x], program.outs)
+    # ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
+    # code_lines += [indent(f"return {ret_str}", il1)]
+    # if fn_name == "main":
+    #     if len(fn_defs) > 0:
+    #         code_lines = (
+    #             code_lines[0:1]
+    #             + [indent(line, il1) for impl_lines in fn_defs.values() for line in impl_lines]
+    #             + code_lines[1:]
+    #         )
+
+    code_lines = head_code_lines + body_code_lines
 
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
@@ -1125,60 +1118,60 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 ### Operator Impls
 
-onnxruntime_backend.set_impl(operator_set.convert)(lambda self, x, *, dtype: f"return {x}.astype(dtype={dtype})")
-onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"return {x}")
-onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"return np.negative({x})")
-onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"return np.sqrt({x})")
-onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"return np.exp({x})")
-onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"return np.log({x})")
-onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"return np.sin({x})")
-onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"return np.add({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"return np.subtract({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"return np.multiply({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"return np.divide({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"return np.invert({x})")
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"return np.equal({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"return np.maximum({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"Cast({x}, 1 ,{dtype})")
+onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"{x}")
+onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"Neg({x})")
+onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"Sqrt({x})")
+onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"Exp({x})")
+onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"Log({x})")
+onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"Sin({x})")
+onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"Add({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"Sub({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"Mul({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"Div({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"BitwiseNot({x})")
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"Equal({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"Max({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: f"return np.sum({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"Sum({x}, axes={axes}, keepdims={keepdims})"
 )
 onnxruntime_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: f"return np.max({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"Max({x}, axis={axes}, keepdims={keepdims})"
 )
 onnxruntime_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"return np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.full)(
-    lambda self, *, shape, fill_value, dtype: f"return np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
+    lambda self, *, shape, fill_value, dtype: f"Constant(shape={shape}, fill_value={fill_value}, dtype={dtype})"
 )
 
 onnxruntime_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"return np.random.uniform(size={shape}).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"RandomUniform(size={shape}).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"return np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"return np.broadcast_to({x}, shape={shape})"
+    lambda self, x, *, shape: f"Expand({x}, shape={shape})"
 )
 
 onnxruntime_backend.set_impl(operator_set.reshape)(
-    lambda self, x, *, shape: f"return np.reshape({x}, newshape={shape})"
+    lambda self, x, *, shape: f"Reshape({x}, newshape={shape})"
 )
 onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"return np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
 onnxruntime_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"return {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
+    lambda self, x, *, starts, limits, strides: f"Slice({x}, [tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))])"
 )
 
 onnxruntime_backend.set_impl(operator_set.concatenate)(
-    lambda self, *xs, axis: f"return np.concatenate({xs}, axis={axis})"
+    lambda self, *xs, axis: f"Concat({xs}, axis={axis})"
 )
-onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"return np.transpose({x}, axes={perm})")
-onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"return np.flip({x}, axis={axes})")
+onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"Transpose({x}, axes={perm})")
+onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ReverseSequence({x}, axis={axes})")
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)
@@ -1266,7 +1259,7 @@ def relu(x):
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
-    cond = cond.convert(trueval.dtype)
+    cond = cond.cast(trueval.dtype)
     return cond * trueval + (1.0 - cond) * falseval
 
 
@@ -1428,7 +1421,7 @@ def tril(self, k: int = 0) -> Tensor:
 
 @procedure_set.register()
 def trunc(self: Tensor) -> Tensor:
-    return self.convert(slope.int32).convert(self.dtype)
+    return self.cast(slope.int32).cast(self.dtype)
 
 
 @procedure_set.register()

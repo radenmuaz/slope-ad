@@ -38,12 +38,8 @@ import string
 import numpy as np
 import math
 import inspect
-import functools
-from functools import partial
-
-# from types import MappingProxyType
+from functools import partial, lru_cache
 import slope
-import importlib
 
 
 # ================
@@ -65,12 +61,7 @@ def list_zip(*args: Any) -> Any:
     fst, *rest = args = list_map(list, args)
     n = len(fst)
     for arg in rest:
-        # assert len(arg) == n
-        try:
-            assert len(arg) == n
-        except:
-            breakpoint()
-            raise
+        assert len(arg) == n
     return list(zip(*args))
 
 
@@ -103,7 +94,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
 
 def lru_cache_verbose(maxsize=None, typed=False):
     def decorator(fn):
-        @functools.lru_cache(maxsize=maxsize, typed=typed)
+        @lru_cache(maxsize=maxsize, typed=typed)
         def wrapper(*args, **kwargs):
             return fn(*args, **kwargs)
 
@@ -118,6 +109,18 @@ def lru_cache_verbose(maxsize=None, typed=False):
         return decorated_function
 
     return decorator
+
+
+def cuda_is_available():
+    try:
+        import subprocess
+        import platform
+        cmd = f"nvidia-smi{'.exe' if platform.system == 'Windows' else ''}"
+        result = subprocess.run([cmd], stdout=subprocess.PIPE)
+        output = result.stdout.decode('utf-8')
+        return True if "NVIDIA-SMI" in output else False
+    except FileNotFoundError:
+        return False
 
 
 class PPrint:
@@ -671,6 +674,8 @@ class ProcedureSet:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
             assert len(args) == len(args_strs)
 
+            # TODO: this doesn't work
+            # static_args = slope.M().tree_map(lambda x: tuple(x) if isinstance(x, list) else x, static_args)
             for k, v in static_args.items():
                 if type(v) is list:
                     static_args[k] = tuple(v)
@@ -729,7 +734,6 @@ def typecheck(self, *in_types, program):
         slope.dblog(f"Typecheck error:")
         for i, j in zip(program_type.in_types, in_types):
             slope.dblog(f"{i == j=}: {i=}, {j=}")
-        breakpoint()
         raise TypeError
     return program_type.out_types
 

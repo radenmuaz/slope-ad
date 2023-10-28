@@ -14,21 +14,21 @@ DEVICE=f'{DEVICE_NAME}:{DEVICE_INDEX}'
 SIZE = (1, 3, 32, 32)
 
 model_text = """
-<
-   ir_version: 9,
-   opset_import: ["" : 15, "slope" : 1]
->
-agraph (int64[] shape) => (float[] y) {
-   one = Constant <value = float[1] {1}> ()
-   y = slope.full (one, shape)
+<ir_version: 9,opset_import: ["" : 15, "slope" : 1]>
+model (int64[] shape) => (float[] y) {
+   y = slope.ones (shape)
 }
-<
-  domain: "slope",
-  opset_import: ["" : 1]
->
+<domain: "slope",opset_import: ["" : 15]>
 full (x, shape) => (y)
 {
    y = Expand (x, shape)
+}
+
+<domain: "slope", opset_import: ["" : 15, "slope" : 1]>
+ones (shape) => (y)
+{
+   one = Constant <value = float[1] {1}> ()
+   y = slope.full(one, shape)
 }
 """
 model = onnx.parser.parse_model(model_text)

@@ -13,6 +13,7 @@ DEVICE_INDEX = 0
 DEVICE=f'{DEVICE_NAME}:{DEVICE_INDEX}'
 SIZE = (1, 3, 32, 32)
 
+# 1.
 
 full_text = """
 <
@@ -40,6 +41,9 @@ opset_imports = [
 model = onnx.helper.make_model(
     graph, functions=functions, opset_imports=opset_imports
 )
+model_text = onnx.printer.to_text(model)
+print(model_text)
+
 path = "/tmp/model.onnx"
 onnx.save_model(model, path)
 sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
@@ -50,40 +54,3 @@ for o in out:
     print(f"{o.shape=}\n{o=}")
 
 # onnx.checker.check_model(model)
-
-
-
-
-#  <
-#     ir_version: 7,
-#     opset_import: ["" : 14]
-# >
-# model (int64[] shape) => (float y) {    
-#     one = Constant <value=float[1]{1}>()
-#     y = slope.full(one, shape)
-# }
-
-#  <
-#           domain: "slope",
-#           opset_import: [ "" : 15],
-#           doc_string: "Test function proto"
-# >
-# full (float[1] x, int64[] shape) => (float y) {
-#     y = Expand(x, shape)
-# }
-# '''
-# model = onnx.parser.parse_model(text)
-# text = onnx.printer.to_text(model)
-# print(text)
-
-# model = onnx.parser.parse_model(code)
-
-# text = onnx.printer.to_text(model)
-# path = "/tmp/model.onnx"
-# onnx.save_model(model, path)
-# print(text)
-# sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
-# input = dict( shape=np.array([2,1]) )
-# out = sess.run(['y'], input)
-# for o in out:
-#     print(f"{o.shape=}\n{o=}")

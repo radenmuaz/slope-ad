@@ -594,7 +594,7 @@ class Operator:
 
     @classmethod
     def binary_reduce(cls, name, **kwargs):
-        op = cls(name, OperatorType.binary_reduce, **kwargs)
+        op = cls(name, OperatorType.BinaryReduce, **kwargs)
         return op
 
     @classmethod

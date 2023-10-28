@@ -1,19 +1,16 @@
 import slope
 import numpy as np
-# x = slope.tensor(np.array([1,2,3]))
 x = slope.ones((3,))
-# print(x)
 
 @slope.jit
 def f(x):
-    y = x.sum()
+    # y = x.sum()
+    y = x + x
     return y
 
 
 
 # x = slope.ones(())
-# print(x)
-print(f(x))
 print(f(x))
 print(f(x))
 
@@ -41,7 +38,7 @@ print(f(x))
 # print(jvp_out)
 # out = f(x); print(out)
 
-g_out = slope.grad(f)(x); print(g_out)
+# g_out = slope.grad(f)(x); print(g_out)
 # g_out = slope.grad(f)(x); print(g_out)
 
 # print(f(x))

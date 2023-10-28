@@ -34,9 +34,9 @@ def M():
 
 
 def default_slope_init():
-    from slope.environments.v1 import v1_environment
+    from slope.environments.v2 import v2_environment
 
-    return core.Machine(environment=v1_environment)
+    return core.Machine(environment=v2_environment)
 
 
 slope_init = default_slope_init

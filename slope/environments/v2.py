@@ -1055,24 +1055,13 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         if len(out_vals) == 0:  # skip codegen for function returns nothing
             continue
 
-        if len(out_vals) == 1:
-            lhs = f"{out_vals[0]}"
-        else:
-            lhs = ", ".join(out_vals)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
-            lhs += ", "
-            rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+            code_line, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
         else:
-            rhs = self.impls[instruction.op](*in_vals, **instruction.params)
-            if "\n" in rhs:  # multi-line impls
-                impl_lines = rhs.strip().split("\n")
-                lhs = "\n".join(impl_lines[:-1] + [lhs])
-                rhs = impl_lines[-1]
-        if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
-            rhs = rhs.replace("(, ", "(")
-        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
-            rhs = rhs.replace(np_dtype.name, f"np.{np_dtype.name}")
-        code_line = f"{lhs} = {rhs}"
+            code_line = self.impls[instruction.op](*in_vals, **instruction.params)
+        
+        for i in range(len(out_vals)):
+            code_line.replace(f"ret{i}", out_vals[i])
 
         for code_line_line in code_line.split("\n"):  # handle multi-line code
             body_code_lines += [indent(code_line_line, il1)]
@@ -1106,60 +1095,64 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     #             + code_lines[1:]
     #         )
 
-    code_lines = head_code_lines + body_code_lines
+    code_lines = head_code_lines + ['{'] + body_code_lines + ['}']
 
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
         del self.fn_count
-
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 
 ### Operator Impls
 
-onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"Cast({x}, 1 ,{dtype})")
-onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"{x}")
-onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"Neg({x})")
-onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"Sqrt({x})")
-onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"Exp({x})")
-onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"Log({x})")
-onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"Sin({x})")
-onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"Add({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"Sub({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"Mul({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"Div({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"BitwiseNot({x})")
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"Equal({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"Max({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = Cast({x}, 1 ,{dtype})")
+onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret = Neg({x})")
+onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
+onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"ret = Exp({x})")
+onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"ret = Log({x})")
+onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"ret = Sin({x})")
+onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"ret = Add({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = Sub({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = Mul({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = BitwiseNot({x})")
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: f"Sum({x}, axes={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"ret = Sum({x}, axes={axes}, keepdims={keepdims})"
 )
 onnxruntime_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: f"Max({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"ret = Max({x}, axis={axes}, keepdims={keepdims})"
 )
 onnxruntime_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"ret = Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
 )
-onnxruntime_backend.set_impl(operator_set.full)(
-    lambda self, *, shape, fill_value, dtype: f"Constant(shape={shape}, fill_value={fill_value}, dtype={dtype})"
-)
+@onnxruntime_backend.set_impl(operator_set.full)
+
+def full_impl(self, *, shape, fill_value, dtype):
+    ret = ""
+    ret += f"ret_value = Constant <values = {dtype.name}[1] {{fill_value}} >()\n"
+    ret += f"ret_shape = Constant <values = int64[{len(shape)}] {repr(shape)[1:-1]} >()\n"
+    ret += f"ret = Expand(ret_value, ret_shape)"
+    return ret
 
 onnxruntime_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"RandomUniform(size={shape}).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"ret = RandomUniform(size={shape}).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"ret = RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"Expand({x}, shape={shape})"
+    lambda self, x, *, shape: f"ret = Expand({x}, shape={shape})"
 )
 
 onnxruntime_backend.set_impl(operator_set.reshape)(
-    lambda self, x, *, shape: f"Reshape({x}, newshape={shape})"
+    lambda self, x, *, shape: f"ret = Reshape({x}, newshape={shape})"
 )
 onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"ret = Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
@@ -2086,4 +2079,4 @@ def cumsum(x, axis: int = 0):
     return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)
 
 
-v1_environment = Environment(operator_set, procedure_set, onnxruntime_backend)
+v2_environment = Environment(operator_set, procedure_set, onnxruntime_backend)

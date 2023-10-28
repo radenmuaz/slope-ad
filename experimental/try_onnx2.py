@@ -14,17 +14,17 @@ DEVICE=f'{DEVICE_NAME}:{DEVICE_INDEX}'
 SIZE = (1, 3, 32, 32)
 
 model_text = """
-<ir_version: 9,opset_import: ["" : 15, "slope" : 1]>
+<ir_version: 9,opset_import: ["" : 17, "slope" : 1]>
 model (int64[] shape) => (float[] y) {
    y = slope.ones (shape)
 }
-<domain: "slope",opset_import: ["" : 15]>
+<domain: "slope",opset_import: ["" : 17]>
 full (x, shape) => (y)
 {
    y = Expand (x, shape)
 }
 
-<domain: "slope", opset_import: ["" : 15, "slope" : 1]>
+<domain: "slope", opset_import: ["" : 17, "slope" : 1]>
 ones (shape) => (y)
 {
    one = Constant <value = float[1] {1}> ()
@@ -44,4 +44,4 @@ out = sess.run(output_names, input)
 for o in out:
     print(f"{o.shape=}\n{o=}")
 
-# onnx.checker.check_model(model)
+# onnx.checker.checkm _model(model)

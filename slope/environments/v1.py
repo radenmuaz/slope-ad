@@ -881,10 +881,17 @@ def tensor(self, val, dtype=numpy_backend.default_dtype_value):
 def numpy_of(self, tensor):
     return tensor.buf.val
 
-
 @numpy_backend.set_method
 def device_of(self, tensor):
     return "cpu"
+
+@numpy_backend.set_method
+def shape_of(self, tensor):
+    return tensor.buf.val.shape
+
+@numpy_backend.set_method
+def dtype_of(self, tensor):
+    return tensor.buf.val.dtype
 
 
 @numpy_backend.set_method

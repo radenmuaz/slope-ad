@@ -218,6 +218,10 @@ class Tensor:
     dtype_short_names = {k.short_name: k for k in dtypes}
     dtype_short_names_inv = {v: k for k, v in dtype_short_names.items()}
 
+    def __init__(self, val: TensorBuffer):
+        assert isinstance(val, TensorBuffer)
+        self.buf = val
+
     @property
     def default_dtype(self):
         return slope.M().environment.backend.default_dtype
@@ -275,9 +279,7 @@ class Tensor:
     __gt__ = lambda self, other: self.greater(other)
     __lt__ = lambda self, other: self.less(other)
 
-    def __init__(self, val: TensorBuffer):
-        assert isinstance(val, TensorBuffer)
-        self.buf = val
+    
 
     def __hash__(self):
         return id(self.val)
@@ -294,14 +296,19 @@ class Tensor:
 
     def numpy(self):
         return slope.M().environment.backend.numpy_of(self)
+    
+    @property
+    def shape(self):
+        return slope.M().environment.backend.shape_of(self)
 
-    shape = property(lambda self: self.buf.val.shape)
-    ndim = property(lambda self: self.buf.val.ndim)
+    @property
+    def ndim(self):
+        return len(self.shape)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}: {repr(self.val)[6:-1] if self.val.ndim > 0 else self.val}"
+        return f"{self.val}"
 
-    __str__ = __repr__
+    # __str__ = __repr__
 
 
 class Typecheckor:
@@ -1155,9 +1162,10 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Backend:
-    def __init__(self, name, default_dtype=Tensor.float32):
+    def __init__(self, name, default_dtype=Tensor.float32, default_device="cpu"):
         self.name = name
         self.default_dtype = default_dtype
+        self.default_device = default_device
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()
@@ -1169,10 +1177,21 @@ class Backend:
     def default_dtype_value(self):
         return self.dtype_map[self.default_dtype]
 
+    
+
     def tensor(self, val):
         raise NotImplementedError
 
     def numpy_of(self, tensor):
+        raise NotImplementedError
+    
+    def device_of(self, tensor):
+        raise NotImplementedError
+    
+    def shape_of(self, tensor):
+        raise NotImplementedError
+    
+    def dtype_of(self, tensor):
         raise NotImplementedError
 
     @lru_cache_verbose()

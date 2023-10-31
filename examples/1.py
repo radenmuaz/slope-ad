@@ -1,7 +1,9 @@
 import slope
 import numpy as np
 x = slope.ones((3,))
-print(x)
+
+y = x+x
+print(y)
 
 # @slope.j`it
 # def f(x):

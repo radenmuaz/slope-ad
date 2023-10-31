@@ -236,8 +236,6 @@ class Tensor:
         return self.dtype is self.uint8
 
     def __getattr__(self, attr):
-        if attr in self.__dict__.keys():
-            return self.__dict__[attr]
         if attr in vars(slope.M().environment.operator_set).keys():
             op = getattr(slope.M().environment.operator_set, attr)
             return partial(op, self)
@@ -245,7 +243,8 @@ class Tensor:
             procedure = getattr(slope.M().environment.procedure_set, attr)
             assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
             return partial(procedure, self)
-        raise AttributeError(f"{self.__class__.__name__} has no attribute {attr}")
+        else:
+            return self.__getattribute__(attr)
 
     def __getitem__(self, idx):
         return self.getitem(idx)
@@ -279,8 +278,6 @@ class Tensor:
     __gt__ = lambda self, other: self.greater(other)
     __lt__ = lambda self, other: self.less(other)
 
-    
-
     def __hash__(self):
         return id(self.val)
 
@@ -288,7 +285,7 @@ class Tensor:
 
     @property
     def dtype(self):
-        return slope.M().environment.backend.dtype_map_inv[self.buf.val.dtype]
+        return slope.M().environment.backend.dtype_of(self)
 
     @property
     def device(self):
@@ -306,9 +303,8 @@ class Tensor:
         return len(self.shape)
 
     def __repr__(self):
-        return f"{self.val}"
+        return f"Tensor: {self.numpy()}, {self.dtype}, {self.device}"
 
-    # __str__ = __repr__
 
 
 class Typecheckor:
@@ -823,8 +819,10 @@ class Environment:
     ):
         if isinstance(val, TensorBuffer):
             return Tensor(val)
+        elif isinstance(val, Tensor):
+            return val
         else:
-            return slope.M().environment.backend.tensor(val, dtype)
+            return slope.M().environment.backend.from_numpy(val, dtype)
 
     def save(arr: "Tensor", filename: str):
         # TODO
@@ -1179,7 +1177,7 @@ class Backend:
 
     
 
-    def tensor(self, val):
+    def from_numpy(self, val):
         raise NotImplementedError
 
     def numpy_of(self, tensor):

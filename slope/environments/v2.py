@@ -949,10 +949,9 @@ onnxruntime_backend.set_dtype_map(
 
 
 @onnxruntime_backend.set_method
-def tensor(self, val, dtype=onnxruntime_backend.default_dtype_value,
+def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value,
            device=onnxruntime_backend.default_device):
     device_type, device_id = device.split(":") if ":" in device else (device, "0")
-
     val = onnxruntime.OrtValue.ortvalue_from_numpy(
         np.array(val, dtype=onnxruntime_backend.dtype_map[dtype]),
         device_type=device_type,
@@ -965,11 +964,9 @@ def tensor(self, val, dtype=onnxruntime_backend.default_dtype_value,
 def numpy_of(self, tensor):
     return tensor.buf.val.numpy()
 
-
 @onnxruntime_backend.set_method
 def device_of(self, tensor):
     return tensor.buf.val.device_name()
-
 
 @onnxruntime_backend.set_method
 def shape_of(self, tensor):
@@ -977,12 +974,11 @@ def shape_of(self, tensor):
 
 @onnxruntime_backend.set_method
 def dtype_of(self, tensor):
-    return tensor.buf.val.dtype()
+    return tensor.buf.val.data_type()
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
-    exec_locals = {}
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
     slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)

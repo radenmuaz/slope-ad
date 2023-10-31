@@ -872,7 +872,7 @@ numpy_backend.set_dtype_map(
 
 
 @numpy_backend.set_method
-def tensor(self, val, dtype=numpy_backend.default_dtype_value):
+def from_numpy(self, val, dtype=numpy_backend.default_dtype_value):
     val = np.array(val, dtype=numpy_backend.dtype_map[dtype])
     return Tensor(TensorBuffer(val))
 

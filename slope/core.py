@@ -315,10 +315,7 @@ class Typecheckor:
     @classmethod
     def like(cls, aval):
         shape = aval.shape
-        if isinstance(aval, Tensor):
-            dtype = slope.M().environment.backend.dtype_map_inv[aval.buf.val.dtype]
-        else:
-            dtype = aval.dtype
+        dtype = aval.dtype
         return cls(shape, dtype)
 
     @property

@@ -974,7 +974,7 @@ def shape_of(self, tensor):
 
 @onnxruntime_backend.set_method
 def dtype_of(self, tensor):
-    return tensor.buf.val.data_type()
+    return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):
@@ -997,14 +997,14 @@ def compile(self, codegen_out):
             name=a_name,
             device_type=a.device_name(),
             device_id=0,
-            element_type=np.float32,
+            element_type=a.data_type(),
             shape=a.shape(),
             buffer_ptr=a.data_ptr(),
         )
         for o in codegen_out["outs"]:
-            io_binding.bind_output(o, "cpu")
+            io_binding.bind_output(o, self.default_device)
         session.run_with_iobinding(io_binding)
-        outputs = tuple(slope.tensor(TensorBuffer(o)) for o in io_binding.get_outputs())
+        outputs = io_binding.get_outputs()
         return outputs
     return fn, code
 

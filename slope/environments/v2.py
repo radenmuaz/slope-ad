@@ -997,7 +997,7 @@ def compile(self, codegen_out):
             name=a_name,
             device_type=a.device_name(),
             device_id=0,
-            element_type=a.data_type(),
+            element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].np,
             shape=a.shape(),
             buffer_ptr=a.data_ptr(),
         )
@@ -1070,7 +1070,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             (rhs, _), fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
         else:
             (call_code, function_code) = self.impls[instruction.op](*in_vals, **instruction.params)
-            fn_defs[instruction.op] = function_code
+            if function_code is not None:
+                fn_defs[instruction.op] = function_code
             rhs = call_code
             if "\n" in rhs:  # multi-line impls
                 impl_lines = rhs.strip().split("\n")
@@ -1127,22 +1128,22 @@ onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: ImplOut(f" Neg({x
 onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: ImplOut(f"Sqrt({x})"))
 onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: ImplOut(f"Exp({x})"))
 onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: ImplOut(f"Log({x})"))
-onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: ImplOut(f"ret = Sin({x})"))
-onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: ImplOut(f"ret = Add({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: ImplOut(f"ret = Sub({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: ImplOut(f"ret = Mul({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: ImplOut(f"ret = Div({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: ImplOut(f"ret = BitwiseNot({x})"))
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: ImplOut(f"ret = Equal({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: ImplOut(f"ret = Max({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: ImplOut(f"Sin({x})"))
+onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: ImplOut(f"Add({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: ImplOut(f"Sub({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: ImplOut(f"Mul({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: ImplOut(f"Div({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: ImplOut(f"BitwiseNot({x})"))
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: ImplOut(f"Equal({x1}, {x2})"))
+onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: ImplOut(f"Max({x1}, {x2})"))
 onnxruntime_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: ImplOut(f"ret = Sum({x}, axes={axes}, keepdims={keepdims})")
+    lambda self, x, *, axes, keepdims: ImplOut(f"Sum({x}, axes={axes}, keepdims={keepdims})")
 )
 onnxruntime_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: ImplOut(f"ret = Max({x}, axis={axes}, keepdims={keepdims})")
+    lambda self, x, *, axes, keepdims: ImplOut(f"Max({x}, axis={axes}, keepdims={keepdims})")
 )
 onnxruntime_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"ret = Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
 )
 @onnxruntime_backend.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
@@ -1162,20 +1163,20 @@ slope.full(shape, fill_value)""",
 """)
 
 onnxruntime_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"ret = RandomUniform(size={shape}).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"RandomUniform(size={shape}).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"ret = RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: f"RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
 onnxruntime_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"ret = Expand({x}, shape={shape})"
+    lambda self, x, *, shape: f"Expand({x}, shape={shape})"
 )
 
 onnxruntime_backend.set_impl(operator_set.reshape)(
-    lambda self, x, *, shape: f"ret = Reshape({x}, newshape={shape})"
+    lambda self, x, *, shape: f"Reshape({x}, newshape={shape})"
 )
 onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"ret = Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
@@ -1668,7 +1669,7 @@ def getitem(self, val):
                 if isinstance(s, slope.core.Tensor):
                     tensors.append(s)
                     dim.append(i - dim_collapsed)
-    ret = sliced_tensor.reshape(tuple(final_shape))
+    sliced_tensor.reshape(tuple(final_shape))
 
     if tensors:  # Fancy/tensor indexing
         # normalize idx
@@ -1700,14 +1701,14 @@ def getitem(self, val):
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx
-        ret = ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
+        ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
         # iteratively fancy index
         for a, i, sd in zip(slice_arange, idx, sum_dim):
-            ret = (a == i).mul(ret).sum(sd)
+            (a == i).mul(ret).sum(sd)
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret = ret.transpose(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
+            ret.transpose(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
@@ -1980,7 +1981,7 @@ def conv(x, weight, groups=1, stride=1, dilation=1, padding=0):
     x = x * weight.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
     x = x.reshape((bs, cout, *oyx))
-    ret = x
+    x
     return ret
 
 
@@ -2079,17 +2080,17 @@ def conv_wino(x, weight, groups=1, stride=1, dilation=1, padding=0):
         apply_matrix(winograd_Bt, d).contiguous().reshape(*HWI, bs, groups, 1, cin, *tyx)
     )  # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
 
-    ret = apply_matrix(
+    apply_matrix(
         winograd_At, (gfactors * dfactors).sum(axis=-1 - len(HW))
     )  # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
 
-    ret = ret.transpose(
+    ret.transpose(
         [
             *range(len(HW), len(ret.shape) - len(HW)),
             *[i + o for i in range(len(HW)) for o in [len(ret.shape) - len(HW), 0]],
         ]
     )  # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
-    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).slice(
+    ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).slice(
         tuple((0, s) for s in [bs, cout, *oyx])
     )  # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
 

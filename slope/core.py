@@ -192,7 +192,7 @@ class DType(NamedTuple):
     itemsize: int
     name: str
     short_name: str
-    np: type
+    numpy: type
 
     def __repr__(self):
         return f"{self.name}"

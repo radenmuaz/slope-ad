@@ -997,7 +997,7 @@ def compile(self, codegen_out):
             name=a_name,
             device_type=a.device_name(),
             device_id=0,
-            element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].np,
+            element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
             shape=a.shape(),
             buffer_ptr=a.data_ptr(),
         )

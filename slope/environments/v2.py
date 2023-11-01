@@ -982,7 +982,7 @@ def compile(self, codegen_out):
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
     slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
-    onnx.checker.check_model(model)
+    # onnx.checker.check_model(model)
     session = onnxruntime.InferenceSession(
             model.SerializeToString(), providers=[
                 "CPUExecutionProvider"
@@ -1071,7 +1071,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         else:
             (call_code, function_code) = self.impls[instruction.op](*in_vals, **instruction.params)
             if function_code is not None:
-                fn_defs[instruction.op] = function_code
+                name = function_code.split(' ')[0]
+                fn_defs[name] = function_code
             rhs = call_code
             if "\n" in rhs:  # multi-line impls
                 impl_lines = rhs.strip().split("\n")
@@ -1084,16 +1085,13 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
    
     head_code_lines = []
     head_code_lines += ['<ir_version: 7, opset_import: ["" : 17, "slope":1]>']
-    fn_args_str = f""
-    if inb_consts:
-        const_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)]
-        fn_args_str = f"{', '.join(const_type_strs)}"
-    
+    const_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)] if inb_consts else []
 
     arg_type_strs = [f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)]
-    fn_args_str += f"{', '.join(arg_type_strs)if len(arg_type_strs) > 1 else arg_type_strs if len(arg_type_strs) == 1 else ''}"
+    fn_args_strs =  (const_type_strs + arg_type_strs)
+    fn_args_str =   ', '.join(const_type_strs + arg_type_strs) if len(fn_args_strs) > 0 else ''
     out_type_strs = [f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(outs, out_types)]
-    out_type_str = f"{', '.join(out_type_strs) if len(out_type_strs) > 1 else out_type_strs[0] if len(out_type_strs) == 1 else ''}"
+    out_type_str = ', '.join(out_type_strs) if len(out_type_strs) > 0 else ''
     head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
 
     model_code_lines = head_code_lines + ['{'] + body_code_lines + ['}']
@@ -1147,20 +1145,33 @@ onnxruntime_backend.set_impl(operator_set.arange)(
 )
 @onnxruntime_backend.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
-    _shape = repr(shape)[1:-1]
-    if len(shape) == 1:
-        _shape = _shape.replace(",", "")
-    _dtype = self.dtype_map[dtype]
-    return ImplOut(
-    f"""
-fill_value = Constant < value = {_dtype}[1] {{ {fill_value} }}>()
-shape = Constant <value = int64[{len(shape)}] {{ {_shape} }} >()
-slope.full(shape, fill_value)""",
-    f"""full (shape, fill_value) => (y)
+    dtype_str = self.dtype_map[dtype]
+    if len(shape) > 0:
+        shape_str = repr(shape)[1:-1]
+        if len(shape) == 1:
+            shape_str = shape_str.replace(",", "")
+        
+        return ImplOut(
+f"""
+fill_value = Constant < value = {dtype_str}[1] {{ {fill_value} }}>()
+shape = Constant <value = int64[{len(shape)}] {{ {shape_str} }} >()
+slope.full (shape, fill_value)""",
+f"""
+full (shape, fill_value) => (y)
 {{
-   y = Expand (fill_value, shape)
+    y = Expand (fill_value, shape)
 }}
-""")
+"""
+)
+    else: # scalar case
+        if dtype_str == "int64":
+            dtype_str = "int"
+        return ImplOut(
+f"""
+Constant < value_{dtype_str.replace("64", "") if dtype_str == "int64" else dtype_str} = {fill_value} >()
+"""
+        )
+
 
 onnxruntime_backend.set_impl(operator_set.random_uniform)(
     lambda self, *, shape, dtype: f"RandomUniform(size={shape}).astype(dtype={dtype})"

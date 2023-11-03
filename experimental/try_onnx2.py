@@ -14,12 +14,17 @@ DEVICE=f'{DEVICE_NAME}:{DEVICE_INDEX}'
 SIZE = (1, 3, 32, 32)
 
 
-
 model_text = """
-<ir_version: 9, opset_import: ["" : 17, "slope" : 1]>
-model () => (float[] y) {
-   y = Constant <value = float[1] {1.0} > ()
+<
+   ir_version: 9,
+   opset_import: ["" : 15]
+>
+agraph (int64[] l) => (int64[] y) {
+   s=Constant <value_int = 0> ()
+   d=Constant <value_int = 1> ()
+   y= Range(s, l, d)
 }
+
 """
 
 model = onnx.parser.parse_model(model_text)
@@ -30,11 +35,68 @@ print(model_text)
 path = "/tmp/model.onnx"
 onnx.save_model(model, path)
 sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
-input = dict()
+input = dict(l=np.array([5]))
 output_names = ['y']
 out = sess.run(output_names, input)
 for o in out:
     print(f"{o.shape=}\n{o=}")
+
+
+# model_text = """
+# <
+#    ir_version: 9,
+#    opset_import: ["" : 15, "slope" : 1]
+# >
+# agraph (int64[] shape) => (float[] y, float[] z,) {
+#    one = Constant <value = float[1] {1}> ()
+#    y, z = slope.full (one, shape)
+# }
+# <
+#   domain: "slope",
+#   opset_import: ["" : 1]
+# >
+# full (x, shape) => (y, z)
+# {
+#    y = Expand (x, shape)
+#    z = x
+# }
+# """
+
+# model = onnx.parser.parse_model(model_text)
+# # onnx.checker.check_model(model)
+# model_text = onnx.printer.to_text(model)
+# print(model_text)
+
+# path = "/tmp/model.onnx"
+# onnx.save_model(model, path)
+# sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
+# input = dict()
+# output_names = ['y']
+# out = sess.run(output_names, input)
+# for o in out:
+#     print(f"{o.shape=}\n{o=}")
+    
+
+# model_text = """
+# <ir_version: 9, opset_import: ["" : 17, "slope" : 1]>
+# model () => (float[] y) {
+#    y = Constant <value = float[1] {1.0} > ()
+# }
+# """
+
+# model = onnx.parser.parse_model(model_text)
+# # onnx.checker.check_model(model)
+# model_text = onnx.printer.to_text(model)
+# print(model_text)
+
+# path = "/tmp/model.onnx"
+# onnx.save_model(model, path)
+# sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
+# input = dict()
+# output_names = ['y']
+# out = sess.run(output_names, input)
+# for o in out:
+#     print(f"{o.shape=}\n{o=}")
     
 # model_text = """
 # <ir_version: 9, opset_import: ["" : 17, "slope" : 1]>

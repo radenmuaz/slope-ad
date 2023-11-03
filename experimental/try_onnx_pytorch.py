@@ -12,6 +12,7 @@ MODEL_FILE = '.model.onnx'
 DEVICE_NAME = 'cuda' if torch.cuda.is_available() else 'cpu'
 DEVICE_INDEX = 0     # Replace this with the index of the device you want to run on
 DEVICE=f'{DEVICE_NAME}:{DEVICE_INDEX}'
+# SIZE = ()
 SIZE = (1, 3, 32, 32)
 
 # A simple model to calculate addition of two tensors
@@ -21,12 +22,14 @@ def model():
             super(Model, self).__init__()
 
         def forward(self, x, y):
-            return x.split(2)
+            # return x.split(2)
             # return x + y + torch.full(SIZE, fill_value=1, dtype=torch.int32)
             # z = torch.ones(1, dtype=torch.float32)#.expand(*SIZE)
             # return x + y + z
-            # return x + y + torch.ones_like(y, dtype=torch.float32)
-
+            # out = (x+y).split(2,2)
+            return torch.arange(10)
+            return out
+            # return x + y + torch.rand_like(y, dtype=torch.flot32)
     return Model()
 
 # Create an instance of the model and export it to ONNX graph format, with dynamic size for the data
@@ -121,9 +124,9 @@ def main():
     print(text)
     model_hat = onnx.parser.parse_model(text.replace('/', ''))
     # print(model_hat)
-
-
-    # print(run(x=np.float32([1.0, 2.0, 3.0]),y=np.float32([4.0, 5.0, 6.0])))
+    ones = np.ones(SIZE, dtype=np.float32)
+    out = run(x=ones,y=ones)
+    for o in out:print(o.shape)
     # [array([5., 7., 9.], dtype=float32)]
 
     # print(run_with_data_on_device(x=np.float32([1.0, 2.0, 3.0, 4.0, 5.0]), y=np.float32([1.0, 2.0, 3.0, 4.0, 5.0])).numpy())

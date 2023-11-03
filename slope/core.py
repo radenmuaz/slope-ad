@@ -115,9 +115,10 @@ def cuda_is_available():
     try:
         import subprocess
         import platform
+
         cmd = f"nvidia-smi{'.exe' if platform.system == 'Windows' else ''}"
         result = subprocess.run([cmd], stdout=subprocess.PIPE)
-        output = result.stdout.decode('utf-8')
+        output = result.stdout.decode("utf-8")
         return True if "NVIDIA-SMI" in output else False
     except FileNotFoundError:
         return False
@@ -204,13 +205,13 @@ class TensorBuffer:
 
 
 class Tensor:
-    bool: Final[DType] = DType(0, 1, "bool", "i1", np.bool_)
-    float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)
     float32: Final[DType] = DType(4, 4, "float32", "f32", np.float32)
+    uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
     int8: Final[DType] = DType(0, 1, "int8", "i8", np.int8)
+    bool: Final[DType] = DType(0, 1, "bool", "i1", np.bool_)
     int32: Final[DType] = DType(1, 4, "int32", "i32", np.int32)
     int64: Final[DType] = DType(2, 8, "int64", "i64", np.int64)
-    uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
+    float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)
 
     dtypes = (bool, float16, float32, int8, int32, int64, uint8)
     dtype_names = {k.name: k for k in dtypes}
@@ -293,7 +294,7 @@ class Tensor:
 
     def numpy(self):
         return slope.M().environment.backend.numpy_of(self)
-    
+
     @property
     def shape(self):
         return slope.M().environment.backend.shape_of(self)
@@ -304,7 +305,6 @@ class Tensor:
 
     def __repr__(self):
         return f"Tensor: {self.numpy()}, {self.dtype}, {self.device}"
-
 
 
 class Typecheckor:
@@ -1172,20 +1172,18 @@ class Backend:
     def default_dtype_value(self):
         return self.dtype_map[self.default_dtype]
 
-    
-
     def from_numpy(self, val):
         raise NotImplementedError
 
     def numpy_of(self, tensor):
         raise NotImplementedError
-    
+
     def device_of(self, tensor):
         raise NotImplementedError
-    
+
     def shape_of(self, tensor):
         raise NotImplementedError
-    
+
     def dtype_of(self, tensor):
         raise NotImplementedError
 

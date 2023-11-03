@@ -1,13 +1,26 @@
 import slope
 
+
 @slope.jit
 def f(x):
-    y = x + x
+    # y = x + x
+    y = x.sum()
     return y
 
-x = slope.ones(())
+# x = slope.ones((16,3,5))
+x = slope.arange(5).cast(slope.float32)
 print(x)
 print(f(x))
+# print(f(x))
+
+# @slope.jit
+# def f(x):
+#     y = x + x
+#     return y
+
+# x = slope.ones(())
+# print(x)
+# print(f(x))
 # print(f(x))
 
 

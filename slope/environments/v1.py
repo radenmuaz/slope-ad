@@ -881,13 +881,16 @@ def from_numpy(self, val, dtype=numpy_backend.default_dtype_value):
 def numpy_of(self, tensor):
     return tensor.buf.val
 
+
 @numpy_backend.set_method
 def device_of(self, tensor):
     return "cpu"
 
+
 @numpy_backend.set_method
 def shape_of(self, tensor):
     return tensor.buf.val.shape
+
 
 @numpy_backend.set_method
 def dtype_of(self, tensor):
@@ -1037,9 +1040,7 @@ numpy_backend.set_impl(operator_set.random_uniform)(
 numpy_backend.set_impl(operator_set.random_normal)(
     lambda self, *, shape, dtype: f"np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
 )
-numpy_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"np.broadcast_to({x}, shape={shape})"
-)
+numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"np.broadcast_to({x}, shape={shape})")
 
 numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"np.reshape({x}, newshape={shape})")
 numpy_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used

@@ -20,16 +20,17 @@ full_text = """
 domain: "slope",
 opset_import: [ "" : 1]
 >
-full (x,shape) => (y) {
-    y = Expand(x, shape)
+full (x,shape) => (y1, y2) {
+    y1 = Expand(x, shape)
+    y2 = Add(x, x)
 }
 """
 functions = [onnx.parser.parse_function(full_text)]
 
 graph_text = '''
-agraph (int64[] shape) => (float[] y) {    
+agraph (int64[] shape) => (float[] y1, float[] y2) {    
     one = Constant <value=float[1]{1}>()
-    y = slope.full(one, shape)
+    y1, y2 = slope.full(one, shape)
 }
 '''
 graph = onnx.parser.parse_graph(graph_text)
@@ -48,9 +49,9 @@ path = "/tmp/model.onnx"
 onnx.save_model(model, path)
 sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
 input = dict( shape=np.array([2]) )
-output_names = ['y']
+output_names = ['y1', 'y2']
 out = sess.run(output_names, input)
-for o in out:
-    print(f"{o.shape=}\n{o=}")
+for n, o in zip(output_names, out):
+    print(f"{n}\nshape: {o.shape=}\ncontents: {o}\n")
 
 # onnx.checker.check_model(model)

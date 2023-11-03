@@ -15,17 +15,7 @@ from slope.core import (
 
 import math
 import numpy as np
-from typing import (
-    Tuple,
-    List,
-    Dict,
-    Any,
-    Optional,
-    Sequence,
-    Union,
-    Iterator,
-    NamedTuple
-)
+from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
 from collections import defaultdict
 import onnx
 import onnxruntime
@@ -830,7 +820,7 @@ operator_set.register(arange)
 
 
 @arange.set_method
-def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
+def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int64):
     if stop is None:
         stop = start
         start = 0
@@ -840,20 +830,20 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
 
 
 @arange.set_method
-def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=Tensor.float32):
+def jvp(self, primals, tangents, *, start, stop, stride, dtype):
     out = self(arange, start, stop, stride, dtype)
     out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_method
-def T(self, cts, *, start, stop, stride=None, dtype=Tensor.float32):
+def T(self, cts, *, start, stop, stride, dtype):
     return [None]
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[Typecheckor]:
-    return [Typecheckor(tuple((stop - start) * stride), dtype)]
+def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
+    return [Typecheckor((((stop - start) * stride),), dtype)]
 
 
 # -------------------
@@ -933,29 +923,40 @@ def T(self, cts, x, y, *, groups, stride, dilation, padding):
 # Backend
 # --------------
 
+#
 
 compile_py = compile
-onnxruntime_backend = Backend(name="onnxruntime",
-                              default_dtype=Tensor.float32,
-                              default_device=slope.DEFAULT_DEVICE)
+onnxruntime_backend = Backend(name="onnxruntime", default_dtype=Tensor.float32, default_device=slope.DEFAULT_DEVICE)
 onnxruntime_backend.set_dtype_map(
     {
         Tensor.float32: "float",
-        Tensor.int64: "int64",
+        Tensor.uint8: "uint8",
         Tensor.int8: "int8",
         Tensor.bool: "bool",
+        Tensor.int32: "int32",
+        Tensor.int64: "int64",
+        Tensor.float16: "float16",
     }
 )
 
+# https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
+# used for Cast op arg
+onnx_dtype_enum_map = {
+    Tensor.float32: 1,
+    Tensor.uint8: 2,
+    Tensor.int8: 3,
+    Tensor.int32: 6,
+    Tensor.int64: 7,
+    Tensor.bool: 9,
+    Tensor.float16: 10,
+}
+
 
 @onnxruntime_backend.set_method
-def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value,
-           device=onnxruntime_backend.default_device):
+def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value, device=onnxruntime_backend.default_device):
     device_type, device_id = device.split(":") if ":" in device else (device, "0")
     val = onnxruntime.OrtValue.ortvalue_from_numpy(
-        np.array(val, dtype=onnxruntime_backend.dtype_map[dtype]),
-        device_type=device_type,
-        device_id=device_id
+        np.array(val, dtype=onnxruntime_backend.dtype_map[dtype]), device_type=device_type, device_id=device_id
     )
     return Tensor(TensorBuffer(val))
 
@@ -964,17 +965,21 @@ def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value,
 def numpy_of(self, tensor):
     return tensor.buf.val.numpy()
 
+
 @onnxruntime_backend.set_method
 def device_of(self, tensor):
     return tensor.buf.val.device_name()
+
 
 @onnxruntime_backend.set_method
 def shape_of(self, tensor):
     return tensor.buf.val.shape()
 
+
 @onnxruntime_backend.set_method
 def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
+
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):
@@ -983,31 +988,28 @@ def compile(self, codegen_out):
     model = onnx.parser.parse_model(code)
     slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
     # onnx.checker.check_model(model)
-    session = onnxruntime.InferenceSession(
-            model.SerializeToString(), providers=[
-                "CPUExecutionProvider"
-                ]
-        )
+    session = onnxruntime.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
+
     def fn(*args):
         io_binding = session.io_binding()
         a_names = codegen_out["inb_args"] + codegen_out["inb_consts"]
         a_types = codegen_out["inb_arg_types"] + codegen_out["inb_const_types"]
         for a, a_name, a_type in zip(args, a_names, a_types):
             io_binding.bind_input(
-            name=a_name,
-            device_type=a.device_name(),
-            device_id=0,
-            element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
-            shape=a.shape(),
-            buffer_ptr=a.data_ptr(),
-        )
+                name=a_name,
+                device_type=a.device_name(),
+                device_id=0,
+                element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
+                shape=a.shape(),
+                buffer_ptr=a.data_ptr(),
+            )
         for o in codegen_out["outs"]:
             io_binding.bind_output(o, self.default_device)
         session.run_with_iobinding(io_binding)
         outputs = io_binding.get_outputs()
         return outputs
-    return fn, code
 
+    return fn, code
 
 
 @onnxruntime_backend.set_method
@@ -1063,38 +1065,36 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 environment[outb] = f"z{nzs}"
                 nzs += 1
 
-        out_vals = list_map(lambda z: environment[z], instruction.out_binders)        
-        lhs = f"{out_vals[0]}" if len(out_vals) == 1 else ", ".join(out_vals)
+        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
-            lhs += ", "
+            lhs = f"{out_vals[0]}" if len(out_vals) == 1 else ", ".join(out_vals)
             (rhs, _), fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+            impl_code = f"{lhs} = {rhs}"
         else:
-            (call_code, function_code) = self.impls[instruction.op](*in_vals, **instruction.params)
-            if function_code is not None:
-                name = function_code.split(' ')[0]
-                fn_defs[name] = function_code
-            rhs = call_code
-            if "\n" in rhs:  # multi-line impls
-                impl_lines = rhs.strip().split("\n")
-                lhs = "\n".join(impl_lines[:-1] + [lhs])
-                rhs = impl_lines[-1]
-        code_line = f"{lhs} = {rhs}"
-        for code_line_line in code_line.split("\n"):  # handle multi-line code
-            body_code_lines += [indent(code_line_line, il1)]
+            impl_code = self.impls[instruction.op](*in_vals, **instruction.params)
+            if len(out_vals) == 1:
+                impl_code = impl_code.replace("ret", out_vals[0])
+            else:
+                raise NotImplementedError
+        for impl_code_line in impl_code.split("\n"):  # handle multi-line code
+            body_code_lines += [indent(impl_code_line, il1)]
 
-   
     head_code_lines = []
     head_code_lines += ['<ir_version: 7, opset_import: ["" : 17, "slope":1]>']
-    const_type_strs = [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)] if inb_consts else []
+    const_type_strs = (
+        [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)] if inb_consts else []
+    )
 
-    arg_type_strs = [f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)]
-    fn_args_strs =  (const_type_strs + arg_type_strs)
-    fn_args_str =   ', '.join(const_type_strs + arg_type_strs) if len(fn_args_strs) > 0 else ''
+    arg_type_strs = [
+        f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)
+    ]
+    fn_args_strs = const_type_strs + arg_type_strs
+    fn_args_str = ", ".join(const_type_strs + arg_type_strs) if len(fn_args_strs) > 0 else ""
     out_type_strs = [f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(outs, out_types)]
-    out_type_str = ', '.join(out_type_strs) if len(out_type_strs) > 0 else ''
+    out_type_str = ", ".join(out_type_strs) if len(out_type_strs) > 0 else ""
     head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
 
-    model_code_lines = head_code_lines + ['{'] + body_code_lines + ['}']
+    model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
 
     functions_head_def = '<domain: "slope",  opset_import: ["" : 17, "slope":1]>'
     functions_code_lines = []
@@ -1106,100 +1106,141 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     if fn_name == "main":
         del self.fn_count
-    return dict(code_lines=code_lines, fn_defs=fn_defs, 
-                inb_args=inb_args, inb_arg_types=inb_arg_types,
-                inb_consts=inb_consts, inb_const_types=inb_const_types,
-                outs=outs, out_types=out_types,
-                )
+    return dict(
+        code_lines=code_lines,
+        fn_defs=fn_defs,
+        inb_args=inb_args,
+        inb_arg_types=inb_arg_types,
+        inb_consts=inb_consts,
+        inb_const_types=inb_const_types,
+        outs=outs,
+        out_types=out_types,
+    )
 
 
 ### Operator Impls
 
-class ImplOut(NamedTuple):
-    call_code: str
-    function_code: str = None
+
+@onnxruntime_backend.set_impl(operator_set.cast)
+def cast_impl(self, x, *, dtype):
+    return f"""
+    ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})
+"""
 
 
-onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: ImplOut(f"Cast({x}, 1 ,{dtype})"))
-onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: ImplOut(f"{x}"))
-onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: ImplOut(f" Neg({x})", None))
-onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: ImplOut(f"Sqrt({x})"))
-onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: ImplOut(f"Exp({x})"))
-onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: ImplOut(f"Log({x})"))
-onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: ImplOut(f"Sin({x})"))
-onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: ImplOut(f"Add({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: ImplOut(f"Sub({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: ImplOut(f"Mul({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: ImplOut(f"Div({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: ImplOut(f"BitwiseNot({x})"))
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: ImplOut(f"Equal({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: ImplOut(f"Max({x1}, {x2})"))
-onnxruntime_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: ImplOut(f"Sum({x}, axes={axes}, keepdims={keepdims})")
-)
-onnxruntime_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: ImplOut(f"Max({x}, axis={axes}, keepdims={keepdims})")
-)
-onnxruntime_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"Range(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
-)
+onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
+onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
+onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"ret = Exp({x})")
+onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"ret = Log({x})")
+onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"ret = Sin({x})")
+onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"ret = Add({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = Sub({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = Mul({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = BitwiseNot({x})")
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
+
+
+@onnxruntime_backend.set_impl(operator_set.sum)
+def sum_impl(self, x, *, axes, keepdims):
+    return f"""
+ret_axes = Constant <value = int64[{len(axes)}]  {{ {repr(axes)[1:(-1 if len(axes) > 1 else -2)]} }} >()
+ret = ReduceSum<keepdims={int(keepdims)}> ({x}, ret_axes)
+"""
+
+
+@onnxruntime_backend.set_impl(operator_set.max)
+def max_impl(self, x, *, axes, keepdims):
+    return f"""
+ret_axes = Constant <value = int64[{len(axes)}]  {{ {repr(axes)[1:(-1 if len(axes) > 1 else -2)]} }} >()
+ret = ReduceMax<keepdims={int(keepdims)}> ({x}, ret_axes)
+"""
+
+
+@onnxruntime_backend.set_impl(operator_set.arange)
+def arange_impl(self, *, start, stop, stride, dtype):
+    return f"""
+ret_start = Constant <value_int = {start}> ()
+ret_limit = Constant <value_int = {stop}> ()
+ret_delta = Constant <value_int = {stride}> ()
+{f'''
+ret_range = Range(ret_start, ret_limit, ret_delta)
+ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)
+''' if dtype is not Tensor.int64 else
+f'''
+ret = Range(ret_start, ret_limit, ret_delta)
+'''
+}
+"""
+
+
+# ret_range = Range(ret_start, ret_limit, ret_delta)
+# {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
 @onnxruntime_backend.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
-    dtype_str = self.dtype_map[dtype]
     if len(shape) > 0:
-        shape_str = repr(shape)[1:-1]
-        if len(shape) == 1:
-            shape_str = shape_str.replace(",", "")
-        
-        return ImplOut(
-f"""
-fill_value = Constant < value = {dtype_str}[1] {{ {fill_value} }}>()
-shape = Constant <value = int64[{len(shape)}] {{ {shape_str} }} >()
-slope.full (shape, fill_value)""",
-f"""
-full (shape, fill_value) => (y)
-{{
-    y = Expand (fill_value, shape)
-}}
+        return f"""
+ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
+ret = Expand (ret_fill_value, ret_shape)
 """
-)
-    else: # scalar case
-        if dtype_str == "int64":
-            dtype_str = "int"
-        return ImplOut(
-f"""
-Constant < value_{dtype_str.replace("64", "") if dtype_str == "int64" else dtype_str} = {fill_value} >()
+    else:  # scalar case
+        return f"""
+ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_fill_value, ret_squeeze_dim)
 """
-        )
 
 
-onnxruntime_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"RandomUniform(size={shape}).astype(dtype={dtype})"
-)
-onnxruntime_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"RandomNormal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
-)
-onnxruntime_backend.set_impl(operator_set.broadcast_to)(
-    lambda self, x, *, shape: f"Expand({x}, shape={shape})"
-)
+@onnxruntime_backend.set_impl(operator_set.random_uniform)
+def random_uniform_impl(self, *, shape, fill_value, dtype):
+    if len(shape) > 0:
+        return f"""
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
+ret = RandomUniform (ret_shape)
+"""
+    else:  # scalar case
+        return f"""
+ret_shape = Constant <value = int64[1] {{1}} >()
+ret_rand = RandomUniform (ret_shape)
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_rand, ret_squeeze_dim)
+"""
 
-onnxruntime_backend.set_impl(operator_set.reshape)(
-    lambda self, x, *, shape: f"Reshape({x}, newshape={shape})"
-)
+
+@onnxruntime_backend.set_impl(operator_set.random_normal)
+def random_normal_impl(self, *, shape, fill_value, dtype):
+    if len(shape) > 0:
+        return f"""
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
+ret = RandomNormal (ret_shape)
+"""
+    else:  # scalar case
+        return f"""
+ret_shape_ = Constant <value = int64[1] {{1}} >()
+ret_ = RandomNormal (ret_shape_)
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_, ret_squeeze_dim)
+"""
+
+
+onnxruntime_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"ret = Expand({x}, shape={shape})")
+
+onnxruntime_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = Reshape({x}, newshape={shape})")
 onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"ret = Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
 onnxruntime_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"Slice({x}, [tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))])"
+    lambda self, x, *, starts, limits, strides: f"ret = Slice({x}, [tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))])"
 )
 
-onnxruntime_backend.set_impl(operator_set.concatenate)(
-    lambda self, *xs, axis: f"Concat({xs}, axis={axis})"
-)
-onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"Transpose({x}, axes={perm})")
-onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ReverseSequence({x}, axis={axes})")
+onnxruntime_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"ret = Concat({xs}, axis={axis})")
+onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"ret = Transpose({x}, axes={perm})")
+onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ret = ReverseSequence({x}, axis={axes})")
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)
@@ -1908,6 +1949,7 @@ def avg_pool2d(x, kernel_size=(2, 2), stride=None):
     return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
+
 
 @procedure_set.register(static_argnames="kernel_size stride dilation")
 def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):

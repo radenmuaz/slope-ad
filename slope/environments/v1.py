@@ -762,11 +762,11 @@ def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
 random_uniform = Operator.load("random_uniform")
 rand = random_uniform
 operator_set.register(random_uniform)
-operator_set.alias(random_uniform, "randn")
+operator_set.alias(random_uniform, "rand")
 
 
 @random_uniform.set_method
-def args_fixer(self, *, shape, dtype=Tensor.float32):
+def args_fixer(self, *, shape=None, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -798,7 +798,7 @@ operator_set.alias(random_normal, "randn")
 
 
 @random_normal.set_method
-def args_fixer(self, *, shape, dtype=Tensor.float32):
+def args_fixer(self, *, shape=None, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:

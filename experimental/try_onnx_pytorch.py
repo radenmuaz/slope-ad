@@ -27,7 +27,7 @@ def model():
             # z = torch.ones(1, dtype=torch.float32)#.expand(*SIZE)
             # return x + y + z
             # out = (x+y).split(2,2)
-            return torch.arange(10)
+            return x + torch.rand(*SIZE)
             return out
             # return x + y + torch.rand_like(y, dtype=torch.flot32)
     return Model()

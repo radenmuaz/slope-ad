@@ -754,11 +754,11 @@ def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
 random_uniform = Operator.load("random_uniform")
 rand = random_uniform
 operator_set.register(random_uniform)
-operator_set.alias(random_uniform, "randn")
+operator_set.alias(random_uniform, "rand")
 
 
 @random_uniform.set_method
-def args_fixer(self, *, shape, dtype=Tensor.float32):
+def args_fixer(self, *, shape=None, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -790,7 +790,7 @@ operator_set.alias(random_normal, "randn")
 
 
 @random_normal.set_method
-def args_fixer(self, *, shape, dtype=Tensor.float32):
+def args_fixer(self, *, shape=None, dtype=Tensor.float32):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -940,7 +940,7 @@ onnxruntime_backend.set_dtype_map(
 )
 
 # https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
-# used for Cast op arg
+# used for impl args
 onnx_dtype_enum_map = {
     Tensor.float32: 1,
     Tensor.uint8: 2,
@@ -1128,7 +1128,7 @@ def cast_impl(self, x, *, dtype):
 """
 
 
-onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
 onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
 onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
 onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"ret = Exp({x})")
@@ -1195,32 +1195,28 @@ ret = Squeeze (ret_fill_value, ret_squeeze_dim)
 
 
 @onnxruntime_backend.set_impl(operator_set.random_uniform)
-def random_uniform_impl(self, *, shape, fill_value, dtype):
+def random_uniform_impl(self, *, shape, dtype):
     if len(shape) > 0:
         return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
-ret = RandomUniform (ret_shape)
+ret = RandomUniform<dtype={onnx_dtype_enum_map[dtype]},shape={repr(list(shape))}>()
 """
     else:  # scalar case
         return f"""
-ret_shape = Constant <value = int64[1] {{1}} >()
-ret_rand = RandomUniform (ret_shape)
+ret_rand = RandomUniform<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
 ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
 ret = Squeeze (ret_rand, ret_squeeze_dim)
 """
 
 
 @onnxruntime_backend.set_impl(operator_set.random_normal)
-def random_normal_impl(self, *, shape, fill_value, dtype):
+def random_normal_impl(self, *, shape, dtype):
     if len(shape) > 0:
         return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
-ret = RandomNormal (ret_shape)
+ret = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}>()
 """
     else:  # scalar case
         return f"""
-ret_shape_ = Constant <value = int64[1] {{1}} >()
-ret_ = RandomNormal (ret_shape_)
+ret_ = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
 ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
 ret = Squeeze (ret_, ret_squeeze_dim)
 """

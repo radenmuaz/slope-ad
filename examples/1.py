@@ -7,8 +7,8 @@ def f(x):
     y = x.sum()
     return y
 
-# x = slope.ones((16,3,5))
-x = slope.arange(5).cast(slope.float32)
+x = slope.randn()
+# x = slope.arange(5).cast(slope.float32)
 print(x)
 print(f(x))
 # print(f(x))

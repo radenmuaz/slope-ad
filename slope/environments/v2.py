@@ -972,7 +972,7 @@ def device_of(self, tensor):
 
 @onnxruntime_backend.set_method
 def shape_of(self, tensor):
-    return tensor.buf.val.shape()
+    return tuple(tensor.buf.val.shape())
 
 
 @onnxruntime_backend.set_method
@@ -1067,7 +1067,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         out_vals = list_map(lambda z: environment[z], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             lhs = f"{out_vals[0]}" if len(out_vals) == 1 else ", ".join(out_vals)
-            (rhs, _), fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+            rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
             impl_code = f"{lhs} = {rhs}"
         else:
             impl_code = self.impls[instruction.op](*in_vals, **instruction.params)
@@ -1097,8 +1097,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     functions_head_def = '<domain: "slope",  opset_import: ["" : 17, "slope":1]>'
     functions_code_lines = []
-    for op, function_code in fn_defs.items():
-        functions_code_lines += [functions_head_def] + function_code.split("\n")
+    for op, fn_def_code_lines in fn_defs.items():
+        functions_code_lines += [functions_head_def] + fn_def_code_lines
 
     code_lines = model_code_lines + functions_code_lines
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
@@ -1182,7 +1182,7 @@ def full_impl(self, *, shape, fill_value, dtype):
     if len(shape) > 0:
         return f"""
 ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(shape)[1:(-1 if len(shape) > 1 else -2)]} }} >()
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
 ret = Expand (ret_fill_value, ret_shape)
 """
     else:  # scalar case
@@ -1215,27 +1215,70 @@ ret = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}
 """
     else:  # scalar case
         return f"""
-ret_ = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
+ret_randn = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
 ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_, ret_squeeze_dim)
+ret = Squeeze (ret_randn, ret_squeeze_dim)
 """
 
 
-onnxruntime_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"ret = Expand({x}, shape={shape})")
+@onnxruntime_backend.set_impl(operator_set.broadcast_to)
+def broadcast_to_impl(self, x, *, shape):
+    return f"""
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+ret = Expand ({x}, ret_shape)
+"""
 
-onnxruntime_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = Reshape({x}, newshape={shape})")
-onnxruntime_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"ret = Pad({x}, list(zip({lo}, {hi})), constant_values={value})"
-)
+@onnxruntime_backend.set_impl(operator_set.reshape)
+def reshape_impl(self, x, *, shape):
+    if len(shape) > 0:
+        return f"""
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+ret = Reshape({x}, ret_shape)
+"""
+    else:  # scalar case
+        f"""
+ret_shape = Constant <value = int64[1] {1} >()
+ret_reshape = Reshape({x}, ret_shape)
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_reshape, ret_squeeze_dim)
+"""
+        
+@onnxruntime_backend.set_impl(operator_set.pad_hlo)
+def pad_hlo_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
+    pads = lo + hi
+    return f"""
+ret_pads = Constant <value = int64[{len(pads)}] {pads}>()
+ret_constant_value =  Constant <value = {value} >()
+ret = Pad({x} ret_pads, ret_constant_value)
+"""
 
 
-onnxruntime_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"ret = Slice({x}, [tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))])"
-)
+@onnxruntime_backend.set_impl(operator_set.slice_hlo)
+def slice_hlo_impl(self, x, *, starts, limits, strides):
+    return f"""
+ret_starts = Constant <value = int64[{len(starts)}] {starts}>()
+ret_ends = Constant <value = int64[{len(limits)}] {limits}>()
+ret_steps = Constant <value = int64[{len(strides)}] {strides}>()
+ret = Slice({x}, ret_starts, ret_ends, steps=ret_steps))])
+"""
 
-onnxruntime_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"ret = Concat({xs}, axis={axis})")
-onnxruntime_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"ret = Transpose({x}, axes={perm})")
-onnxruntime_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ret = ReverseSequence({x}, axis={axes})")
+@onnxruntime_backend.set_impl(operator_set.concatenate)
+def concatenate_impl(self, *xs, axis):
+    return f"ret = Concat< axis={axis}>({repr(list(xs))[1:-1]})"
+
+@onnxruntime_backend.set_impl(operator_set.transpose)
+def transpose_impl(self, x, *, perm):
+    return f"ret = Transpose<perm={repr(list(perm))}>({x})"
+
+@onnxruntime_backend.set_impl(operator_set.flip)
+def flip_impl(self, x, *, axes):
+    return f"""
+ret_starts = Constant <value = int64[{len(axes)}] {", ".join(["0"] * len(axes))}>()
+ret_ends = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
+ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
+ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
+ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
+"""
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)
@@ -1320,11 +1363,17 @@ def relu(x):
     return x.maximum(slope.zeros_like(x))
 
 
+# @procedure_set.register()
+# def where(x, trueval, falseval):
+#     cond = x != 0.0
+#     cond = cond.cast(trueval.dtype)
+#     return cond * trueval + (1.0 - cond) * falseval
+
 @procedure_set.register()
 def where(x, trueval, falseval):
-    cond = x != 0.0
+    cond = x != zeros_like(x)
     cond = cond.cast(trueval.dtype)
-    return cond * trueval + (1.0 - cond) * falseval
+    return cond * trueval + (ones_like(cond) - cond) * falseval
 
 
 @procedure_set.register(static_argnames="axes keepdims")

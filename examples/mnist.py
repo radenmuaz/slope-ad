@@ -97,7 +97,7 @@ def loss_fn(model, batch):
 g_loss_fn = slope.value_and_grad(loss_fn)
 
 
-@slope.jit
+# @slope.jit
 def train_step(model, batch, optimizer):
     loss, (g_model, _) = g_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, g_model)
@@ -123,9 +123,9 @@ if __name__ == "__main__":
     model = nn.Serial(
         [
             nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-            # nn.Linear(784, 10),
-            nn.MLP(784, 100, 10),
-            nn.Fn(lambda x: x.log_softmax(axes=-1)),
+            nn.Linear(784, 10),
+            # nn.MLP(784, 100, 10),
+            # nn.Fn(lambda x: x.log_softmax(axes=-1)),
         ]
     )
     optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
@@ -148,7 +148,7 @@ if __name__ == "__main__":
             batch = next(batches)
             loss, model, optimizer = train_step(model, batch, optimizer)
             if i % log_interval == 0:
-                print(f"loss: {loss.val:.2f}")
+                print(f"loss: {loss.numpy():.2f}")
         epoch_time = time.time() - start_time
 
         test_acc = accuracy(

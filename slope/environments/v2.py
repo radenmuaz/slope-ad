@@ -954,10 +954,9 @@ onnx_dtype_enum_map = {
 
 @onnxruntime_backend.set_method
 def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value, device=onnxruntime_backend.default_device):
-    device_type, device_id = device.split(":") if ":" in device else (device, "0")
-    val = onnxruntime.OrtValue.ortvalue_from_numpy(
-        np.array(val, dtype=onnxruntime_backend.dtype_map[dtype]), device_type=device_type, device_id=device_id
-    )
+    device_type, device_id = device.split(":") if ":" in device else (device, 0)
+    np_val = np.array(val, dtype=dtype.numpy)
+    val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
     return Tensor(TensorBuffer(val))
 
 

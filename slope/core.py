@@ -208,7 +208,7 @@ class Tensor:
     float32: Final[DType] = DType(4, 4, "float32", "f32", np.float32)
     uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
     int8: Final[DType] = DType(0, 1, "int8", "i8", np.int8)
-    bool: Final[DType] = DType(0, 1, "bool", "i1", np.bool_)
+    bool: Final[DType] = DType(0, 1, "bool", "i1", bool)
     int32: Final[DType] = DType(1, 4, "int32", "i32", np.int32)
     int64: Final[DType] = DType(2, 8, "int64", "i64", np.int64)
     float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)

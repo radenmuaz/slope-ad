@@ -866,7 +866,7 @@ numpy_backend.set_dtype_map(
         Tensor.float32: np.dtype("float32"),
         Tensor.int64: np.dtype("int64"),
         Tensor.int8: np.dtype("int8"),
-        Tensor.bool: np.dtype("bool"),
+        Tensor.bool: bool,
     }
 )
 
@@ -978,6 +978,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
             rhs = rhs.replace("(, ", "(")
         for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
+            if np_dtype is bool:
+                continue
             rhs = rhs.replace(np_dtype.name, f"np.{np_dtype.name}")
         code_line = f"{lhs} = {rhs}"
 

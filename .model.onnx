@@ -1,20 +1,37 @@
-pytorch2.0.1:å
-Z/RandomUniform_output_0/RandomUniform"RandomUniform*
-dtype *
-shape@@@ @  
+pytorch2.0.1:·
++
+x/Cast_output_0/Cast"Cast*	
+to	 
 *
-x
-/RandomUniform_output_0z/Add"Add	torch_jitZ)
+/Cast_output_0/Not_output_0/Not"Not
+/
+y/Cast_1_output_0/Cast_1"Cast*	
+to	 
+;
+/Not_output_0
+/Cast_1_output_0/And_output_0/And"And
+8onnx::And_6
+Constant_4"Constant*
+value*	J 
+,
+/And_output_0
+onnx::And_6z/And_1"And	torch_jitZ)
 x$
 "
 array_length_x
 
  
+ Z)
+y$
+"
+array_length_y
+
+ 
  b%
 z 
-
+	
 
-Addz_dim_0
+Andz_dim_0
 
  
  B

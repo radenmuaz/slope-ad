@@ -19,6 +19,33 @@ model_text = """
    ir_version: 9,
    opset_import: ["" : 15]
 >
+agraph (int64[] x) => (int64[] y) {
+   c = Constant <value = true> ()
+   y= And(c)
+}
+
+"""
+
+model = onnx.parser.parse_model(model_text)
+# onnx.checker.check_model(model)
+model_text = onnx.printer.to_text(model)
+print(model_text)
+
+path = "/tmp/model.onnx"
+onnx.save_model(model, path)
+sess= onnxruntime.InferenceSession(path,  providers=['CPUExecutionProvider'])
+input = dict(x=np.array([True]))
+output_names = ['y']
+out = sess.run(output_names, input)
+for o in out:
+    print(f"{o.shape=}\n{o=}")
+
+
+model_text = """
+<
+   ir_version: 9,
+   opset_import: ["" : 15]
+>
 agraph (int64[] l) => (int64[] y) {
    s=Constant <value_int = 0> ()
    d=Constant <value_int = 1> ()
@@ -40,7 +67,6 @@ output_names = ['y']
 out = sess.run(output_names, input)
 for o in out:
     print(f"{o.shape=}\n{o=}")
-
 
 # model_text = """
 # <

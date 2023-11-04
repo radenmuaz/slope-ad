@@ -164,6 +164,10 @@ def T(self, cts, x):
     (z,) = cts
     return [~z]
 
+@invert.set_method
+def typecheck(self, x, **params):
+    return [Typecheckor(x.shape, slope.bool)]
+
 
 # -----------------------
 # Binary
@@ -245,8 +249,8 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
-            (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+        return ((x == z).cast(x.dtype).where(slope.ones_like(z), slope.zeros_like(z))) / (
+            (y == z).cast(y.dtype).where(slope.full_like(z, 2), slope.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -269,7 +273,7 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [slope.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.zeros(out_primal.shape, Tensor.bool)]
 
 
 @equal.set_method
@@ -277,6 +281,35 @@ def T(self, cts, x, y):
     (z_bar,) = cts
     return [z_bar, None]
 
+@equal.set_method
+def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
+     # difference with default binary typecheck: force dtype bool
+    if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+        Tensor,
+        Typecheckor,
+    ):
+        raise TypeError
+    void_x = Typecheckor.like(x)
+    void_y = Typecheckor.like(y)
+    if void_x == void_y:
+        return [Typecheckor(void_x.shape, Tensor.bool)]
+    shape_delta = len(void_x.shape) - len(void_y.shape)
+    if shape_delta > 0:
+        void_y = Typecheckor((1,) * shape_delta + void_y.shape, Tensor.bool)
+    elif shape_delta < 0:
+        x = x.reshape((1,) * -shape_delta + void_x.shape)
+        void_x = Typecheckor((1,) * -shape_delta + void_x.shape, Tensor.bool)
+    if void_x == void_y:
+        return [void_x]
+    else:
+        shape_ret = tuple([max(x, y) for x, y in zip(void_x.shape, void_y.shape)])
+        if void_x.shape != shape_ret:
+            void_x = Typecheckor(shape_ret, Tensor.bool)
+        if void_y.shape != shape_ret:
+            void_y = Typecheckor(shape_ret, Tensor.bool)
+        if void_x != void_y:
+            raise TypeError
+        return [void_x]
 
 max = Operator.reduce("max")
 operator_set.register(max)
@@ -1079,7 +1112,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             body_code_lines += [indent(impl_code_line, il1)]
 
     head_code_lines = []
-    head_code_lines += ['<ir_version: 7, opset_import: ["" : 17, "slope":1]>']
+    head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
     const_type_strs = (
         [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)] if inb_consts else []
     )
@@ -1095,7 +1128,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
 
-    functions_head_def = '<domain: "slope",  opset_import: ["" : 17, "slope":1]>'
+    functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
         functions_code_lines += [functions_head_def] + fn_def_code_lines
@@ -1120,13 +1153,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 ### Operator Impls
 
 
-@onnxruntime_backend.set_impl(operator_set.cast)
-def cast_impl(self, x, *, dtype):
-    return f"""
-    ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})
-"""
-
-
+onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype:f" ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
 onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
 onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
 onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
@@ -1137,8 +1164,12 @@ onnxruntime_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"ret = Add(
 onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = Sub({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = Mul({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div({x1}, {x2})")
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = BitwiseNot({x})")
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
+@onnxruntime_backend.set_impl(operator_set.equal)
+def equal_impl(self, x1, x2):
+    return f"""
+ret = Equal({x1}, {x2})
+"""
 onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
 
 
@@ -1179,18 +1210,32 @@ ret = Range(ret_start, ret_limit, ret_delta)
 # {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
 @onnxruntime_backend.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
-    if len(shape) > 0:
-        return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand (ret_fill_value, ret_shape)
-"""
-    else:  # scalar case
-        return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_fill_value, ret_squeeze_dim)
-"""
+    if dtype is not Tensor.bool:
+        if len(shape) > 0:
+            return f"""
+    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+    ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+    ret = Expand (ret_fill_value, ret_shape)
+    """
+        else:  # scalar case
+            return f"""
+    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+    ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+    ret = Squeeze (ret_fill_value, ret_squeeze_dim)
+    """
+    else:
+        if len(shape) > 0:
+            return f"""
+    ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
+    ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+    ret = Expand (ret_fill_value, ret_shape)
+    """
+        else:  # scalar case
+            return f"""
+    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+    ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+    ret = Squeeze (ret_fill_value, ret_squeeze_dim)
+    """
 
 
 @onnxruntime_backend.set_impl(operator_set.random_uniform)
@@ -1361,13 +1406,6 @@ def ones_like(y):
 @procedure_set.register()
 def relu(x):
     return x.maximum(slope.zeros_like(x))
-
-
-# @procedure_set.register()
-# def where(x, trueval, falseval):
-#     cond = x != 0.0
-#     cond = cond.cast(trueval.dtype)
-#     return cond * trueval + (1.0 - cond) * falseval
 
 @procedure_set.register()
 def where(x, trueval, falseval):

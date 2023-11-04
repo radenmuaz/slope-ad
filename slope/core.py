@@ -488,6 +488,8 @@ class Operator:
                 x = y._trace.pure(x)
             elif type(y) is Tensor and isinstance(x, Tracor):
                 y = x._trace.pure(y)
+            
+            
 
             if (xshape := x.shape) == (yshape := y.shape):
                 return (x, y), params

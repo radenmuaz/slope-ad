@@ -27,7 +27,7 @@ def model():
             # z = torch.ones(1, dtype=torch.float32)#.expand(*SIZE)
             # return x + y + z
             # out = (x+y).split(2,2)
-            return x + torch.rand(*SIZE)
+            return ~(x.bool()) & y.bool() & torch.full(SIZE, True)
             return out
             # return x + y + torch.rand_like(y, dtype=torch.flot32)
     return Model()
@@ -124,6 +124,7 @@ def main():
     print(text)
     model_hat = onnx.parser.parse_model(text.replace('/', ''))
     # print(model_hat)
+    # ones = np.ones(SIZE, dtype=bool)
     ones = np.ones(SIZE, dtype=np.float32)
     out = run(x=ones,y=ones)
     for o in out:print(o.shape)

@@ -92,7 +92,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     return lst1, lst2
 
 
-def lru_cache_verbose(maxsize=None, typed=False):
+def lru_cache_verbose(maxsize=100, typed=False):
     def decorator(fn):
         @lru_cache(maxsize=maxsize, typed=typed)
         def wrapper(*args, **kwargs):
@@ -2313,12 +2313,7 @@ class Machine:
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)
-            outs = self.bind(
-                jit_op,
-                *consts,
-                *args,
-                program=program,
-            )
+            outs = self.bind(jit_op,*consts,*args,program=program)
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted

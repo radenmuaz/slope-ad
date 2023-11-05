@@ -1024,11 +1024,9 @@ def compile(self, codegen_out):
 
     def fn(*args):
         io_binding = session.io_binding()
-        a_names = codegen_out["inb_args"] + codegen_out["inb_consts"]
-        a_types = codegen_out["inb_arg_types"] + codegen_out["inb_const_types"]
-        for a, a_name, a_type in zip(args, a_names, a_types):
+        for a, in_binder in zip(args, codegen_out["in_binders"]):
             io_binding.bind_input(
-                name=a_name,
+                name=in_binder["name"],
                 device_type=a.device_name(),
                 device_id=0,
                 element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
@@ -1036,9 +1034,9 @@ def compile(self, codegen_out):
                 buffer_ptr=a.data_ptr(),
             )
         for o in codegen_out["outs"]:
-            io_binding.bind_output(o, self.default_device)
+            io_binding.bind_output(o["name"], self.default_device)
         session.run_with_iobinding(io_binding)
-        outputs = io_binding.get_outputs()
+        outputs = tuple(io_binding.get_outputs())
         return outputs
 
     return fn, code
@@ -1058,48 +1056,26 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
     il1 = 4  # indent length
-    ncs = 0  # n constant
-    nxs = 0  # n x inputs
-    nzs = 0  # n z intermediate variables
-    nys = 0  # n y outputs
-    inb_args = []
-    inb_arg_types = []
-    inb_consts = []
-    inb_const_types = []
-    outs = []
-    out_types = []
-
     body_code_lines = []
 
     for inb in program.in_binders:
-        if type(inb.aval) is not Typecheckor:
-            environment[inb] = f"c{ncs}"
-            inb_consts += [environment[inb]]
-            inb_const_types += [inb.aval]
-            ncs += 1
-        else:
-            environment[inb] = f"x{nxs}"
-            inb_args += [environment[inb]]
-            inb_arg_types += [inb.aval]
-            nxs += 1
+        prefix = "x" if type(inb.aval) is Typecheckor else "c"
+        idx = sum_py([1 if prefix in v['name'] else 0 for v in environment.values()])
+        environment[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
             continue
-        in_vals = list_map(lambda x: environment[x], instruction.inputs)
+        in_vals = list_map(lambda x: environment[x]["name"], instruction.inputs)
         for outb in instruction.out_binders:
-            if outb in program.outs:
-                environment[outb] = f"y{nys}"
-                outs += [environment[outb]]
-                out_types += [outb.aval]
-                nys += 1
-            else:
-                environment[outb] = f"z{nzs}"
-                nzs += 1
+            prefix = "y" if outb in program.outs else "z"
+            idx = sum_py([1 if prefix in v['name'] else 0 for v in environment.values()])
+            environment[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
-        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
+
+        out_vals = list_map(lambda z: environment[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
-            lhs = f"{out_vals[0]}" if len(out_vals) == 1 else ", ".join(out_vals)
+            lhs = ", ".join(out_vals)
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
             impl_code = f"{lhs} = {rhs}"
         else:
@@ -1111,49 +1087,46 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
+   
+    
+    # inb_consts = [v for v in environment.values() if "c" in v["name"]]
+    # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
+
+    in_binders = list_map(lambda x: environment[x], program.in_binders)
+    arg_type_strs = [f"{self.dtype_map[i['type'].dtype]}[{repr(i['type'].shape)[1:-1]}] {i['name']}" for i in in_binders]
+    fn_args_str = ", ".join(arg_type_strs)
+
+    outs = list_map(lambda x: environment[x], program.outs) # TODO: input that is output should has identity op
+    out_type_strs = [f"{self.dtype_map[o['type'].dtype]}[{repr(o['type'].shape)[1:-1]}] {o['name']}" for o in outs]
+    out_type_str = ", ".join(out_type_strs)
+
     head_code_lines = []
     head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
-    const_type_strs = (
-        [f"{t.dtype}[{repr(t.shape)[1:-1]}] {c}" for (c, t) in zip(inb_consts, inb_const_types)] if inb_consts else []
-    )
-
-    arg_type_strs = [
-        f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(inb_args, inb_arg_types)
-    ]
-    fn_args_strs = const_type_strs + arg_type_strs
-    fn_args_str = ", ".join(const_type_strs + arg_type_strs) if len(fn_args_strs) > 0 else ""
-    out_type_strs = [f"{self.dtype_map[t.dtype]}[{repr(list(t.shape))[1:-1]}] {c}" for (c, t) in zip(outs, out_types)]
-    out_type_str = ", ".join(out_type_strs) if len(out_type_strs) > 0 else ""
     head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
-
     model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
 
     functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
         functions_code_lines += [functions_head_def] + fn_def_code_lines
-
     code_lines = model_code_lines + functions_code_lines
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
         del self.fn_count
+    assert len(outs) == len(program.outs)
     return dict(
         code_lines=code_lines,
         fn_defs=fn_defs,
-        inb_args=inb_args,
-        inb_arg_types=inb_arg_types,
-        inb_consts=inb_consts,
-        inb_const_types=inb_const_types,
-        outs=outs,
-        out_types=out_types,
+        in_binders=in_binders,
+        outs=outs
     )
 
 
 ### Operator Impls
 
 
-onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype:f" ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
+onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype:f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
 onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
 onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
 onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
@@ -1165,11 +1138,7 @@ onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = Sub(
 onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = Mul({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
-@onnxruntime_backend.set_impl(operator_set.equal)
-def equal_impl(self, x1, x2):
-    return f"""
-ret = Equal({x1}, {x2})
-"""
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2}")
 onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
 
 
@@ -1213,29 +1182,29 @@ def full_impl(self, *, shape, fill_value, dtype):
     if dtype is not Tensor.bool:
         if len(shape) > 0:
             return f"""
-    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-    ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-    ret = Expand (ret_fill_value, ret_shape)
-    """
+ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+ret = Expand (ret_fill_value, ret_shape)
+"""
         else:  # scalar case
             return f"""
-    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-    ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-    ret = Squeeze (ret_fill_value, ret_squeeze_dim)
-    """
+ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_fill_value, ret_squeeze_dim)
+"""
     else:
         if len(shape) > 0:
             return f"""
-    ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
-    ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-    ret = Expand (ret_fill_value, ret_shape)
-    """
+ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
+ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+ret = Expand (ret_fill_value, ret_shape)
+"""
         else:  # scalar case
             return f"""
-    ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-    ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-    ret = Squeeze (ret_fill_value, ret_squeeze_dim)
-    """
+ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+ret = Squeeze (ret_fill_value, ret_squeeze_dim)
+"""
 
 
 @onnxruntime_backend.set_impl(operator_set.random_uniform)
@@ -1340,7 +1309,7 @@ def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     fn_defs[jit_name] = jit_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
-    rhs = f"{jit_name}({args_str})"
+    rhs = f"slope.{jit_name}({args_str})"
     return rhs, fn_defs
 
 
@@ -1358,7 +1327,7 @@ def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
     fn_defs[proc_name] = proc_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
-    rhs = f"{proc_name}({args_str})"
+    rhs = f"slope.{proc_name}({args_str})"
     return rhs, fn_defs
 
 

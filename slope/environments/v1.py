@@ -894,7 +894,7 @@ def shape_of(self, tensor):
 
 @numpy_backend.set_method
 def dtype_of(self, tensor):
-    return tensor.buf.val.dtype
+    return self.dtype_map_inv[tensor.buf.val.dtype]
 
 
 @numpy_backend.set_method
@@ -1003,7 +1003,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     if fn_name == "main":
         del self.fn_count
-
+    if len(program.outs) > 2:
+        breakpoint()
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 

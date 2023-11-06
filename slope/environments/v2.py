@@ -249,9 +249,10 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).cast(x.dtype).where(slope.ones_like(z), slope.zeros_like(z))) / (
-            (y == z).cast(y.dtype).where(slope.full_like(z, 2), slope.ones_like(z))
-        )
+        xz = ((x == z).where(slope.ones_like(z), slope.zeros_like(z)))
+        yz = (y == z).where(slope.full_like(z, 2.0 if 'float' in z.dtype.name else 2), slope.ones_like(z))
+        eps = slope.ones_like(z)
+        return xz/(yz + eps) # TODO: nan if no eps for onnxruntime
 
     (x, y), (x_dot, y_dot) = primals, tangents
     run_out = x.maximum(y)
@@ -273,12 +274,13 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [slope.zeros(out_primal.shape, Tensor.bool)]
+    return [out_primal], [slope.full(out_primal.shape, Tensor.bool)]
 
 
 @equal.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
+    z_bar = z_bar.cast(x.dtype)
     return [z_bar, None]
 
 @equal.set_method
@@ -321,14 +323,14 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
     out = x.max(axes, keepdims)
     _out = out
     if not keepdims:
-        axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
+        axes = tuple([a if a >= 0 else len(out.shape) + a + 1 for a in axes])
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    locs = x.equal(_out.broadcast(x.shape))
+    locs = x.equal(_out.broadcast_to(x.shape))
     locs = locs.cast(x_dot.dtype)
-    counts = locs.sum(axes)
-    jvp_out = (x_dot * locs).sum(axes)
-    jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
+    counts = locs.sum(axes, keepdims)
+    jvp_out = (x_dot * locs).sum(axes, keepdims)
+    jvp_out = jvp_out / counts.broadcast_to(jvp_out.shape)
 
     return [out], [jvp_out]
 
@@ -884,72 +886,72 @@ def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
 # -------------------
 
 
-dot = Operator.binary_reduce("dot")
+# dot = Operator.binary_reduce("dot")
 
 
-@dot.set_method
-def typecheck(self, x, y):
-    # matrix-matrix
-    if x.ndim == y.ndim:
-        assert x.shape[-1] == y.shape[-2]
-        if x.ndim >= 3:
-            assert x.shape[0:-2] == y.shape[0:-2]
-        shape = (x.shape[0:-1]) + (y.shape[-2],)
-    # matrix-vector
-    elif x.ndim == y.ndim - 1:
-        assert x.shape[-1] == y.shape[-1]
-        if x.ndim >= 3:
-            assert x.shape[0:-1] == y.shape[0:-1]
-        shape = (x.shape[0:-1]) + (y.shape[-1],)
-    else:
-        raise ValueError
-    # matrix-matrix, vector-matrix, matrix-vector
-    return [Typecheckor(shape, x.dtype)]
+# @dot.set_method
+# def typecheck(self, x, y):
+#     # matrix-matrix
+#     if x.ndim == y.ndim:
+#         assert x.shape[-1] == y.shape[-2]
+#         if x.ndim >= 3:
+#             assert x.shape[0:-2] == y.shape[0:-2]
+#         shape = (x.shape[0:-1]) + (y.shape[-2],)
+#     # matrix-vector
+#     elif x.ndim == y.ndim - 1:
+#         assert x.shape[-1] == y.shape[-1]
+#         if x.ndim >= 3:
+#             assert x.shape[0:-1] == y.shape[0:-1]
+#         shape = (x.shape[0:-1]) + (y.shape[-1],)
+#     else:
+#         raise ValueError
+#     # matrix-matrix, vector-matrix, matrix-vector
+#     return [Typecheckor(shape, x.dtype)]
 
 
-@dot.set_method
-def jvp(self, primals, tangents):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
+# @dot.set_method
+# def jvp(self, primals, tangents):
+#     (x, y), (x_dot, y_dot) = primals, tangents
+#     return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
 
 
-@dot.set_method
-def T(self, cts, x, y):
-    (z_bar,) = cts
-    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
-    if type(x) is PrimalProxy:
-        return [z_bar.dot(y), None]
-    elif type(y) is PrimalProxy:
-        return [None, x.dot(z_bar)]
+# @dot.set_method
+# def T(self, cts, x, y):
+#     (z_bar,) = cts
+#     assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
+#     if type(x) is PrimalProxy:
+#         return [z_bar.dot(y), None]
+#     elif type(y) is PrimalProxy:
+#         return [None, x.dot(z_bar)]
 
 
-conv = Operator.binary_reduce("conv")
+# conv = Operator.binary_reduce("conv")
 
 
-def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
-    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+# def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
+#     return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
 
-@conv.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
-    (x, y), (x_dot, y_dot) = primals, tangents
-    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+# @conv.set_method
+# def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+#     (x, y), (x_dot, y_dot) = primals, tangents
+#     jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#     jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
 
-    return [x.conv(y)], [jvp1 + jvp2]
+#     return [x.conv(y)], [jvp1 + jvp2]
 
 
-@conv.set_method
-def T(self, cts, x, y, *, groups, stride, dilation, padding):
-    (z_bar,) = cts
-    if type(x) is PrimalProxy:
-        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [gx, None]
-    elif type(y) is PrimalProxy:
-        x_T = x.swapaxes(0, 1)
-        z_bar_T = z_bar.swapaxes(0, 1)
-        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
-        return [None, gy]
+# @conv.set_method
+# def T(self, cts, x, y, *, groups, stride, dilation, padding):
+#     (z_bar,) = cts
+#     if type(x) is PrimalProxy:
+#         gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#         return [gx, None]
+#     elif type(y) is PrimalProxy:
+#         x_T = x.swapaxes(0, 1)
+#         z_bar_T = z_bar.swapaxes(0, 1)
+#         gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
+#         return [None, gy]
 
 
 # --------------
@@ -1018,7 +1020,7 @@ def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
-    slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
+    # slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
     # onnx.checker.check_model(model)
     session = onnxruntime.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
 
@@ -1060,7 +1062,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     for inb in program.in_binders:
         prefix = "x" if type(inb.aval) is Typecheckor else "c"
-        idx = sum_py([1 if prefix in v['name'] else 0 for v in environment.values()])
+        idx = sum_py([1 if v['name'][0] == prefix else 0 for v in environment.values()])
         environment[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
@@ -1069,9 +1071,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         in_vals = list_map(lambda x: environment[x]["name"], instruction.inputs)
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
-            idx = sum_py([1 if prefix in v['name'] else 0 for v in environment.values()])
+            idx = sum_py([1 if v['name'][0] == prefix else 0 for v in environment.values()])
             environment[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
-
 
         out_vals = list_map(lambda z: environment[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
@@ -1093,18 +1094,18 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
 
     in_binders = list_map(lambda x: environment[x], program.in_binders)
-    arg_type_strs = [f"{self.dtype_map[i['type'].dtype]}[{repr(i['type'].shape)[1:-1]}] {i['name']}" for i in in_binders]
+    arg_type_strs = [f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders]
     fn_args_str = ", ".join(arg_type_strs)
 
     outs = list_map(lambda x: environment[x], program.outs) # TODO: input that is output should has identity op
-    out_type_strs = [f"{self.dtype_map[o['type'].dtype]}[{repr(o['type'].shape)[1:-1]}] {o['name']}" for o in outs]
+    out_type_strs = [f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs]
     out_type_str = ", ".join(out_type_strs)
 
     head_code_lines = []
     head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
     head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
     model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
-
+    
     functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
@@ -1138,7 +1139,7 @@ onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = Sub(
 onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = Mul({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2}")
+onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
 
 
@@ -1197,13 +1198,15 @@ ret = Squeeze (ret_fill_value, ret_squeeze_dim)
             return f"""
 ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
 ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand (ret_fill_value, ret_shape)
+ret_expand = Expand (ret_fill_value, ret_shape)
+ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_expand)
 """
         else:  # scalar case
             return f"""
 ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
 ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_fill_value, ret_squeeze_dim)
+ret_squeeze = Squeeze (ret_fill_value, ret_squeeze_dim)
+ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_squeeze)
 """
 
 
@@ -1349,12 +1352,12 @@ def flatten_seq(l: Iterator):
 
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
-    return slope.full(shape, 0.0, dtype)
+    return slope.full(shape, 0.0 if 'float' in dtype.name else 0, dtype)
 
 
 @procedure_set.register(static_argnames="shape dtype")
 def ones(shape, dtype=Tensor.float32):
-    return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
+    return slope.full(shape, 1.0 if 'float' in dtype.name else 1, dtype)
 
 
 @procedure_set.register(static_argnames="fill_value")
@@ -1369,7 +1372,7 @@ def zeros_like(y):
 
 @procedure_set.register()
 def ones_like(y):
-    return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
+    return slope.ones(shape=y.shape, dtype=y.dtype)
 
 
 @procedure_set.register()
@@ -1378,8 +1381,8 @@ def relu(x):
 
 @procedure_set.register()
 def where(x, trueval, falseval):
-    cond = x != zeros_like(x)
-    cond = cond.cast(trueval.dtype)
+    assert x.dtype is Tensor.bool
+    cond = x.cast(trueval.dtype)
     return cond * trueval + (ones_like(cond) - cond) * falseval
 
 
@@ -1669,7 +1672,8 @@ def T(x):
 
 @procedure_set.register(static_argnames="axes")
 def _softmax(x, axes):
-    m = x  # - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
+    # m = x - x.max(axes, keepdims=True)
+    m = x
     e = m.exp()
     return m, e, e.sum(axes, keepdims=True)
 

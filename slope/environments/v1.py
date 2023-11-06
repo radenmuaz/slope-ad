@@ -254,7 +254,7 @@ operator_set.register(maximum)
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
-            (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+            (y == z).where(slope.full_like(z, 2.0 if 'float' in z.dtype.name else 2), slope.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -277,15 +277,43 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, y), _ = primals, tangents
     out_primal = x.equal(y)
-    return [out_primal], [slope.zeros(out_primal.shape, out_primal.dtype)]
+    return [out_primal], [slope.full(out_primal.shape, Tensor.bool)]
 
 
 @equal.set_method
 def T(self, cts, x, y):
     (z_bar,) = cts
+    z_bar = z_bar.cast(x.dtype)
     return [z_bar, None]
 
-
+@equal.set_method
+def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
+     # difference with default binary typecheck: force dtype bool
+    if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+        Tensor,
+        Typecheckor,
+    ):
+        raise TypeError
+    void_x = Typecheckor(x.shape, Tensor.bool)
+    void_y = Typecheckor(y.shape, Tensor.bool)
+    if void_x == void_y:
+        return [void_x]
+    shape_delta = len(void_x.shape) - len(void_y.shape)
+    if shape_delta > 0:
+        void_y = Typecheckor((1,) * shape_delta + void_y.shape, Tensor.bool)
+    elif shape_delta < 0:
+        void_x = Typecheckor((1,) * -shape_delta + void_x.shape, Tensor.bool)
+    if void_x == void_y:
+        return [void_x]
+    else:
+        shape_ret = tuple([max(x, y) for x, y in zip(void_x.shape, void_y.shape)])
+        if void_x.shape != shape_ret:
+            void_x = Typecheckor(shape_ret, Tensor.bool)
+        if void_y.shape != shape_ret:
+            void_y = Typecheckor(shape_ret, Tensor.bool)
+        if void_x != void_y:
+            raise TypeError
+        return [void_x]
 max = Operator.reduce("max")
 operator_set.register(max)
 
@@ -304,7 +332,6 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
     counts = locs.sum(axes)
     jvp_out = (x_dot * locs).sum(axes)
     jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
-
     return [out], [jvp_out]
 
 
@@ -1003,8 +1030,6 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     if fn_name == "main":
         del self.fn_count
-    if len(program.outs) > 2:
-        breakpoint()
     return dict(code_lines=code_lines, fn_defs=fn_defs)
 
 

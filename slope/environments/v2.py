@@ -318,7 +318,7 @@ operator_set.register(max)
 
 
 @max.set_method
-def jvp(self, primals, tangents, *, axes=(), keepdims=False):
+def jvp(self, primals, tangents, *, axes, keepdims):
     (x,), (x_dot,) = primals, tangents
     out = x.max(axes, keepdims)
     _out = out
@@ -336,7 +336,7 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
 
 
 @max.set_method
-def T(self, cts, x, *, axes=None, keepdims=False):
+def T(self, cts, x, *, axes, keepdims):
     (z,) = cts
     out = z
     if not keepdims:
@@ -1669,24 +1669,18 @@ def T(x):
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return x.transpose(tuple(perm))
 
-
-@procedure_set.register(static_argnames="axes")
-def _softmax(x, axes):
-    # m = x - x.max(axes, keepdims=True)
-    m = x
-    e = m.exp()
-    return m, e, e.sum(axes, keepdims=True)
-
-
 @procedure_set.register(static_argnames="axes")
 def softmax(x, axes=-1):
-    _, e, ss = x._softmax(axes)
-    return e.div(ss)
-
+    m = x - x.max(axes, keepdims=True)
+    e = m.exp()
+    ss = e.sum(axes, keepdims=True)
+    return e/ss
 
 @procedure_set.register(static_argnames="axes")
 def log_softmax(x, axes=-1):
-    m, _, ss = x._softmax(axes)
+    m = x - x.max(axes, keepdims=True)
+    e = m.exp()
+    ss = e.sum(axes, keepdims=True)
     return m - ss.log()
 
 

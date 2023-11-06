@@ -319,7 +319,7 @@ operator_set.register(max)
 
 
 @max.set_method
-def jvp(self, primals, tangents, *, axes=(), keepdims=False):
+def jvp(self, primals, tangents, *, axes, keepdims):
     (x,), (x_dot,) = primals, tangents
     out = x.max(axes, keepdims)
     _out = out
@@ -327,16 +327,16 @@ def jvp(self, primals, tangents, *, axes=(), keepdims=False):
         axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    locs = x.equal(_out.broadcast(x.shape))
+    locs = x.equal(_out.broadcast_to(x.shape))
     locs = locs.cast(x_dot.dtype)
-    counts = locs.sum(axes)
-    jvp_out = (x_dot * locs).sum(axes)
-    jvp_out = jvp_out / counts.broadcast(jvp_out.shape)
+    counts = locs.sum(axes, keepdims)
+    jvp_out = (x_dot * locs).sum(axes, keepdims)
+    jvp_out = jvp_out / counts.broadcast_to(jvp_out.shape)
     return [out], [jvp_out]
 
 
 @max.set_method
-def T(self, cts, x, *, axes=None, keepdims=False):
+def T(self, cts, x, *, axes, keepdims):
     (z,) = cts
     out = z
     if not keepdims:
@@ -1459,21 +1459,17 @@ def T(x):
 
 
 @procedure_set.register(static_argnames="axes")
-def _softmax(x, axes):
-    m = x  # - x.max(axes, keepdims=True) # BUG: enable this error in typecheck program
-    e = m.exp()
-    return m, e, e.sum(axes, keepdims=True)
-
-
-@procedure_set.register(static_argnames="axes")
 def softmax(x, axes=-1):
-    _, e, ss = x._softmax(axes)
-    return e.div(ss)
-
+    m = x - x.max(axes, keepdims=True)
+    e = m.exp()
+    ss = e.sum(axes, keepdims=True)
+    return e/ss
 
 @procedure_set.register(static_argnames="axes")
 def log_softmax(x, axes=-1):
-    m, _, ss = x._softmax(axes)
+    m = x - x.max(axes, keepdims=True)
+    e = m.exp()
+    ss = e.sum(axes, keepdims=True)
     return m - ss.log()
 
 

@@ -41,6 +41,7 @@ def M():
 
 def default_slope_init():
     from slope.environments.v1 import v1_environment
+
     return core.Machine(environment=v1_environment)
 
 

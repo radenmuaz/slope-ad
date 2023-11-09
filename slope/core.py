@@ -42,6 +42,8 @@ from functools import partial, lru_cache
 import slope
 import mmap
 import struct
+
+
 # ================
 #   Utils
 # ================
@@ -302,16 +304,15 @@ class Tensor:
     @property
     def ndim(self):
         return len(self.shape)
-    
+
     def numel(self):
         return math.prod(self.shape)
-    
+
     def element_size(self):
         return self.dtype.itemsize
-    
+
     def nbytes(self):
         return self.numel() * self.element_size()
-
 
     def __repr__(self):
         return f"Tensor: {self.numpy()}, {self.dtype}, {self.device}"
@@ -498,8 +499,6 @@ class Operator:
                 x = y._trace.pure(x)
             elif type(y) is Tensor and isinstance(x, Tracor):
                 y = x._trace.pure(y)
-            
-            
 
             if (xshape := x.shape) == (yshape := y.shape):
                 return (x, y), params
@@ -837,10 +836,9 @@ class Environment:
 
     def save(self, tensor: Tensor, path: str) -> str:
         return self.backend.save(tensor, path)
-    
+
     def load(self, path: str) -> Tensor:
         return self.backend.load(path)
-
 
 
 # ================
@@ -1188,7 +1186,7 @@ class Backend:
         fn, code = self.compile(codegen_out)
         compiled = JitFn(code, fn, consts)
         return compiled
-    
+
     def set_dtype_map(self, dtype_map: Dict):
         self.dtype_map = dtype_map
         self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
@@ -1215,7 +1213,7 @@ class Backend:
             with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as m:
                 json_len = np.int64(m[0])
                 start = 8 + json_len
-                metadata = json.loads(m[8 : start])
+                metadata = json.loads(m[8:start])
                 ret = {}
                 for k, v in metadata.items():
                     if k != "__metadata__":
@@ -1244,16 +1242,17 @@ class Backend:
         j = json.dumps(metadata, separators=(",", ":"))
         Path(path).unlink(missing_ok=True)
         jbytes = j.encode("utf-8")
-        start = 8+len(jbytes)
-        with open(path, mode="wb") as f: # make empty file with enough space
-            f.write(b'\x00'* (start+offset))
+        start = 8 + len(jbytes)
+        with open(path, mode="wb") as f:  # make empty file with enough space
+            f.write(b"\x00" * (start + offset))
         with open(path, mode="r+b") as f:
             with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE) as m:
                 m[0:8] = np.int64(len(j)).tobytes()
                 m[8:start] = jbytes
                 for t, tm in zip(tensors.values(), metadata.values()):
                     data_start, data_end = tm["data_offsets"]
-                    m[start+data_start:start+data_end] = t.numpy().tobytes()
+                    m[start + data_start : start + data_end] = t.numpy().tobytes()
+
 
 class MainTrace(NamedTuple):
     rt: "Machine"
@@ -1541,7 +1540,7 @@ class ProgramBuilder:
         )
         slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
-    
+
     def get_current_scope_info(self):
         current_frame = inspect.currentframe()
         current_function_name = current_frame.f_code.co_name
@@ -1551,14 +1550,10 @@ class ProgramBuilder:
             print(frame_info)
             frame_locals = frame_info.frame.f_locals
             print(frame_locals)
-            if 'self' in frame_locals:
-                current_class_name = frame_locals['self'].__class__.__name__
+            if "self" in frame_locals:
+                current_class_name = frame_locals["self"].__class__.__name__
                 break
-        return {
-            "Function": current_function_name,
-            "Module": current_module_name,
-            "Class": current_class_name
-        }
+        return {"Function": current_function_name, "Module": current_module_name, "Class": current_class_name}
 
 
 class PrimalProxy(NamedTuple):
@@ -2363,7 +2358,7 @@ class Machine:
             program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
 
             args, in_tree = self.tree_flatten(args)
-            outs = self.bind(jit_op,*consts,*args,program=program)
+            outs = self.bind(jit_op, *consts, *args, program=program)
             return self.tree_unflatten(out_tree, outs)
 
         return f_jitted

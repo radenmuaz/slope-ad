@@ -164,6 +164,7 @@ def T(self, cts, x):
     (z,) = cts
     return [~z]
 
+
 @invert.set_method
 def typecheck(self, x, **params):
     return [Typecheckor(x.shape, slope.bool)]
@@ -249,10 +250,10 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        xz = ((x == z).where(slope.ones_like(z), slope.zeros_like(z)))
-        yz = (y == z).where(slope.full_like(z, 2.0 if 'float' in z.dtype.name else 2), slope.ones_like(z))
+        xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
+        yz = (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
         eps = slope.ones_like(z)
-        return xz/(yz + eps) # TODO: nan if no eps for onnxruntime
+        return xz / (yz + eps)  # TODO: nan if no eps for onnxruntime
 
     (x, y), (x_dot, y_dot) = primals, tangents
     run_out = x.maximum(y)
@@ -283,9 +284,10 @@ def T(self, cts, x, y):
     z_bar = z_bar.cast(x.dtype)
     return [z_bar, None]
 
+
 @equal.set_method
 def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
-     # difference with default binary typecheck: force dtype bool
+    # difference with default binary typecheck: force dtype bool
     if not type(x) in (Tensor, Typecheckor) or not type(x) in (
         Tensor,
         Typecheckor,
@@ -312,6 +314,7 @@ def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typechecko
         if void_x != void_y:
             raise TypeError
         return [void_x]
+
 
 max = Operator.reduce("max")
 operator_set.register(max)
@@ -1062,7 +1065,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     for inb in program.in_binders:
         prefix = "x" if type(inb.aval) is Typecheckor else "c"
-        idx = sum_py([1 if v['name'][0] == prefix else 0 for v in environment.values()])
+        idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
         environment[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
@@ -1071,7 +1074,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         in_vals = list_map(lambda x: environment[x]["name"], instruction.inputs)
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
-            idx = sum_py([1 if v['name'][0] == prefix else 0 for v in environment.values()])
+            idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
             environment[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
         out_vals = list_map(lambda z: environment[z]["name"], instruction.out_binders)
@@ -1088,24 +1091,26 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
-   
-    
     # inb_consts = [v for v in environment.values() if "c" in v["name"]]
     # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
 
     in_binders = list_map(lambda x: environment[x], program.in_binders)
-    arg_type_strs = [f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders]
+    arg_type_strs = [
+        f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
+    ]
     fn_args_str = ", ".join(arg_type_strs)
 
-    outs = list_map(lambda x: environment[x], program.outs) # TODO: input that is output should has identity op
-    out_type_strs = [f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs]
+    outs = list_map(lambda x: environment[x], program.outs)  # TODO: input that is output should has identity op
+    out_type_strs = [
+        f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
+    ]
     out_type_str = ", ".join(out_type_strs)
 
     head_code_lines = []
     head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
     head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
     model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
-    
+
     functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
@@ -1116,18 +1121,15 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         del self.fn_count
     assert len(outs) == len(program.outs)
-    return dict(
-        code_lines=code_lines,
-        fn_defs=fn_defs,
-        in_binders=in_binders,
-        outs=outs
-    )
+    return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
 
 
 ### Operator Impls
 
 
-onnxruntime_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype:f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
+onnxruntime_backend.set_impl(operator_set.cast)(
+    lambda self, x, *, dtype: f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})"
+)
 onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
 onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
 onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
@@ -1245,6 +1247,7 @@ ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }
 ret = Expand ({x}, ret_shape)
 """
 
+
 @onnxruntime_backend.set_impl(operator_set.reshape)
 def reshape_impl(self, x, *, shape):
     if len(shape) > 0:
@@ -1254,12 +1257,12 @@ ret = Reshape({x}, ret_shape)
 """
     else:  # scalar case
         f"""
-ret_shape = Constant <value = int64[1] {1} >()
-ret_reshape = Reshape({x}, ret_shape)
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_reshape, ret_squeeze_dim)
-"""
-        
+        ret_shape = Constant <value = int64[1] {1} >()
+        ret_reshape = Reshape({x}, ret_shape)
+        ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+        ret = Squeeze (ret_reshape, ret_squeeze_dim)"""
+
+
 @onnxruntime_backend.set_impl(operator_set.pad_hlo)
 def pad_hlo_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
     pads = lo + hi
@@ -1279,13 +1282,16 @@ ret_steps = Constant <value = int64[{len(strides)}] {strides}>()
 ret = Slice({x}, ret_starts, ret_ends, steps=ret_steps))])
 """
 
+
 @onnxruntime_backend.set_impl(operator_set.concatenate)
 def concatenate_impl(self, *xs, axis):
     return f"ret = Concat< axis={axis}>({repr(list(xs))[1:-1]})"
 
+
 @onnxruntime_backend.set_impl(operator_set.transpose)
 def transpose_impl(self, x, *, perm):
     return f"ret = Transpose<perm={repr(list(perm))}>({x})"
+
 
 @onnxruntime_backend.set_impl(operator_set.flip)
 def flip_impl(self, x, *, axes):
@@ -1352,12 +1358,12 @@ def flatten_seq(l: Iterator):
 
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
-    return slope.full(shape, 0.0 if 'float' in dtype.name else 0, dtype)
+    return slope.full(shape, 0.0 if "float" in dtype.name else 0, dtype)
 
 
 @procedure_set.register(static_argnames="shape dtype")
 def ones(shape, dtype=Tensor.float32):
-    return slope.full(shape, 1.0 if 'float' in dtype.name else 1, dtype)
+    return slope.full(shape, 1.0 if "float" in dtype.name else 1, dtype)
 
 
 @procedure_set.register(static_argnames="fill_value")
@@ -1378,6 +1384,7 @@ def ones_like(y):
 @procedure_set.register()
 def relu(x):
     return x.maximum(slope.zeros_like(x))
+
 
 @procedure_set.register()
 def where(x, trueval, falseval):
@@ -1669,12 +1676,14 @@ def T(x):
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return x.transpose(tuple(perm))
 
+
 @procedure_set.register(static_argnames="axes")
 def softmax(x, axes=-1):
     m = x - x.max(axes, keepdims=True)
     e = m.exp()
     ss = e.sum(axes, keepdims=True)
-    return e/ss
+    return e / ss
+
 
 @procedure_set.register(static_argnames="axes")
 def log_softmax(x, axes=-1):

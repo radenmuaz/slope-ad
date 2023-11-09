@@ -254,7 +254,7 @@ operator_set.register(maximum)
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
         return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
-            (y == z).where(slope.full_like(z, 2.0 if 'float' in z.dtype.name else 2), slope.ones_like(z))
+            (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
         )
 
     (x, y), (x_dot, y_dot) = primals, tangents
@@ -286,9 +286,10 @@ def T(self, cts, x, y):
     z_bar = z_bar.cast(x.dtype)
     return [z_bar, None]
 
+
 @equal.set_method
 def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
-     # difference with default binary typecheck: force dtype bool
+    # difference with default binary typecheck: force dtype bool
     if not type(x) in (Tensor, Typecheckor) or not type(x) in (
         Tensor,
         Typecheckor,
@@ -314,6 +315,8 @@ def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typechecko
         if void_x != void_y:
             raise TypeError
         return [void_x]
+
+
 max = Operator.reduce("max")
 operator_set.register(max)
 
@@ -1463,7 +1466,8 @@ def softmax(x, axes=-1):
     m = x - x.max(axes, keepdims=True)
     e = m.exp()
     ss = e.sum(axes, keepdims=True)
-    return e/ss
+    return e / ss
+
 
 @procedure_set.register(static_argnames="axes")
 def log_softmax(x, axes=-1):

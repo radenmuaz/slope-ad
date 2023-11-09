@@ -12,6 +12,6 @@ pip install -e .
 
 # Quickstart
 
-WIP.
-
+Currently there are two backends:
+numpy and onnxruntime
 So far `examples/mnist.py` is working.

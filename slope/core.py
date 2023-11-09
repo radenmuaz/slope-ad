@@ -40,8 +40,8 @@ import math
 import inspect
 from functools import partial, lru_cache
 import slope
-
-
+import mmap
+import struct
 # ================
 #   Utils
 # ================
@@ -302,6 +302,16 @@ class Tensor:
     @property
     def ndim(self):
         return len(self.shape)
+    
+    def numel(self):
+        return math.prod(self.shape)
+    
+    def element_size(self):
+        return self.dtype.itemsize
+    
+    def nbytes(self):
+        return self.numel() * self.element_size()
+
 
     def __repr__(self):
         return f"Tensor: {self.numpy()}, {self.dtype}, {self.device}"
@@ -821,41 +831,16 @@ class Environment:
         elif isinstance(val, Tensor):
             return val
         else:
-            return slope.M().environment.backend.from_numpy(val, dtype)
+            if type(val) is bytes:
+                val = np.frombuffer(val, dtype=dtype)
+            return self.backend.from_numpy(val, dtype)
 
-    def save(arr: "Tensor", filename: str):
-        # TODO
-        arr_np = arr.numpy()
+    def save(self, tensor: Tensor, path: str) -> str:
+        return self.backend.save(tensor, path)
+    
+    def load(self, path: str) -> Tensor:
+        return self.backend.load(path)
 
-    def safe_load(self, fn: Union[Tensor, str]) -> Dict[str, Tensor]:
-        t = fn if isinstance(fn, Tensor) else Tensor.empty(os.stat(fn).st_size, dtype=Tensor.uint8, device=f"disk:{fn}")
-        json_len = t[0:1].cast(Tensor.int64).numpy()[0]
-        metadata = json.loads(t[8 : 8 + json_len].numpy().tobytes())
-        return {
-            k: t[8 + json_len + v["data_offsets"][0] :]
-            .cast(Tensor.safe_dtypes[v["dtype"]])[: math.prod(v["shape"])]
-            .reshape(v["shape"])
-            for k, v in metadata.items()
-            if k != "__metadata__"
-        }
-
-    def safe_save(self, Tensors: Dict[str, Tensor], fn: str):
-        metadata, offset = {}, 0
-        for k, v in Tensors.items():
-            metadata[k] = {
-                "dtype": Tensor.safe_dtypes_inv[v.dtype],
-                "shape": list(v.shape),
-                "data_offsets": [offset, offset + v.nbytes()],
-            }
-            offset += v.nbytes()
-        j = json.dumps(metadata, separators=(",", ":"))
-        j += "\x20" * ((8 - len(j) % 8) % 8)
-        Path(fn).unlink(missing_ok=True)
-        t = Tensor.empty(8 + len(j) + offset, dtype=Tensor.uint8, device=f"disk:{fn}")
-        t[0:1].cast(Tensor.int64).assign([len(j)])
-        t[8 : 8 + len(j)].assign(Tensor(list(j.encode("utf-8")), dtype=Tensor.uint8, device="cpu"))
-        for k, v in self.safe_load(t).items():
-            v.assign(Tensors[k])
 
 
 # ================
@@ -1203,25 +1188,72 @@ class Backend:
         fn, code = self.compile(codegen_out)
         compiled = JitFn(code, fn, consts)
         return compiled
-
-    def codegen(self, program, args, in_avals, name: str):
-        "Returns backend IR from the Program"
-        raise NotImplementedError
-
-    def compile(self, program, args, in_avals, name: str):
-        "Compiles backend IR to a Python callable function"
-        raise NotImplementedError
-
-    def set_dtype_map(self, dtype_map):
+    
+    def set_dtype_map(self, dtype_map: Dict):
         self.dtype_map = dtype_map
         self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
 
-    def set_impl(self, op):
+    def set_impl(self, op: Union[types.LambdaType, types.FunctionType]):
         def set_impl_(fn):
             self.impls[op] = types.MethodType(fn, self)
 
         return set_impl_
 
+    def codegen(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
+        "Returns backend IR from the Program"
+        raise NotImplementedError
+
+    def compile(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
+        "Compiles backend IR to a Python callable function"
+        raise NotImplementedError
+
+    def export(self, jitted):
+        raise NotImplementedError
+
+    def load(self, path, single_key="_tensor"):
+        with open(path, mode="rb") as f:
+            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as m:
+                json_len = np.int64(m[0])
+                start = 8 + json_len
+                metadata = json.loads(m[8 : start])
+                ret = {}
+                for k, v in metadata.items():
+                    if k != "__metadata__":
+                        dtype = Tensor.dtype_short_names[(v["dtype"])]
+                        data_start = start + v["data_offsets"][0]
+                        data_end = start + v["data_offsets"][1]
+                        t_np = np.frombuffer(m[data_start:data_end], dtype=dtype.numpy())
+                        t = slope.tensor(t_np, dtype=dtype)
+                        t = t.reshape(tuple(v["shape"]))
+                        ret[k] = t
+                if len(ret) == 1 and single_key in ret.keys():
+                    return ret[single_key]
+                return ret
+
+    def save(self, tensors: Dict[str, Tensor], path: str, single_key="_tensor"):
+        if isinstance(tensors, Tensor):
+            tensors = {single_key: tensors}
+        metadata, offset = {}, 0
+        for k, v in tensors.items():
+            metadata[k] = {
+                "dtype": v.dtype.short_name,
+                "shape": list(v.shape),
+                "data_offsets": [offset, offset + v.nbytes()],
+            }
+            offset += v.nbytes()
+        j = json.dumps(metadata, separators=(",", ":"))
+        Path(path).unlink(missing_ok=True)
+        jbytes = j.encode("utf-8")
+        start = 8+len(jbytes)
+        with open(path, mode="wb") as f: # make empty file with enough space
+            f.write(b'\x00'* (start+offset))
+        with open(path, mode="r+b") as f:
+            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE) as m:
+                m[0:8] = np.int64(len(j)).tobytes()
+                m[8:start] = jbytes
+                for t, tm in zip(tensors.values(), metadata.values()):
+                    data_start, data_end = tm["data_offsets"]
+                    m[start+data_start:start+data_end] = t.numpy().tobytes()
 
 class MainTrace(NamedTuple):
     rt: "Machine"
@@ -1509,6 +1541,24 @@ class ProgramBuilder:
         )
         slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
+    
+    def get_current_scope_info(self):
+        current_frame = inspect.currentframe()
+        current_function_name = current_frame.f_code.co_name
+        current_module_name = inspect.getmodulename(current_frame.f_code.co_filename)
+        current_class_name = None
+        for frame_info in inspect.getouterframes(current_frame):
+            print(frame_info)
+            frame_locals = frame_info.frame.f_locals
+            print(frame_locals)
+            if 'self' in frame_locals:
+                current_class_name = frame_locals['self'].__class__.__name__
+                break
+        return {
+            "Function": current_function_name,
+            "Module": current_module_name,
+            "Class": current_class_name
+        }
 
 
 class PrimalProxy(NamedTuple):

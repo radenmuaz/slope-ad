@@ -893,7 +893,7 @@ numpy_backend.set_dtype_map(
         Tensor.float32: np.dtype("float32"),
         Tensor.int64: np.dtype("int64"),
         Tensor.int8: np.dtype("int8"),
-        Tensor.bool: bool,
+        Tensor.bool: np.dtype("bool"),
     }
 )
 

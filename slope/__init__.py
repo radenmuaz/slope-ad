@@ -11,6 +11,7 @@ LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
 
+import logging
 
 def dblog(*msg, enable=True):
     if enable:
@@ -41,7 +42,6 @@ def M():
 
 def default_slope_init():
     from slope.environments.v1 import v1_environment
-
     return core.Machine(environment=v1_environment)
 
 

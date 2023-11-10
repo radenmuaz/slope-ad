@@ -1231,6 +1231,9 @@ class Backend:
     def save(self, tensors: Dict[str, Tensor], path: str, single_key="_tensor"):
         if isinstance(tensors, Tensor):
             tensors = {single_key: tensors}
+        else:
+            assert all((isinstance(k, str) and isinstance(v, Tensor)) for k,v in tensors.items())
+
         metadata, offset = {}, 0
         for k, v in tensors.items():
             metadata[k] = {
@@ -1243,7 +1246,7 @@ class Backend:
         Path(path).unlink(missing_ok=True)
         jbytes = j.encode("utf-8")
         start = 8 + len(jbytes)
-        with open(path, mode="wb") as f:  # make empty file with enough space
+        with open(path, mode="wb") as f:  # make empty file, fill with enough space
             f.write(b"\x00" * (start + offset))
         with open(path, mode="r+b") as f:
             with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE) as m:
@@ -2328,15 +2331,22 @@ class Machine:
 
         return grad_fn
 
-    def jit(self, f, static_argnames=(), name=None):
-        assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
+    class jit:
+        def __init__(self, f, static_argnames=(), name=None):
+            assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
+            self.f = f
+            self.name = name
+            self.static_argnames = static_argnames
+        
+        @classmethod
+        def with_options(cls, static_argnames=(), name=None):
+            return partial(cls, static_argnames=static_argnames, name=name)
 
-        def f_jitted(*args, **static_args):
-            _args = args
-            sig = inspect.signature(f)
+        def process(self, *args, **static_args):
+            sig = inspect.signature(self.f)
             if all("*" not in repr(v) for v in sig.parameters.values()):
-                args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
-                static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
+                args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in self.static_argnames]
+                static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in self.static_argnames]
 
                 if args:
                     if len(args) > len(args_strs):
@@ -2351,17 +2361,27 @@ class Machine:
 
             static_args = tuple(static_args.items())
 
-            avals_in = self.tree_map(lambda x: Typecheckor.like(self.get_aval(x)), args)
-            nonlocal name
-            if name is None:
-                name = f"jit_{str(hash((f, avals_in, static_args)))[1:5]}"
-            program, consts, out_tree = self.make_program(f, *avals_in, static_args=static_args, name=name)
+            avals_in = slope.M().tree_map(lambda x: Typecheckor.like(slope.M().get_aval(x)), args)
+            if self.name is None:
+                self.name = f"jit_{str(hash((self.f, avals_in, static_args)))[1:5]}"
+            program, consts, out_tree = slope.M().make_program(self.f, *avals_in, static_args=static_args, name=self.name)
+            return program, consts, out_tree
 
-            args, in_tree = self.tree_flatten(args)
-            outs = self.bind(jit_op, *consts, *args, program=program)
-            return self.tree_unflatten(out_tree, outs)
-
-        return f_jitted
+        def __call__(self, *args, **static_args):
+            program, consts, out_tree = self.process(*args, **static_args)
+            args, in_tree = slope.M().tree_flatten(args)
+            outs = slope.M().bind(jit_op, *consts, *args, program=program)
+            return slope.M().tree_unflatten(out_tree, outs)
+        
+        def get_jit_fn(self, *args, **static_args):
+            program, consts, out_tree = self.process(*args, **static_args)
+            args, in_tree = slope.M().tree_flatten(args)
+            hashed_program = Hashed(program)
+            num_consts = program.num_consts
+            consts, args = args[:num_consts], args[num_consts:]
+            hashed_consts = tuple(map(Hashed, consts))
+            jit_fn = slope.M().environment.backend.gen_jit_fn(hashed_program, hashed_consts)
+            return jit_fn, consts, args
 
     def jit_partial_run(self, trace, tracers, *, program):
         in_unknowns = [not t.pval.is_known for t in tracers]

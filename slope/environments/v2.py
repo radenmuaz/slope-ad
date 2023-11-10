@@ -1017,6 +1017,9 @@ def shape_of(self, tensor):
 def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
 
+@onnxruntime_backend.set_method
+def export(self, jitted):
+    breakpoint()
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):

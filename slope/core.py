@@ -1021,7 +1021,7 @@ leaf = Leaf()
 # ================
 
 
-class JitFn:
+class JitObject:
     def __init__(self, code, fn, consts):
         super().__init__()
         self.code = code
@@ -1037,6 +1037,9 @@ class JitFn:
             slope.dblog(self.code, enable=slope.LOG_JIT)
             raise
         return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
+    
+    def export(self, output_path, *args, **params):
+        return slope.M().environment.backend.export(self, output_path, *args, **params)
 
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
@@ -1048,8 +1051,8 @@ def run_impl(self, *args, program):
     num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    jit_fn = slope.M().environment.backend.gen_jit_fn(hashed_program, hashed_consts)
-    ret = jit_fn(*consts, *args)
+    jit_object = slope.M().environment.backend.gen_jit_object(hashed_program, hashed_consts)
+    ret = jit_object(*consts, *args)
     return ret
 
 
@@ -1173,7 +1176,7 @@ class Backend:
         raise NotImplementedError
 
     @lru_cache_verbose()
-    def gen_jit_fn(
+    def gen_jit_object(
         self,
         hashed_program: Hashed,
         hashed_consts: Tuple[Hashed, ...],
@@ -1184,7 +1187,7 @@ class Backend:
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         codegen_out = self.codegen(program, consts + in_avals, fn_name="main")
         fn, code = self.compile(codegen_out)
-        compiled = JitFn(code, fn, consts)
+        compiled = JitObject(code, fn, consts)
         return compiled
 
     def set_dtype_map(self, dtype_map: Dict):
@@ -1205,7 +1208,7 @@ class Backend:
         "Compiles backend IR to a Python callable function"
         raise NotImplementedError
 
-    def export(self, jitted):
+    def export(self, jit_object, output_path, *args, **params):
         raise NotImplementedError
 
     def load(self, path, single_key="_tensor"):
@@ -2319,8 +2322,8 @@ class Machine:
             return y, x_bars
 
         # TODO: if nested jit, rejit, find cleaner way
-        if f.__qualname__ == "Machine.jit.<locals>.f_jitted":
-            f = f.__closure__[0].cell_contents
+        if isinstance(f, self.jit):
+            f = f.f
             return self.jit(value_and_grad_fn)
         else:
             return value_and_grad_fn
@@ -2342,7 +2345,7 @@ class Machine:
         def with_options(cls, static_argnames=(), name=None):
             return partial(cls, static_argnames=static_argnames, name=name)
 
-        def process(self, *args, **static_args):
+        def get_program(self, *args, **static_args):
             sig = inspect.signature(self.f)
             if all("*" not in repr(v) for v in sig.parameters.values()):
                 args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in self.static_argnames]
@@ -2368,21 +2371,21 @@ class Machine:
             return program, consts, out_tree
 
         def __call__(self, *args, **static_args):
-            program, consts, out_tree = self.process(*args, **static_args)
+            program, consts, out_tree = self.get_program(*args, **static_args)
             args, in_tree = slope.M().tree_flatten(args)
             outs = slope.M().bind(jit_op, *consts, *args, program=program)
             return slope.M().tree_unflatten(out_tree, outs)
         
-        def get_jit_fn(self, *args, **static_args):
-            program, consts, out_tree = self.process(*args, **static_args)
+        def get_jit_object(self, *args, **static_args):
+            program, consts, out_tree = self.get_program(*args, **static_args)
             args, in_tree = slope.M().tree_flatten(args)
             hashed_program = Hashed(program)
             num_consts = program.num_consts
             consts, args = args[:num_consts], args[num_consts:]
             hashed_consts = tuple(map(Hashed, consts))
-            jit_fn = slope.M().environment.backend.gen_jit_fn(hashed_program, hashed_consts)
-            return jit_fn, consts, args
-
+            jit_object = slope.M().environment.backend.gen_jit_object(hashed_program, hashed_consts)
+            return jit_object
+        
     def jit_partial_run(self, trace, tracers, *, program):
         in_unknowns = [not t.pval.is_known for t in tracers]
         program1, program2, out_unknowns, num_res = self.partial_run_program(program, in_unknowns)

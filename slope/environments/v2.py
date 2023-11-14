@@ -1018,7 +1018,7 @@ def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
 
 @onnxruntime_backend.set_method
-def export(self, jitted):
+def export(self, jit_object: slope.JitObject, output_path, *args, **kwargs):
     breakpoint()
 
 @onnxruntime_backend.set_method

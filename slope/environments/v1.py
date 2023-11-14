@@ -926,6 +926,9 @@ def shape_of(self, tensor):
 def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.dtype]
 
+@numpy_backend.set_method
+def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
+    breakpoint()
 
 @numpy_backend.set_method
 def compile(self, codegen_out):
@@ -1067,10 +1070,12 @@ numpy_backend.set_impl(operator_set.full)(
 )
 
 numpy_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: f"np.random.uniform(size={shape}).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: (f"{'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
+                                   )
 )
 numpy_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: f"np.random.normal(loc=np.zeros(shape={shape})).astype(dtype={dtype})"
+    lambda self, *, shape, dtype: (f"{'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
+                                   )
 )
 numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"np.broadcast_to({x}, shape={shape})")
 

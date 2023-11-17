@@ -27,7 +27,7 @@ from typing import (
 )
 from collections import defaultdict
 import importlib
-
+import os
 sum_py = sum
 slice_py = slice
 
@@ -928,13 +928,16 @@ def dtype_of(self, tensor):
 
 @numpy_backend.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
-    # ret = jit_object(*self.jit_object.consts, *args)
-    # *self.jit_object.consts, *args
     code = jit_object.code
-    consts = [np.array2string(c.numpy(), separator=",") for c in jit_object.consts]
-    breakpoint()
+    os.makedirs(output_path, exist_ok=True)
+    in_binders = jit_object.codegen_out["in_binders"]
+    len_consts = len(jit_object.consts)
+    for i in range(len_consts):
+        const_path = os.path.join(output_path,f"{in_binders[i]}.npy")
+        breakpoint()
+        np.save(jit_object.consts[i].numpy())
     with open(output_path, "w") as f:
-        text = "\n".join(consts) + "\n" + code
+        text = "\n".join(in_binders[:len_consts]) + "\n" + code
 
 @numpy_backend.set_method
 def compile(self, codegen_out):
@@ -1043,7 +1046,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     if fn_name == "main":
         del self.fn_count
-    return dict(code_lines=code_lines, fn_defs=fn_defs)
+    return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders = inb_consts + inb_args, outs=outs)
 
 
 ### Operator Impls

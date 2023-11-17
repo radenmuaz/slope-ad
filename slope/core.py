@@ -628,7 +628,7 @@ class ProcedureSet:
     # def register(self, static_argnames=(), not_op=False):
     def register(self, static_argnames=(), inline=True):
         def wrap(f):
-            f_procedure = self.new_procedure(f, static_argnames) if not inline else f
+            f_procedure = self.new_procedure(f, static_argnames) if inline else f
             assert f.__name__ not in vars(self)
             setattr(self, f.__name__, f_procedure)
             return f_procedure

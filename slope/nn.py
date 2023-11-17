@@ -308,7 +308,7 @@ class Optimizer(Module):
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
-        step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
+        step_out_T = slope.tree_permute(self.params_treedef, leaf0_treedef, step_out)
         params_out, state_attrs_out = step_out_T
         state = Module()
         for k, v in zip(state_names, state_attrs_out):

@@ -184,10 +184,10 @@ def broadcast_tensors(*args) -> List[Tensor]:
     if not shapes or all(shapes[0] == s for s in shapes):
         return Tensor(arg)
     result_shape = _broadcast_shapes_uncached(*shapes)
-    return [_broadcast_to(arg, result_shape) for arg in args]
+    return [_expand(arg, result_shape) for arg in args]
 
 
-def _broadcast_to(arr, shape) -> Tensor:
+def _expand(arr, shape) -> Tensor:
     if not isinstance(shape, tuple) and np.ndim(shape) == 0:
         shape = (shape,)
     if arr.shape == shape:
@@ -467,7 +467,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
         gather_indices_list = [
             g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim))) for g, i in gather_indices
         ]
-        gather_indices_tensor = Tracor.concatenate(gather_indices_list, last_dim)
+        gather_indices_tensor = Tracor.cat(gather_indices_list, last_dim)
 
     return _Indexer(
         slice_shape=slice_shape,

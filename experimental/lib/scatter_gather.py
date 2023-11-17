@@ -97,12 +97,12 @@ class Gather(ShapeOp):
 
             # Example: user code had indices shape (3, 4, 5), and we have to deal with
             # indices shape (7, 3, 4, 5). We transform that to indices of shape
-            # (7, 3, 4, 6) where we concatenated an iota that counts along our batch
+            # (7, 3, 4, 6) where we catd an iota that counts along our batch
             # dimension to the front of the ndindex.
             count_shape = list(indices.shape)
             count_shape[-1] = 1
             counts = lax.broadcasted_iota(indices.dtype, tuple(count_shape), 0)
-            indices = lax.concatenate([counts, indices], len(count_shape) - 1)
+            indices = lax.cat([counts, indices], len(count_shape) - 1)
 
             slice_sizes = (1,) + slice_sizes
             collapsed_slice_dims = (0,) + tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
@@ -381,7 +381,7 @@ class Scatter(ShapeOp):
         count_shape = list(indices.shape)
         count_shape[-1] = 1
         counts = lax.broadcasted_iota(indices.dtype, tuple(count_shape), 0)
-        indices = lax.concatenate([counts, indices], len(count_shape) - 1)
+        indices = lax.cat([counts, indices], len(count_shape) - 1)
 
         update_window_dims = tuple(np.add(1, dimension_numbers.update_window_dims))
         inserted_window_dims = (0,) + tuple(np.add(1, dimension_numbers.inserted_window_dims))

@@ -493,7 +493,7 @@ class Tensor(object):
     Attributes
     ----------
     T : Tensor
-        Transpose of the np. In tinynumpy only supported for ndim <= 3.
+        permute of the np. In tinynumpy only supported for ndim <= 3.
     data : buffer
         The Tensor's elements, in memory. In tinynumpy this is a ctypes np.
     dtype : str
@@ -1187,7 +1187,7 @@ class Tensor(object):
         if self.ndim < 2:
             return self
         else:
-            return self.transpose()
+            return self.permute()
 
     @property
     def flags(self):
@@ -1245,7 +1245,7 @@ class Tensor(object):
             out.shape = newshape
         return out
 
-    def transpose(self):
+    def permute(self):
         # Numpy returns a view, but we cannot do that since we do not
         # support Fortran ordering
         ndim = self.ndim
@@ -1262,7 +1262,7 @@ class Tensor(object):
                 for j in xrange(self.shape[1]):
                     out[:, j, i] = self[i, j, :]
         else:
-            raise ValueError("Tinynumpy supports transpose up to ndim=3")
+            raise ValueError("Tinynumpy supports permute up to ndim=3")
         return out
 
     def astype(self, dtype):

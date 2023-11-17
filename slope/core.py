@@ -512,9 +512,9 @@ class Operator:
 
             shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
             if xshape != shape_ret:
-                x = x.broadcast_to(shape_ret)
+                x = x.expand(shape_ret)
             if yshape != shape_ret:
-                y = y.broadcast_to(shape_ret)
+                y = y.expand(shape_ret)
             return (x, y), params
 
         @op.set_method
@@ -752,10 +752,10 @@ def typecheck(self, *in_types, program):
 @procedure_op.set_method
 def T(self, cts, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
-    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
+    permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
-    outs = slope.M().bind(self, *new_consts, *residuals, *cts, program=transposed_program)
+    outs = slope.M().bind(self, *new_consts, *residuals, *cts, program=permuted_program)
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
@@ -1091,7 +1091,7 @@ def typecheck(self, *in_types, program):
 @jit_op.set_method
 def T(self, cts, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
-    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
+    permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
     outs = slope.M().bind(
@@ -1099,7 +1099,7 @@ def T(self, cts, *invals, program):
         *new_consts,
         *residuals,
         *cts,
-        program=transposed_program,
+        program=permuted_program,
     )
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
@@ -1392,14 +1392,14 @@ class BatchTrace(Trace):
                 out_ndim += 1
             reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
             x = x.reshape(reshape_shape)
-            x = x.broadcast_to(target_shape)
+            x = x.expand(target_shape)
             return x
         elif src == dst:
             return x
         else:
             perm = [i for i in range(len(x.shape)) if i != src]
             perm.insert(dst, src)
-            return x.transpose(perm)
+            return x.permute(perm)
 
 
 class JVPTracor(Tracor):
@@ -1735,21 +1735,21 @@ class Machine:
         slope.dblog(f"unflattening {treedef}", enable=slope.LOG_PYTREE)
         return _tree_unflatten(treedef, iter(xs))
 
-    def tree_transpose(
+    def tree_permute(
         self,
         outer_treedef: PyTreeDef,
         inner_treedef: PyTreeDef,
-        pytree_to_transpose: Any,
+        pytree_to_permute: Any,
     ) -> Any:
-        flat, treedef = self.tree_flatten(pytree_to_transpose)
+        flat, treedef = self.tree_flatten(pytree_to_permute)
         inner_size = inner_treedef.num_leaves
         outer_size = outer_treedef.num_leaves
         if treedef.num_leaves != (inner_size * outer_size):
             raise TypeError
         iter_flat = iter(flat)
         lol = [[next(iter_flat) for _ in range(inner_size)] for __ in range(outer_size)]
-        transposed_lol = zip(*lol)
-        subtrees = map(partial(self.tree_unflatten, outer_treedef), transposed_lol)
+        permuted_lol = zip(*lol)
+        subtrees = map(partial(self.tree_unflatten, outer_treedef), permuted_lol)
         return self.tree_unflatten(inner_treedef, subtrees)
 
     def flatten_fn(self, f, in_tree):
@@ -1922,10 +1922,10 @@ class Machine:
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
             vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
-        outs_transposed = [
+        outs_permuted = [
             BatchTrace.move_batch_axis(axis_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
         ]
-        return outs_transposed
+        return outs_permuted
 
     def vmap(self, f, in_axes):
         def batched_f(*args):
@@ -2245,8 +2245,8 @@ class Machine:
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]
-        transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
-        f_vjp_flat = lambda *cts: self.run_program_transposed(program, transpose_inputs, cts)
+        permute_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
+        f_vjp_flat = lambda *cts: self.run_program_permuted(program, permute_inputs, cts)
         return primals_out_flat, f_vjp_flat
 
     def vjp(self, f, *primals_in, **static_args):
@@ -2263,7 +2263,7 @@ class Machine:
 
         return primals_out, f_vjp
 
-    def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
+    def run_program_permuted(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
         primal_environment: Dict[Var, Any] = {}
         ct_environment: Dict[Var, Any] = {}
 
@@ -2299,9 +2299,9 @@ class Machine:
         return ret
 
     @lru_cache_verbose()
-    def transpose_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
+    def permute_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
-        traceable = partial(self.run_program_transposed, program)
+        traceable = partial(self.run_program_permuted, program)
         args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
             traceable,

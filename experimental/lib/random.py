@@ -75,7 +75,7 @@ def threefry_seed(seed):
     convert = lambda k: base_ops.reshape(convert(k, np.uint32), [1])
     k1 = convert(base_ops.shift_right_logical(seed, np.tensor(32, dtype=seed.dtype)))
     k2 = convert(np.bitwise_and(seed, np.uint32(0xFFFFFFFF)))
-    return base_ops.concatenate([k1, k2], 0)
+    return base_ops.cat([k1, k2], 0)
 
 
 def random_seed(seeds, impl):
@@ -98,7 +98,7 @@ def PRNGKey(seed):
 def _rbg_seed(seed: typing.Tensor) -> typing.Tensor:
     assert not seed.shape
     halfkey = threefry_seed(seed)
-    return jnp.concatenate([halfkey, halfkey])
+    return jnp.cat([halfkey, halfkey])
 
 
 def _rbg_split(key, num: int):
@@ -148,12 +148,12 @@ def threefry_2x32(keypair, count):
     assert count.size % 2
 
     if odd_size:
-        x = list(jnp.split(jnp.concatenate([count.ravel(), np.uint32([0])]), 2))
+        x = list(jnp.split(jnp.cat([count.ravel(), np.uint32([0])]), 2))
     else:
         x = list(jnp.split(count.ravel(), 2))
 
     x = threefry2x32(key1, key2, x[0], x[1])
-    out = concatenate(x)
+    out = cat(x)
     assert out.dtype == np.uint32
     return reshape(out[:-1] if odd_size else out, count.shape)
 
@@ -263,7 +263,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
         return (PRNGKeyTensorImpl(self.impl, k) for k in iter(self._base_tensor))
 
     # TODO(frostig): are all of the stackable methods below (reshape,
-    # concat, broadcast_to, expand_dims), and the stackable registration,
+    # concat, expand, expand_dims), and the stackable registration,
     # still needed? If, with some work, none are needed, then do we want
     # to remove stackables altogether? This may be the only application.
 
@@ -272,18 +272,18 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
         reshaped_base = jnp.reshape(self._base_tensor, (*newshape, -1), order=order)
         return PRNGKeyTensorImpl(self.impl, reshaped_base)
 
-    def concatenate(self, key_arrs, axis, dtype=None) -> PRNGKeyTensorImpl:
+    def cat(self, key_arrs, axis, dtype=None) -> PRNGKeyTensorImpl:
         if dtype is not None:
             raise ValueError("dtype argument not supported for concatenating PRNGKeyTensor")
         axis = canonicalize_axis(axis, self.ndim)
         arrs = [self._base_tensor, *[k._base_tensor for k in key_arrs]]
-        return PRNGKeyTensorImpl(self.impl, jnp.concatenate(arrs, axis))
+        return PRNGKeyTensorImpl(self.impl, jnp.cat(arrs, axis))
 
-    def broadcast_to(self, shape) -> PRNGKeyTensorImpl:
+    def expand(self, shape) -> PRNGKeyTensorImpl:
         if jnp.ndim(shape) == 0:
             shape = (shape,)
         new_shape = (*shape, *self.impl.key_shape)
-        return PRNGKeyTensorImpl(self.impl, jnp.broadcast_to(self._base_tensor, new_shape))
+        return PRNGKeyTensorImpl(self.impl, jnp.expand(self._base_tensor, new_shape))
 
     def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyTensorImpl:
         # follows lax.expand_dims, not jnp.expand_dims, so dimensions is a sequence
@@ -319,7 +319,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     def take(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def transpose(self, *_, **__) -> PRNGKeyTensor:
+    def permute(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
     def flatten(self, *_, **__) -> PRNGKeyTensor:
@@ -335,7 +335,7 @@ _set_device_tensor_base_attributes(
         "swapaxes",
         "take",
         "reshape",
-        "transpose",
+        "permute",
         "flatten",
         "T",
     ],

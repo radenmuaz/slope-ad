@@ -330,11 +330,11 @@ def jvp(self, primals, tangents, *, axes, keepdims):
         axes = tuple([a if a >= 0 else len(out.shape) + a + 1 for a in axes])
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    locs = x.equal(_out.broadcast_to(x.shape))
+    locs = x.equal(_out.expand(x.shape))
     locs = locs.cast(x_dot.dtype)
     counts = locs.sum(axes, keepdims)
     jvp_out = (x_dot * locs).sum(axes, keepdims)
-    jvp_out = jvp_out / counts.broadcast_to(jvp_out.shape)
+    jvp_out = jvp_out / counts.expand(jvp_out.shape)
 
     return [out], [jvp_out]
 
@@ -347,7 +347,7 @@ def T(self, cts, x, *, axes, keepdims):
         axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
         for a in reversed(sorted(axes)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.broadcast_to(x.aval.shape)
+    out = out.expand(x.aval.shape)
 
 
 sum = Operator.reduce("sum")
@@ -370,7 +370,7 @@ def T(self, cts, x, *, axes, keepdims):
         axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
         for a in reversed(sorted(axes)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.broadcast_to(x.aval.shape)
+    out = out.expand(x.aval.shape)
 
     return [out]
 
@@ -380,16 +380,16 @@ def T(self, cts, x, *, axes, keepdims):
 # -----------------------
 
 
-broadcast_to = Operator.shape("broadcast_to")
-operator_set.register(broadcast_to)
+expand = Operator.shape("expand")
+operator_set.register(expand)
 
 
-@broadcast_to.set_method
+@expand.set_method
 def args_fixer(self, x, *, shape):
     return (x,), dict(shape=shape)
 
 
-@broadcast_to.set_method
+@expand.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, shape):
     (x,), (x_bdim,) = vals_in, dims_in
     shape = list(shape)
@@ -399,7 +399,7 @@ def vmap(self, axis_size, vals_in, dims_in, *, shape):
     return [self(x, shape)], [x_bdim]
 
 
-@broadcast_to.set_method
+@expand.set_method
 def jvp(self, primals, tangents, *, shape, axes=None):
     (x,), (x_dot,) = primals, tangents
     return (
@@ -408,7 +408,7 @@ def jvp(self, primals, tangents, *, shape, axes=None):
     )
 
 
-@broadcast_to.set_method
+@expand.set_method
 def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
     e_shape = list(x.shape)
     assert len(e_shape) == len(shape)
@@ -416,7 +416,7 @@ def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor
     return [Typecheckor(tuple(shape), x.dtype)]
 
 
-@broadcast_to.set_method
+@expand.set_method
 def T(self, cts, x, *, shape):
     (z,) = cts
     out = z
@@ -464,11 +464,11 @@ def T(self, cts, x, *, shape):
     return [z.reshape(x.aval.shape)]
 
 
-transpose = Operator.shape("transpose")
-operator_set.register(transpose)
+permute = Operator.shape("permute")
+operator_set.register(permute)
 
 
-@transpose.set_method
+@permute.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, perm):
     (x,), (x_bdim,) = vals_in, dims_in
     perm_ = list(perm)
@@ -480,22 +480,22 @@ def vmap(self, axis_size, vals_in, dims_in, *, perm):
     return [x.tranpose(perm)], [x_bdim]
 
 
-@transpose.set_method
+@permute.set_method
 def jvp(self, primals, tangents, *, perm):
     (x,), (x_dot,) = primals, tangents
-    return [x.transpose(perm)], [x_dot.transpose(perm)]
+    return [x.permute(perm)], [x_dot.permute(perm)]
 
 
-@transpose.set_method
+@permute.set_method
 def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]:
     shape = [x.shape[i] for i in perm]
     return [Typecheckor(shape, x.dtype)]
 
 
-@transpose.set_method
+@permute.set_method
 def T(self, cts, x, *, perm):
     (z,) = cts
-    return [z.transpose(perm)]
+    return [z.permute(perm)]
 
 
 pad_hlo = Operator.shape("pad_hlo")
@@ -689,12 +689,12 @@ def T(self, cts, x, *, axes):
     return [z.flip(axes)]
 
 
-concatenate = Operator.shape("concatenate", nary_inputs=True)
-operator_set.register(concatenate)
-operator_set.alias(concatenate, "cat")
+cat = Operator.shape("cat", nary_inputs=True)
+operator_set.register(cat)
+operator_set.alias(cat, "cat")
 
 
-@concatenate.set_method
+@cat.set_method
 def args_fixer(self, *xs, axis=0):
     if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
         xs = xs[0]
@@ -702,29 +702,29 @@ def args_fixer(self, *xs, axis=0):
     return xs, dict(axis=axis)
 
 
-@concatenate.set_method
+@cat.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
     raise NotImplementedError
 
 
-@concatenate.set_method
+@cat.set_method
 def jvp(self, primals, tangents, *, axis=0):
-    return [concatenate(*primals, axis=axis)], [concatenate(*tangents, axis=axis)]
+    return [cat(*primals, axis=axis)], [cat(*tangents, axis=axis)]
 
 
-@concatenate.set_method
+@cat.set_method
 def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
     if len(set(x.ndim for x in xs)) != 1:
-        msg = "Cannot concatenate tensors with different numbers of dimensions: got {}."
+        msg = "Cannot cat tensors with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
     if not 0 <= axis < xs[0].ndim:
-        msg = "concatenate dimension out of bounds: dimension {} for shapes {}."
+        msg = "cat dimension out of bounds: dimension {} for shapes {}."
         raise TypeError(msg.format(axis, ", ".join([str(o.shape) for o in xs])))
     shapes = [x.shape[:axis] + x.shape[axis + 1 :] for x in xs]
     if not shapes[:-1] == shapes[1:]:
         msg = (
-            "Cannot concatenate tensors with shapes that differ in dimensions "
-            "other than the one being concatenated: concatenating along "
+            "Cannot cat tensors with shapes that differ in dimensions "
+            "other than the one being catd: concatenating along "
             "dimension {} for shapes {}."
         )
         shapes = [x.shape for x in xs]
@@ -735,7 +735,7 @@ def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
     return [Typecheckor(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
 
 
-@concatenate.set_method
+@cat.set_method
 def T(self, cts, *xs, axis=0):
     (z,) = cts
     x_shapes = [o.aval.shape if type(o) is PrimalProxy else o.shape for o in xs]
@@ -949,7 +949,7 @@ def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
 # def T(self, cts, x, y, *, groups, stride, dilation, padding):
 #     (z_bar,) = cts
 #     if type(x) is PrimalProxy:
-#         gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#         gx = z_bar.conv_permute(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
 #         return [gx, None]
 #     elif type(y) is PrimalProxy:
 #         x_T = x.swapaxes(0, 1)
@@ -1313,8 +1313,8 @@ ret = Squeeze (ret_randn, ret_squeeze_dim)
 """
 
 
-@onnxruntime_backend.set_impl(operator_set.broadcast_to)
-def broadcast_to_impl(self, x, *, shape):
+@onnxruntime_backend.set_impl(operator_set.expand)
+def expand_impl(self, x, *, shape):
     return f"""
 ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
 ret = Expand ({x}, ret_shape)
@@ -1356,13 +1356,13 @@ ret = Slice({x}, ret_starts, ret_ends, steps=ret_steps))])
 """
 
 
-@onnxruntime_backend.set_impl(operator_set.concatenate)
-def concatenate_impl(self, *xs, axis):
+@onnxruntime_backend.set_impl(operator_set.cat)
+def cat_impl(self, *xs, axis):
     return f"ret = Concat< axis={axis}>({repr(list(xs))[1:-1]})"
 
 
-@onnxruntime_backend.set_impl(operator_set.transpose)
-def transpose_impl(self, x, *, perm):
+@onnxruntime_backend.set_impl(operator_set.permute)
+def permute_impl(self, x, *, perm):
     return f"ret = Transpose<perm={repr(list(perm))}>({x})"
 
 
@@ -1747,7 +1747,7 @@ procedure_set.alias(matmul, "dot")
 def T(x):
     perm = list(range(x.ndim))
     perm[-2], perm[-1] = perm[-1], perm[-2]
-    return x.transpose(tuple(perm))
+    return x.permute(tuple(perm))
 
 
 @procedure_set.register(static_argnames="axes")
@@ -1892,7 +1892,7 @@ def getitem(self, val):
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret.transpose(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
+            ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
@@ -1956,7 +1956,7 @@ def gather(x, idx, dim: int):
                     device=x.device,
                 )
             )
-            * x.transpose(*permarg)
+            * x.permute(*permarg)
             .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
             .expand_dims(0)
         )
@@ -1971,7 +1971,7 @@ def stack(tensors, dim=0):
     first = tensors[0].expand_dims(dim)
     expand_dimsd_tensors = [tensor.expand_dims(dim) for tensor in tensors[1:]]
     # checks for shapes and number of dimensions delegated to cat
-    return first.concatenate(*expand_dimsd_tensors, dim=dim)
+    return first.cat(*expand_dimsd_tensors, dim=dim)
 
 
 @procedure_set.register(static_argnames="repeats")
@@ -2016,7 +2016,7 @@ def expand_dims(x, dim):
 def swapaxes(x, ax1=1, ax2=0):
     order = list(range(len(x.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
-    return x.transpose(order)
+    return x.permute(order)
 
 
 @procedure_set.register(static_argnames="start_dim")
@@ -2044,7 +2044,7 @@ def _pool(
         e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
-        xup = xup.broadcast_to((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
+        xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
         # slide by dilation
         xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
@@ -2054,7 +2054,7 @@ def _pool(
         xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
         xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
-        return xup.transpose(
+        return xup.permute(
             (
                 *range(len(prefix)),
                 *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
@@ -2066,7 +2066,7 @@ def _pool(
     xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
     xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
-    return xup.transpose(
+    return xup.permute(
         (
             *range(len(prefix)),
             *[len(prefix) + i * 2 for i in range(len(k_))],

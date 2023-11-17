@@ -10,7 +10,7 @@ x_dot = slope.ones((3,))
 @slope.jit
 def f(x):
     y = x
-    y = slope.concatenate([x, x])
+    y = slope.cat([x, x])
     y = y.sum()
     return y
 

@@ -1,14 +1,13 @@
 import slope
 
 @slope.jit
-def f(x):
+def f(x1, x2):
     # y = x + x
-    y = x.sum()
+    y = x.sum() + x2
     return y
 
-x = slope.randn((3,))
-print(f(x))
-
-f_jitobj = f.get_jit_object(x)
+x = slope.tensor([[1,2],[3,4]], dtype=slope.float32)
+# print(f(x,))
+f_jitobj = f.get_jit_object(x, slope.tensor([[5,6],[7,8]], dtype=slope.float32))
 print(f_jitobj)
-f_jitobj.export('/tmp/f')
+f_jitobj.export('/tmp/f.py')

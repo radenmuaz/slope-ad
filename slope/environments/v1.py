@@ -928,7 +928,13 @@ def dtype_of(self, tensor):
 
 @numpy_backend.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
+    # ret = jit_object(*self.jit_object.consts, *args)
+    # *self.jit_object.consts, *args
+    code = jit_object.code
+    consts = [np.array2string(c.numpy(), separator=",") for c in jit_object.consts]
     breakpoint()
+    with open(output_path, "w") as f:
+        text = "\n".join(consts) + "\n" + code
 
 @numpy_backend.set_method
 def compile(self, codegen_out):

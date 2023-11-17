@@ -1,4 +1,4 @@
-from setuptools import setup, find_unflattenages
+from setuptools import setup, find_packages
 
 setup(
     name="slope",
@@ -7,6 +7,10 @@ setup(
     author="Raden Muaz",
     author_email="author@gmail.com",
     description="Description of my unflattenage",
-    unflattenages=find_unflattenages(),
-    install_requires=["numpy >= 1.11.1", "matplotlib >= 1.5.1"],
+    packages=find_packages(),
+    install_requires=[
+        "numpy >= 1.11.1",
+        "matplotlib >= 1.5.1",
+        "onnx >= 1.14.1",
+        "onnxruntime >= 1.16.0"],
 )

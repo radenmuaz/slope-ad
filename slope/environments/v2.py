@@ -19,7 +19,7 @@ from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, 
 from collections import defaultdict
 import onnx
 import onnxruntime
-
+import os
 sum_py = sum
 slice_py = slice
 
@@ -1018,8 +1018,48 @@ def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
 
 @onnxruntime_backend.set_method
-def export(self, jit_object: slope.JitObject, output_path, *args, **kwargs):
-    breakpoint()
+def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
+    code = jit_object.code
+    os.makedirs(output_path, exist_ok=True)
+    consts_dir_path = os.path.join(output_path, "consts")
+    os.makedirs(consts_dir_path, exist_ok=True)
+    in_binders = jit_object.codegen_out["in_binders"]
+    num_consts = jit_object.program.num_consts
+    load_consts_code = ""
+    for i in range(num_consts):
+        const_name = in_binders[i]["name"]
+        const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
+        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
+        np.save(const_path, in_binders[i]['type'].numpy())
+    input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
+    args_code = ", ".join(ib["name"] for ib in in_binders)
+    test_input_code = ""
+    for i in range(num_consts, len(in_binders)):
+        input_name = in_binders[i]["name"]
+        input_shape = in_binders[i]["type"].shape
+        dtype = in_binders[i]["type"].dtype
+        input_dtype = ("np." + dtype.numpy.__name__) if dtype is not Tensor.bool else "bool"
+        test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
+
+    module_path = os.path.join(output_path, '__init__.py')
+    module_code = (
+f"""import numpy as np
+import os
+root_path = os.path.dirname(__file__)
+consts_dir_path =  os.path.join(root_path, "consts")
+{load_consts_code}
+{code}
+
+def run({input_args_code}):
+    return main({args_code})
+
+if __name__ == "__main__":
+{test_input_code}
+    outputs = run({input_args_code})
+    print("outputs:")
+    print(outputs)
+"""
+)
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):

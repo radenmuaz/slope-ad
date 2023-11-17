@@ -930,14 +930,48 @@ def dtype_of(self, tensor):
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
     code = jit_object.code
     os.makedirs(output_path, exist_ok=True)
+    consts_dir_path = os.path.join(output_path, "consts")
+    os.makedirs(consts_dir_path, exist_ok=True)
     in_binders = jit_object.codegen_out["in_binders"]
-    len_consts = len(jit_object.consts)
-    for i in range(len_consts):
-        const_path = os.path.join(output_path,f"{in_binders[i]}.npy")
-        breakpoint()
-        np.save(jit_object.consts[i].numpy())
-    with open(output_path, "w") as f:
-        text = "\n".join(in_binders[:len_consts]) + "\n" + code
+    num_consts = jit_object.program.num_consts
+    load_consts_code = ""
+    for i in range(num_consts):
+        const_name = in_binders[i]["name"]
+        const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
+        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
+        np.save(const_path, in_binders[i]['type'].numpy())
+    input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
+    args_code = ", ".join(ib["name"] for ib in in_binders)
+    test_input_code = ""
+    for i in range(num_consts, len(in_binders)):
+        input_name = in_binders[i]["name"]
+        input_shape = in_binders[i]["type"].shape
+        dtype = in_binders[i]["type"].dtype
+        input_dtype = ("np." + dtype.numpy.__name__) if dtype is not Tensor.bool else "bool"
+        test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
+
+    module_path = os.path.join(output_path, '__init__.py')
+    module_code = (
+f"""import numpy as np
+import os
+root_path = os.path.dirname(__file__)
+consts_dir_path =  os.path.join(root_path, "consts")
+{load_consts_code}
+{code}
+
+def run({input_args_code}):
+    return main({args_code})
+
+if __name__ == "__main__":
+{test_input_code}
+    outputs = run({input_args_code})
+    print("outputs:")
+    print(outputs)
+"""
+)
+    with open(module_path, "w") as f:
+        f.write(module_code)
+        slope.dblog(module_code, enable=slope.LOG_JIT)
 
 @numpy_backend.set_method
 def compile(self, codegen_out):
@@ -951,7 +985,6 @@ def compile(self, codegen_out):
     exec(compile_py(code, "<string>", "exec"), deps_dict, exec_locals)
     fn = exec_locals["main"]
     return fn, code
-
 
 @numpy_backend.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
@@ -967,140 +1000,129 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # codegen is recursive if jit-of-jit happens
     environment: Dict[slope.Var, Any] = {}
     il1 = 4  # indent length
-    ncs = 0  # n constant
-    nxs = 0  # n x inputs
-    nzs = 0  # n z intermediate variables
-    nys = 0  # n y outputs
-    inb_args = []
-    inb_consts = []
+    body_code_lines = []
 
     for inb in program.in_binders:
-        if type(inb.aval) is not Typecheckor:
-            environment[inb] = f"c{ncs}"
-            inb_consts += [environment[inb]]
-            ncs += 1
-        else:
-            environment[inb] = f"x{nxs}"
-            inb_args += [environment[inb]]
-            nxs += 1
+        prefix = "x" if type(inb.aval) is Typecheckor else "c"
+        idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
+        environment[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
-    code_lines = []
-    fn_args_strs = f""
-    if inb_consts:
-        fn_args_strs += f"{', '.join(inb_consts)}, "
-    fn_args_strs += f"{', '.join(inb_args)}"
-    code_lines += [f"def {fn_name}({fn_args_strs}):"]
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
             continue
-        in_vals = list_map(lambda x: environment[x], instruction.inputs)
+        in_vals = list_map(lambda x: environment[x]["name"], instruction.inputs)
         for outb in instruction.out_binders:
-            if outb in program.outs:
-                environment[outb] = f"y{nys}"
-                nys += 1
-            else:
-                environment[outb] = f"z{nzs}"
-                nzs += 1
+            prefix = "y" if outb in program.outs else "z"
+            idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
+            environment[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
-        out_vals = list_map(lambda z: environment[z], instruction.out_binders)
-
-        if len(out_vals) == 1:
-            lhs = f"{out_vals[0]}"
-        else:
-            lhs = ", ".join(out_vals)
+        out_vals = list_map(lambda z: environment[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
-            lhs += ", "
+            lhs = ", ".join(out_vals)
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+            impl_code = f"{lhs} = {rhs}"
         else:
-            rhs = self.impls[instruction.op](*in_vals, **instruction.params)
-            if "\n" in rhs:  # multi-line impls
-                impl_lines = rhs.strip().split("\n")
-                lhs = "\n".join(impl_lines[:-1] + [lhs])
-                rhs = impl_lines[-1]
-        if "(, " in rhs:  # fix syntax error for function call has only keyword-only args
-            rhs = rhs.replace("(, ", "(")
-        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
-            if np_dtype is np.dtype("bool"):
-                rhs = rhs.replace(np_dtype.name, "bool")
+            impl_code = self.impls[instruction.op](*in_vals, **instruction.params)
+            if len(out_vals) == 1:
+                impl_code = impl_code.replace("ret", out_vals[0])
             else:
-                rhs = rhs.replace(np_dtype.name, f"np.{np_dtype.name}")
-        code_line = f"{lhs} = {rhs}"
+                raise NotImplementedError
+        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
+            impl_code = impl_code.replace(np_dtype.name, "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}")
 
-        for code_line_line in code_line.split("\n"):  # handle multi-line code
-            code_lines += [indent(code_line_line, il1)]
+        for impl_code_line in impl_code.split("\n"):  # handle multi-line code
+            body_code_lines += [indent(impl_code_line, il1)]
+        
 
-    outs = list_map(lambda x: environment[x], program.outs)
-    ret_str = f"{', '.join(outs)}{',' if len(outs)==1 else ''}"
-    code_lines += [indent(f"return {ret_str}", il1)]
-    if fn_name == "main":
-        if len(fn_defs) > 0:
-            code_lines = (
-                code_lines[0:1]
-                + [indent(line, il1) for impl_lines in fn_defs.values() for line in impl_lines]
-                + code_lines[1:]
-            )
 
-        # code_lines = code_lines[0:1] + [indent(f"float32 = np.float32", il1)] + code_lines[1:]
+    in_binders = list_map(lambda x: environment[x], program.in_binders)
+    arg_type_strs = [
+        i['name'] for i in in_binders
+    ]
+    # arg_type_asserts = [
+    #     f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
+    # ]
+    fn_args_str = ", ".join(arg_type_strs)
 
+    outs = list_map(lambda x: environment[x], program.outs)  # TODO: input that is output should has identity op
+    out_type_strs = [
+        o['name'] for o in outs
+    ]
+    # out_type_asserts = [
+    #     f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
+    # ]
+
+    head_code_lines = []
+    head_code_lines += [f"def {fn_name} ({fn_args_str}):"]
+    out_type_str = ", ".join(out_type_strs) + ("," if len(outs) == 1 else "")
+    return_line = [indent(f"return {out_type_str}", il1)]
+    model_code_lines = head_code_lines + body_code_lines + return_line
+
+    functions_code_lines = []
+    for op, fn_def_code_lines in fn_defs.items():
+        functions_code_lines += fn_def_code_lines
+    
+    code_lines = model_code_lines + functions_code_lines
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
         del self.fn_count
-    return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders = inb_consts + inb_args, outs=outs)
+    assert len(outs) == len(program.outs)
+    return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
 
 
 ### Operator Impls
 
-numpy_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"{x}.astype(dtype={dtype})")
-numpy_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"{x}")
-numpy_backend.set_impl(operator_set.neg)(lambda self, x: f"np.negative({x})")
-numpy_backend.set_impl(operator_set.sqrt)(lambda self, x: f"np.sqrt({x})")
-numpy_backend.set_impl(operator_set.exp)(lambda self, x: f"np.exp({x})")
-numpy_backend.set_impl(operator_set.log)(lambda self, x: f"np.log({x})")
-numpy_backend.set_impl(operator_set.sin)(lambda self, x: f"np.sin({x})")
-numpy_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"np.add({x1}, {x2})")
-numpy_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"np.subtract({x1}, {x2})")
-numpy_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"np.multiply({x1}, {x2})")
-numpy_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"np.divide({x1}, {x2})")
-numpy_backend.set_impl(operator_set.invert)(lambda self, x: f"np.invert({x})")
-numpy_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"np.equal({x1}, {x2})")
-numpy_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"np.maximum({x1}, {x2})")
+numpy_backend.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = {x}.astype(dtype={dtype})")
+numpy_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+numpy_backend.set_impl(operator_set.neg)(lambda self, x: f"ret = np.negative({x})")
+numpy_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = np.sqrt({x})")
+numpy_backend.set_impl(operator_set.exp)(lambda self, x: f"ret = np.exp({x})")
+numpy_backend.set_impl(operator_set.log)(lambda self, x: f"ret = np.log({x})")
+numpy_backend.set_impl(operator_set.sin)(lambda self, x: f"ret = np.sin({x})")
+numpy_backend.set_impl(operator_set.add)(lambda self, x1, x2: f"ret = np.add({x1}, {x2})")
+numpy_backend.set_impl(operator_set.sub)(lambda self, x1, x2: f"ret = np.subtract({x1}, {x2})")
+numpy_backend.set_impl(operator_set.mul)(lambda self, x1, x2: f"ret = np.multiply({x1}, {x2})")
+numpy_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = np.divide({x1}, {x2})")
+numpy_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = np.invert({x})")
+numpy_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = np.equal({x1}, {x2})")
+numpy_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = np.maximum({x1}, {x2})")
 numpy_backend.set_impl(operator_set.sum)(
-    lambda self, x, *, axes, keepdims: f"np.sum({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"ret = np.sum({x}, axis={axes}, keepdims={keepdims})"
 )
 numpy_backend.set_impl(operator_set.max)(
-    lambda self, x, *, axes, keepdims: f"np.max({x}, axis={axes}, keepdims={keepdims})"
+    lambda self, x, *, axes, keepdims: f"ret = np.max({x}, axis={axes}, keepdims={keepdims})"
 )
 numpy_backend.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
 )
 numpy_backend.set_impl(operator_set.full)(
-    lambda self, *, shape, fill_value, dtype: f"np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
+    lambda self, *, shape, fill_value, dtype: f"ret = np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
 )
 
 numpy_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: (f"{'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
+    lambda self, *, shape, dtype: (f"ret = {'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
                                    )
 )
 numpy_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: (f"{'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
+    lambda self, *, shape, dtype: (f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
                                    )
 )
-numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"np.broadcast_to({x}, shape={shape})")
+numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
 
-numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"np.reshape({x}, newshape={shape})")
+numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
 numpy_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used
-    lambda self, x, *, lo, hi, interior, value: f"np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+    lambda self, x, *, lo, hi, interior, value: f"ret = np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
 )
 
 
 numpy_backend.set_impl(operator_set.slice_hlo)(
-    lambda self, x, *, starts, limits, strides: f"{x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
+    lambda self, x, *, starts, limits, strides: f"ret = {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
 )
 
-numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"np.concatenate({xs}, axis={axis})")
-numpy_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"np.transpose({x}, axes={perm})")
-numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"np.flip({x}, axis={axes})")
+numpy_backend.set_impl(operator_set.concatenate)(lambda self, *xs, axis: f"ret = np.concatenate({xs}, axis={axis})")
+numpy_backend.set_impl(operator_set.transpose)(lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})")
+numpy_backend.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ret = np.flip({x}, axis={axes})")
 
 
 @numpy_backend.set_impl(slope.core.jit_op)

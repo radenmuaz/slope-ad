@@ -5,3 +5,7 @@ Summary: Description of my unflattenage
 Home-page: https://github.com/radenmuaz/slope.git
 Author: Raden Muaz
 Author-email: author@gmail.com
+Requires-Dist: numpy>=1.11.1
+Requires-Dist: matplotlib>=1.5.1
+Requires-Dist: onnx>=1.14.1
+Requires-Dist: onnxruntime>=1.16.0

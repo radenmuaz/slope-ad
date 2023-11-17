@@ -1022,13 +1022,12 @@ leaf = Leaf()
 
 
 class JitObject:
-    def __init__(self ,program, consts, codegen_out, fn, code):
+    def __init__(self ,program, codegen_out, fn, code):
         super().__init__()
         self.program = program
         self.code = code
         self.codegen_out = codegen_out
         self.fn = fn
-        self.consts = consts
 
     def __call__(self, *args, **params):
         args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
@@ -1189,7 +1188,7 @@ class Backend:
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         codegen_out = self.codegen(program, consts + in_avals, fn_name="main")
         fn, code = self.compile(codegen_out)
-        compiled = JitObject(program, consts, codegen_out, fn, code)
+        compiled = JitObject(program, codegen_out, fn, code)
         return compiled
 
     def set_dtype_map(self, dtype_map: Dict):

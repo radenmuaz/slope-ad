@@ -1022,7 +1022,7 @@ leaf = Leaf()
 
 
 class JitObject:
-    def __init__(self ,program, codegen_out, fn, code):
+    def __init__(self, program, codegen_out, fn, code):
         super().__init__()
         self.program = program
         self.code = code
@@ -1038,7 +1038,7 @@ class JitObject:
             slope.dblog(self.code, enable=slope.LOG_JIT)
             raise
         return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
-    
+
     def export(self, output_path, *args, **params):
         return slope.M().environment.backend.export(self, output_path, *args, **params)
 
@@ -1236,7 +1236,7 @@ class Backend:
         if isinstance(tensors, Tensor):
             tensors = {single_key: tensors}
         else:
-            assert all((isinstance(k, str) and isinstance(v, Tensor)) for k,v in tensors.items())
+            assert all((isinstance(k, str) and isinstance(v, Tensor)) for k, v in tensors.items())
 
         metadata, offset = {}, 0
         for k, v in tensors.items():
@@ -2341,7 +2341,7 @@ class Machine:
             self.f = f
             self.name = name
             self.static_argnames = static_argnames
-        
+
         @classmethod
         def with_options(cls, static_argnames=(), name=None):
             return partial(cls, static_argnames=static_argnames, name=name)
@@ -2368,7 +2368,9 @@ class Machine:
             avals_in = slope.M().tree_map(lambda x: Typecheckor.like(slope.M().get_aval(x)), args)
             if self.name is None:
                 self.name = f"jit_{str(hash((self.f, avals_in, static_args)))[1:5]}"
-            program, consts, out_tree = slope.M().make_program(self.f, *avals_in, static_args=static_args, name=self.name)
+            program, consts, out_tree = slope.M().make_program(
+                self.f, *avals_in, static_args=static_args, name=self.name
+            )
             return program, consts, out_tree
 
         def __call__(self, *args, **static_args):
@@ -2376,7 +2378,7 @@ class Machine:
             args, in_tree = slope.M().tree_flatten(args)
             outs = slope.M().bind(jit_op, *consts, *args, program=program)
             return slope.M().tree_unflatten(out_tree, outs)
-        
+
         def get_jit_object(self, *args, **static_args):
             program, consts, out_tree = self.get_program(*args, **static_args)
             args, in_tree = slope.M().tree_flatten(args)
@@ -2386,7 +2388,7 @@ class Machine:
             hashed_consts = tuple(map(Hashed, consts))
             jit_object = slope.M().environment.backend.gen_jit_object(hashed_program, hashed_consts)
             return jit_object
-        
+
     def jit_partial_run(self, trace, tracers, *, program):
         in_unknowns = [not t.pval.is_known for t in tracers]
         program1, program2, out_unknowns, num_res = self.partial_run_program(program, in_unknowns)

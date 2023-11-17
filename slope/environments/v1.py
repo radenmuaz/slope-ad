@@ -28,6 +28,7 @@ from typing import (
 from collections import defaultdict
 import importlib
 import os
+
 sum_py = sum
 slice_py = slice
 
@@ -926,6 +927,7 @@ def shape_of(self, tensor):
 def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.dtype]
 
+
 @numpy_backend.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
     code = jit_object.code
@@ -940,7 +942,7 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
         const_name = in_binders[i]["name"]
         const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
         load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
-        np.save(const_path, in_binders[i]['type'].numpy())
+        np.save(const_path, in_binders[i]["type"].numpy())
     input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
     args_code = ", ".join(ib["name"] for ib in in_binders)
     input_arg_names = [ib["name"] for ib in in_binders[num_consts:]]
@@ -955,9 +957,8 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
         input_dtype = ("np." + dtype.numpy.__name__) if dtype is not Tensor.bool else "bool"
         test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
 
-    module_path = os.path.join(output_path, '__init__.py')
-    module_code = (
-f"""import numpy as np
+    module_path = os.path.join(output_path, "__init__.py")
+    module_code = f"""import numpy as np
 import os
 root_path = os.path.dirname(__file__)
 consts_dir_path =  os.path.join(root_path, "consts")
@@ -989,10 +990,10 @@ if __name__ == "__main__":
         print(f"shape: {{out.shape}}")
         print()
 """
-)
     with open(module_path, "w") as f:
         f.write(module_code)
         slope.dblog(module_code, enable=slope.LOG_JIT)
+
 
 @numpy_backend.set_method
 def compile(self, codegen_out):
@@ -1006,6 +1007,7 @@ def compile(self, codegen_out):
     exec(compile_py(code, "<string>", "exec"), deps_dict, exec_locals)
     fn = exec_locals["main"]
     return fn, code
+
 
 @numpy_backend.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
@@ -1049,26 +1051,22 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             else:
                 raise NotImplementedError
         for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
-            impl_code = impl_code.replace(np_dtype.name, "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}")
+            impl_code = impl_code.replace(
+                np_dtype.name, "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}"
+            )
 
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
-        
-
 
     in_binders = list_map(lambda x: environment[x], program.in_binders)
-    arg_type_strs = [
-        i['name'] for i in in_binders
-    ]
+    arg_type_strs = [i["name"] for i in in_binders]
     # arg_type_asserts = [
     #     f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
     # ]
     fn_args_str = ", ".join(arg_type_strs)
 
     outs = list_map(lambda x: environment[x], program.outs)  # TODO: input that is output should has identity op
-    out_type_strs = [
-        o['name'] for o in outs
-    ]
+    out_type_strs = [o["name"] for o in outs]
     # out_type_asserts = [
     #     f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
     # ]
@@ -1082,7 +1080,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
         functions_code_lines += fn_def_code_lines
-    
+
     code_lines = model_code_lines + functions_code_lines
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
@@ -1122,14 +1120,18 @@ numpy_backend.set_impl(operator_set.full)(
 )
 
 numpy_backend.set_impl(operator_set.random_uniform)(
-    lambda self, *, shape, dtype: (f"ret = {'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
-                                   )
+    lambda self, *, shape, dtype: (
+        f"ret = {'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
+    )
 )
 numpy_backend.set_impl(operator_set.random_normal)(
-    lambda self, *, shape, dtype: (f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})" 
-                                   )
+    lambda self, *, shape, dtype: (
+        f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
+    )
 )
-numpy_backend.set_impl(operator_set.broadcast_to)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
+numpy_backend.set_impl(operator_set.broadcast_to)(
+    lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})"
+)
 
 numpy_backend.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
 numpy_backend.set_impl(operator_set.pad_hlo)(  # TODO: interior not used

@@ -13,6 +13,7 @@ DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
 
 import logging
 
+
 def dblog(*msg, enable=True):
     if enable:
         print(*msg)
@@ -34,17 +35,21 @@ def M():
         default_slope_init()
     return machine
 
+
 def default_slope_init():
     global machine
     from slope.environments.v1 import v1_environment
+
     machine = core.Machine(environment=v1_environment)
     # from slope.environments.v2 import v2_environment
     # machine = core.Machine(environment=v2_environment)
+
 
 def manual_init(init_machine):
     global machine
     machine = init_machine
     dblog(f"Manual init with {machine}", enable=LOG_INIT)
+
 
 def __getattr__(attr):
     if attr in (globals_dict := globals()):

@@ -20,6 +20,7 @@ from collections import defaultdict
 import onnx
 import onnxruntime
 import os
+
 sum_py = sum
 slice_py = slice
 
@@ -1017,6 +1018,7 @@ def shape_of(self, tensor):
 def dtype_of(self, tensor):
     return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
 
+
 @onnxruntime_backend.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
     code = jit_object.code
@@ -1026,8 +1028,8 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
     outs = jit_object.codegen_out["outs"]
     num_consts = jit_object.program.num_consts
     for i in range(num_consts):
-        const_array = in_binders[i]['type'].numpy()
-        const_name = in_binders[i]['name']
+        const_array = in_binders[i]["type"].numpy()
+        const_name = in_binders[i]["name"]
         const = onnx.numpy_helper.from_array(const_array, name=const_name)
         model.graph.initializer.append(const)
         # TODO: try if need these
@@ -1039,7 +1041,7 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
     input_arg_names = [ib["name"] for ib in in_binders[num_consts:]]
     input_arg_names_str = ", ".join(input_arg_names)
     outs_names = [out["name"] for out in outs]
-    
+
     test_input_code = ""
     for i in range(num_consts, len(in_binders)):
         input_name = in_binders[i]["name"]
@@ -1048,9 +1050,8 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
         input_dtype = ("np." + dtype.numpy.__name__) if dtype is not Tensor.bool else "bool"
         test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
 
-    module_path = os.path.join(output_path, '__init__.py')
-    module_code = (
-f"""import onnxruntime
+    module_path = os.path.join(output_path, "__init__.py")
+    module_code = f"""import onnxruntime
 import os
 import numpy as np
 
@@ -1087,18 +1088,16 @@ if __name__ == "__main__":
         print(f"shape: {{out.shape}}")
         print()
 """
-)
     with open(module_path, "w") as f:
         f.write(module_code)
         slope.dblog(module_code, enable=slope.LOG_JIT)
+
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
-    # slope.dblog(onnx.printer.to_text(model), enable=slope.LOG_JIT)
-    # onnx.checker.check_model(model)
     session = onnxruntime.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
 
     def fn(*args):

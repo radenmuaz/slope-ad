@@ -1020,19 +1020,26 @@ def dtype_of(self, tensor):
 @onnxruntime_backend.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
     code = jit_object.code
+    model = onnx.parser.parse_model(code)
     os.makedirs(output_path, exist_ok=True)
-    consts_dir_path = os.path.join(output_path, "consts")
-    os.makedirs(consts_dir_path, exist_ok=True)
     in_binders = jit_object.codegen_out["in_binders"]
+    outs = jit_object.codegen_out["outs"]
     num_consts = jit_object.program.num_consts
-    load_consts_code = ""
     for i in range(num_consts):
-        const_name = in_binders[i]["name"]
-        const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
-        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
-        np.save(const_path, in_binders[i]['type'].numpy())
-    input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
-    args_code = ", ".join(ib["name"] for ib in in_binders)
+        const_array = in_binders[i]['type'].numpy()
+        const_name = in_binders[i]['name']
+        const = onnx.numpy_helper.from_array(const_array, name=const_name)
+        model.graph.initializer.append(const)
+        # TODO: try if need these
+        # const_tensor = next(t for t in model.graph.input if t.name == const_name)
+        # const_tensor.type.tensor_type.shape.dim[0].dim_param = const_name
+        # const_tensor.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
+
+    onnx.save(model.SerializeToString(), os.path.join(output_path, "model.onnx"))
+    input_arg_names = [ib["name"] for ib in in_binders[num_consts:]]
+    input_arg_names_str = ", ".join(input_arg_names)
+    outs_names = [out["name"] for out in outs]
+    
     test_input_code = ""
     for i in range(num_consts, len(in_binders)):
         input_name = in_binders[i]["name"]
@@ -1043,23 +1050,47 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
 
     module_path = os.path.join(output_path, '__init__.py')
     module_code = (
-f"""import numpy as np
+f"""import onnxruntime
 import os
+import numpy as np
+
 root_path = os.path.dirname(__file__)
-consts_dir_path =  os.path.join(root_path, "consts")
-{load_consts_code}
-{code}
+model_path = os.path.join(root_path, "model.onnx")
+session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+input_arg_names = {input_arg_names}
+out_names = {outs_names}
 
-def run({input_args_code}):
-    return main({args_code})
-
+def run(*args, **kwargs):
+    if len(args) > 0:
+        for a_name, a in zip(input_arg_names, args):
+            assert a_name not in kwargs.keys()
+            kwargs[a_name] = a
+    outputs = session.run(out_names, kwargs)
+    return outputs
 if __name__ == "__main__":
 {test_input_code}
-    outputs = run({input_args_code})
+    print("inputs:")
+    for inp_name, inp in zip(input_arg_names, ({input_arg_names_str})):
+        print(f"{{inp_name}} = ")
+        print(inp)
+        print(f"dtype: {{inp.dtype}}")
+        print(f"shape: {{inp.shape}}")
+        print()
+
+    outs = run({input_arg_names_str})
+
     print("outputs:")
-    print(outputs)
+    for out_name, out in zip(out_names, outs):
+        print(f"{{out_name}} = ")
+        print(out)
+        print(f"dtype: {{out.dtype}}")
+        print(f"shape: {{out.shape}}")
+        print()
 """
 )
+    with open(module_path, "w") as f:
+        f.write(module_code)
+        slope.dblog(module_code, enable=slope.LOG_JIT)
 
 @onnxruntime_backend.set_method
 def compile(self, codegen_out):

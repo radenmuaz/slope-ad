@@ -6,7 +6,7 @@ setup(
     url="https://github.com/radenmuaz/slope.git",
     author="Raden Muaz",
     author_email="author@gmail.com",
-    description="Description of my unflattenage",
+    description="An automatic differentiation middleware",
     packages=find_packages(),
     install_requires=[
         "numpy >= 1.11.1",

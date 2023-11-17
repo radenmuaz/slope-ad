@@ -30,28 +30,21 @@ def M():
     global machine
     if type(machine) is LazyInitMachine:
         dblog("Initializing slope.machine with", enable=LOG_INIT)
-        dblog(inspect.getsource(slope_init), enable=LOG_INIT)
-        machine = slope_init()
+        dblog(inspect.getsource(default_slope_init), enable=LOG_INIT)
+        default_slope_init()
     return machine
 
-
-# def default_slope_init():
-#     from slope.environments.v2 import v2_environment
-#     return core.Machine(environment=v2_environment)
-
-
 def default_slope_init():
+    global machine
     from slope.environments.v1 import v1_environment
-    return core.Machine(environment=v1_environment)
+    machine = core.Machine(environment=v1_environment)
+    # from slope.environments.v2 import v2_environment
+    # machine = core.Machine(environment=v2_environment)
 
-
-slope_init = default_slope_init
-
-
-def set_slope_init(fn):
-    global slope_init
-    slope_init = fn
-
+def manual_init(init_machine):
+    global machine
+    machine = init_machine
+    dblog(f"Manual init with {machine}", enable=LOG_INIT)
 
 def __getattr__(attr):
     if attr in (globals_dict := globals()):

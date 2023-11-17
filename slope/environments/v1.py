@@ -933,6 +933,7 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
     consts_dir_path = os.path.join(output_path, "consts")
     os.makedirs(consts_dir_path, exist_ok=True)
     in_binders = jit_object.codegen_out["in_binders"]
+    outs = jit_object.codegen_out["outs"]
     num_consts = jit_object.program.num_consts
     load_consts_code = ""
     for i in range(num_consts):
@@ -942,6 +943,10 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
         np.save(const_path, in_binders[i]['type'].numpy())
     input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
     args_code = ", ".join(ib["name"] for ib in in_binders)
+    input_arg_names = [ib["name"] for ib in in_binders[num_consts:]]
+    input_arg_names_str = ", ".join(input_arg_names)
+    outs_names = [out["name"] for out in outs]
+
     test_input_code = ""
     for i in range(num_consts, len(in_binders)):
         input_name = in_binders[i]["name"]
@@ -959,14 +964,30 @@ consts_dir_path =  os.path.join(root_path, "consts")
 {load_consts_code}
 {code}
 
+input_arg_names = {input_arg_names}
+out_names = {outs_names}
+
 def run({input_args_code}):
     return main({args_code})
 
 if __name__ == "__main__":
 {test_input_code}
-    outputs = run({input_args_code})
+    for inp_name, inp in zip(input_arg_names, ({input_arg_names_str})):
+        print(f"{{inp_name}} = ")
+        print(inp)
+        print(f"dtype: {{inp.dtype}}")
+        print(f"shape: {{inp.shape}}")
+        print()
+
+    outs = run({input_arg_names_str})
+
     print("outputs:")
-    print(outputs)
+    for out_name, out in zip(out_names, outs):
+        print(f"{{out_name}} = ")
+        print(out)
+        print(f"dtype: {{out.dtype}}")
+        print(f"shape: {{out.shape}}")
+        print()
 """
 )
     with open(module_path, "w") as f:

@@ -1791,7 +1791,7 @@ def log_softmax(x, axes=-1):
 #        - if first Tensor passed in (expand dims) is not at dim 0
 #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-@procedure_set.register(not_op=True)  # not_op because easier to support variadic dynamic and static args
+@procedure_set.register(inline=True)  # not_op because easier to support variadic dynamic and static args
 def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
@@ -1854,6 +1854,7 @@ def getitem(self, val):
                     dim.append(i - dim_collapsed)
     sliced_tensor.reshape(tuple(final_shape))
 
+    ret = sliced_tensor.reshape(tuple(final_shape))
     if tensors:  # Fancy/tensor indexing
         # normalize idx
         idx = [t.sign().neg().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]

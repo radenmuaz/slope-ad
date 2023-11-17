@@ -30,7 +30,7 @@ import importlib
 import os
 
 sum_py = sum
-max_py = max
+# max_py = max
 slice_py = slice
 
 # --------------
@@ -1563,7 +1563,7 @@ def log_softmax(x, axes=-1):
 #        - if first Tensor passed in (expand dims) is not at dim 0
 #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-@procedure_set.register(inline=True)  # not_op because easier to support variadic dynamic and static args
+# @procedure_set.register(inline=True)
 def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:

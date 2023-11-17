@@ -11,8 +11,6 @@ LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
 
-import logging
-
 
 def dblog(*msg, enable=True):
     if enable:
@@ -30,19 +28,17 @@ machine = LazyInitMachine()
 def M():
     global machine
     if type(machine) is LazyInitMachine:
-        dblog("Initializing slope.machine with", enable=LOG_INIT)
-        dblog(inspect.getsource(default_slope_init), enable=LOG_INIT)
-        default_slope_init()
+        dblog("Auto init with default_slope_init:", enable=LOG_INIT)
+        dblog(inspect.getsource(get_default_machine), enable=LOG_INIT)
+        machine = get_default_machine()
     return machine
 
 
-def default_slope_init():
-    global machine
+def get_default_machine():
     from slope.environments.v1 import v1_environment
-
-    machine = core.Machine(environment=v1_environment)
+    return core.Machine(environment=v1_environment)
     # from slope.environments.v2 import v2_environment
-    # machine = core.Machine(environment=v2_environment)
+    # return core.Machine(environment=v2_environment)
 
 
 def manual_init(init_machine):

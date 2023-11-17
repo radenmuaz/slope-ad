@@ -625,10 +625,9 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    # def register(self, static_argnames=(), not_op=False):
-    def register(self, static_argnames=(), not_op=True):
+    def register(self, static_argnames=(), inline=False):
         def wrap(f):
-            f_procedure = self.new_procedure(f, static_argnames) if not not_op else f
+            f_procedure = self.new_procedure(f, static_argnames) if ((not inline) or slope.INLINE_PROCEDURE ) else f
             assert f.__name__ not in vars(self)
             setattr(self, f.__name__, f_procedure)
             return f_procedure

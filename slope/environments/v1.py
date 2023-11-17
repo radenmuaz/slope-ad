@@ -30,6 +30,7 @@ import importlib
 import os
 
 sum_py = sum
+max_py = max
 slice_py = slice
 
 # --------------
@@ -1562,7 +1563,7 @@ def log_softmax(x, axes=-1):
 #        - if first Tensor passed in (expand dims) is not at dim 0
 #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-@procedure_set.register(not_op=True)  # not_op because easier to support variadic dynamic and static args
+@procedure_set.register(inline=True)  # not_op because easier to support variadic dynamic and static args
 def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
@@ -1697,7 +1698,7 @@ def slice(x, arg):
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(padding, constant_values=value)
     slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
     x = x.slice(slc)

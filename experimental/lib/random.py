@@ -313,7 +313,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     def squeeze(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
-    def swapaxes(self, *_, **__) -> PRNGKeyTensor:
+    def transpose(self, *_, **__) -> PRNGKeyTensor:
         assert False
 
     def take(self, *_, **__) -> PRNGKeyTensor:
@@ -332,7 +332,7 @@ _set_device_tensor_base_attributes(
         "__getitem__",
         "ravel",
         "squeeze",
-        "swapaxes",
+        "transpose",
         "take",
         "reshape",
         "permute",

@@ -1711,7 +1711,7 @@ def gather(x, idx, dim: int):
     assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
         dim += x.ndim
-    idx = idx.swapaxes(ax1=dim, ax2=0).expand_dims(-1)
+    idx = idx.transpose(ax1=dim, ax2=0).expand_dims(-1)
     permarg = list(range(x.ndim))
     permarg = (
         permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
@@ -1732,7 +1732,7 @@ def gather(x, idx, dim: int):
             .expand_dims(0)
         )
         .sum(-1)
-        .swapaxes(ax1=0, ax2=dim)
+        .transpose(ax1=0, ax2=dim)
     )
 
 
@@ -1784,7 +1784,7 @@ def expand_dims(x, dim):
 
 
 @procedure_set.register(static_argnames="ax1 ax2")
-def swapaxes(x, ax1=1, ax2=0):
+def transpose(x, ax1=1, ax2=0):
     order = list(range(len(x.shape)))
     order[ax1], order[ax2] = order[ax2], order[ax1]
     return x.permute(order)
@@ -2055,7 +2055,7 @@ def conv_wino(x, weight, groups=1, stride=1, dilation=1, padding=0):
 
 @procedure_set.register(static_argnames="axis")
 def cumsum(x, axis: int = 0):
-    return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)
+    return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
 
 
 numpy_environment = Environment(operator_set, procedure_set, numpy_backend)

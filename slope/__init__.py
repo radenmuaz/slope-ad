@@ -1,7 +1,5 @@
 from slope import core
-
 import os
-import inspect
 
 LOG_LRU = int(os.environ.get("LOG_LRU", 0))
 LOG_JIT = int(os.environ.get("LOG_JIT", 0))
@@ -10,7 +8,8 @@ LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
-
+# DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "numpy")
+DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "onnxruntime")
 
 def dblog(*msg, enable=True):
     if enable:
@@ -28,17 +27,18 @@ machine = LazyInitMachine()
 def M():
     global machine
     if type(machine) is LazyInitMachine:
-        dblog("Auto init with default_slope_init:", enable=LOG_INIT)
-        dblog(inspect.getsource(get_default_machine), enable=LOG_INIT)
-        machine = get_default_machine()
+        # import here to avoid circular import
+        from slope.environments.numpy_environment import numpy_environment
+        from slope.environments.onnxruntime_environment import onnxruntime_environment
+        environment_registry = dict(
+            numpy=numpy_environment,
+            onnxruntime=onnxruntime_environment
+        )
+        if DEFAULT_ENV not in environment_registry.keys():
+            raise ValueError(f"{DEFAULT_ENV} isnonexistent environment in: {list(environment_registry.keys())}")
+        machine = core.Machine(environment=environment_registry[DEFAULT_ENV])
+        dblog(f"Auto init with {machine}", enable=LOG_INIT)
     return machine
-
-
-def get_default_machine():
-    from slope.environments.v1 import v1_environment
-    return core.Machine(environment=v1_environment)
-    # from slope.environments.v2 import v2_environment
-    # return core.Machine(environment=v2_environment)
 
 
 def manual_init(init_machine):

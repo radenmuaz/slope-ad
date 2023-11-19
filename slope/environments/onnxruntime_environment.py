@@ -890,72 +890,111 @@ def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
 # -------------------
 
 
-# dot = Operator.binary_reduce("dot")
+matmul = Operator.binary_reduce("matmul")
+operator_set.register(matmul)
 
 
-# @dot.set_method
-# def typecheck(self, x, y):
-#     # matrix-matrix
-#     if x.ndim == y.ndim:
-#         assert x.shape[-1] == y.shape[-2]
-#         if x.ndim >= 3:
-#             assert x.shape[0:-2] == y.shape[0:-2]
-#         shape = (x.shape[0:-1]) + (y.shape[-2],)
-#     # matrix-vector
-#     elif x.ndim == y.ndim - 1:
-#         assert x.shape[-1] == y.shape[-1]
-#         if x.ndim >= 3:
-#             assert x.shape[0:-1] == y.shape[0:-1]
-#         shape = (x.shape[0:-1]) + (y.shape[-1],)
-#     else:
-#         raise ValueError
-#     # matrix-matrix, vector-matrix, matrix-vector
-#     return [Typecheckor(shape, x.dtype)]
 
 
-# @dot.set_method
-# def jvp(self, primals, tangents):
-#     (x, y), (x_dot, y_dot) = primals, tangents
-#     return [x.dot(y)], [(x_dot.dot(y)) + (x.dot(y_dot))]
+@matmul.set_method
+def typecheck(self, x, y):
+    assert x.dtype == y.dtype
+    if x.ndim == y.ndim == 2:
+        # Both arguments are 2-D, multiply like conventional matrices
+        assert x.shape[-1] == y.shape[-2]
+        shape = x.shape[:-1] + (y.shape[-1],)
+    elif x.ndim > 2 and y.ndim > 2:
+        # Treat as a stack of matrices and broadcast accordingly
+        assert x.shape[-1] == y.shape[-2]
+        shape = x.shape[:-2] + (x.shape[-2], y.shape[-1])
+    elif x.ndim == 1 and y.ndim > 1:
+        # Promote the 1-D argument to a matrix by prepending a 1
+        assert x.shape[0] == y.shape[-2]
+        shape = (1,) + (y.shape[-2], y.shape[-1])
+    elif x.ndim > 1 and y.ndim == 1:
+        # Promote the 1-D argument to a matrix by appending a 1
+        assert x.shape[-1] == y.shape[0]
+        shape = x.shape[:-1] + (y.shape[0],)
+    else:
+        raise ValueError("Invalid dimensions for matmul")
+
+    return [Typecheckor(shape, x.dtype)]
 
 
-# @dot.set_method
-# def T(self, cts, x, y):
-#     (z_bar,) = cts
-#     assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
-#     if type(x) is PrimalProxy:
-#         return [z_bar.dot(y), None]
-#     elif type(y) is PrimalProxy:
-#         return [None, x.dot(z_bar)]
+
+@matmul.set_method
+def jvp(self, primals, tangents):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    return [x @ y], [(x_dot @ y) + (x @ y_dot)]
 
 
-# conv = Operator.binary_reduce("conv")
+@matmul.set_method
+def T(self, cts, x, y):
+    (z_bar,) = cts
+    assert (type(x) is PrimalProxy) ^ (type(y) is PrimalProxy)
+    if type(x) is PrimalProxy:
+        return [z_bar @ y.T(), None]
+    elif type(y) is PrimalProxy:
+        return [None, x.T() @ z_bar]
+
+
+# conv_transpose = Operator.binary_reduce("conv_transpose")
 
 
 # def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
 #     return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
 
-# @conv.set_method
+# @conv_transpose.set_method
 # def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 #     (x, y), (x_dot, y_dot) = primals, tangents
-#     jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-#     jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#     jvp1 = x_dot.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#     jvp2 = x.conv_transpose(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
 
-#     return [x.conv(y)], [jvp1 + jvp2]
+#     return [x.conv_transpose(y)], [jvp1 + jvp2]
 
 
-# @conv.set_method
+# @conv_transpose.set_method
 # def T(self, cts, x, y, *, groups, stride, dilation, padding):
 #     (z_bar,) = cts
 #     if type(x) is PrimalProxy:
-#         gx = z_bar.conv_permute(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+#         gx = z_bar.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
 #         return [gx, None]
 #     elif type(y) is PrimalProxy:
 #         x_T = x.swapaxes(0, 1)
 #         z_bar_T = z_bar.swapaxes(0, 1)
-#         gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
+#         gy = x_T.conv_transpose(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
 #         return [None, gy]
+    
+
+conv = Operator.binary_reduce("conv")
+
+
+def args_fixer(self, x, y, *, groups=1, stride=1, dilation=1, padding=0):
+    return (x, y), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+
+@conv.set_method
+def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+    (x, y), (x_dot, y_dot) = primals, tangents
+    jvp1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    jvp2 = x.conv(y_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+
+    return [x.conv(y)], [jvp1 + jvp2]
+
+
+@conv.set_method
+def T(self, cts, x, y, *, groups, stride, dilation, padding):
+    (z_bar,) = cts
+    if type(x) is PrimalProxy:
+        gx = z_bar.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        return [gx, None]
+    elif type(y) is PrimalProxy:
+        x_T = x.swapaxes(0, 1)
+        z_bar_T = z_bar.swapaxes(0, 1)
+        gy = x_T.conv(z_bar_T, groups=groups, stride=stride, dilation=dilation, padding=padding).swapaxes(0, 1)
+        return [None, gy]
+
 
 
 # --------------
@@ -1216,6 +1255,7 @@ onnxruntime_backend.set_impl(operator_set.div)(lambda self, x1, x2: f"ret = Div(
 onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
 onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x1, x2: f"ret = Equal({x1}, {x2})")
 onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x1, x2: f"ret = Max({x1}, {x2})")
+onnxruntime_backend.set_impl(operator_set.matmul)(lambda self, x1, x2: f"ret = MatMul({x1}, {x2})")
 
 
 @onnxruntime_backend.set_impl(operator_set.sum)
@@ -1375,6 +1415,18 @@ ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
 ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
 ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
 """
+
+
+
+# @onnxruntime_backend.set_impl(operator_set.conv)
+# def conv_impl(self, x, w, *, pads ):
+#     return f"""
+# ret_starts = Constant <value = int64[{len(axes)}] {", ".join(["0"] * len(axes))}>()
+# ret_ends = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
+# ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
+# ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
+# ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
+# """
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)
@@ -1733,14 +1785,14 @@ def softsign(self):
     return self / (1 + self.abs())
 
 
-@procedure_set.register()
-def matmul(x, w):
-    x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
-    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
-    return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
+# @procedure_set.register()
+# def matmul(x, w):
+#     x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
+#     w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
+#     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
 
-procedure_set.alias(matmul, "dot")
+# procedure_set.alias(matmul, "dot")
 
 
 @procedure_set.register()
@@ -2094,4 +2146,4 @@ def cumsum(x, axis: int = 0):
     return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)
 
 
-v2_environment = Environment(operator_set, procedure_set, onnxruntime_backend)
+onnxruntime_environment = Environment(operator_set, procedure_set, onnxruntime_backend)

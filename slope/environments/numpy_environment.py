@@ -1862,7 +1862,7 @@ def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
 
 
 @procedure_set.register(static_argnames="groups stride dilation padding output_padding")
-def conv_permute(x, weight, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+def conv_transpose(x, weight, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     HW, trailing = weight.shape[2:], list(range(3, len(weight.shape) + 1))
     x, w = x, weight.reshape(groups, weight.shape[0] // groups, weight.shape[1], *weight.shape[2:]).permute(
         0, 2, 1, *trailing
@@ -2058,4 +2058,4 @@ def cumsum(x, axis: int = 0):
     return x.swapaxes(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).swapaxes(axis, -1)
 
 
-v1_environment = Environment(operator_set, procedure_set, numpy_backend)
+numpy_environment = Environment(operator_set, procedure_set, numpy_backend)

@@ -497,7 +497,8 @@ def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]
 @permute.set_method
 def T(self, cotangents, x, *, perm):
     (z,) = cotangents
-    inv_perm =  tuple(np.argsort(perm))
+    # inv_perm =  tuple(np.argsort(perm))
+    inv_perm = tuple(i[0] for i in sorted(enumerate(perm), key=lambda x: x[1]))
     return [z.permute(inv_perm)]
 
 

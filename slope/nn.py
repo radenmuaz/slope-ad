@@ -15,8 +15,8 @@ import numpy as np
 
 class Module:
     def __hash__(self):
-        # (metadata, rest), tensors = self.leaf_flatten()
-        self_flat, _ = slope.tree_flatten(self)
+        self_flat, tree = slope.tree_flatten(self)
+        # TODO: also use tree to compute hash
         return hash(self_flat)
 
     def __eq__(self, other):
@@ -252,7 +252,7 @@ class Linear(Module):
         self.bias = b_init((out_dim,)) if bias else None
 
     def __call__(self, x):
-        x = x.dot(self.weight.T())
+        x = x @ self.weight.transpose(-2,-1)
         return x + self.bias[None, ...] if self.bias is not None else x
 
 

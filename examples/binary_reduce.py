@@ -2,25 +2,62 @@ import slope
 
 
 
-x1 = slope.ones((1, 784))
-x1_dot = slope.ones((1, 784))
-x2 = slope.ones((784, 100))
-x2_dot = slope.ones((784, 100))
-print(x1.shape, x2.shape)
+# x = slope.ones((1, 784))
+# x_dot = slope.ones((1, 784))
+# w = slope.ones((784, 100))
+# w_dot = slope.ones((784, 100))
+# print(x.shape, w.shape)
 
-def f(x1, x2):
-    y = x1 @ x2
-    return y
+# def f(x, w):
+#     y = x @ w
+#     return y
 
-y = f(x1, x2)
-y, y_dot = slope.jvp(f, (x1, x2), (x1_dot, x2_dot))
-y, grad_y = slope.grad(lambda *args: f(*args).sum())(x1, x2)
+# y = f(x, w)
+# y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
+# y, grad_L_y = slope.grad(lambda *args: f(*args).sum())(x, w)
 
 
 # x = slope.ones((1, 3, 16, 16))
-# y = slope.ones((8, 3, 3, 3)) * 2
-# print(x.shape, y.shape)
-# print(slope.conv(x, y).shape)
+# x_dot = slope.ones((1, 3, 16, 16))
+# w = slope.ones((8, 3, 3, 3)) * 2
+# w_dot = slope.ones((8, 3, 3, 3)) * 2
+# print(x.shape, w.shape)
 
-# def test_with_input(f, input_tensors, out_tensors):
 
+# def f(x, w):
+#     y = x.conv(w)
+#     return y
+
+# y = f(x, w)
+# y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
+# y, grad_L_y = slope.grad(lambda *args: f(*args).sum())(x, w)
+
+
+# x = slope.ones((1, 3, 4, 4))
+# x_dot = slope.ones((1, 3, 4, 4))
+# w = slope.full((3, 8, 2, 2), 2.)
+# w_dot = slope.full((3, 8, 2, 2), 2.)
+# print(x.shape, w.shape)
+
+
+# def f(x, w):
+#     y = x.conv_transpose(w)
+#     return y
+
+# y = f(x, w)
+
+
+x = slope.ones((1, 3, 16, 16))
+x_dot = slope.ones((1, 3, 16, 16))
+w = slope.ones((8, 3, 3, 3)) * 2
+w_dot = slope.ones((8, 3, 3, 3)) * 2
+print(x.shape, w.shape)
+
+
+def f(x, w):
+    y = x.conv(w,padding=1)
+    return y
+
+y = f(x, w)
+y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
+y, grad_L_y = slope.grad(lambda *args: f(*args).sum())(x, w)

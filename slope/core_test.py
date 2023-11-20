@@ -13,8 +13,8 @@ DEBUG = os.environmentiron.get("SLOPE_DEBUG", 0)
 
 
 class ADResult(NamedTuple):
-    run_out: Tensor
-    jvp_out: Tensor
+    y: Tensor
+    y_dot: Tensor
     loss: Tensor
     grads: Tensor
 
@@ -23,17 +23,17 @@ class TestGrad(unittest.TestCase):
     @staticmethod
     def run_ad_fns(f, *args):
         args_dot = [Tensor.ones_like(x) for x in args]
-        run_out, f_lin = slope.ad.linearize(f, *args)
-        jvp_out = f_lin(*args_dot)
+        y, f_lin = slope.ad.linearize(f, *args)
+        y_dot = f_lin(*args_dot)
         loss_fn = ad.grad(lambda *args,: f(*args).sum())
         loss, grads = loss_fn(*args)
         if DEBUG:
             print(f"{args=}")
-            print(f"{run_out=}")
-            print(f"{jvp_out=}")
+            print(f"{y=}")
+            print(f"{y_dot=}")
             print(f"{loss=}")
             print(f"{grads=}")
-        return ADResult(run_out, jvp_out, loss, grads)
+        return ADResult(y, y_dot, loss, grads)
 
     def test_maximum(self):
         def f(x, **kwargs):

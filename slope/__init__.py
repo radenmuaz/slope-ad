@@ -8,8 +8,7 @@ LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
-# DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "numpy")
-DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "onnxruntime")
+DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "numpy")
 
 def dblog(*msg, enable=True):
     if enable:
@@ -42,6 +41,11 @@ def M():
 
 
 def manual_init(init_machine):
+    """
+    Example usage:
+    from slope.environments.onnxruntime_environment import onnxruntime_environment
+    slope.manual_init(slope.core.Machine(environment=onnxruntime_environment))
+    """
     global machine
     machine = init_machine
     dblog(f"Manual init with {machine}", enable=LOG_INIT)

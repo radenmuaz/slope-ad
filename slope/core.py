@@ -49,9 +49,9 @@ import struct
 # ================
 def unzip2(pairs):
     lst1, lst2 = [], []
-    for x1, x2 in pairs:
-        lst1.append(x1)
-        lst2.append(x2)
+    for i1, i2 in pairs:
+        lst1.append(i1)
+        lst2.append(i2)
     return lst1, lst2
 
 
@@ -365,9 +365,8 @@ class OperatorType(Enum):
     Unary = auto()
     Binary = auto()
     Reduce = auto()
-    Shape = auto()
-    Load = auto()
-    BinaryReduce = auto()
+    Init = auto()
+    Other = auto()
     Meta = auto()
 
 
@@ -485,48 +484,48 @@ class Operator:
         op = cls(name, OperatorType.Binary, **kwargs)
 
         @op.set_method
-        def args_fixer(self, x, y, **params):
-            if type(x) is PrimalProxy or type(y) is PrimalProxy:
-                assert x.shape == y.shape
-                return (x, y), params
+        def args_fixer(self, x, w, **params):
+            if type(x) is PrimalProxy or type(w) is PrimalProxy:
+                assert x.shape == w.shape
+                return (x, w), params
 
             if type(x) in Tracor.PYTHON_TYPES:
-                x = slope.full(shape=(), fill_value=x, dtype=y.dtype)
-            elif type(y) in Tracor.PYTHON_TYPES:
-                y = slope.full(shape=(), fill_value=y, dtype=x.dtype)
+                x = slope.full(shape=(), fill_value=x, dtype=w.dtype)
+            elif type(w) in Tracor.PYTHON_TYPES:
+                w = slope.full(shape=(), fill_value=w, dtype=x.dtype)
 
-            if type(x) is Tensor and isinstance(y, Tracor):
-                x = y._trace.pure(x)
-            elif type(y) is Tensor and isinstance(x, Tracor):
-                y = x._trace.pure(y)
+            if type(x) is Tensor and isinstance(w, Tracor):
+                x = w._trace.pure(x)
+            elif type(w) is Tensor and isinstance(x, Tracor):
+                w = x._trace.pure(w)
 
-            if (xshape := x.shape) == (yshape := y.shape):
-                return (x, y), params
-            shape_delta = len(xshape) - len(yshape)
+            if (xshape := x.shape) == (wshape := w.shape):
+                return (x, w), params
+            shape_delta = len(xshape) - len(wshape)
             if shape_delta > 0:
-                y = y.reshape((1,) * shape_delta + yshape)
+                w = w.reshape((1,) * shape_delta + wshape)
             elif shape_delta < 0:
                 x = x.reshape((1,) * -shape_delta + xshape)
-            if (xshape := x.shape) == (yshape := y.shape):
-                return (x, y), params
+            if (xshape := x.shape) == (wshape := w.shape):
+                return (x, w), params
 
-            shape_ret = tuple([max(x, y) for x, y in zip(xshape, yshape)])
+            shape_ret = tuple([max(x, w) for x, w in zip(xshape, wshape)])
             if xshape != shape_ret:
                 x = x.expand(shape_ret)
-            if yshape != shape_ret:
-                y = y.expand(shape_ret)
-            return (x, y), params
+            if wshape != shape_ret:
+                w = w.expand(shape_ret)
+            return (x, w), params
 
         @op.set_method
         def vmap(self, axis_size, vals_in, dims_in, **params):
-            (x, y), (x_bdim, y_bdim) = vals_in, dims_in
+            (x, w), (x_bdim, y_bdim) = vals_in, dims_in
             if x_bdim != y_bdim:
                 if x_bdim is None:
                     x = BatchTrace.move_batch_axis(axis_size, x_bdim, y_bdim, x)
                     x_bdim = y_bdim
                 else:
                     y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
-            return [self(x, y, **params)], [x_bdim]
+            return [self(x, w, **params)], [x_bdim]
 
         @op.set_method
         def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
@@ -548,7 +547,7 @@ class Operator:
             if void_x == void_y:
                 return [void_x]
             else:
-                shape_ret = tuple([max(x, y) for x, y in zip(void_x.shape, void_y.shape)])
+                shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
                 if void_x.shape != shape_ret:
                     void_x = Typecheckor(shape_ret, void_x.dtype)
                 if void_y.shape != shape_ret:
@@ -599,19 +598,15 @@ class Operator:
         return op
 
     @classmethod
-    def shape(cls, name, **kwargs):
-        op = cls(name, OperatorType.Shape, **kwargs)
+    def init(cls, name, **kwargs):
+        op = cls(name, OperatorType.Init, **kwargs)
+        return op
+    
+    @classmethod
+    def other(cls, name, **kwargs):
+        op = cls(name, OperatorType.Other, **kwargs)
         return op
 
-    @classmethod
-    def binary_reduce(cls, name, **kwargs):
-        op = cls(name, OperatorType.BinaryReduce, **kwargs)
-        return op
-
-    @classmethod
-    def load(cls, name, **kwargs):
-        op = cls(name, OperatorType.Load, **kwargs)
-        return op
 
 
 class OperatorSet:
@@ -750,7 +745,7 @@ def typecheck(self, *in_types, program):
 
 
 @procedure_op.set_method
-def T(self, cts, *invals, program):
+def T(self, cotangents, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
     permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
 
@@ -1089,7 +1084,7 @@ def typecheck(self, *in_types, program):
 
 
 @jit_op.set_method
-def T(self, cts, *invals, program):
+def T(self, cotangents, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
     permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
 

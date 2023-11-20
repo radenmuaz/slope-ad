@@ -1,6 +1,5 @@
 import slope
-from slope.environments.onnxruntime_environment import onnxruntime_environment
-slope.manual_init(slope.core.Machine(environment=onnxruntime_environment))
+
 
 import slope.nn as nn
 

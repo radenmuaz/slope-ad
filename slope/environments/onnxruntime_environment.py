@@ -499,46 +499,46 @@ def T(self, cotangents, x, *, perm):
     return [z.permute(inv_perm)]
 
 
-pad_ll = Operator.other("pad_ll")
-operator_set.register(pad_ll)
+pad_lowlevel = Operator.other("pad_lowlevel")
+operator_set.register(pad_lowlevel)
 
 
-@pad_ll.set_method
+@pad_lowlevel.set_method
 def args_fixer(self, x, *, lo, hi, interior=None, value=0.0):
     if interior is None:
         interior = tuple([0] * len(lo))
     return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
 
 
-@pad_ll.set_method
+@pad_lowlevel.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
-    Operand, padding_value = batched_args
-    Operand_bdim, padding_value_bdim = batch_dims
+    Operand, pads_value = batched_args
+    Operand_bdim, pads_value_bdim = batch_dims
     if Operand_bdim is None:
         Operand_bdim = 0
-        Operand = broadcast_in_dim(operand, (padding_value.shape[padding_value_bdim],))
+        Operand = broadcast_in_dim(operand, (pads_value.shape[pads_value_bdim],))
 
-    padding_config = list(padding_config)
-    padding_config.insert(operand_bdim, (0, 0, 0))
-    if padding_value_bdim is None:
-        return pad(operand, padding_value, padding_config), Operand_bdim
+    pads_config = list(pads_config)
+    pads_config.insert(operand_bdim, (0, 0, 0))
+    if pads_value_bdim is None:
+        return pad(operand, pads_value, pads_config), Operand_bdim
 
-    assert padding_value_bdim == 0, padding_value_bdim
+    assert pads_value_bdim == 0, pads_value_bdim
 
-    x = pad(operand, _zero(operand), padding_config)
-    mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
-    return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
+    x = pad(operand, _zero(operand), pads_config)
+    mask = pad(full_like(operand, True, np.bool_), False, pads_config)
+    broadcast_in_dimed_pads = broadcast_in_dim_in_dim(pads_value, x.shape, (operand_bdim,))
+    return select(mask, x, broadcast_in_dimed_pads), Operand_bdim
 
 
-@pad_ll.set_method
+@pad_lowlevel.set_method
 def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
     (x,), (x_dot,) = primals, tangents
-    return [x.pad_ll(lo, hi, interior, value)], [x_dot.pad_ll(lo, hi, interior, value)]
+    return [x.pad_lowlevel(lo, hi, interior, value)], [x_dot.pad_lowlevel(lo, hi, interior, value)]
 
 
-@pad_ll.set_method
+@pad_lowlevel.set_method
 def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List[Typecheckor]:
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
@@ -546,7 +546,7 @@ def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List
     shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
     if not all(d >= 0 for d in shape):
         raise ValueError(
-            f"Dimension size after padding is not at least 0, "
+            f"Dimension size after pads is not at least 0, "
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
@@ -554,34 +554,34 @@ def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List
     return [res]
 
 
-@pad_ll.set_method
+@pad_lowlevel.set_method
 def T(self, cotangents, x, *, lo, hi, interior=None, value=0.0):
     (z,) = cotangents
 
     def t_op():
-        unpadded = z.slice_ll(
+        unpadded = z.slice_lowlevel(
             lo,
             tuple(s - h for s, h in list_zip(z.shape, hi)),
             tuple([1] * len(interior)),
         )
-        return unpadded.slice_ll(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
+        return unpadded.slice_lowlevel(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
     res = t_op() if isinstance(x, PrimalProxy) else None
     return [res]
 
 
-slice_ll = Operator.other("slice_ll")
-operator_set.register(slice_ll)
+slice_lowlevel = Operator.other("slice_lowlevel")
+operator_set.register(slice_lowlevel)
 
 
-@slice_ll.set_method
+@slice_lowlevel.set_method
 def args_fixer(self, x, *, starts, limits, strides=None):
     if strides is None:
         strides = (1,) * len(starts)
     return (x,), dict(starts=starts, limits=limits, strides=strides)
 
 
-@slice_ll.set_method
+@slice_lowlevel.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
     (x,) = vals_in
@@ -599,17 +599,17 @@ def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
         new_strides = list(strides)
         new_strides.insert(x_bdim, 1)
 
-    out = x.slice_ll(new_start_indices, new_limit_indices, new_strides)
+    out = x.slice_lowlevel(new_start_indices, new_limit_indices, new_strides)
     return out, x_bdim
 
 
-@slice_ll.set_method
+@slice_lowlevel.set_method
 def jvp(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice_ll(starts, limits, strides)], [x_dot.slice_ll(starts, limits, strides)]
+    return [x.slice_lowlevel(starts, limits, strides)], [x_dot.slice_lowlevel(starts, limits, strides)]
 
 
-@slice_ll.set_method
+@slice_lowlevel.set_method
 def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typecheckor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
@@ -623,7 +623,7 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
         return [Typecheckor(x.shape, x.dtype)]
 
 
-@slice_ll.set_method
+@slice_lowlevel.set_method
 def T(self, cotangents, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
@@ -648,7 +648,7 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
 
-    res = z.pad_ll(lo, hi, interior)
+    res = z.pad_lowlevel(lo, hi, interior)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
@@ -753,7 +753,7 @@ def T(self, cotangents, *xs, axis=0):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_ll(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)
+        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)
     ]
 
 
@@ -941,25 +941,48 @@ def T(self, cotangents, x, w):
 
 
 conv = Operator.other("conv")
+operator_set.register(conv)
+
 
 @conv.set_method
-def typecheck(x_shape, w_shape, groups=1, stride=1, dilation=1, padding=0):
+def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, pads=0):
+    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    assert groups * cin == cin_ and len(x.shape) == len(
+        w.shape
+    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+    if isinstance(pads, (tuple, list)):
+        assert len(pads) == 2 * len(HW) or len(pads) == len(
+            HW
+        ), f"Expected pads of length {2*len(HW)} or {len(HW)}, but got {len(pads)} for tensor of shape {x.shape}"
+    pads_ = (
+        [pads] * 2 * len(HW)
+        if isinstance(pads, int)
+        else (pads if len(pads) == 2 * len(HW) else [p for p in pads for _ in range(2)][::-1])
+    )
+    pads_ = tuple(pads_)
+    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, pads=pads)
+
+@conv.set_method
+def typecheck(self, x, w, *, groups, stride, dilation, pads):
+    assert x.dtype == w.dtype
+    x_shape = x.shape
+    w_shape = w.shape
     (bs, cin_), (cout, cin), HW = x_shape[:2], w_shape[:2], w_shape[2:]
     assert groups * cin == cin_, f"Input axis shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
 
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
+    if isinstance(pads, (tuple, list)):
+        assert len(pads) == 2 * len(HW) or len(pads) == len(HW), f"Expected pads of length {2*len(HW)} or {len(HW)}, but got {len(pads)} for tensor of shape {x_shape}"
 
-    padding_ = (
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+    pads_ = (
+        [pads] * 2 * len(HW)
+        if isinstance(pads, int)
+        else (pads if len(pads) == 2 * len(HW) else [p for p in pads for _ in range(2)][::-1])
     )
-    padding_ = tuple(padding_)
+    pads_ = tuple(pads_)
 
-    # Perform padding
-    oy = ((x_shape[2] + 2 * padding_[0] - dilation * (HW[0] - 1) - 1) // stride) + 1
-    ox = ((x_shape[3] + 2 * padding_[1] - dilation * (HW[1] - 1) - 1) // stride) + 1
+    # Perform pads
+    oy = ((x_shape[2] + 2 * pads_[0] - dilation * (HW[0] - 1) - 1) // stride) + 1
+    ox = ((x_shape[3] + 2 * pads_[1] - dilation * (HW[1] - 1) - 1) // stride) + 1
 
     # Shape after pooling
     y_shape = (bs, groups * cin, oy, ox, *HW)
@@ -982,70 +1005,65 @@ def typecheck(x_shape, w_shape, groups=1, stride=1, dilation=1, padding=0):
     # Shape after convolution
     result_shape = (bs, cout, *oyx)
 
-    return result_shape
-
-
-def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+    return [Typecheckor(result_shape, x.dtype)]
 
 
 @conv.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+def jvp(self, primals, tangents, *, groups, stride, dilation, pads):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.conv(w)
-    y_dot1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    y_dot1 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    y_dot1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, pads=pads)
+    y_dot1 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, pads=pads)
 
     return [y], [y_dot1 + y_dot1]
 
 
 @conv.set_method
-def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
+def T(self, cotangents, x, w, *, groups, stride, dilation, pads):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, pads=pads)
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(0, 1)
+        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, pads=pads).transpose(0, 1)
         return [None, grad_L_w]
 
 
 
 
 conv_transpose = Operator.other("conv_transpose")
+operator_set.register(conv_transpose)
 
-
-def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, pads=0):
+    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, pads=pads)
 
 
 @conv_transpose.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+def jvp(self, primals, tangents, *, groups, stride, dilation, pads):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.conv_transpose(w)
-    y_dot1 = x_dot.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    y_dot1 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    y_dot1 = x_dot.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, pads=pads)
+    y_dot1 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, pads=pads)
 
     return [y], [y_dot1 + y_dot1]
 
 
 @conv_transpose.set_method
-def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
+def T(self, cotangents, x, w, *, groups, stride, dilation, pads):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        gx = grad_L_y.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        gx = grad_L_y.conv(y, groups=groups, stride=stride, dilation=dilation, pads=pads)
         return [gx, None]
     elif type(y) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        gy = x_T.conv_transpose(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(0, 1)
+        gy = x_T.conv_transpose(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, pads=pads).transpose(0, 1)
         return [None, gy]
 
 # @conv_transpose.set_method
-# def typecheck(x_shape, w_shape, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+# def typecheck(x_shape, w_shape, groups=1, stride=1, dilation=1, pads=0, output_pads=0):
 #     HW, trailing = w_shape[2:], list(range(3, len(w_shape) + 1))
     
 #     # Reshape and permute weight
@@ -1058,8 +1076,8 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
 #         x_shape = x_shape[:2] + tuple(k * s for k, s in zip(x_shape[2::2], stride))
 #         x_shape = x_shape[:2] + tuple(k - (s - 1) for k, s in zip(x_shape[2:], stride))
 
-#     # Calculate padding
-#     padding = flatten_seq(
+#     # Calculate pads
+#     pads = flatten_seq(
 #         (
 #             ((k - 1) * d - p, (k - 1) * d - p + op)
 #             for k, d, p, op in reversed(
@@ -1067,8 +1085,8 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
 #                     zip(
 #                         HW,
 #                         make_pair(dilation, len(HW)),
-#                         make_pair(padding, len(HW)),
-#                         make_pair(output_padding, len(HW)),
+#                         make_pair(pads, len(HW)),
+#                         make_pair(output_pads, len(HW)),
 #                     )
 #                 )
 #             )
@@ -1078,13 +1096,13 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
 #     # Calculate output shape after convolution transpose
 #     output_shape = x_shape[:2] + tuple(
 #         ((s + p[0] + p[1] - ((k - 1) * d + 1)) // s) + 1
-#         for k, d, s, p in zip(HW, make_pair(dilation, len(HW)), stride, padding)
+#         for k, d, s, p in zip(HW, make_pair(dilation, len(HW)), stride, pads)
 #     )
 
 #     return output_shape
  
 @conv_transpose.set_method
-def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
+def typecheck(x, w, *, groups, stride, dilation, pads, output_pads):
     x_shape = x.shape
     w_shape = w.shappe
     HW, trailing = w_shape[2:], list(range(3, len(w_shape) + 1))
@@ -1107,17 +1125,17 @@ def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
     stride = make_pair(stride, len(HW))
     
     if any(s > 1 for s in stride):
-        # Reshape x for padding
+        # Reshape x for pads
         x_shape = x_shape[:2] + flatten_seq((k, 1) for k in x_shape[2:])
         x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, 0)) for _ in range(len(HW)))
         x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, s - 1)) for s in stride)
         x_shape = x_shape[:2] + flatten_seq(((k * s,) for k, s in zip(x_shape[2::2], stride)))
         
-        # Slice x to handle padding
+        # Slice x to handle pads
         x_shape = x_shape[:2] + [k - (s - 1) for k, s in zip(x_shape[2:], stride)]
         
-    # Calculate padding
-    padding = flatten_seq(
+    # Calculate pads
+    pads = flatten_seq(
         (
             ((k - 1) * d - p, (k - 1) * d - p + op)
             for k, d, p, op in reversed(
@@ -1125,8 +1143,8 @@ def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
                     zip(
                         HW,
                         make_pair(dilation, len(HW)),
-                        make_pair(padding, len(HW)),
-                        make_pair(output_padding, len(HW)),
+                        make_pair(pads, len(HW)),
+                        make_pair(output_pads, len(HW)),
                     )
                 )
             )
@@ -1139,7 +1157,7 @@ def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
         w_shape_final[0] * w_shape_final[1],
         *[
             (s + p[0] + p[1] - (d * (k - 1) + 1)) // s + 1
-            for k, d, p, s in zip(HW, make_pair(dilation, len(HW)), padding, stride)
+            for k, d, p, s in zip(HW, make_pair(dilation, len(HW)), pads, stride)
         ]
     )
     
@@ -1153,7 +1171,7 @@ def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
 #
 
 compile_py = compile
-onnxruntime_backend = Backend(name="onnxruntime", default_dtype=Tensor.float32, default_device=slope.DEFAULT_DEVICE)
+onnxruntime_backend = Backend(name="onnxruntime", default_dtype=Tensor.float32, SLOPE_DEVICE=slope.SLOPE_DEVICE)
 onnxruntime_backend.set_dtype_map(
     {
         Tensor.float32: "float",
@@ -1180,7 +1198,7 @@ onnx_dtype_enum_map = {
 
 
 @onnxruntime_backend.set_method
-def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value, device=onnxruntime_backend.default_device):
+def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value, device=onnxruntime_backend.SLOPE_DEVICE):
     device_type, device_id = device.split(":") if ":" in device else (device, 0)
     np_val = np.array(val, dtype=dtype.numpy)
     val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
@@ -1300,7 +1318,7 @@ def compile(self, codegen_out):
                 buffer_ptr=a.data_ptr(),
             )
         for o in codegen_out["outs"]:
-            io_binding.bind_output(o["name"], self.default_device)
+            io_binding.bind_output(o["name"], self.SLOPE_DEVICE)
         session.run_with_iobinding(io_binding)
         outputs = tuple(io_binding.get_outputs())
         return outputs
@@ -1525,8 +1543,8 @@ ret = Reshape({x}, ret_shape)
         ret = Squeeze (ret_reshape, ret_squeeze_dim)"""
 
 
-@onnxruntime_backend.set_impl(operator_set.pad_ll)
-def pad_ll_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
+@onnxruntime_backend.set_impl(operator_set.pad_lowlevel)
+def pad_lowlevel_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
     pads = lo + hi
     return f"""
 ret_pads = Constant <value = int64[{len(pads)}] {pads}>()
@@ -1535,8 +1553,8 @@ ret = Pad({x} ret_pads, ret_constant_value)
 """
 
 
-@onnxruntime_backend.set_impl(operator_set.slice_ll)
-def slice_ll_impl(self, x, *, starts, limits, strides):
+@onnxruntime_backend.set_impl(operator_set.slice_lowlevel)
+def slice_lowlevel_impl(self, x, *, starts, limits, strides):
     return f"""
 ret_starts = Constant <value = int64[{len(starts)}] {starts}>()
 ret_ends = Constant <value = int64[{len(limits)}] {limits}>()
@@ -1567,15 +1585,23 @@ ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
 
 
 
-# @onnxruntime_backend.set_impl(operator_set.conv)
-# def conv_impl(self, x, w, *, pads ):
-#     return f"""
-# ret_starts = Constant <value = int64[{len(axes)}] {", ".join(["0"] * len(axes))}>()
-# ret_ends = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-# ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
-# ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-# ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
-# """
+@onnxruntime_backend.set_impl(operator_set.conv)
+def conv_impl(self, x, w, *, groups, stride, dilation, pads):
+    dilations_attr = f"dilations={repr(list(dilation))[1:-1]}"
+    pads_attr = f"pads={repr(list(pads))[1:-1]}"
+    strides_attr = f"strides={repr(list(stride))[1:-1]}"
+    group_attr = f"group={groups}"
+    return f"""ret = Conv<a{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})])"""
+
+
+
+@onnxruntime_backend.set_impl(operator_set.conv_transpose)
+def conv_transpose_impl(self, x, w, *, groups, stride, dilation, pads):
+    dilations_attr = f"dilations={repr(list(dilation))[1:-1]}"
+    pads_attr = f"pads={repr(list(pads))[1:-1]}"
+    strides_attr = f"strides={repr(list(stride))[1:-1]}"
+    group_attr = f"group={groups}"
+    return f"""ret = Conv<a{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})])"""
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)
@@ -2102,7 +2128,7 @@ def pad(x, pad_width, mode="constant", constant_values=0.0):
         assert all(2 <= len(pw) <= 3 for pw in pad_width)
         pad_width = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad_width)
     lo, hi, interior = tuple(zip(*pad_width))
-    return x.pad_ll(lo, hi, interior, value=constant_values)
+    return x.pad_lowlevel(lo, hi, interior, value=constant_values)
 
 
 @procedure_set.register(static_argnames="arg")
@@ -2110,16 +2136,16 @@ def slice(x, arg):
     # assert all(2 <= len(a) <= 3 for a in arg)
     arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
     starts, limits, strides = tuple(zip(*arg))
-    return x.slice_ll(starts, limits, strides)
+    return x.slice_lowlevel(starts, limits, strides)
 
 
 # @procedure_set.register(static_argnames=("arg", "value"))
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(padding, constant_values=value)
-    slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
+    pads = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    x = x.pad(pads, constant_values=value)
+    slc = tuple([(p[0] + pads[i][0], p[1] + pads[i][0]) for i, p in enumerate(arg_)])
     x = x.slice(slc)
     return x
 
@@ -2231,7 +2257,7 @@ def _pool(
     )
     if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
         o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
+        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need pads
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
         xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))

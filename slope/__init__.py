@@ -7,8 +7,8 @@ LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
 LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
-DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
-DEFAULT_ENV = os.environ.get("DEFAULT_ENV", "numpy")
+SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
+SLOPE_ENV = os.environ.get("SLOPE_ENV", "numpy")
 
 def dblog(*msg, enable=True):
     if enable:
@@ -33,9 +33,9 @@ def M():
             numpy=numpy_environment,
             onnxruntime=onnxruntime_environment
         )
-        if DEFAULT_ENV not in environment_registry.keys():
-            raise ValueError(f"{DEFAULT_ENV} isnonexistent environment in: {list(environment_registry.keys())}")
-        machine = core.Machine(environment=environment_registry[DEFAULT_ENV])
+        if SLOPE_ENV not in environment_registry.keys():
+            raise ValueError(f"{SLOPE_ENV} isnonexistent environment in: {list(environment_registry.keys())}")
+        machine = core.Machine(environment=environment_registry[SLOPE_ENV])
         dblog(f"Auto init with {machine}", enable=LOG_INIT)
     return machine
 

@@ -750,7 +750,7 @@ def T(self, cotangents, *invals, program):
     permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
-    outs = slope.M().bind(self, *new_consts, *residuals, *cts, program=permuted_program)
+    outs = slope.M().bind(self, *new_consts, *residuals, *cotangents, program=permuted_program)
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
@@ -1093,7 +1093,7 @@ def T(self, cotangents, *invals, program):
         self,
         *new_consts,
         *residuals,
-        *cts,
+        *cotangents,
         program=permuted_program,
     )
     outs = iter(outs)
@@ -1141,10 +1141,10 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Backend:
-    def __init__(self, name, default_dtype=Tensor.float32, default_device="cpu"):
+    def __init__(self, name, default_dtype=Tensor.float32, SLOPE_DEVICE="cpu"):
         self.name = name
         self.default_dtype = default_dtype
-        self.default_device = default_device
+        self.SLOPE_DEVICE = SLOPE_DEVICE
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()
@@ -2241,7 +2241,7 @@ class Machine:
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]
         permute_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
-        f_vjp_flat = lambda *cts: self.run_program_permuted(program, permute_inputs, cts)
+        f_vjp_flat = lambda *cotangents: self.run_program_permuted(program, permute_inputs, cotangents)
         return primals_out_flat, f_vjp_flat
 
     def vjp(self, f, *primals_in, **static_args):
@@ -2282,12 +2282,12 @@ class Machine:
         for instruction in program.instructions[::-1]:
             # print(i, instruction); i -= 1
             primals_in = list_map(read_primal, instruction.inputs)
-            cts_in = list_map(read_cotangent, instruction.out_binders)
+            cotangents_in = list_map(read_cotangent, instruction.out_binders)
             inp, params = primals_in, instruction.params
             inp, params = instruction.op.reorg_args(inp, params)
             inp, params = instruction.op.args_fixer(*inp, **params)
-            cts_out = instruction.op.T(cts_in, *inp, **params)
-            list_map(write_cotangent, instruction.inputs, cts_out)
+            cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
+            list_map(write_cotangent, instruction.inputs, cotangents_out)
 
         ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is PrimalProxy]
 

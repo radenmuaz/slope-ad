@@ -985,7 +985,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
     )
     padding_ = tuple(padding_)
 
-    # Perform padding
+    # Perform padding, TODO: N-D instead of 2D
     oy = ((x_shape[2] + 2 * padding_[0] - dilation[0] * (HW[0] - 1) - 1) // stride[0]) + 1
     ox = ((x_shape[3] + 2 * padding_[1] - dilation[1] * (HW[1] - 1) - 1) // stride[1]) + 1
 
@@ -1017,7 +1017,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
 def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.conv(w)
-    y_dot1 = x_dot.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    y_dot1 = x_dot.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
     y_dot1 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
 
     return [y], [y_dot1 + y_dot1]
@@ -1027,7 +1027,7 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0)
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
         x_T = x.transpose(0, 1)
@@ -1041,22 +1041,120 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
 conv_transpose = Operator.other("conv_transpose")
 operator_set.register(conv_transpose)
 
-def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+@conv_transpose.set_method
+def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+    (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    assert groups * cin == cin_ and len(x.shape) == len(
+        w.shape
+    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+    if isinstance(padding, (tuple, list)):
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+    
+    if isinstance(output_padding, (tuple, list)):
+        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x.shape}"
+    padding = tuple(
+        [padding] * 2 * len(HW)
+        if isinstance(padding, int)
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+    )
+    output_padding = tuple(
+        [output_padding] * 2 * len(HW)
+        if isinstance(output_padding, int)
+        else (output_padding if len(output_padding) == 2 * len(HW) else [p for p in output_padding for _ in range(2)][::-1])
+    )
+    if isinstance(stride, int):
+        stride = make_pair(dilation, len(HW))
+    if isinstance(dilation, int):
+        dilation = make_pair(dilation, len(HW))
+    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
 
 @conv_transpose.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
+def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
+    assert x.dtype == w.dtype
+    x_shape = x.shape
+    w_shape = w.shape
+    HW, trailing = w_shape[2:], list(range(3, len(w_shape) + 1))
+    x_shape, w_shape = x_shape, (
+        groups,
+        w_shape[0] // groups,
+        w_shape[1],
+        *w_shape[2:]
+    )
+    
+    # Reshape and permute dimensions of the weight
+    w_shape_permuted = w_shape[:2] + (w_shape[2],) + tuple(trailing)
+    w_shape_permuted = tuple(w_shape_permuted)
+    w_shape_flipped = tuple(reversed(w_shape_permuted))
+    
+    # Flip the trailing dimensions
+    w_shape_final = w_shape_flipped[3:]
+    
+    # # Update stride to be a pair
+    # stride = make_pair(stride, len(HW))
+    
+    if any(s > 1 for s in stride):
+        # Reshape x for padding
+        x_shape = x_shape[:2] + flatten_seq((k, 1) for k in x_shape[2:])
+        x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, 0)) for _ in range(len(HW)))
+        x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, s - 1)) for s in stride)
+        x_shape = x_shape[:2] + flatten_seq(((k * s,) for k, s in zip(x_shape[2::2], stride)))
+        
+        # Slice x to handle padding
+        x_shape = x_shape[:2] + [k - (s - 1) for k, s in zip(x_shape[2:], stride)]
+        
+    # Calculate padding
+    padding_start = padding[0::2]
+    padding_end = padding[1::2]
+    output_padding_start = padding[0::2]
+    output_padding_end = padding[1::2]
+    padding = flatten_seq(
+        (
+            ((k - 1) * d - ps + ops, (k - 1) * d - pe + ope)
+            for k, d, ps, pe, ops, ope in reversed(
+                list(
+                    zip(
+                        HW, dilation, padding_start, padding_end, output_padding_start, output_padding_end
+                    )
+                )
+            )
+        )
+    )
+    
+    # Calculate the final output shape after convolution transpose
+    padding_start = padding[0::2]
+    padding_end = padding[1::2]
+    result_shape = (
+        x_shape[0],
+        w_shape_final[0] * w_shape_final[1],
+        *[
+            (s + ps + pe - (d * (k - 1) + 1)) // s + 1
+            for k, d, ps, pe, s in zip(HW, dilation, padding_start, padding_end, stride)
+        ]
+    )
+    
+    return [Typecheckor(result_shape, x.dtype)]
+
+
+
+
+@conv_transpose.set_method
+def jvp(self, primals, tangents, *, groups, stride, dilation, padding, output_padding):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.conv_transpose(w)
-    y_dot1 = x_dot.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    y_dot1 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+    y_dot1 = x_dot.conv_transpose(y, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
+    y_dot1 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
     return [y], [y_dot1 + y_dot1]
 
 
 @conv_transpose.set_method
-def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
+def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
         gx = grad_L_y.conv(y, groups=groups, stride=stride, dilation=dilation, padding=padding)
@@ -1064,7 +1162,7 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     elif type(y) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        gy = x_T.conv_transpose(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(0, 1)
+        gy = x_T.conv_transpose(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding).transpose(0, 1)
         return [None, gy]
 
 # @conv_transpose.set_method
@@ -1106,68 +1204,6 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
 
 #     return output_shape
  
-@conv_transpose.set_method
-def typecheck(x, w, *, groups, stride, dilation, padding, output_padding):
-    x_shape = x.shape
-    w_shape = w.shappe
-    HW, trailing = w_shape[2:], list(range(3, len(w_shape) + 1))
-    x_shape, w_shape = x_shape, (
-        groups,
-        w_shape[0] // groups,
-        w_shape[1],
-        *w_shape[2:]
-    )
-    
-    # Reshape and permute dimensions of the weight
-    w_shape_permuted = w_shape[:2] + (w_shape[2],) + tuple(trailing)
-    w_shape_permuted = tuple(w_shape_permuted)
-    w_shape_flipped = tuple(reversed(w_shape_permuted))
-    
-    # Flip the trailing dimensions
-    w_shape_final = w_shape_flipped[3:]
-    
-    # Update stride to be a pair
-    stride = make_pair(stride, len(HW))
-    
-    if any(s > 1 for s in stride):
-        # Reshape x for padding
-        x_shape = x_shape[:2] + flatten_seq((k, 1) for k in x_shape[2:])
-        x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, 0)) for _ in range(len(HW)))
-        x_shape = x_shape[:2] + flatten_seq(((0, 0), (0, s - 1)) for s in stride)
-        x_shape = x_shape[:2] + flatten_seq(((k * s,) for k, s in zip(x_shape[2::2], stride)))
-        
-        # Slice x to handle padding
-        x_shape = x_shape[:2] + [k - (s - 1) for k, s in zip(x_shape[2:], stride)]
-        
-    # Calculate padding
-    padding = flatten_seq(
-        (
-            ((k - 1) * d - p, (k - 1) * d - p + op)
-            for k, d, p, op in reversed(
-                list(
-                    zip(
-                        HW,
-                        make_pair(dilation, len(HW)),
-                        make_pair(padding, len(HW)),
-                        make_pair(output_padding, len(HW)),
-                    )
-                )
-            )
-        )
-    )
-    
-    # Calculate the final output shape after convolution transpose
-    result_shape = (
-        x_shape[0],
-        w_shape_final[0] * w_shape_final[1],
-        *[
-            (s + p[0] + p[1] - (d * (k - 1) + 1)) // s + 1
-            for k, d, p, s in zip(HW, make_pair(dilation, len(HW)), padding, stride)
-        ]
-    )
-    
-    return result_shape
-
 
 # --------------
 # Backend
@@ -1601,12 +1637,14 @@ def conv_impl(self, x, w, *, groups, stride, dilation, padding):
 
 
 @onnxruntime_backend.set_impl(operator_set.conv_transpose)
-def conv_transpose_impl(self, x, w, *, groups, stride, dilation, padding):
-    dilations_attr = f"dilations={repr(list(dilation))[1:-1]}"
-    pads_attr = f"pads={repr(list(padding))[1:-1]}"
-    strides_attr = f"strides={repr(list(stride))[1:-1]}"
+def conv_transpose_impl(self, x, w, *, groups, stride, dilation, padding, output_padding):
+    dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
+    pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
+    pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
+    output_padding_attr = f"pads=[{repr(list(output_padding))[1:-1]}]"
+    strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
     group_attr = f"group={groups}"
-    return f"""ret = Conv<a{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})])"""
+    return f"""ret = ConvTranspose<{dilations_attr}, {group_attr}, {output_padding_attr}, {pads_attr}, {strides_attr}>({x}, {w})"""
 
 
 @onnxruntime_backend.set_impl(slope.core.jit_op)

@@ -406,7 +406,6 @@ class Operator:
         raise NotImplementedError
 
     def reorg_args(self, args, params):
-        args_, params_ = args, params
         sig = inspect.signature(self.typecheck)
         args_strs = [
             k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"

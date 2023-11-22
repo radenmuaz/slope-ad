@@ -53,7 +53,7 @@ w = slope.ones((8, 3, 3, 3)) * 2
 w_dot = slope.ones((8, 3, 3, 3)) * 2
 print(x.shape, w.shape)
 
-# @slope.jit
+@slope.jit
 def f(x, w):
     y = x.conv(w,padding=1)
     return y

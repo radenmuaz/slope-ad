@@ -516,23 +516,23 @@ def args_fixer(self, x, *, lo, hi, interior=None, value=0.0):
 @pad_lowlevel.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     raise NotImplementedError
-    Operand, pads_value = batched_args
-    Operand_bdim, pads_value_bdim = batch_dims
+    Operand, padding_value = batched_args
+    Operand_bdim, padding_value_bdim = batch_dims
     if Operand_bdim is None:
         Operand_bdim = 0
-        Operand = broadcast_in_dim(operand, (pads_value.shape[pads_value_bdim],))
+        Operand = broadcast_in_dim(operand, (padding_value.shape[padding_value_bdim],))
 
-    pads_config = list(pads_config)
-    pads_config.insert(operand_bdim, (0, 0, 0))
-    if pads_value_bdim is None:
-        return pad(operand, pads_value, pads_config), Operand_bdim
+    padding_config = list(padding_config)
+    padding_config.insert(operand_bdim, (0, 0, 0))
+    if padding_value_bdim is None:
+        return pad(operand, padding_value, padding_config), Operand_bdim
 
-    assert pads_value_bdim == 0, pads_value_bdim
+    assert padding_value_bdim == 0, padding_value_bdim
 
-    x = pad(operand, _zero(operand), pads_config)
-    mask = pad(full_like(operand, True, np.bool_), False, pads_config)
-    broadcast_in_dimed_pads = broadcast_in_dim_in_dim(pads_value, x.shape, (operand_bdim,))
-    return select(mask, x, broadcast_in_dimed_pads), Operand_bdim
+    x = pad(operand, _zero(operand), padding_config)
+    mask = pad(full_like(operand, True, np.bool_), False, padding_config)
+    broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
+    return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 
 @pad_lowlevel.set_method
@@ -549,7 +549,7 @@ def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List
     shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
     if not all(d >= 0 for d in shape):
         raise ValueError(
-            f"Dimension size after pads is not at least 0, "
+            f"Dimension size after padding is not at least 0, "
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
@@ -1700,17 +1700,18 @@ def slice(x, arg):
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    pads = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(pads, constant_values=value)
-    slc = tuple([(p[0] + pads[i][0], p[1] + pads[i][0]) for i, p in enumerate(arg_)])
+    padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    x = x.pad(padding, constant_values=value)
+    slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
     x = x.slice(slc)
     return x
 
 
-@procedure_set.register(static_argnames="pads value")
-def pad2d(x, pads:Union[List[int], Tuple[int, ...]], value:float=0):
-    slc = [(-p0, s+p1) for p0,p1,s in zip(pads[::2], pads[1::2], x.shape[::-1])][::-1]
-    return x.padslice([(0,s) for s in x.shape[:-(len(pads)//2)]] + slc, value=value)
+@procedure_set.register(static_argnames="padding value")
+def pad2d(x, padding:Union[List[int], Tuple[int, ...]], value:float=0):
+    # (padding_left, padding_right, padding_top, padding_bottom)
+    slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
+    return x.padslice([(0,s) for s in x.shape[:-(len(padding)//2)]] + slc, value=value)
 
 @procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
@@ -1819,7 +1820,7 @@ def _pool(
     )
     if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
         o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need pads
+        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
         xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
@@ -1868,8 +1869,8 @@ def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
     )
 
 
-@procedure_set.register(static_argnames="groups stride dilation pads output_pads")
-def conv_transpose(x, w, groups=1, stride=1, dilation=1, pads=0, output_pads=0):
+@procedure_set.register(static_argnames="groups stride dilation padding output_padding")
+def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     HW, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
     w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
     w = w.permute((0, 2, 1, *trailing)).flip(trailing)
@@ -1885,7 +1886,7 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, pads=0, output_pads=0):
                 *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
             )
         )
-    pads = flatten_seq(
+    padding = flatten_seq(
         (
             ((k - 1) * d - p, (k - 1) * d - p + op)
             for k, d, p, op in reversed(
@@ -1893,35 +1894,35 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, pads=0, output_pads=0):
                     zip(
                         HW,
                         make_pair(dilation, len(HW)),
-                        make_pair(pads, len(HW)),
-                        make_pair(output_pads, len(HW)),
+                        make_pair(padding, len(HW)),
+                        make_pair(output_padding, len(HW)),
                     )
                 )
             )
         )
     )
     w =  w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
-    return x.conv(w,groups=groups,dilation=dilation,pads=pads)
+    return x.conv(w,groups=groups,dilation=dilation,padding=padding)
 
 
-@procedure_set.register(static_argnames="groups stride dilation pads")
-def conv(x, w, groups=1, stride=1, dilation=1, pads=0):
+@procedure_set.register(static_argnames="groups stride dilation padding")
+def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
     ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(pads, (tuple, list)):
-        assert len(pads) == 2 * len(HW) or len(pads) == len(
+    if isinstance(padding, (tuple, list)):
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
-        ), f"Expected pads of length {2*len(HW)} or {len(HW)}, but got {len(pads)} for tensor of shape {x.shape}"
-    pads_ = (
-        [pads] * 2 * len(HW)
-        if isinstance(pads, int)
-        else (pads if len(pads) == 2 * len(HW) else [p for p in pads for _ in range(2)][::-1])
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+    padding_ = (
+        [padding] * 2 * len(HW)
+        if isinstance(padding, int)
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
-    pads_ = tuple(pads_)
+    padding_ = tuple(padding_)
     x_ = x
-    x = x.pad2d(pads_)
+    x = x.pad2d(padding_)
     x = x._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
@@ -1944,24 +1945,24 @@ def conv(x, w, groups=1, stride=1, dilation=1, pads=0):
     return ret
 
 
-@procedure_set.register(static_argnames="groups stride dilation pads")
-def conv_wino(x, w, groups=1, stride=1, dilation=1, pads=0):
+@procedure_set.register(static_argnames="groups stride dilation padding")
+def conv_wino(x, w, groups=1, stride=1, dilation=1, padding=0):
     assert not all(x == 3 for x in HW) or stride != 1 or dilation != 1
     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
     ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(pads, (tuple, list)):
-        assert len(pads) == 2 * len(HW) or len(pads) == len(
+    if isinstance(padding, (tuple, list)):
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
-        ), f"Expected pads of length {2*len(HW)} or {len(HW)}, but got {len(pads)} for tensor of shape {x.shape}"
-    pads_ = (
-        [pads] * 2 * len(HW)
-        if isinstance(pads, int)
-        else (pads if len(pads) == 2 * len(HW) else [p for p in pads for _ in range(2)][::-1])
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+    padding_ = (
+        [padding] * 2 * len(HW)
+        if isinstance(padding, int)
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
 
-    x = x.padslice(pads_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+    x = x.padslice(padding_)._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
 
     # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
@@ -2006,13 +2007,13 @@ def conv_wino(x, w, groups=1, stride=1, dilation=1, pads=0):
     ]  # applying At in pre-order almost doubles compilation time
 
     # todo: stride == dilation
-    # use pads to round up to 4x4 output tiles
+    # use padding to round up to 4x4 output tiles
     d = x.pad(
         sum(
             [
                 [
-                    pads_[i * 2],
-                    pads_[i * 2 + 1] + (-(dim + sum(pads_[i * 2 : (i + 1) * 2]) - 2) % 4),
+                    padding_[i * 2],
+                    padding_[i * 2 + 1] + (-(dim + sum(padding_[i * 2 : (i + 1) * 2]) - 2) % 4),
                 ]
                 for i, dim in enumerate(x.shape[-len(HW) :])
             ],

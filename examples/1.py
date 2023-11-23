@@ -51,4 +51,4 @@ print(f(x))
 # g_out = slope.grad(f)(x); print(g_out)
 
 # print(f(x))
-# print(slope.machine.backend.callable.cache_info())
+# print(slope.machine.compiler.callable.cache_info())

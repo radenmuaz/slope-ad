@@ -8,7 +8,7 @@ LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
-SLOPE_ENV = os.environ.get("SLOPE_ENV", "numpy")
+SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
 
 def dblog(*msg, enable=True):
     if enable:
@@ -27,15 +27,15 @@ def M():
     global machine
     if type(machine) is LazyInitMachine:
         # import here to avoid circular import
-        from slope.environments.numpy_environment import numpy_environment
-        from slope.environments.onnxruntime_environment import onnxruntime_environment
-        environment_registry = dict(
-            numpy=numpy_environment,
-            onnxruntime=onnxruntime_environment
+        from slope.backends.numpy_backend import numpy_backend
+        from slope.backends.onnxruntime_backend import onnxruntime_backend
+        backend_registry = dict(
+            numpy=numpy_backend,
+            onnxruntime=onnxruntime_backend
         )
-        if SLOPE_ENV not in environment_registry.keys():
-            raise ValueError(f"{SLOPE_ENV} isnonexistent environment in: {list(environment_registry.keys())}")
-        machine = core.Machine(environment=environment_registry[SLOPE_ENV])
+        if SLOPE_BACKEND not in backend_registry.keys():
+            raise ValueError(f"{SLOPE_BACKEND} isnonexistent backend in: {list(backend_registry.keys())}")
+        machine = core.Machine(backend=backend_registry[SLOPE_BACKEND])
         dblog(f"Auto init with {machine}", enable=LOG_INIT)
     return machine
 
@@ -43,8 +43,8 @@ def M():
 def manual_init(init_machine):
     """
     Example usage:
-    from slope.environments.onnxruntime_environment import onnxruntime_environment
-    slope.manual_init(slope.core.Machine(environment=onnxruntime_environment))
+    from slope.backends.onnxruntime_backend import onnxruntime_backend
+    slope.manual_init(slope.core.Machine(backend=onnxruntime_backend))
     """
     global machine
     machine = init_machine
@@ -59,12 +59,12 @@ def __getattr__(attr):
     if attr in vars(core.Machine):
         return getattr(machine, attr)
 
-    if attr in vars(machine.environment.operator_set):
-        return getattr(machine.environment.operator_set, attr)
-    elif attr in vars(machine.environment.procedure_set):
-        return getattr(machine.environment.procedure_set, attr)
-    elif attr in vars(core.Environment):
-        return getattr(machine.environment, attr)
+    if attr in vars(machine.backend.operator_set):
+        return getattr(machine.backend.operator_set, attr)
+    elif attr in vars(machine.backend.procedure_set):
+        return getattr(machine.backend.procedure_set, attr)
+    elif attr in vars(core.Backend):
+        return getattr(machine.backend, attr)
 
     elif attr in core.Tensor.dtype_names.keys():
         return core.Tensor.dtype_names[attr]

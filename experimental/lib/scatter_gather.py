@@ -1,5 +1,5 @@
 class Gather(ShapeOp):
-    get_impl = lambda: slope.RT.backend.GatherImpl
+    get_impl = lambda: slope.RT.compiler.GatherImpl
 
     @staticmethod
     def run(x, idx, *, axis):
@@ -319,7 +319,7 @@ class Gather(ShapeOp):
 
 
 class Scatter(ShapeOp):
-    get_impl = lambda: slope.RT.backend.ScatterImpl
+    get_impl = lambda: slope.RT.compiler.ScatterImpl
 
     @staticmethod
     def run(x, idx, *, axis):
@@ -506,7 +506,7 @@ class Scatter(ShapeOp):
         return [operand_t, None, update_t]
 
 
-@numpy_backend.set_impl("scatter")
+@numpy_compiler.set_impl("scatter")
 def fn(
     inputs,
     scatter_indices,
@@ -589,7 +589,7 @@ def fn(
 """
 
 
-@numpy_backend.set_impl("gather")
+@numpy_compiler.set_impl("gather")
 def fn(
     operand,
     start_indices,

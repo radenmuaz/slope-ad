@@ -227,7 +227,7 @@ class Tensor:
 
     @property
     def default_dtype(self):
-        return slope.M().environment.backend.default_dtype
+        return slope.M().backend.compiler.default_dtype
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -239,11 +239,11 @@ class Tensor:
         return self.dtype is self.uint8
 
     def __getattr__(self, attr):
-        if attr in vars(slope.M().environment.operator_set).keys():
-            op = getattr(slope.M().environment.operator_set, attr)
+        if attr in vars(slope.M().backend.operator_set).keys():
+            op = getattr(slope.M().backend.operator_set, attr)
             return partial(op, self)
-        elif attr in vars(slope.M().environment.procedure_set).keys():
-            procedure = getattr(slope.M().environment.procedure_set, attr)
+        elif attr in vars(slope.M().backend.procedure_set).keys():
+            procedure = getattr(slope.M().backend.procedure_set, attr)
             assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
             return partial(procedure, self)
         else:
@@ -288,18 +288,18 @@ class Tensor:
 
     @property
     def dtype(self):
-        return slope.M().environment.backend.dtype_of(self)
+        return slope.M().backend.compiler.dtype_of(self)
 
     @property
     def device(self):
-        return slope.M().environment.backend.device_of(self)
+        return slope.M().backend.compiler.device_of(self)
 
     def numpy(self):
-        return slope.M().environment.backend.numpy_of(self)
+        return slope.M().backend.compiler.numpy_of(self)
 
     @property
     def shape(self):
-        return slope.M().environment.backend.shape_of(self)
+        return slope.M().backend.compiler.shape_of(self)
 
     @property
     def ndim(self):
@@ -795,10 +795,10 @@ def reorg_args(self, args, params):
 
 
 @dataclass
-class Environment:
+class Backend:
     operator_set: OperatorSet
     procedure_set: ProcedureSet
-    backend: "Backend"
+    compiler: "Compiler"
 
     def __getattr__(self, attr):
         try:
@@ -826,13 +826,13 @@ class Environment:
         else:
             if type(val) is bytes:
                 val = np.frombuffer(val, dtype=dtype)
-            return self.backend.from_numpy(val, dtype)
+            return self.compiler.from_numpy(val, dtype)
 
     def save(self, tensor: Tensor, path: str) -> str:
-        return self.backend.save(tensor, path)
+        return self.compiler.save(tensor, path)
 
     def load(self, path: str) -> Tensor:
-        return self.backend.load(path)
+        return self.compiler.load(path)
 
 
 # ================
@@ -1031,10 +1031,10 @@ class JitObject:
         except Exception as e:
             slope.dblog(self.code, enable=slope.LOG_JIT)
             raise
-        return [slope.M().environment.tensor(TensorBuffer(o)) for o in outs]
+        return [slope.M().backend.tensor(TensorBuffer(o)) for o in outs]
 
     def export(self, output_path, *args, **params):
-        return slope.M().environment.backend.export(self, output_path, *args, **params)
+        return slope.M().backend.compiler.export(self, output_path, *args, **params)
 
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
@@ -1046,7 +1046,7 @@ def run_impl(self, *args, program):
     num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    jit_object = slope.M().environment.backend.gen_jit_object(hashed_program, hashed_consts)
+    jit_object = slope.M().backend.compiler.gen_jit_object(hashed_program, hashed_consts)
     ret = jit_object(*consts, *args)
     return ret
 
@@ -1135,11 +1135,11 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 # ================
-#   Module
+#   Compiler
 # ================
 
 
-class Backend:
+class Compiler:
     def __init__(self, name, default_dtype=Tensor.float32, SLOPE_DEVICE="cpu"):
         self.name = name
         self.default_dtype = default_dtype
@@ -1196,11 +1196,11 @@ class Backend:
         return set_impl_
 
     def codegen(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
-        "Returns backend IR from the Program"
+        "Returns compiler IR from the Program"
         raise NotImplementedError
 
     def compile(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
-        "Compiles backend IR to a Python callable function"
+        "Compiles compiler IR to a Python callable function"
         raise NotImplementedError
 
     def export(self, jit_object, output_path, *args, **params):
@@ -1419,7 +1419,7 @@ class JVPTrace(Trace):
     def pure(self, val):
         if isinstance(val, PartialRunTrace):
             val = val.pval.const
-        return JVPTracor(self, val, slope.M().environment.zeros_like(val))
+        return JVPTracor(self, val, slope.M().backend.zeros_like(val))
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
@@ -1640,15 +1640,15 @@ class PartialRunTrace(Trace):
 class Machine:
     def __init__(
         self,
-        environment,
+        backend,
     ):
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, RunTrace, None)]
 
-        self.environment = environment
-        self.environment.operator_set.register(jit_op)
-        self.environment.operator_set.register(procedure_op)
+        self.backend = backend
+        self.backend.operator_set.register(jit_op)
+        self.backend.operator_set.register(procedure_op)
 
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
@@ -1682,8 +1682,8 @@ class Machine:
         if isinstance(x, Tracor):
             return x.aval
         elif type(x) in Tracor.PYTHON_TYPES:
-            # return Typecheckor.like(self.environment.tensor(x))
-            return self.environment.tensor(x)
+            # return Typecheckor.like(self.backend.tensor(x))
+            return self.backend.tensor(x)
         elif isinstance(x, Tensor):
             return x
         elif isinstance(x, Typecheckor):
@@ -1854,31 +1854,31 @@ class Machine:
             return val
 
     def typecheck_program(self, program: Program) -> ProgramType:
-        environment: Set[Var] = set()
+        backend: Set[Var] = set()
 
         for v in program.in_binders:
-            if v in environment:
+            if v in backend:
                 raise TypeError
-            environment.add(v)
+            backend.add(v)
 
         for instruction in program.instructions:
-            in_types = [self.typecheck_atom(environment, x) for x in instruction.inputs]
+            in_types = [self.typecheck_atom(backend, x) for x in instruction.inputs]
             out_types = instruction.op.typecheck(*in_types, **instruction.params)
             for out_binder, out_type in list_zip(instruction.out_binders, out_types):
                 if not out_type == out_binder.aval:
                     raise TypeError
             for out_binder in instruction.out_binders:
-                if out_binder in environment:
+                if out_binder in backend:
                     raise TypeError
-                environment.add(out_binder)
+                backend.add(out_binder)
 
         in_types = [v.aval for v in program.in_binders]
-        out_types = [self.typecheck_atom(environment, x) for x in program.outs]
+        out_types = [self.typecheck_atom(backend, x) for x in program.outs]
         return ProgramType(tuple(in_types), tuple(out_types))
 
-    def typecheck_atom(self, environment: Set[Var], x: Atom) -> Typecheckor:
+    def typecheck_atom(self, backend: Set[Var], x: Atom) -> Typecheckor:
         if isinstance(x, Var):
-            if x not in environment:
+            if x not in backend:
                 raise TypeError("unbound variable")
             return x.aval
         elif isinstance(x, Lit):
@@ -1887,14 +1887,14 @@ class Machine:
             assert False
 
     def run_program(self, program: Program, args: List[Any]) -> List[Any]:
-        environment: Dict[Var, Any] = {}
+        backend: Dict[Var, Any] = {}
 
         def read(x: Atom) -> Any:
-            return environment[x] if type(x) is Var else x.val
+            return backend[x] if type(x) is Var else x.val
 
         def write(v: Var, val: Any) -> None:
-            assert v not in environment  # single-assignment
-            environment[v] = val
+            assert v not in backend  # single-assignment
+            backend[v] = val
 
         list_map(write, program.in_binders, args)
         for instruction in program.instructions:
@@ -1955,7 +1955,7 @@ class Machine:
 
     def jacfwd(self, f, x):
         pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
-        vecs_in = self.environment.eye(math.prod(x.shape)).reshape(x.shape * 2)
+        vecs_in = self.backend.eye(math.prod(x.shape)).reshape(x.shape * 2)
         return self.vmap(pushfwd, (0,))(vecs_in)
 
     @lru_cache_verbose()
@@ -2014,14 +2014,14 @@ class Machine:
         in_unknowns: List[bool],
         instantiate: Optional[List[bool]] = None,
     ) -> Tuple[Program, Program, List[bool], int]:
-        environment: Dict[Var, bool] = {}
+        backend: Dict[Var, bool] = {}
         residuals: Set[Var] = set()
 
         def read(x: Atom) -> bool:
-            return type(x) is Var and environment[x]
+            return type(x) is Var and backend[x]
 
         def write(unk: bool, v: Var) -> None:
-            environment[v] = unk
+            backend[v] = unk
 
         instructions1, instructions2 = [], []
         list_map(write, in_unknowns, program.in_binders)
@@ -2258,22 +2258,22 @@ class Machine:
         return primals_out, f_vjp
 
     def run_program_permuted(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
-        primal_environment: Dict[Var, Any] = {}
-        ct_environment: Dict[Var, Any] = {}
+        primal_backend: Dict[Var, Any] = {}
+        ct_backend: Dict[Var, Any] = {}
 
         def read_primal(x: Atom) -> Any:
-            return primal_environment.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
+            return primal_backend.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
 
         def write_primal(v: Var, val: Any) -> None:
             if type(val) is not PrimalProxy:
-                primal_environment[v] = val
+                primal_backend[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_environment.pop(v, self.environment.zeros(v.aval.shape, v.aval.dtype))
+            return ct_backend.pop(v, self.backend.zeros(v.aval.shape, v.aval.dtype))
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
-                ct_environment[x] = ct_environment[x] + val if x in ct_environment else val
+                ct_backend[x] = ct_backend[x] + val if x in ct_backend else val
 
         list_map(write_primal, program.in_binders, args)
         list_map(write_cotangent, program.outs, cotangents)
@@ -2313,7 +2313,7 @@ class Machine:
             y, f_vjp = self.vjp(f, x, *xs, **static_args)
             if np.shape(y) != ():
                 raise TypeError("grad output must be 0-dim scalar with shape ()")
-            x_bars = f_vjp(self.environment.ones(()))
+            x_bars = f_vjp(self.backend.ones(()))
             return y, x_bars
 
         # TODO: if nested jit, rejit, find cleaner way
@@ -2380,7 +2380,7 @@ class Machine:
             num_consts = program.num_consts
             consts, args = args[:num_consts], args[num_consts:]
             hashed_consts = tuple(map(Hashed, consts))
-            jit_object = slope.M().environment.backend.gen_jit_object(hashed_program, hashed_consts)
+            jit_object = slope.M().backend.compiler.gen_jit_object(hashed_program, hashed_consts)
             return jit_object
 
     def jit_partial_run(self, trace, tracers, *, program):

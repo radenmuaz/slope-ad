@@ -1,7 +1,7 @@
 import slope
 from slope.core import (
+    Compiler,
     Backend,
-    Environment,
     Operator,
     OperatorSet,
     ProcedureSet,
@@ -15,13 +15,22 @@ from slope.core import (
 
 import math
 import numpy as np
-from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
+from typing import (
+    Tuple,
+    List,
+    Dict,
+    Any,
+    Optional,
+    Sequence,
+    Union,
+    Iterator,
+)
 from collections import defaultdict
-import onnx
-import onnxruntime
+import importlib
 import os
 
 sum_py = sum
+max_py = max
 slice_py = slice
 
 # --------------
@@ -166,11 +175,6 @@ def T(self, cotangents, x):
     return [~z]
 
 
-@invert.set_method
-def typecheck(self, x, **params):
-    return [Typecheckor(x.shape, slope.bool)]
-
-
 # -----------------------
 # Binary
 # -----------------------
@@ -235,7 +239,7 @@ operator_set.register(div)
 @div.set_method
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
-    return [x / w], [(x_dot / w) + (-w_dot * x * 1 / (w * w))]
+    return [x / y], [(x_dot / w) + (-w_dot * x * 1 / (w * w))]
 
 
 @div.set_method
@@ -251,10 +255,9 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
-        yz = (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
-        eps = slope.ones_like(z)
-        return xz / (yz + eps)  # TODO: nan if no eps for onnxruntime
+        return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
+            (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
+        )
 
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.maximum(w)
@@ -294,15 +297,14 @@ def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typechecko
         Typecheckor,
     ):
         raise TypeError
-    void_x = Typecheckor.like(x)
-    void_y = Typecheckor.like(y)
+    void_x = Typecheckor(x.shape, Tensor.bool)
+    void_y = Typecheckor(y.shape, Tensor.bool)
     if void_x == void_y:
-        return [Typecheckor(void_x.shape, Tensor.bool)]
+        return [void_x]
     shape_delta = len(void_x.shape) - len(void_y.shape)
     if shape_delta > 0:
         void_y = Typecheckor((1,) * shape_delta + void_y.shape, Tensor.bool)
     elif shape_delta < 0:
-        x = x.reshape((1,) * -shape_delta + void_x.shape)
         void_x = Typecheckor((1,) * -shape_delta + void_x.shape, Tensor.bool)
     if void_x == void_y:
         return [void_x]
@@ -327,7 +329,7 @@ def jvp(self, primals, tangents, *, axes, keepdims):
     out = x.max(axes, keepdims)
     _out = out
     if not keepdims:
-        axes = tuple([a if a >= 0 else len(out.shape) + a + 1 for a in axes])
+        axes = [a if a >= 0 else len(out.shape) + a + 1 for a in axes]
         for a in reversed(sorted(axes)):
             _out = _out.reshape(out.shape[:a] + (1,) + out.shape[a:])
     locs = x.equal(_out.expand(x.shape))
@@ -335,7 +337,6 @@ def jvp(self, primals, tangents, *, axes, keepdims):
     counts = locs.sum(axes, keepdims)
     y_dot = (x_dot * locs).sum(axes, keepdims)
     y_dot = y_dot / counts.expand(y_dot.shape)
-
     return [out], [y_dot]
 
 
@@ -410,9 +411,10 @@ def jvp(self, primals, tangents, *, shape, axes=None):
 
 @expand.set_method
 def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
-    e_shape = list(x.shape)
-    assert len(e_shape) == len(shape)
-    assert all(a <= b for a, b in zip(e_shape, shape))
+    original_shape = list(x.shape)
+    assert len(original_shape) == len(shape)
+    assert all((od == d) or (od < d and od ==1) for od, d in zip(original_shape, shape))
+    # assert all(a <= b for a, b in zip(e_shape, shape))
     return [Typecheckor(tuple(shape), x.dtype)]
 
 
@@ -495,6 +497,7 @@ def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]
 @permute.set_method
 def T(self, cotangents, x, *, perm):
     (z,) = cotangents
+    # inv_perm =  tuple(np.argsort(perm))
     inv_perm = tuple(i[0] for i in sorted(enumerate(perm), key=lambda x: x[1]))
     return [z.permute(inv_perm)]
 
@@ -860,7 +863,7 @@ operator_set.register(arange)
 
 
 @arange.set_method
-def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int64):
+def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
     if stop is None:
         stop = start
         start = 0
@@ -870,356 +873,82 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int64):
 
 
 @arange.set_method
-def jvp(self, primals, tangents, *, start, stop, stride, dtype):
+def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=Tensor.float32):
     out = self(arange, start, stop, stride, dtype)
     out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_method
-def T(self, cotangents, *, start, stop, stride, dtype):
+def T(self, cotangents, *, start, stop, stride=None, dtype=Tensor.float32):
     return [None]
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
-    return [Typecheckor((((stop - start) * stride),), dtype)]
+def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[Typecheckor]:
+    return [Typecheckor(tuple((stop - start) * stride), dtype)]
 
-
-# -------------------
-# Other
-# -------------------
-
-
-matmul = Operator.other("matmul")
-operator_set.register(matmul)
-
-
-
-
-@matmul.set_method
-def typecheck(self, x, w):
-    assert x.dtype == w.dtype
-    if x.ndim == w.ndim == 2:
-        # Both arguments are 2-D, multiply like conventional matrices
-        assert x.shape[-1] == w.shape[-2]
-        shape = x.shape[:-1] + (w.shape[-1],)
-    elif x.ndim > 2 and w.ndim > 2:
-        # Treat as a stack of matrices and broadcast accordingly
-        assert x.shape[-1] == w.shape[-2]
-        shape = x.shape[:-2] + (x.shape[-2], y.shape[-1])
-    elif x.ndim == 1 and w.ndim > 1:
-        # Promote the 1-D argument to a matrix by prepending a 1
-        assert x.shape[0] == w.shape[-2]
-        shape = (1,) + (w.shape[-2], w.shape[-1])
-    elif x.ndim > 1 and w.ndim == 1:
-        # Promote the 1-D argument to a matrix by appending a 1
-        assert x.shape[-1] == w.shape[0]
-        shape = x.shape[:-1] + (w.shape[0],)
-    else:
-        raise ValueError("Invalid dimensions for matmul")
-
-    return [Typecheckor(shape, x.dtype)]
-
-
-
-@matmul.set_method
-def jvp(self, primals, tangents):
-    (x, w), (x_dot, w_dot) = primals, tangents
-    return [x @ w], [(x_dot @ w) + (x @ w_dot)]
-
-
-@matmul.set_method
-def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
-        return [grad_L_y @ w.transpose(-1, -2), None]
-    elif type(w) is PrimalProxy:
-        return [None, x.transpose(-1, -2) @ grad_L_y]
-
-
-
-conv = Operator.other("conv")
-operator_set.register(conv)
-
-
-@conv.set_method
-def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-    assert groups * cin == cin_ and len(x.shape) == len(
-        w.shape
-    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
-    padding = (
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-    padding = tuple(padding)
-    if isinstance(stride, int):
-        stride = make_pair(dilation, len(HW))
-    if isinstance(dilation, int):
-        dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
-    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-@conv.set_method
-def typecheck(self, x, w, *, groups, stride, dilation, padding):
-    assert x.dtype == w.dtype
-    x_shape = x.shape
-    w_shape = w.shape
-    (bs, cin_), (cout, cin), HW = x_shape[:2], w_shape[:2], w_shape[2:]
-    assert groups * cin == cin_, f"Input axis shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
-
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
-
-    padding_ = (
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-    padding_ = tuple(padding_)
-
-    # Perform padding, TODO: N-D instead of 2D
-    oy = ((x_shape[2] + 2 * padding_[0] - dilation[0] * (HW[0] - 1) - 1) // stride[0]) + 1
-    ox = ((x_shape[3] + 2 * padding_[1] - dilation[1] * (HW[1] - 1) - 1) // stride[1]) + 1
-
-    # Shape after pooling
-    y_shape = (bs, groups * cin, oy, ox, *HW)
-
-    rcout, oyx = cout // groups, y_shape[2 : -len(HW)]
-
-    # Reshape and expand dimensions
-    y_shape = (bs, groups, cin, rcout, *oyx, *HW)
-
-    # Permute dimensions
-    y_shape = (
-        y_shape[0],
-        y_shape[1],
-        y_shape[3],
-        *[4 + i for i in range(len(oyx))],
-        y_shape[2],
-        *[4 + len(oyx) + i for i in range(len(HW))],
-    )
-
-    # Shape after convolution
-    result_shape = (bs, cout, *oyx)
-
-    return [Typecheckor(result_shape, x.dtype)]
-
-
-@conv.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
-    (x, w), (x_dot, w_dot) = primals, tangents
-    y = x.conv(w)
-    y_dot1 = x_dot.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
-    y_dot2 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
-
-    return [y], [y_dot1 + y_dot2]
-
-
-@conv.set_method
-def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
-    (grad_L_y,) = cotangents
-    if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0)
-        return [grad_L_x, None]
-    elif type(w) is PrimalProxy:
-        x_T = x.transpose(0, 1)
-        grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(0, 1)
-        return [None, grad_L_w]
-
-
-
-
-conv_transpose = Operator.other("conv_transpose")
-operator_set.register(conv_transpose)
-
-@conv_transpose.set_method
-def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
-    (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-    assert groups * cin == cin_ and len(x.shape) == len(
-        w.shape
-    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
-    
-    if isinstance(output_padding, (tuple, list)):
-        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x.shape}"
-    padding = tuple(
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-    output_padding = tuple(
-        [output_padding] * 2 * len(HW)
-        if isinstance(output_padding, int)
-        else (output_padding if len(output_padding) == 2 * len(HW) else [p for p in output_padding for _ in range(2)][::-1])
-    )
-    if isinstance(stride, int):
-        stride = make_pair(dilation, len(HW))
-    if isinstance(dilation, int):
-        dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
-    return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
-
-
-@conv_transpose.set_method
-def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
-    assert x.dtype == w.dtype
-    x_shape = x.shape
-    w_shape = w.shape
-    (bs, cin_), (cin, cout), HW = x_shape[:2], w_shape[:2], w_shape[2:]
-    assert groups * cin == cin_, f"Input axis shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
-    
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
-
-    if isinstance(output_padding, (tuple, list)):
-        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x_shape}"
-
-    padding = tuple(
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-
-    output_padding = tuple(
-        [output_padding] * 2 * len(HW)
-        if isinstance(output_padding, int)
-        else (output_padding if len(output_padding) == 2 * len(HW) else [p for p in output_padding for _ in range(2)][::-1])
-    )
-
-    if isinstance(stride, int):
-        stride = [stride] * len(HW)
-
-    if isinstance(dilation, int):
-        dilation = [dilation] * len(HW)
-
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
-
-    # Calculate output shape
-    result_shape = tuple([bs, cout] + [(s - 1) * stride[i] - 2 * padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1 for i, s in enumerate(x_shape[2:])])
-    return [Typecheckor(result_shape, x.dtype)]
-
-
-
-
-@conv_transpose.set_method
-def jvp(self, primals, tangents, *, groups, stride, dilation, padding, output_padding):
-    (x, w), (x_dot, w_dot) = primals, tangents
-    y = x.conv_transpose(w)
-    y_dot1 = x_dot.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
-    y_dot2 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
-    print(y.shape)
-
-    return [y], [y_dot1 + y_dot2]
-
-
-@conv_transpose.set_method
-def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_padding):
-    (grad_L_y,) = cotangents
-    if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [grad_L_x, None]
-    elif type(w) is PrimalProxy:
-        x_T = x.transpose(0, 1)
-        grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [None, grad_L_w]
-
- 
 
 # --------------
-# Backend
+# Compiler
 # --------------
 
-#
 
 compile_py = compile
-onnxruntime_backend = Backend(name="onnxruntime", default_dtype=Tensor.float32, SLOPE_DEVICE=slope.SLOPE_DEVICE)
-onnxruntime_backend.set_dtype_map(
+compiler = Compiler(name="numpy", default_dtype=Tensor.float32)
+compiler.set_dtype_map(
     {
-        Tensor.float32: "float",
-        Tensor.uint8: "uint8",
-        Tensor.int8: "int8",
-        Tensor.bool: "bool",
-        Tensor.int32: "int32",
-        Tensor.int64: "int64",
-        Tensor.float16: "float16",
+        Tensor.float32: np.dtype("float32"),
+        Tensor.int64: np.dtype("int64"),
+        Tensor.int8: np.dtype("int8"),
+        Tensor.bool: np.dtype("bool"),
     }
 )
 
-# https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
-# used for impl args
-onnx_dtype_enum_map = {
-    Tensor.float32: 1,
-    Tensor.uint8: 2,
-    Tensor.int8: 3,
-    Tensor.int32: 6,
-    Tensor.int64: 7,
-    Tensor.bool: 9,
-    Tensor.float16: 10,
-}
 
-
-@onnxruntime_backend.set_method
-def from_numpy(self, val, dtype=onnxruntime_backend.default_dtype_value, device=onnxruntime_backend.SLOPE_DEVICE):
-    device_type, device_id = device.split(":") if ":" in device else (device, 0)
-    np_val = np.array(val, dtype=dtype.numpy)
-    val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
+@compiler.set_method
+def from_numpy(self, val, dtype=compiler.default_dtype_value):
+    val = np.array(val, dtype=compiler.dtype_map[dtype])
     return Tensor(TensorBuffer(val))
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def numpy_of(self, tensor):
-    return tensor.buf.val.numpy()
+    return tensor.buf.val
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def device_of(self, tensor):
-    return tensor.buf.val.device_name()
+    return "cpu"
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def shape_of(self, tensor):
-    return tuple(tensor.buf.val.shape())
+    return tensor.buf.val.shape
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def dtype_of(self, tensor):
-    return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
+    return self.dtype_map_inv[tensor.buf.val.dtype]
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
     code = jit_object.code
-    model = onnx.parser.parse_model(code)
     os.makedirs(output_path, exist_ok=True)
+    consts_dir_path = os.path.join(output_path, "consts")
+    os.makedirs(consts_dir_path, exist_ok=True)
     in_binders = jit_object.codegen_out["in_binders"]
     outs = jit_object.codegen_out["outs"]
     num_consts = jit_object.program.num_consts
+    load_consts_code = ""
     for i in range(num_consts):
-        const_array = in_binders[i]["type"].numpy()
         const_name = in_binders[i]["name"]
-        const = onnx.numpy_helper.from_array(const_array, name=const_name)
-        model.graph.initializer.append(const)
-        # TODO: try if need these
-        # const_tensor = next(t for t in model.graph.input if t.name == const_name)
-        # const_tensor.type.tensor_type.shape.dim[0].dim_param = const_name
-        # const_tensor.type.tensor_type.elem_type = onnx.TensorProto.FLOAT
-
-    onnx.save(model.SerializeToString(), os.path.join(output_path, "model.onnx"))
+        const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
+        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
+        np.save(const_path, in_binders[i]["type"].numpy())
+    input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
+    args_code = ", ".join(ib["name"] for ib in in_binders)
     input_arg_names = [ib["name"] for ib in in_binders[num_consts:]]
     input_arg_names_str = ", ".join(input_arg_names)
     outs_names = [out["name"] for out in outs]
@@ -1233,26 +962,21 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
         test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
 
     module_path = os.path.join(output_path, "__init__.py")
-    module_code = f"""import onnxruntime
+    module_code = f"""import numpy as np
 import os
-import numpy as np
-
 root_path = os.path.dirname(__file__)
-model_path = os.path.join(root_path, "model.onnx")
-session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
+consts_dir_path =  os.path.join(root_path, "consts")
+{load_consts_code}
+{code}
+
 input_arg_names = {input_arg_names}
 out_names = {outs_names}
 
-def run(*args, **kwargs):
-    if len(args) > 0:
-        for a_name, a in zip(input_arg_names, args):
-            assert a_name not in kwargs.keys()
-            kwargs[a_name] = a
-    outputs = session.run(out_names, kwargs)
-    return outputs
+def run({input_args_code}):
+    return main({args_code})
+
 if __name__ == "__main__":
 {test_input_code}
-    print("inputs:")
     for inp_name, inp in zip(input_arg_names, ({input_arg_names_str})):
         print(f"{{inp_name}} = ")
         print(inp)
@@ -1275,34 +999,21 @@ if __name__ == "__main__":
         slope.dblog(module_code, enable=slope.LOG_JIT)
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def compile(self, codegen_out):
+    deps_dict = dict()
+    deps_dict["numpy"] = importlib.import_module("numpy")
+    deps_dict["np"] = deps_dict["numpy"]
+    deps_dict["math"] = importlib.import_module("math")
     code_lines = codegen_out["code_lines"]
+    exec_locals = dict()
     code = "\n".join(code_lines)
-    model = onnx.parser.parse_model(code)
-    session = onnxruntime.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
-
-    def fn(*args):
-        io_binding = session.io_binding()
-        for a, in_binder in zip(args, codegen_out["in_binders"]):
-            io_binding.bind_input(
-                name=in_binder["name"],
-                device_type=a.device_name(),
-                device_id=0,
-                element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
-                shape=a.shape(),
-                buffer_ptr=a.data_ptr(),
-            )
-        for o in codegen_out["outs"]:
-            io_binding.bind_output(o["name"], self.SLOPE_DEVICE)
-        session.run_with_iobinding(io_binding)
-        outputs = tuple(io_binding.get_outputs())
-        return outputs
-
+    exec(compile_py(code, "<string>", "exec"), deps_dict, exec_locals)
+    fn = exec_locals["main"]
     return fn, code
 
 
-@onnxruntime_backend.set_method
+@compiler.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
@@ -1314,25 +1025,25 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         return "\n".join([spaces + line for line in code.strip().split("\n")])
 
     # codegen is recursive if jit-of-jit happens
-    environment: Dict[slope.Var, Any] = {}
+    backend: Dict[slope.Var, Any] = {}
     il1 = 4  # indent length
     body_code_lines = []
 
     for inb in program.in_binders:
         prefix = "x" if type(inb.aval) is Typecheckor else "c"
-        idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
-        environment[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
+        idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
+        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
             continue
-        in_vals = list_map(lambda x: environment[x]["name"], instruction.inputs)
+        in_vals = list_map(lambda x: backend[x]["name"], instruction.inputs)
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
-            idx = sum_py([1 if v["name"][0] == prefix else 0 for v in environment.values()])
-            environment[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
+            idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
+            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
-        out_vals = list_map(lambda z: environment[z]["name"], instruction.out_binders)
+        out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             lhs = ", ".join(out_vals)
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
@@ -1343,33 +1054,37 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 impl_code = impl_code.replace("ret", out_vals[0])
             else:
                 raise NotImplementedError
+        for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
+            impl_code = impl_code.replace(
+                np_dtype.name, "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}"
+            )
+
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
-    # inb_consts = [v for v in environment.values() if "c" in v["name"]]
-    # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
-
-    in_binders = list_map(lambda x: environment[x], program.in_binders)
-    arg_type_strs = [
-        f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
-    ]
+    in_binders = list_map(lambda x: backend[x], program.in_binders)
+    arg_type_strs = [i["name"] for i in in_binders]
+    # arg_type_asserts = [
+    #     f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
+    # ]
     fn_args_str = ", ".join(arg_type_strs)
 
-    outs = list_map(lambda x: environment[x], program.outs)  # TODO: input that is output should has identity op
-    out_type_strs = [
-        f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
-    ]
-    out_type_str = ", ".join(out_type_strs)
+    outs = list_map(lambda x: backend[x], program.outs)  # TODO: input that is output should has identity op
+    out_type_strs = [o["name"] for o in outs]
+    # out_type_asserts = [
+    #     f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
+    # ]
 
     head_code_lines = []
-    head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
-    head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
-    model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
+    head_code_lines += [f"def {fn_name} ({fn_args_str}):"]
+    out_type_str = ", ".join(out_type_strs) + ("," if len(outs) == 1 else "")
+    return_line = [indent(f"return {out_type_str}", il1)]
+    model_code_lines = head_code_lines + body_code_lines + return_line
 
-    functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
-        functions_code_lines += [functions_head_def] + fn_def_code_lines
+        functions_code_lines += fn_def_code_lines
+
     code_lines = model_code_lines + functions_code_lines
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
@@ -1381,208 +1096,63 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 ### Operator Impls
 
-
-onnxruntime_backend.set_impl(operator_set.cast)(
-    lambda self, x, *, dtype: f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})"
+compiler.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = {x}.astype(dtype={dtype})")
+compiler.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+compiler.set_impl(operator_set.neg)(lambda self, x: f"ret = np.negative({x})")
+compiler.set_impl(operator_set.sqrt)(lambda self, x: f"ret = np.sqrt({x})")
+compiler.set_impl(operator_set.exp)(lambda self, x: f"ret = np.exp({x})")
+compiler.set_impl(operator_set.log)(lambda self, x: f"ret = np.log({x})")
+compiler.set_impl(operator_set.sin)(lambda self, x: f"ret = np.sin({x})")
+compiler.set_impl(operator_set.add)(lambda self, x, w: f"ret = np.add({x}, {w})")
+compiler.set_impl(operator_set.sub)(lambda self, x, w: f"ret = np.subtract({x}, {w})")
+compiler.set_impl(operator_set.mul)(lambda self, x, w: f"ret = np.multiply({x}, {w})")
+compiler.set_impl(operator_set.div)(lambda self, x, w: f"ret = np.divide({x}, {w})")
+compiler.set_impl(operator_set.invert)(lambda self, x: f"ret = np.invert({x})")
+compiler.set_impl(operator_set.equal)(lambda self, x, w: f"ret = np.equal({x}, {w})")
+compiler.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = np.maximum({x}, {w})")
+compiler.set_impl(operator_set.sum)(
+    lambda self, x, *, axes, keepdims: f"ret = np.sum({x}, axis={axes}, keepdims={keepdims})"
 )
-onnxruntime_backend.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
-onnxruntime_backend.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
-onnxruntime_backend.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
-onnxruntime_backend.set_impl(operator_set.exp)(lambda self, x: f"ret = Exp({x})")
-onnxruntime_backend.set_impl(operator_set.log)(lambda self, x: f"ret = Log({x})")
-onnxruntime_backend.set_impl(operator_set.sin)(lambda self, x: f"ret = Sin({x})")
-onnxruntime_backend.set_impl(operator_set.add)(lambda self, x, w: f"ret = Add({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.sub)(lambda self, x, w: f"ret = Sub({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.mul)(lambda self, x, w: f"ret = Mul({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.div)(lambda self, x, w: f"ret = Div({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
-onnxruntime_backend.set_impl(operator_set.equal)(lambda self, x, w: f"ret = Equal({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = Max({x}, {w})")
-onnxruntime_backend.set_impl(operator_set.matmul)(lambda self, x, w: f"ret = MatMul({x}, {w})")
+compiler.set_impl(operator_set.max)(
+    lambda self, x, *, axes, keepdims: f"ret = np.max({x}, axis={axes}, keepdims={keepdims})"
+)
+compiler.set_impl(operator_set.arange)(
+    lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+)
+compiler.set_impl(operator_set.full)(
+    lambda self, *, shape, fill_value, dtype: f"ret = np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
+)
+
+compiler.set_impl(operator_set.random_uniform)(
+    lambda self, *, shape, dtype: (
+        f"ret = {'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
+    )
+)
+compiler.set_impl(operator_set.random_normal)(
+    lambda self, *, shape, dtype: (
+        f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
+    )
+)
+compiler.set_impl(operator_set.expand)(
+    lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})"
+)
+
+compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
+compiler.set_impl(operator_set.pad_lowlevel)(  # TODO: interior not used
+    lambda self, x, *, lo, hi, interior, value: f"ret = np.pad({x}, list(zip({lo}, {hi})), constant_values={value})"
+)
 
 
-@onnxruntime_backend.set_impl(operator_set.sum)
-def sum_impl(self, x, *, axes, keepdims):
-    return f"""
-ret_axes = Constant <value = int64[{len(axes)}]  {{ {repr(axes)[1:(-1 if len(axes) > 1 else -2)]} }} >()
-ret = ReduceSum<keepdims={int(keepdims)}> ({x}, ret_axes)
-"""
+compiler.set_impl(operator_set.slice_lowlevel)(
+    lambda self, x, *, starts, limits, strides: f"ret = {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
+)
+
+compiler.set_impl(operator_set.cat)(lambda self, *xs, axis: f"ret = np.cat({xs}, axis={axis})")
+compiler.set_impl(operator_set.permute)(lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})")
+compiler.set_impl(operator_set.flip)(lambda self, x, *, axes: f"ret = np.flip({x}, axis={axes})")
 
 
-@onnxruntime_backend.set_impl(operator_set.max)
-def max_impl(self, x, *, axes, keepdims):
-    return f"""
-ret_axes = Constant <value = int64[{len(axes)}]  {{ {repr(axes)[1:(-1 if len(axes) > 1 else -2)]} }} >()
-ret = ReduceMax<keepdims={int(keepdims)}> ({x}, ret_axes)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.arange)
-def arange_impl(self, *, start, stop, stride, dtype):
-    return f"""
-ret_start = Constant <value_int = {start}> ()
-ret_limit = Constant <value_int = {stop}> ()
-ret_delta = Constant <value_int = {stride}> ()
-{f'''
-ret_range = Range(ret_start, ret_limit, ret_delta)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)
-''' if dtype is not Tensor.int64 else
-f'''
-ret = Range(ret_start, ret_limit, ret_delta)
-'''
-}
-"""
-
-
-# ret_range = Range(ret_start, ret_limit, ret_delta)
-# {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
-@onnxruntime_backend.set_impl(operator_set.full)
-def full_impl(self, *, shape, fill_value, dtype):
-    if dtype is not Tensor.bool:
-        if len(shape) > 0:
-            return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand (ret_fill_value, ret_shape)
-"""
-        else:  # scalar case
-            return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_fill_value, ret_squeeze_dim)
-"""
-    else:
-        if len(shape) > 0:
-            return f"""
-ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret_expand = Expand (ret_fill_value, ret_shape)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_expand)
-"""
-        else:  # scalar case
-            return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret_squeeze = Squeeze (ret_fill_value, ret_squeeze_dim)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_squeeze)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.random_uniform)
-def random_uniform_impl(self, *, shape, dtype):
-    if len(shape) > 0:
-        return f"""
-ret = RandomUniform<dtype={onnx_dtype_enum_map[dtype]},shape={repr(list(shape))}>()
-"""
-    else:  # scalar case
-        return f"""
-ret_rand = RandomUniform<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_rand, ret_squeeze_dim)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.random_normal)
-def random_normal_impl(self, *, shape, dtype):
-    if len(shape) > 0:
-        return f"""
-ret = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}>()
-"""
-    else:  # scalar case
-        return f"""
-ret_randn = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_randn, ret_squeeze_dim)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.expand)
-def expand_impl(self, x, *, shape):
-    return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand ({x}, ret_shape)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.reshape)
-def reshape_impl(self, x, *, shape):
-    if len(shape) > 0:
-        return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Reshape({x}, ret_shape)
-"""
-    else:  # scalar case
-        f"""
-        ret_shape = Constant <value = int64[1] {1} >()
-        ret_reshape = Reshape({x}, ret_shape)
-        ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-        ret = Squeeze (ret_reshape, ret_squeeze_dim)"""
-
-
-@onnxruntime_backend.set_impl(operator_set.pad_lowlevel)
-def pad_lowlevel_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
-    padding = lo + hi
-    return f"""
-ret_padding = Constant <value = int64[{len(padding)}] {padding}>()
-ret_constant_value =  Constant <value = {value} >()
-ret = Pad({x} ret_padding, ret_constant_value)
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.slice_lowlevel)
-def slice_lowlevel_impl(self, x, *, starts, limits, strides):
-    return f"""
-ret_starts = Constant <value = int64[{len(starts)}] {starts}>()
-ret_ends = Constant <value = int64[{len(limits)}] {limits}>()
-ret_steps = Constant <value = int64[{len(strides)}] {strides}>()
-ret = Slice({x}, ret_starts, ret_ends, steps=ret_steps))])
-"""
-
-
-@onnxruntime_backend.set_impl(operator_set.cat)
-def cat_impl(self, *xs, axis):
-    return f"ret = Concat< axis={axis}>({repr(list(xs))[1:-1]})"
-
-
-@onnxruntime_backend.set_impl(operator_set.permute)
-def permute_impl(self, x, *, perm):
-    return f"ret = Transpose<perm={repr(list(perm))}>({x})"
-
-
-@onnxruntime_backend.set_impl(operator_set.flip)
-def flip_impl(self, x, *, axes):
-    return f"""
-ret_starts = Constant <value = int64[{len(axes)}] {", ".join(["0"] * len(axes))}>()
-ret_ends = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
-ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
-"""
-
-
-
-@onnxruntime_backend.set_impl(operator_set.conv)
-def conv_impl(self, x, w, *, groups, stride, dilation, padding):
-    dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
-    pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
-    strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
-    group_attr = f"group={groups}"
-    return f"""ret = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})"""
-
-
-
-@onnxruntime_backend.set_impl(operator_set.conv_transpose)
-def conv_transpose_impl(self, x, w, *, groups, stride, dilation, padding, output_padding):
-    dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
-    pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
-    pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
-    output_padding_attr = f"pads=[{repr(list(output_padding))[1:-1]}]"
-    strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
-    group_attr = f"group={groups}"
-    return f"""ret = ConvTranspose<{dilations_attr}, {group_attr}, {output_padding_attr}, {pads_attr}, {strides_attr}>({x}, {w})"""
-
-
-@onnxruntime_backend.set_impl(slope.core.jit_op)
+@compiler.set_impl(slope.core.jit_op)
 def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     jit_program = instruction.params["program"]
     jit_name = f"{program.name}"
@@ -1596,11 +1166,11 @@ def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     fn_defs[jit_name] = jit_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
-    rhs = f"slope.{jit_name}({args_str})"
+    rhs = f"{jit_name}({args_str})"
     return rhs, fn_defs
 
 
-@onnxruntime_backend.set_impl(slope.core.procedure_op)
+@compiler.set_impl(slope.core.procedure_op)
 def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
     proc_program = instruction.params["program"]
     proc_name = f"{proc_program.name}_{self.fn_count}"
@@ -1614,7 +1184,7 @@ def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
     fn_defs[proc_name] = proc_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
-    rhs = f"slope.{proc_name}({args_str})"
+    rhs = f"{proc_name}({args_str})"
     return rhs, fn_defs
 
 
@@ -1636,12 +1206,12 @@ def flatten_seq(l: Iterator):
 
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
-    return slope.full(shape, 0.0 if "float" in dtype.name else 0, dtype)
+    return slope.full(shape, 0.0, dtype)
 
 
 @procedure_set.register(static_argnames="shape dtype")
 def ones(shape, dtype=Tensor.float32):
-    return slope.full(shape, 1.0 if "float" in dtype.name else 1, dtype)
+    return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
 @procedure_set.register(static_argnames="fill_value")
@@ -1656,7 +1226,7 @@ def zeros_like(y):
 
 @procedure_set.register()
 def ones_like(y):
-    return slope.ones(shape=y.shape, dtype=y.dtype)
+    return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
 
 @procedure_set.register()
@@ -1666,9 +1236,9 @@ def relu(x):
 
 @procedure_set.register()
 def where(x, trueval, falseval):
-    assert x.dtype is Tensor.bool
-    cond = x.cast(trueval.dtype)
-    return cond * trueval + (ones_like(cond) - cond) * falseval
+    cond = x != 0.0
+    cond = cond.cast(trueval.dtype)
+    return cond * trueval + (1.0 - cond) * falseval
 
 
 @procedure_set.register(static_argnames="axes keepdims")
@@ -1937,6 +1507,17 @@ def softplus(self, beta=1):
 def softsign(self):
     return self / (1 + self.abs())
 
+
+@procedure_set.register()
+def matmul(x, w):
+    x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
+    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
+    return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
+
+
+procedure_set.alias(matmul, "dot")
+
+
 @procedure_set.register()
 def T(x):
     perm = list(range(x.ndim))
@@ -1966,7 +1547,7 @@ def log_softmax(x, axes=-1):
 #    - Negative values for i and j are taken relative to the end of the sequence
 #    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
 # - Indexing with None on a given axis will add a new dimension of size one before that axis
-# - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all backends).
+# - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all compilers).
 # - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
 # - Strides > 1 and < 0 are now allowed!:
 #    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
@@ -1985,7 +1566,7 @@ def log_softmax(x, axes=-1):
 #        - if first Tensor passed in (expand dims) is not at dim 0
 #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-@procedure_set.register(inline=True)  # not_op because easier to support variadic dynamic and static args
+# @procedure_set.register(inline=True)
 def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
@@ -2019,7 +1600,7 @@ def getitem(self, val):
         zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     )
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = self.paddinglice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
+    sliced_tensor = self.padslice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
         strides = tuple(abs(s) for s in strides)
@@ -2031,7 +1612,7 @@ def getitem(self, val):
         reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.paddinglice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i, s in enumerate(orig_slices):
@@ -2046,9 +1627,8 @@ def getitem(self, val):
                 if isinstance(s, slope.core.Tensor):
                     tensors.append(s)
                     dim.append(i - dim_collapsed)
-    sliced_tensor.reshape(tuple(final_shape))
-
     ret = sliced_tensor.reshape(tuple(final_shape))
+
     if tensors:  # Fancy/tensor indexing
         # normalize idx
         idx = [t.sign().neg().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
@@ -2079,54 +1659,59 @@ def getitem(self, val):
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx
-        ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
+        ret = ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
         # iteratively fancy index
         for a, i, sd in zip(slice_arange, idx, sum_dim):
-            (a == i).mul(ret).sum(sd)
+            ret = (a == i).mul(ret).sum(sd)
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
+            ret = ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
-@procedure_set.register(static_argnames="pad_width mode constant_values")
-def pad(x, pad_width, mode="constant", constant_values=0.0):
+
+@procedure_set.register(static_argnames="pad mode constant_values")
+def pad(x, pad, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
-    if type(pad_width) is int:
-        pad_width = (pad_width, pad_width, 0) * x.ndim
-    elif all(type(pw) is int for pw in pad_width):
-        assert len(pad_width) == x.ndim
-        pad_width = tuple((pw, pw, 0) for pw in pad_width)
-    elif len(pad_width) == 2 and all(type(item) is int for item in pad_width):
-        pad_width = (*pad_width, 0) * x.ndim
-    elif len(pad_width) == 3 and all(type(item) is int for item in pad_width):
-        pad_width = (pad_width,) * x.ndim
+    if type(pad) is int:
+        pad = (pad, pad, 0) * x.ndim
+    elif all(type(pw) is int for pw in pad):
+        assert len(pad) == x.ndim
+        pad = tuple((pw, pw, 0) for pw in pad)
+    elif len(pad) == 2 and all(type(item) is int for item in pad):
+        pad = (*pad, 0) * x.ndim
+    elif len(pad) == 3 and all(type(item) is int for item in pad):
+        pad = (pad,) * x.ndim
     else:
-        assert all(2 <= len(pw) <= 3 for pw in pad_width)
-        pad_width = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad_width)
-    lo, hi, interior = tuple(zip(*pad_width))
+        assert all(2 <= len(pw) <= 3 for pw in pad)
+        pad = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad)
+    lo, hi, interior = tuple(zip(*pad))
     return x.pad_lowlevel(lo, hi, interior, value=constant_values)
 
 
 @procedure_set.register(static_argnames="arg")
 def slice(x, arg):
-    # assert all(2 <= len(a) <= 3 for a in arg)
     arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
     starts, limits, strides = tuple(zip(*arg))
     return x.slice_lowlevel(starts, limits, strides)
 
 
-# @procedure_set.register(static_argnames=("arg", "value"))
 @procedure_set.register(static_argnames=("arg", "value"))
-def paddinglice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
+def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(padding, constant_values=value)
     slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
     x = x.slice(slc)
     return x
 
+
+@procedure_set.register(static_argnames="padding value")
+def pad2d(x, padding:Union[List[int], Tuple[int, ...]], value:float=0):
+    # (padding_left, padding_right, padding_top, padding_bottom)
+    slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
+    return x.padslice([(0,s) for s in x.shape[:-(len(padding)//2)]] + slc, value=value)
 
 @procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
@@ -2151,7 +1736,7 @@ def gather(x, idx, dim: int):
                 )
             )
             * x.permute(*permarg)
-            .paddinglice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
+            .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
             .expand_dims(0)
         )
         .sum(-1)
@@ -2210,7 +1795,7 @@ def expand_dims(x, dim):
 def transpose(x, ax=1, aw=0):
     order = list(range(len(x.shape)))
     order[ax], order[aw] = order[aw], order[ax]
-    return x.permute(tuple(order))
+    return x.permute(order)
 
 
 @procedure_set.register(static_argnames="start_dim")
@@ -2241,12 +1826,12 @@ def _pool(
         xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
         # slide by dilation
-        xup = xup.paddinglice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
+        xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
         xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
-        xup = xup.paddinglice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
         # handle stride, and permute to move reduce to the end
         xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
-        xup = xup.paddinglice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
         return xup.permute(
             (
@@ -2257,9 +1842,9 @@ def _pool(
         )
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
-    xup = x.paddinglice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
+    xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
-    xup = xup.paddinglice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
+    xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
     return xup.permute(
         (
             *range(len(prefix)),
@@ -2283,9 +1868,91 @@ def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
+
+@procedure_set.register(static_argnames="groups stride dilation padding output_padding")
+def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+    HW, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
+    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
+    w = w.permute((0, 2, 1, *trailing)).flip(trailing)
+    stride = make_pair(stride, len(HW))
+    if any(s > 1 for s in stride):
+        x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
+        x = x.pad(((0, 0), (0, 0), *flatten_seq(((0, 0), (0, s - 1)) for s in stride)))
+        x = x.reshape((*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)]))
+        x = x.slice(
+            (
+                (0, x.shape[0]),
+                (0, x.shape[1]),
+                *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
+            )
+        )
+    padding = flatten_seq(
+        (
+            ((k - 1) * d - p, (k - 1) * d - p + op)
+            for k, d, p, op in reversed(
+                list(
+                    zip(
+                        HW,
+                        make_pair(dilation, len(HW)),
+                        make_pair(padding, len(HW)),
+                        make_pair(output_padding, len(HW)),
+                    )
+                )
+            )
+        )
+    )
+    w =  w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
+    return x.conv(w,groups=groups,dilation=dilation,padding=padding)
+
+
+@procedure_set.register(static_argnames="groups stride dilation padding")
+def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
+    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    assert groups * cin == cin_ and len(x.shape) == len(
+        w.shape
+    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+    if isinstance(padding, (tuple, list)):
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+    padding_ = (
+        [padding] * 2 * len(HW)
+        if isinstance(padding, int)
+        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+    )
+    padding_ = tuple(padding_)
+    x_ = x
+    x = x.pad2d(padding_)
+    x = x._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+    rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
+    x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
+    x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
+    x = x.permute(
+        (
+            0,
+            1,
+            3,
+            *[4 + i for i in range(len(oyx))],
+            2,
+            *[4 + len(oyx) + i for i in range(len(HW))],
+        )
+    )
+    # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+    x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
+    x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
+    x = x.reshape((bs, cout, *oyx))
+    ret = x
+    return ret
+
+
 @procedure_set.register(static_argnames="axis")
 def cumsum(x, axis: int = 0):
     return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
 
+@staticmethod
+def arange(start, stop=None, step=1, **kwargs):
+    if stop is None: stop, start = start, 0
+    return slope.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
 
-onnxruntime_environment = Environment(operator_set, procedure_set, onnxruntime_backend)
+
+numpy_backend = Backend(operator_set, procedure_set, compiler)

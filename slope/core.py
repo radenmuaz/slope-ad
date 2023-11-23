@@ -315,7 +315,7 @@ class Tensor:
         return self.numel() * self.element_size()
 
     def __repr__(self):
-        return f"Tensor: {self.numpy()}, {self.dtype}, {self.device}"
+        return f"Tensor: {self.numpy()}, {self.shape}, {self.dtype}, {self.device}"
 
 
 class Typecheckor:

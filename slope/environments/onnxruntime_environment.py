@@ -1135,49 +1135,9 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
     elif type(w) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        # grad_L_w = x_T.conv(grad_L_y, groups=groups, stride=stride, dilation=dilation, padding=padding)
         grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        breakpoint()
         return [None, grad_L_w]
 
-# @conv_transpose.set_method
-# def typecheck(x_shape, w_shape, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
-#     HW, trailing = w_shape[2:], list(range(3, len(w_shape) + 1))
-    
-#     # Reshape and permute weight
-#     w = w_shape.reshape(groups, w_shape[0] // groups, w_shape[1], *w_shape[2:]).permute(0, 2, 1, *trailing).flip(trailing)
-
-#     stride = make_pair(stride, len(HW))
-
-#     if any(s > 1 for s in stride):
-#         x_shape = x_shape[:2] + tuple(flatten_seq((k, 1) for k in x_shape[2:]))
-#         x_shape = x_shape[:2] + tuple(k * s for k, s in zip(x_shape[2::2], stride))
-#         x_shape = x_shape[:2] + tuple(k - (s - 1) for k, s in zip(x_shape[2:], stride))
-
-#     # Calculate padding
-#     padding = flatten_seq(
-#         (
-#             ((k - 1) * d - p, (k - 1) * d - p + op)
-#             for k, d, p, op in reversed(
-#                 list(
-#                     zip(
-#                         HW,
-#                         make_pair(dilation, len(HW)),
-#                         make_pair(padding, len(HW)),
-#                         make_pair(output_padding, len(HW)),
-#                     )
-#                 )
-#             )
-#         )
-#     )
-
-#     # Calculate output shape after convolution transpose
-#     output_shape = x_shape[:2] + tuple(
-#         ((s + p[0] + p[1] - ((k - 1) * d + 1)) // s) + 1
-#         for k, d, s, p in zip(HW, make_pair(dilation, len(HW)), stride, padding)
-#     )
-
-#     return output_shape
  
 
 # --------------

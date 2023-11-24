@@ -2322,12 +2322,52 @@ class Machine:
             return self.jit(value_and_grad_fn)
         else:
             return value_and_grad_fn
-
-    def grad(self, f):
+    def grad(self, f, argnums=(0,), argnames=""):
+        if isinstance(argnums, int):
+            argnums = (argnums,)
         def grad_fn(x, *xs, **static_args):
-            return self.value_and_grad(f)(x, *xs, **static_args)[1]
+            y, f_vjp = self.vjp(f, x, *xs, **static_args)
+            if np.shape(y) != ():
+                raise TypeError("grad output must be 0-dim scalar with shape ()")
+            x_bars = f_vjp(self.backend.ones(()))
+            return tuple(x_bars[i] for i in argnums) if len(argnums) > 1 else x_bars[argnums[0]]
+        if isinstance(f, self.jit):
+            f = f.f
+            return self.jit(grad_fn)
+        else:
+            return grad_fn
+    
+    #  def _grad(self, f, argnums=(0,), argnames=(), has_aux=False, return_value=False):
+    #     if has_aux:
+    #         raise NotImplementedError
+    #     if isinstance(argnums, int):
+    #         argnums = (argnums,)
+    #     def grad_fn(x, *xs, **static_args):
+    #         y, f_vjp = self.vjp(f, x, *xs, has_aux, **static_args)
+    #         if np.shape(y) != ():
+    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
+    #         x_bars = f_vjp(self.backend.ones(()))
+    #         if return_value:
+    #             return tuple([y] + [x_bars[i] for i in argnums] if len(argnums) > 1 else [x_bars[0]])
+    #         else:
+    #             return tuple([x_bars[i] for i in argnums]) if len(argnums) > 1 else x_bars[0]
+    #     if isinstance(f, self.jit):
+    #         f = f.f
+    #         return self.jit(grad_fn)
+    #     else:
+    #         return grad_fn
 
-        return grad_fn
+    # def grad(self, f, argnums=(0,), argnames=(), has_aux=False):
+    #     return self._grad(f, argnums, argnames, has_aux, return_value=False)
+    
+    # def value_and_grad(self, f, argnums=(0,), argnames=(), has_aux=False):
+    #     return self._grad(f, argnums, argnames, has_aux, return_value=True)
+
+    # def grad(self, f):
+    #     def grad_fn(x, *xs, **static_args):
+    #         return self.value_and_grad(f)(x, *xs, **static_args)[1]
+
+    #     return grad_fn
 
     class jit:
         def __init__(self, f, static_argnames=(), name=None):

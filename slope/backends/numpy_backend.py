@@ -1085,7 +1085,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     for op, fn_def_code_lines in fn_defs.items():
         functions_code_lines += fn_def_code_lines
 
-    code_lines = model_code_lines + functions_code_lines
+    code_lines = functions_code_lines + model_code_lines 
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":

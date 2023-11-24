@@ -2025,7 +2025,7 @@ def getitem(self, val):
         zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     )
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = self.paddinglice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
+    sliced_tensor = self.padslice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs(s) != 1 for s in strides):
         strides = tuple(abs(s) for s in strides)
@@ -2037,7 +2037,7 @@ def getitem(self, val):
         reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.paddinglice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
     for i, s in enumerate(orig_slices):
@@ -2125,7 +2125,7 @@ def slice(x, arg):
 
 # @procedure_set.register(static_argnames=("arg", "value"))
 @procedure_set.register(static_argnames=("arg", "value"))
-def paddinglice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
+def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(padding, constant_values=value)
@@ -2157,7 +2157,7 @@ def gather(x, idx, dim: int):
                 )
             )
             * x.permute(*permarg)
-            .paddinglice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
+            .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
             .expand_dims(0)
         )
         .sum(-1)
@@ -2247,12 +2247,12 @@ def _pool(
         xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
         xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
         # slide by dilation
-        xup = xup.paddinglice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
+        xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
         xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
-        xup = xup.paddinglice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
         # handle stride, and permute to move reduce to the end
         xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
-        xup = xup.paddinglice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
         return xup.permute(
             (
@@ -2263,9 +2263,9 @@ def _pool(
         )
     # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
-    xup = x.paddinglice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
+    xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
-    xup = xup.paddinglice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
+    xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
     return xup.permute(
         (
             *range(len(prefix)),

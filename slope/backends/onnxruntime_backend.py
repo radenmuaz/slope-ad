@@ -753,7 +753,8 @@ def T(self, cotangents, *xs, axis=0):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)
+        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None
+        for o, start, limit in zip(xs, starts, limits)
     ]
 
 
@@ -895,8 +896,6 @@ matmul = Operator.other("matmul")
 operator_set.register(matmul)
 
 
-
-
 @matmul.set_method
 def typecheck(self, x, w):
     assert x.dtype == w.dtype
@@ -922,7 +921,6 @@ def typecheck(self, x, w):
     return [Typecheckor(shape, x.dtype)]
 
 
-
 @matmul.set_method
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
@@ -937,7 +935,6 @@ def T(self, cotangents, x, w):
         return [grad_L_y @ w.transpose(-1, -2), None]
     elif type(w) is PrimalProxy:
         return [None, x.transpose(-1, -2) @ grad_L_y]
-
 
 
 conv = Operator.other("conv")
@@ -964,8 +961,11 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
         stride = make_pair(dilation, len(HW))
     if isinstance(dilation, int):
         dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    assert len(HW) == len(stride) and len(HW) == len(
+        dilation
+    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
+
 
 @conv.set_method
 def typecheck(self, x, w, *, groups, stride, dilation, padding):
@@ -973,10 +973,14 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
     x_shape = x.shape
     w_shape = w.shape
     (bs, cin_), (cout, cin), HW = x_shape[:2], w_shape[:2], w_shape[2:]
-    assert groups * cin == cin_, f"Input axis shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
+    assert (
+        groups * cin == cin_
+    ), f"Input axis shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
 
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
 
     padding_ = (
         [padding] * 2 * len(HW)
@@ -1027,19 +1031,22 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0)
+        grad_L_x = grad_L_y.conv_transpose(
+            w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0
+        )
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(0, 1)
+        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(
+            0, 1
+        )
         return [None, grad_L_w]
-
-
 
 
 conv_transpose = Operator.other("conv_transpose")
 operator_set.register(conv_transpose)
+
 
 @conv_transpose.set_method
 def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
@@ -1057,7 +1064,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
         ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
-    
+
     if isinstance(output_padding, (tuple, list)):
         assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
             HW
@@ -1070,13 +1077,19 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
     output_padding = tuple(
         [output_padding] * 2 * len(HW)
         if isinstance(output_padding, int)
-        else (output_padding if len(output_padding) == 2 * len(HW) else [p for p in output_padding for _ in range(2)][::-1])
+        else (
+            output_padding
+            if len(output_padding) == 2 * len(HW)
+            else [p for p in output_padding for _ in range(2)][::-1]
+        )
     )
     if isinstance(stride, int):
         stride = make_pair(dilation, len(HW))
     if isinstance(dilation, int):
         dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    assert len(HW) == len(stride) and len(HW) == len(
+        dilation
+    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
 
@@ -1086,13 +1099,19 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     x_shape = x.shape
     w_shape = w.shape
     (bs, cin_), (cin, cout), HW = x_shape[:2], w_shape[:2], w_shape[2:]
-    assert groups * cin == cin_, f"Input axis shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
-    
+    assert (
+        groups * cin == cin_
+    ), f"Input axis shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
+
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
+        assert len(padding) == 2 * len(HW) or len(padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
 
     if isinstance(output_padding, (tuple, list)):
-        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(HW), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x_shape}"
+        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
+            HW
+        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x_shape}"
 
     padding = tuple(
         [padding] * 2 * len(HW)
@@ -1103,7 +1122,11 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     output_padding = tuple(
         [output_padding] * 2 * len(HW)
         if isinstance(output_padding, int)
-        else (output_padding if len(output_padding) == 2 * len(HW) else [p for p in output_padding for _ in range(2)][::-1])
+        else (
+            output_padding
+            if len(output_padding) == 2 * len(HW)
+            else [p for p in output_padding for _ in range(2)][::-1]
+        )
     )
 
     if isinstance(stride, int):
@@ -1112,21 +1135,31 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     if isinstance(dilation, int):
         dilation = [dilation] * len(HW)
 
-    assert len(HW) == len(stride) and len(HW) == len(dilation), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    assert len(HW) == len(stride) and len(HW) == len(
+        dilation
+    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
 
     # Calculate output shape
-    result_shape = tuple([bs, cout] + [(s - 1) * stride[i] - 2 * padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1 for i, s in enumerate(x_shape[2:])])
+    result_shape = tuple(
+        [bs, cout]
+        + [
+            (s - 1) * stride[i] - 2 * padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1
+            for i, s in enumerate(x_shape[2:])
+        ]
+    )
     return [Typecheckor(result_shape, x.dtype)]
-
-
 
 
 @conv_transpose.set_method
 def jvp(self, primals, tangents, *, groups, stride, dilation, padding, output_padding):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.conv_transpose(w)
-    y_dot1 = x_dot.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
-    y_dot2 = x.conv_transpose(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
+    y_dot1 = x_dot.conv_transpose(
+        w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding
+    )
+    y_dot2 = x.conv_transpose(
+        w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding
+    )
     print(y.shape)
 
     return [y], [y_dot1 + y_dot2]
@@ -1144,7 +1177,6 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
         grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
         return [None, grad_L_w]
 
- 
 
 # --------------
 # Compiler
@@ -1388,9 +1420,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 ### Operator Impls
 
 
-compiler.set_impl(operator_set.cast)(
-    lambda self, x, *, dtype: f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})"
-)
+compiler.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
 compiler.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = Identity({x})")
 compiler.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
 compiler.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
@@ -1566,7 +1596,6 @@ ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
 """
 
 
-
 @compiler.set_impl(operator_set.conv)
 def conv_impl(self, x, w, *, groups, stride, dilation, padding):
     dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
@@ -1574,7 +1603,6 @@ def conv_impl(self, x, w, *, groups, stride, dilation, padding):
     strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
     group_attr = f"group={groups}"
     return f"""ret = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})"""
-
 
 
 @compiler.set_impl(operator_set.conv_transpose)
@@ -1943,6 +1971,7 @@ def softplus(self, beta=1):
 def softsign(self):
     return self / (1 + self.abs())
 
+
 @procedure_set.register()
 def T(x):
     perm = list(range(x.ndim))
@@ -2288,6 +2317,7 @@ def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
     return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
+
 
 @procedure_set.register(static_argnames="axis")
 def cumsum(x, axis: int = 0):

@@ -600,12 +600,11 @@ class Operator:
     def init(cls, name, **kwargs):
         op = cls(name, OperatorType.Init, **kwargs)
         return op
-    
+
     @classmethod
     def other(cls, name, **kwargs):
         op = cls(name, OperatorType.Other, **kwargs)
         return op
-
 
 
 class OperatorSet:
@@ -1957,18 +1956,17 @@ class Machine:
         f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
         jvp_ret = self.jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux, **static_args)
         if has_aux:
-            ((primals_out, tangents_out), aux) = jvp_ret
+            (primals_out_flat, tangents_out_flat), aux = jvp_ret
         else:
-            (primals_out, tangents_out) = jvp_ret
-        primals_out_flat, tangents_out_flat  = jvp_ret
+            (primals_out_flat, tangents_out_flat) = jvp_ret
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
         tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_flat)
         return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
-    def jacfwd(self, f, x):
-        pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
-        vecs_in = self.backend.eye(math.prod(x.shape)).reshape(x.shape * 2)
-        return self.vmap(pushfwd, (0,))(vecs_in)
+    # def jacfwd(self, f, x):
+    #     pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
+    #     vecs_in = slope.eye(math.prod(x.shape)).reshape(x.shape * 2)
+    #     return self.vmap(pushfwd, (0,))(vecs_in)
 
     @lru_cache_verbose()
     def make_program(
@@ -1983,7 +1981,16 @@ class Machine:
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in, **{k: v for k, v in static_args})
-                tracers_out = [self.full_raise(trace, out) for out in outs]
+                # extract aux from JVPTracor if has_aux=True
+                def get_nested(out, depth=0, max_depth=100):
+                    if isinstance(out, ProgramTracor):
+                        return out
+                    elif depth < max_depth:
+                        assert isinstance(out, JVPTracor)
+                        return get_nested(out.primal, depth+1)
+                    else:
+                        raise ValueError
+                tracers_out = [self.full_raise(trace, get_nested(out)) for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
         return program, consts, out_tree_store()
@@ -2128,11 +2135,11 @@ class Machine:
         def f_jvp(*primals_tangents_in):
             jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux)
             if has_aux:
-                (primals_out, tangents_out), aux = jvp_ret  
+                (primals_out, tangents_out), aux = jvp_ret
                 return ((*primals_out, *tangents_out), aux)
             else:
                 primals_out, tangents_out = jvp_ret
-                return  (*primals_out, *tangents_out)
+                return (*primals_out, *tangents_out)
 
         partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux)
         if has_aux:
@@ -2148,7 +2155,7 @@ class Machine:
     def linearize(self, f, *primals_in, has_aux=False):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
-        linearize_flat_ret =  self.linearize_flat(f, *primals_in_flat, has_aux=has_aux)
+        linearize_flat_ret = self.linearize_flat(f, *primals_in_flat, has_aux=has_aux)
         if has_aux:
             primals_out_flat, f_lin_flat, aux = linearize_flat_ret
         else:
@@ -2262,9 +2269,9 @@ class Machine:
         def f_jvp(*primals_tangents_in):
             jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, **static_args)
             if has_aux:
-                (primals_out, tangents_out, aux) = jvp_ret
+                ((primals_out, tangents_out), aux) = jvp_ret
             else:
-                primals_out, tangents_out = jvp_ret
+                (primals_out, tangents_out) = jvp_ret
             return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
 
         partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
@@ -2283,7 +2290,7 @@ class Machine:
     def vjp(self, f, *primals_in, has_aux=False, **static_args):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
-        vjp_ret = self.vjp_flat(f, *primals_in_flat, has_aux, **static_args)
+        vjp_ret = self.vjp_flat(f, *primals_in_flat, has_aux=has_aux, **static_args)
         if has_aux:
             primals_out_flat, f_vjp_flat, aux = vjp_ret
         else:
@@ -2363,14 +2370,15 @@ class Machine:
             return self.jit(value_and_grad_fn)
         else:
             return value_and_grad_fn
-        
+
     def grad(self, f, argnums=(0,), argnames="", has_aux=False):
         if isinstance(f, self.jit):
             f = f.f
         if isinstance(argnums, int):
             argnums = (argnums,)
+
         def grad_fn(x, *xs, **static_args):
-            vjp_ret  = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
+            vjp_ret = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
             if has_aux:
                 y, f_vjp, aux = vjp_ret
             else:
@@ -2380,6 +2388,7 @@ class Machine:
             grad_L_xs = f_vjp(self.backend.ones(()))
             grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
             return (grad_L_xs, aux) if has_aux else grad_L_xs
+
         if isinstance(f, self.jit):
             return self.jit(grad_fn)
         else:

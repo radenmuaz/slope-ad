@@ -252,7 +252,7 @@ class Linear(Module):
         self.bias = b_init((out_dim,)) if bias else None
 
     def __call__(self, x):
-        x = x @ self.weight.transpose(-2,-1)
+        x = x @ self.weight.transpose(-2, -1)
         return x + self.bias[None, ...] if self.bias is not None else x
 
 

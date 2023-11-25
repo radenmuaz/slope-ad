@@ -10,6 +10,7 @@ INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
 
+
 def dblog(*msg, enable=True):
     if enable:
         print(*msg)
@@ -29,10 +30,8 @@ def M():
         # import here to avoid circular import
         from slope.backends.numpy_backend import numpy_backend
         from slope.backends.onnxruntime_backend import onnxruntime_backend
-        backend_registry = dict(
-            numpy=numpy_backend,
-            onnxruntime=onnxruntime_backend
-        )
+
+        backend_registry = dict(numpy=numpy_backend, onnxruntime=onnxruntime_backend)
         if SLOPE_BACKEND not in backend_registry.keys():
             raise ValueError(f"{SLOPE_BACKEND} isnonexistent backend in: {list(backend_registry.keys())}")
         machine = core.Machine(backend=backend_registry[SLOPE_BACKEND])

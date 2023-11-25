@@ -413,7 +413,7 @@ def jvp(self, primals, tangents, *, shape, axes=None):
 def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
     original_shape = list(x.shape)
     assert len(original_shape) == len(shape)
-    assert all((od == d) or (od < d and od ==1) for od, d in zip(original_shape, shape))
+    assert all((od == d) or (od < d and od == 1) for od, d in zip(original_shape, shape))
     # assert all(a <= b for a, b in zip(e_shape, shape))
     return [Typecheckor(tuple(shape), x.dtype)]
 
@@ -756,7 +756,8 @@ def T(self, cotangents, *xs, axis=0):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)
+        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None
+        for o, start, limit in zip(xs, starts, limits)
     ]
 
 
@@ -1028,7 +1029,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     # codegen is recursive if jit-of-jit happens
     backend: Dict[slope.Var, Any] = {}
-    il1 = (self.depth+1)*4
+    il1 = (self.depth + 1) * 4
     body_code_lines = []
 
     for inb in program.in_binders:
@@ -1089,7 +1090,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         # functions_code_lines += fn_def_code_lines
         functions_code_lines += fn_def_code_lines
 
-    code_lines = head_code_lines + [indent(l, il1) for l in functions_code_lines] + body_code_lines + return_line 
+    code_lines = head_code_lines + [indent(l, il1) for l in functions_code_lines] + body_code_lines + return_line
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
@@ -1138,9 +1139,7 @@ compiler.set_impl(operator_set.random_normal)(
         f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
     )
 )
-compiler.set_impl(operator_set.expand)(
-    lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})"
-)
+compiler.set_impl(operator_set.expand)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
 
 compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
 compiler.set_impl(operator_set.pad_lowlevel)(  # TODO: interior not used
@@ -1675,7 +1674,6 @@ def getitem(self, val):
     return ret
 
 
-
 @procedure_set.register(static_argnames="pad mode constant_values")
 def pad(x, pad, mode="constant", constant_values=0.0):
     assert mode == "constant", "Other modes not supported"
@@ -1713,10 +1711,11 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
 
 
 @procedure_set.register(static_argnames="padding value")
-def pad2d(x, padding:Union[List[int], Tuple[int, ...]], value:float=0):
+def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
     # (padding_left, padding_right, padding_top, padding_bottom)
-    slc = [(-p0, s+p1) for p0,p1,s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
-    return x.padslice([(0,s) for s in x.shape[:-(len(padding)//2)]] + slc, value=value)
+    slc = [(-p0, s + p1) for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
+    return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
+
 
 @procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
@@ -1906,8 +1905,8 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
             )
         )
     )
-    w =  w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
-    return x.conv(w,groups=groups,dilation=dilation,padding=padding)
+    w = w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
+    return x.conv(w, groups=groups, dilation=dilation, padding=padding)
 
 
 @procedure_set.register(static_argnames="groups stride dilation padding")
@@ -1954,10 +1953,12 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
 def cumsum(x, axis: int = 0):
     return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
 
+
 @staticmethod
 def arange(start, stop=None, step=1, **kwargs):
-    if stop is None: stop, start = start, 0
-    return slope.full((math.ceil((stop-start)/step),), step, **kwargs).cumsum() + (start - step)
+    if stop is None:
+        stop, start = start, 0
+    return slope.full((math.ceil((stop - start) / step),), step, **kwargs).cumsum() + (start - step)
 
 
 numpy_backend = Backend(operator_set, procedure_set, compiler)

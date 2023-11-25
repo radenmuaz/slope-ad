@@ -746,10 +746,10 @@ def typecheck(self, *in_types, program):
 @procedure_op.set_method
 def T(self, cotangents, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
-    permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
+    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
-    outs = slope.M().bind(self, *new_consts, *residuals, *cotangents, program=permuted_program)
+    outs = slope.M().bind(self, *new_consts, *residuals, *cotangents, program=transposed_program)
     outs = iter(outs)
     return [next(outs) if undef else None for undef in undef_primals]
 
@@ -1085,7 +1085,7 @@ def typecheck(self, *in_types, program):
 @jit_op.set_method
 def T(self, cotangents, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
-    permuted_program, new_consts = slope.M().permute_program(program, tuple(undef_primals))
+    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
     outs = slope.M().bind(
@@ -1093,9 +1093,10 @@ def T(self, cotangents, *invals, program):
         *new_consts,
         *residuals,
         *cotangents,
-        program=permuted_program,
+        program=transposed_program,
     )
     outs = iter(outs)
+    breakpoint()
     return [next(outs) if undef else None for undef in undef_primals]
 
 
@@ -1729,7 +1730,7 @@ class Machine:
         slope.dblog(f"unflattening {treedef}", enable=slope.LOG_PYTREE)
         return _tree_unflatten(treedef, iter(xs))
 
-    def tree_permute(
+    def tree_transpose(
         self,
         outer_treedef: PyTreeDef,
         inner_treedef: PyTreeDef,
@@ -1746,15 +1747,17 @@ class Machine:
         subtrees = map(partial(self.tree_unflatten, outer_treedef), permuted_lol)
         return self.tree_unflatten(inner_treedef, subtrees)
 
-    def flatten_fn(self, f, in_tree):
+    def flatten_fn(self, f, in_tree, *, has_aux=False):
         store = Store()
 
         def flat_fn(*args_flat, **params):
             pytree_args = self.tree_unflatten(in_tree, args_flat)
             out = f(*pytree_args, **params)
+            if has_aux:
+                out, aux = out
             out_flat, out_tree = self.tree_flatten(out)
             store.set_value(out_tree)
-            return out_flat
+            return (out_flat, aux) if has_aux else out_flat
 
         return flat_fn, store
 
@@ -1933,25 +1936,34 @@ class Machine:
 
         return batched_f
 
-    def jvp_flat(self, f, primals, tangents, **static_args):
+    def jvp_flat(self, f, primals, tangents, *, has_aux, **static_args):
         with self.new_main(JVPTrace) as main:
             trace = JVPTrace(main)
             tracers_in = [JVPTracor(trace, x, t) for x, t in list_zip(primals, tangents)]
-            outs = f(*tracers_in, **static_args)
+            jvp_flat_ret = f(*tracers_in, **static_args)
+            if has_aux:
+                (outs, aux) = jvp_flat_ret
+            else:
+                outs = jvp_flat_ret
             tracers_out = [self.full_raise(trace, out) for out in outs]
             primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
-        return primals_out, tangents_out
+        return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
-    def jvp(self, f, primals, tangents, **static_args):
+    def jvp(self, f, primals, tangents, *, has_aux=False, **static_args):
         primals_flat, in_tree = self.tree_flatten(primals)
         tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
-        f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_flat, tangents_out_flat = self.jvp_flat(f, primals_flat, tangents_flat, **static_args)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        jvp_ret = self.jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux, **static_args)
+        if has_aux:
+            ((primals_out, tangents_out), aux) = jvp_ret
+        else:
+            (primals_out, tangents_out) = jvp_ret
+        primals_out_flat, tangents_out_flat  = jvp_ret
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
         tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_flat)
-        return primals_out, tangents_out
+        return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
     def jacfwd(self, f, x):
         pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
@@ -1994,19 +2006,21 @@ class Machine:
         return new_program, new_consts
 
     def partial_run_flat(
-        self, f: Callable, pvals_in: List["PartialValue"], global_data=None
+        self, f: Callable, pvals_in: List["PartialValue"], has_aux, global_data=None
     ) -> Tuple[Program, List["PartialValue"], List[Any]]:
         with self.new_main(PartialRunTrace, global_data) as main:
             trace = PartialRunTrace(main)
             tracers_in = [trace.new_arg(pval) for pval in pvals_in]
             outs = f(*tracers_in)
+            if has_aux:
+                outs, aux = outs
             tracers_out = [self.full_raise(trace, out) for out in outs]
             pvals_out = [t.pval for t in tracers_out]
             unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
             unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
             program, consts = self.tracers_to_program(unk_tracers_in, unk_tracers_out)
 
-        return program, pvals_out, consts
+        return (program, pvals_out, consts, aux) if has_aux else (program, pvals_out, consts)
 
     def partial_run_program(
         self,
@@ -2106,26 +2120,40 @@ class Machine:
         if b2 != b2_:
             raise TypeError
 
-    def linearize_flat(self, f, *primals_in):
+    def linearize_flat(self, f, *primals_in, has_aux):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(Typecheckor.like(self.get_aval(x))) for x in primals_in
         ]
 
         def f_jvp(*primals_tangents_in):
-            primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in))
-            return [*primals_out, *tangents_out]
+            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux)
+            if has_aux:
+                (primals_out, tangents_out), aux = jvp_ret  
+                return ((*primals_out, *tangents_out), aux)
+            else:
+                primals_out, tangents_out = jvp_ret
+                return  (*primals_out, *tangents_out)
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in)
+        partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux)
+        if has_aux:
+            program, pvals_out, consts, aux = partial_run_flat_ret
+        else:
+            program, pvals_out, consts = partial_run_flat_ret
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out = [pval.const for pval in primal_pvals]
         f_lin = lambda *tangents: self.run_program(program, [*consts, *tangents])
-        return primals_out, f_lin
+        return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
 
-    def linearize(self, f, *primals_in):
+    def linearize(self, f, *primals_in, has_aux=False):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
-        f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_flat, f_lin_flat = self.linearize_flat(f, *primals_in_flat)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        linearize_flat_ret =  self.linearize_flat(f, *primals_in_flat, has_aux=has_aux)
+        if has_aux:
+            primals_out_flat, f_lin_flat, aux = linearize_flat_ret
+        else:
+            primals_out_flat, f_lin_flat = linearize_flat_ret
+
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
         def f_lin(*tangents_in):
@@ -2135,7 +2163,7 @@ class Machine:
             tangents_out_flat = f_lin_flat(*tangents_in_flat)
             return self.tree_unflatten(out_tree_store(), tangents_out_flat)
 
-        return primals_out, f_lin
+        return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
 
     def tracers_to_program(
         self,
@@ -2225,28 +2253,41 @@ class Machine:
         check_toposort(sorted_nodes, parents)
         return sorted_nodes
 
-    def vjp_flat(self, f, *primals_in, **static_args):
+    def vjp_flat(self, f, *primals_in, has_aux=False, **static_args):
         pvals_in = [self.make_known_pval(x) for x in primals_in] + [
             self.make_unknown_pval(Typecheckor.like(self.get_aval(x))) for x in primals_in
         ]
         _, tangent_pvals_in = split_half(pvals_in)
 
         def f_jvp(*primals_tangents_in):
-            primals_out, tangents_out = self.jvp(f, *split_half(primals_tangents_in), **static_args)
-            return [*primals_out, *tangents_out]
+            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, **static_args)
+            if has_aux:
+                (primals_out, tangents_out, aux) = jvp_ret
+            else:
+                primals_out, tangents_out = jvp_ret
+            return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
 
-        program, pvals_out, consts = self.partial_run_flat(f_jvp, pvals_in, "vjp")
+        partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
+        if has_aux:
+            program, pvals_out, consts, aux = partial_run_flat_ret
+        else:
+            program, pvals_out, consts = partial_run_flat_ret
+
         primal_pvals, _ = split_half(pvals_out)
         assert all(pval.is_known for pval in primal_pvals)
         primals_out_flat = [pval.const for pval in primal_pvals]
-        permute_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
-        f_vjp_flat = lambda *cotangents: self.run_program_permuted(program, permute_inputs, cotangents)
-        return primals_out_flat, f_vjp_flat
+        transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
+        f_vjp_flat = lambda *cotangents: self.run_program_transposed(program, transpose_inputs, cotangents)
+        return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
-    def vjp(self, f, *primals_in, **static_args):
+    def vjp(self, f, *primals_in, has_aux=False, **static_args):
         primals_in_flat, in_tree = self.tree_flatten(primals_in)
-        f, out_tree_store = self.flatten_fn(f, in_tree)
-        primals_out_flat, f_vjp_flat = self.vjp_flat(f, *primals_in_flat, **static_args)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        vjp_ret = self.vjp_flat(f, *primals_in_flat, has_aux, **static_args)
+        if has_aux:
+            primals_out_flat, f_vjp_flat, aux = vjp_ret
+        else:
+            primals_out_flat, f_vjp_flat = vjp_ret
         primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
         def f_vjp(*cotangents_out):
@@ -2255,9 +2296,9 @@ class Machine:
 
             return self.tree_unflatten(in_tree, cotangents_in_flat)
 
-        return primals_out, f_vjp
+        return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
 
-    def run_program_permuted(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
+    def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
         primal_backend: Dict[Var, Any] = {}
         ct_backend: Dict[Var, Any] = {}
 
@@ -2293,9 +2334,9 @@ class Machine:
         return ret
 
     @lru_cache_verbose()
-    def permute_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
+    def transpose_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
         avals_in, avals_out = self.typecheck_program(program)
-        traceable = partial(self.run_program_permuted, program)
+        traceable = partial(self.run_program_transposed, program)
         args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
         trans_program, consts, _ = self.make_program(
             traceable,
@@ -2322,52 +2363,27 @@ class Machine:
             return self.jit(value_and_grad_fn)
         else:
             return value_and_grad_fn
-    def grad(self, f, argnums=(0,), argnames=""):
+        
+    def grad(self, f, argnums=(0,), argnames="", has_aux=False):
+        if isinstance(f, self.jit):
+            f = f.f
         if isinstance(argnums, int):
             argnums = (argnums,)
         def grad_fn(x, *xs, **static_args):
-            y, f_vjp = self.vjp(f, x, *xs, **static_args)
+            vjp_ret  = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
+            if has_aux:
+                y, f_vjp, aux = vjp_ret
+            else:
+                y, f_vjp = vjp_ret
             if np.shape(y) != ():
                 raise TypeError("grad output must be 0-dim scalar with shape ()")
-            x_bars = f_vjp(self.backend.ones(()))
-            return tuple(x_bars[i] for i in argnums) if len(argnums) > 1 else x_bars[argnums[0]]
+            grad_L_xs = f_vjp(self.backend.ones(()))
+            grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
+            return (grad_L_xs, aux) if has_aux else grad_L_xs
         if isinstance(f, self.jit):
-            f = f.f
             return self.jit(grad_fn)
         else:
             return grad_fn
-    
-    #  def _grad(self, f, argnums=(0,), argnames=(), has_aux=False, return_value=False):
-    #     if has_aux:
-    #         raise NotImplementedError
-    #     if isinstance(argnums, int):
-    #         argnums = (argnums,)
-    #     def grad_fn(x, *xs, **static_args):
-    #         y, f_vjp = self.vjp(f, x, *xs, has_aux, **static_args)
-    #         if np.shape(y) != ():
-    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
-    #         x_bars = f_vjp(self.backend.ones(()))
-    #         if return_value:
-    #             return tuple([y] + [x_bars[i] for i in argnums] if len(argnums) > 1 else [x_bars[0]])
-    #         else:
-    #             return tuple([x_bars[i] for i in argnums]) if len(argnums) > 1 else x_bars[0]
-    #     if isinstance(f, self.jit):
-    #         f = f.f
-    #         return self.jit(grad_fn)
-    #     else:
-    #         return grad_fn
-
-    # def grad(self, f, argnums=(0,), argnames=(), has_aux=False):
-    #     return self._grad(f, argnums, argnames, has_aux, return_value=False)
-    
-    # def value_and_grad(self, f, argnums=(0,), argnames=(), has_aux=False):
-    #     return self._grad(f, argnums, argnames, has_aux, return_value=True)
-
-    # def grad(self, f):
-    #     def grad_fn(x, *xs, **static_args):
-    #         return self.value_and_grad(f)(x, *xs, **static_args)[1]
-
-    #     return grad_fn
 
     class jit:
         def __init__(self, f, static_argnames=(), name=None):

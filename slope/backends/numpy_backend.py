@@ -1018,6 +1018,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
+        assert not hasattr(self, "depth")
+        self.depth = 0
 
     def indent(code, amount):
         spaces = " " * (len(code) - len(code.lstrip()))
@@ -1026,7 +1028,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     # codegen is recursive if jit-of-jit happens
     backend: Dict[slope.Var, Any] = {}
-    il1 = 4  # indent length
+    il1 = (self.depth+1)*4
     body_code_lines = []
 
     for inb in program.in_binders:
@@ -1046,7 +1048,9 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
             lhs = ", ".join(out_vals)
+            self.depth += 1
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
+            self.depth -= 1
             impl_code = f"{lhs} = {rhs}"
         else:
             impl_code = self.impls[instruction.op](*in_vals, **instruction.params)
@@ -1079,17 +1083,18 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     head_code_lines += [f"def {fn_name} ({fn_args_str}):"]
     out_type_str = ", ".join(out_type_strs) + ("," if len(outs) == 1 else "")
     return_line = [indent(f"return {out_type_str}", il1)]
-    model_code_lines = head_code_lines + body_code_lines + return_line
 
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
+        # functions_code_lines += fn_def_code_lines
         functions_code_lines += fn_def_code_lines
 
-    code_lines = functions_code_lines + model_code_lines 
+    code_lines = head_code_lines + [indent(l, il1) for l in functions_code_lines] + body_code_lines + return_line 
     slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
 
     if fn_name == "main":
         del self.fn_count
+        del self.depth
     assert len(outs) == len(program.outs)
     return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
 

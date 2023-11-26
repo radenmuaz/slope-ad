@@ -801,16 +801,16 @@ class Backend:
 
     def __getattr__(self, attr):
         try:
-            slope.dblog(f"{self} looking {attr} in operator_set", enable=slope.LOG_ENV)
+            slope.dblog(f"Looking {self}.{attr} in operator_set", enable=slope.LOG_BACKEND)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            slope.dblog(f"{self} looking {attr} in procedure_set", enable=slope.LOG_ENV)
+            slope.dblog(f"Looking {self}.{attr} in procedure_set", enable=slope.LOG_BACKEND)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        slope.dblog(f"{self} fallback to default getattribute", enable=slope.LOG_ENV)
+        slope.dblog(f"Fallback to default {self} getattribute", enable=slope.LOG_BACKEND)
         super().__getattribute__(attr)
 
     def tensor(
@@ -832,6 +832,9 @@ class Backend:
 
     def load(self, path: str) -> Tensor:
         return self.compiler.load(path)
+    
+    def seed(self, seed):
+        raise NotImplementedError
 
 
 # ================

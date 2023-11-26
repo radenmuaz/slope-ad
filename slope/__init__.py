@@ -4,7 +4,7 @@ import os
 LOG_LRU = int(os.environ.get("LOG_LRU", 0))
 LOG_JIT = int(os.environ.get("LOG_JIT", 0))
 LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
-LOG_ENV = int(os.environ.get("LOG_ENV", 0))
+LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
@@ -43,6 +43,7 @@ def M():
 def manual_init(init_machine):
     """
     Example usage:
+    import slope
     from slope.backends.onnxruntime_backend import onnxruntime_backend
     slope.manual_init(slope.core.Machine(backend=onnxruntime_backend))
     """

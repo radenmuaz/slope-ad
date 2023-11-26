@@ -2,7 +2,6 @@ import slope
 
 @slope.jit
 def f(x1, x2):
-    # y = x + x
     y = x.sum() + x2
     return y
 

@@ -1923,7 +1923,7 @@ class Machine:
         ]
         return outs_permuted
 
-    def vmap(self, f, in_axes):
+    def vmap(self, f, in_axes=0, out_axes=0):
         def batched_f(*args):
             args_flat, in_tree = self.tree_flatten(args)
             in_axes_flat, in_tree2 = self.tree_flatten(in_axes)
@@ -1942,6 +1942,7 @@ class Machine:
             jvp_flat_ret = f(*tracers_in, **static_args)
             if has_aux:
                 (outs, aux) = jvp_flat_ret
+                aux = aux.primal
             else:
                 outs = jvp_flat_ret
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -1981,16 +1982,7 @@ class Machine:
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in, **{k: v for k, v in static_args})
-                # extract aux from JVPTracor if has_aux=True
-                def get_nested(out, depth=0, max_depth=100):
-                    if isinstance(out, ProgramTracor):
-                        return out
-                    elif depth < max_depth:
-                        assert isinstance(out, JVPTracor)
-                        return get_nested(out.primal, depth+1)
-                    else:
-                        raise ValueError
-                tracers_out = [self.full_raise(trace, get_nested(out)) for out in outs]
+                tracers_out = [self.full_raise(trace, out) for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
         return program, consts, out_tree_store()

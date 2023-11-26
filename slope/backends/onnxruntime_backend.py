@@ -1185,7 +1185,7 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
 #
 
 compile_py = compile
-compiler = Compiler(name="onnxruntime", default_dtype=Tensor.float32, SLOPE_DEVICE=slope.SLOPE_DEVICE)
+compiler = Compiler(name="onnxruntime", default_dtype=Tensor.float32, default_device=slope.SLOPE_DEVICE)
 compiler.set_dtype_map(
     {
         Tensor.float32: "float",
@@ -1212,7 +1212,7 @@ onnx_dtype_enum_map = {
 
 
 @compiler.set_method
-def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.SLOPE_DEVICE):
+def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.default_device):
     device_type, device_id = device.split(":") if ":" in device else (device, 0)
     np_val = np.array(val, dtype=dtype.numpy)
     val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
@@ -1332,7 +1332,7 @@ def compile(self, codegen_out):
                 buffer_ptr=a.data_ptr(),
             )
         for o in codegen_out["outs"]:
-            io_binding.bind_output(o["name"], self.SLOPE_DEVICE)
+            io_binding.bind_output(o["name"], self.default_device)
         session.run_with_iobinding(io_binding)
         outputs = tuple(io_binding.get_outputs())
         return outputs

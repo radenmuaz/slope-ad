@@ -1140,10 +1140,10 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Compiler:
-    def __init__(self, name, default_dtype=Tensor.float32, SLOPE_DEVICE="cpu"):
+    def __init__(self, name, default_dtype=Tensor.float32, default_device="cpu"):
         self.name = name
         self.default_dtype = default_dtype
-        self.SLOPE_DEVICE = SLOPE_DEVICE
+        self.default_device = default_device
         self.impls = dict()
         self.dtype_map = dict()
         self.dtype_map_inv = dict()

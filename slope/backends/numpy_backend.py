@@ -31,6 +31,7 @@ import os
 
 sum_py = sum
 max_py = max
+abs_py = abs
 slice_py = slice
 
 # --------------
@@ -239,7 +240,7 @@ operator_set.register(div)
 @div.set_method
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
-    return [x / y], [(x_dot / w) + (-w_dot * x * 1 / (w * w))]
+    return [x / w], [(x_dot / w) + (-w_dot * x * 1 / (w * w))]
 
 
 @div.set_method
@@ -864,7 +865,7 @@ operator_set.register(arange)
 
 
 @arange.set_method
-def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
+def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int32):
     if stop is None:
         stop = start
         start = 0
@@ -874,20 +875,20 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.float32):
 
 
 @arange.set_method
-def jvp(self, primals, tangents, *, start, stop, stride=None, dtype=Tensor.float32):
+def jvp(self, primals, tangents, *, start, stop, stride, dtype):
     out = self(arange, start, stop, stride, dtype)
     out_jvp = slope.ones_like(out)
     return [out], [out_jvp]
 
 
 @arange.set_method
-def T(self, cotangents, *, start, stop, stride=None, dtype=Tensor.float32):
+def T(self, cotangents, *, start, stop, stride, dtype):
     return [None]
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[Typecheckor]:
-    return [Typecheckor(tuple((stop - start) * stride), dtype)]
+def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
+    return [Typecheckor((stop - start,) * stride, dtype)]
 
 
 # --------------
@@ -896,11 +897,12 @@ def typecheck(self, *, start, stop, stride=None, dtype=Tensor.float32) -> List[T
 
 
 compile_py = compile
-compiler = Compiler(name="numpy", default_dtype=Tensor.float32)
+compiler = Compiler(name="numpy", default_dtype=Tensor.dtype_names[slope.SLOPE_DTYPE])
 compiler.set_dtype_map(
     {
         Tensor.float32: np.dtype("float32"),
         Tensor.int64: np.dtype("int64"),
+        Tensor.int32: np.dtype("int32"),
         Tensor.int8: np.dtype("int8"),
         Tensor.bool: np.dtype("bool"),
     }
@@ -1123,7 +1125,7 @@ compiler.set_impl(operator_set.max)(
     lambda self, x, *, axes, keepdims: f"ret = np.max({x}, axis={axes}, keepdims={keepdims})"
 )
 compiler.set_impl(operator_set.arange)(
-    lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, stride={stride}, dtype={dtype})"
+    lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, step={stride}, dtype={dtype})"
 )
 compiler.set_impl(operator_set.full)(
     lambda self, *, shape, fill_value, dtype: f"ret = np.full(shape={shape}, fill_value={fill_value}, dtype={dtype})"
@@ -1247,7 +1249,7 @@ def where(x, trueval, falseval):
 
 @procedure_set.register(static_argnames="axes keepdims")
 def mean(x, axes=None, keepdims=False):
-    out = x.sum(axes=axes, keepdim=keepdims)
+    out = x.sum(axes=axes, keepdims=keepdims)
     return out * (math.prod(out.shape) / math.prod(x.shape))
 
 
@@ -1311,12 +1313,11 @@ def argmax(x, axes=None, keepdims=False):
             dtype=slope.int32,
         ).reshape(x.shape)
         return math.prod(x.shape) - idx.max() - 1
-    axis = axes + len(x.shape) if axes < 0 else axes
-    m = x == x.max(axis=axis, keepdim=True)
-    idx = m * slope.arange(x.shape[axis] - 1, -1, -1, dtype=slope.int32).reshape(
-        x.shape[axis], *[1] * (x.ndim - axis - 1)
-    )
-    return x.shape[axis] - idx.max(axes=axes, keepdim=keepdims) - 1
+    axes = axes + len(x.shape) if axes < 0 else axes
+    m = (x == x.max(axes=axes, keepdims=True)).cast(slope.int32)
+    idx = m * slope.arange(x.shape[axes] - 1, -1, -1, dtype=slope.int32).reshape((x.shape[axes], *[1] * (x.ndim - axes - 1)))
+    ret = x.shape[axes] - idx.max(axes=axes, keepdims=keepdims) - 1
+    return ret
 
 
 @procedure_set.register(static_argnames="axes keepdims")
@@ -1339,7 +1340,7 @@ def pow(self, x: Union[Tensor, float], reverse=False) -> Tensor:
             return self.sqrt()
     if not isinstance(x, Tensor) and reverse and x > 0:
         return self.mul(math.log(x)).exp()
-    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs(x))).exp()
+    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs_py(x))).exp()
     # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
     sign = (
         (x * math.pi).cos()
@@ -1353,7 +1354,7 @@ def pow(self, x: Union[Tensor, float], reverse=False) -> Tensor:
     # we need 0 to be positive so we need to correct base_sign when the base is 0
     base_sign = base_sign - (
         1.5
-        * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs(int(bool(x)))))
+        * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs_py(int(bool(x)))))
     )
     # inject nan if the base is negative and the power is not an integer
     to_nan = (
@@ -1518,10 +1519,6 @@ def matmul(x, w):
     w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
-
-procedure_set.alias(matmul, "dot")
-
-
 @procedure_set.register()
 def T(x):
     perm = list(range(x.ndim))
@@ -1570,7 +1567,7 @@ def log_softmax(x, axes=-1):
 #        - if first Tensor passed in (expand dims) is not at dim 0
 #        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
 # val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
-# @procedure_set.register(inline=True)
+@procedure_set.register(inline=True)
 def getitem(self, val):
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
@@ -1606,8 +1603,8 @@ def getitem(self, val):
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
     sliced_tensor = self.padslice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
-    if any(abs(s) != 1 for s in strides):
-        strides = tuple(abs(s) for s in strides)
+    if any(abs_py(s) != 1 for s in strides):
+        strides = tuple(abs_py(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
             tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))
@@ -1753,7 +1750,6 @@ def gather(x, idx, dim: int):
 def stack(tensors, dim=0):
     first = tensors[0].expand_dims(dim)
     expand_dimsd_tensors = [tensor.expand_dims(dim) for tensor in tensors[1:]]
-    # checks for shapes and number of dimensions delegated to cat
     return first.cat(*expand_dimsd_tensors, dim=dim)
 
 
@@ -1770,7 +1766,7 @@ def repeat(x, repeats):
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
     slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
-    return [x[tuple(sl)] for sl in slice_params]
+    return tuple(x[tuple(sl)] for sl in slice_params)
 
 
 @procedure_set.register(static_argnames="dim")
@@ -1799,7 +1795,7 @@ def expand_dims(x, dim):
 def transpose(x, ax=1, aw=0):
     order = list(range(len(x.shape)))
     order[ax], order[aw] = order[aw], order[ax]
-    return x.permute(order)
+    return x.permute(tuple(order))
 
 
 @procedure_set.register(static_argnames="start_dim")
@@ -1808,7 +1804,7 @@ def flatten(x, start_dim=0):
 
 
 @procedure_set.register(static_argnames="k_ stride dilation")
-def _pool(
+def pool(
     x,
     k_: Tuple[int, ...],
     stride: Union[Tuple[int, ...], int] = 1,
@@ -1844,7 +1840,6 @@ def _pool(
                 *[len(prefix) + i * 2 for i in range(len(k_))],
             )
         )
-    # TODO: once the shapetracker can optimize well, remove this alternative implementation. or not if the CPU implementation doesn't use ShapeTracker
     o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
     xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
     xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
@@ -1858,17 +1853,16 @@ def _pool(
     )
 
 
-# NOTE: these work for more than 2D
 @procedure_set.register(static_argnames="kernel_size stride")
-def avg_pool2d(x, kernel_size=(2, 2), stride=None):
-    return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
+def avgpool2d(x, kernel_size=(2, 2), stride=None):
+    return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
 
 @procedure_set.register(static_argnames="kernel_size stride dilation")
-def max_pool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
-    return x._pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
+def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
+    return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
         axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
@@ -1927,7 +1921,7 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
     padding_ = tuple(padding_)
     x_ = x
     x = x.pad2d(padding_)
-    x = x._pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+    x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
     x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
@@ -1941,7 +1935,7 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
             *[4 + len(oyx) + i for i in range(len(HW))],
         )
     )
-    # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
+    # (bs, groups, rcout, *oyx, cin, *HW)
     x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
     x = x.reshape((bs, cout, *oyx))
@@ -1951,14 +1945,19 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
 
 @procedure_set.register(static_argnames="axis")
 def cumsum(x, axis: int = 0):
-    return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0))._pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
+    return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0)).pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
 
 
 @staticmethod
-def arange(start, stop=None, step=1, **kwargs):
+@procedure_set.register(static_argnames="start stop step")
+def arange_with_cumsum(start, stop=None, step=1):
     if stop is None:
         stop, start = start, 0
-    return slope.full((math.ceil((stop - start) / step),), step, **kwargs).cumsum() + (start - step)
+    return slope.full((math.ceil((stop - start) / step),), step).cumsum() + (start - step)
+
+@procedure_set.register(static_argnames="dtype")
+def one_hot(x, k, dtype=Tensor.int32):
+    return (x[:, None] == slope.arange(k, dtype=dtype)).cast(dtype)
 
 
 numpy_backend = Backend(operator_set, procedure_set, compiler)

@@ -8,6 +8,7 @@ LOG_ENV = int(os.environ.get("LOG_ENV", 0))
 LOG_INIT = int(os.environ.get("LOG_INIT", 0))
 INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
+SLOPE_DTYPE = os.environ.get("SLOPE_DTYPE", "float32")
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
 
 
@@ -33,7 +34,7 @@ def M():
 
         backend_registry = dict(numpy=numpy_backend, onnxruntime=onnxruntime_backend)
         if SLOPE_BACKEND not in backend_registry.keys():
-            raise ValueError(f"{SLOPE_BACKEND} isnonexistent backend in: {list(backend_registry.keys())}")
+            raise ValueError(f"{SLOPE_BACKEND} is nonexistent backend in: {list(backend_registry.keys())}")
         machine = core.Machine(backend=backend_registry[SLOPE_BACKEND])
         dblog(f"Auto init with {machine}", enable=LOG_INIT)
     return machine

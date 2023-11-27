@@ -24,10 +24,12 @@ from typing import (
     Sequence,
     Union,
     Iterator,
+    Callable
 )
 from collections import defaultdict
 import importlib
 import os
+import functools
 
 sum_py = sum
 max_py = max
@@ -188,7 +190,7 @@ operator_set.register(add)
 @add.set_method
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
-    return [x + y], [x_dot + w_dot]
+    return [x + w], [x_dot + w_dot]
 
 
 @add.set_method
@@ -1325,36 +1327,37 @@ def argmin(x, axes=None, keepdims=False):
     return (-x).argmax(axes=axes, keepdims=keepdims)
 
 
-def pow(self, x: Union[Tensor, float], reverse=False) -> Tensor:
-    if x.__class__ is not Tensor and not reverse:
+@procedure_set.register(inline=True)
+def pow(x, w: Union[Tensor, float], reverse=False) -> Tensor:
+    if w.__class__ is not Tensor and not reverse:
         # simple pow identities
-        if x < 0:
-            return (1 / self).pow(-x)
-        if x == 3.0:
-            return self * self * self
-        if x == 2.0:
-            return self * self
-        if x == 1.0:
-            return self
-        if x == 0.5:
-            return self.sqrt()
+        if w < 0:
+            return (slope.ones_like(x) / x) ** (-w)
+        if w == 3.0:
+            return x * x * x
+        if w == 2.0:
+            return x * x
+        if w == 1.0:
+            return x
+        if w == 0.5:
+            return x.sqrt()
     if not isinstance(x, Tensor) and reverse and x > 0:
-        return self.mul(math.log(x)).exp()
-    ar = self.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else self.mul(math.log(abs_py(x))).exp()
+        return x.mul(math.log(x)).exp()
+    ar = x.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else x.mul(math.log(abs_py(x))).exp()
     # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
     sign = (
         (x * math.pi).cos()
         if isinstance(x, Tensor)
         else math.cos(x * math.pi)
         if not reverse
-        else (self * math.pi).cos()
+        else (x * math.pi).cos()
     )
     # we only need to correct the sign if the base is negative
-    base_sign = ((self.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
+    base_sign = ((x.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
     # we need 0 to be positive so we need to correct base_sign when the base is 0
     base_sign = base_sign - (
         1.5
-        * (1 - (self.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs_py(int(bool(x)))))
+        * (1 - (x.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs_py(int(bool(x)))))
     )
     # inject nan if the base is negative and the power is not an integer
     to_nan = (
@@ -1362,7 +1365,7 @@ def pow(self, x: Union[Tensor, float], reverse=False) -> Tensor:
         if isinstance(x, Tensor)
         else int(bool(x - int(x)))
         if not reverse
-        else ((self - self.trunc()) * 1e10).abs().clip(0, 1)
+        else ((x - x.trunc()) * 1e10).abs().clip(0, 1)
     ) * base_sign
     inject_nan = (
         ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
@@ -1541,34 +1544,9 @@ def log_softmax(x, axes=-1):
     ss = e.sum(axes, keepdims=True)
     return m - ss.log()
 
-
-# - Negative indices are taken relative to the end of the sequence, so X[-2] returns the 2nd-to-last element
-# - A slice i:j returns the elements with indices in [i, j)
-#    - If omitted, i and j will default to 0 and N, respectively, where N is the length of the sequence
-#    - Negative values for i and j are taken relative to the end of the sequence
-#    - Both i and j will be clamped to the range (-N, N], where N in the length of the sequence
-# - Indexing with None on a given axis will add a new dimension of size one before that axis
-# - Empty slices are not allowed (tensors with 0s in shape have to be supported first, for all compilers).
-# - For a slice [i:j:k] finding the correct indices is delegated to slice.indices(len).
-# - Strides > 1 and < 0 are now allowed!:
-#    - This works by applying Shrink -> [[Flip -> ] Pad -> Reshape -> Shrink] -> Reshape (ops in brackets are optional)
-#    - Idea of stride < 0 support:
-#        - Do the slice first, flip the axes were slice.step is negative, do slice.step -> -slice.step. Go to steps below.
-#    - Idea of stride `s` > 1 support (Pad -> Reshape -> Shrink):
-#        - Instead of doing [::s] on axis [dim_sz], do [:, 0] on axes [dim_sz_padded // s, s].
-#        - So pad dim_sz with as many zeros as needed (dim_sz -> dim_sz_padded) so that reshape to [dim_sz_padded // s, s]
-#          is possible.
-#        - Apply Shrink to do the slice [:, 0] on axes of shapes [dim_sz_padded // s, s].
-# - Fancy indexing and combined indexing is supported
-#    - Combined indexing works by letting regular slicing finish first -> computing the resulting dims w.r.t to Tensors passed in -> fancy indexing
-#    - Any Tensors passed in __getitem__ will perform (CMPEQ with arange -> MUL with self -> SUM_REDUCE) iteratively
-#        - The first iteration will expand the dim of self while consecutive iterations will reduce the dim
-#    - There's a special case where a permute is needed at the end:
-#        - if first Tensor passed in (expand dims) is not at dim 0
-#        - and following Tensors does not follow consecutively to the end of fancy indexing's dims
-# val: Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
 @procedure_set.register(inline=True)
 def getitem(self, val):
+    # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
@@ -1959,5 +1937,61 @@ def arange_with_cumsum(start, stop=None, step=1):
 def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None] == slope.arange(k, dtype=dtype)).cast(dtype)
 
+@procedure_set.register(inline=True)
+def linear(x, w:Tensor, b:Optional[Tensor]=None):
+    return (x @ w) if b is not None else (x @ w + b)
+
+
+@procedure_set.register(inline=True)
+def serial(self, ll:List[Callable[[Tensor], Tensor]]):
+    return functools.reduce(lambda x,f: f(x), ll, self)
+
+@procedure_set.register(static_argnames="axis eps")
+def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
+    y = (self - self.mean(axis, keepdim=True))
+    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
+
+@procedure_set.register(inline=True)
+def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
+    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
+    if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
+    ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
+    return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
+
+@procedure_set.register(static_argnames="p")
+def dropout(self, p=0.5) -> Tensor:
+    if not Tensor.training or p == 0: return self
+    mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(slope.bool)
+    return self * mask * (1/(1.0 - p))
+
+@procedure_set.register()
+def scaled_dot_product_attention(x, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
+    if is_causal: 
+        attn_mask = Tensor.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
+    if attn_mask is not None and attn_mask.dtype == slope.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
+    return (x @ key.transpose(-2,-1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+@procedure_set.register()
+def binary_crossentropy(x, y:Tensor) -> Tensor:
+    return (-y*x.log() - (1-y)*(1-x).log()).mean()
+
+@procedure_set.register()
+def binary_crossentropy_logits(x, y:Tensor) -> Tensor:
+    return (x.maximum(0) - y * x + (1 + x.abs().__neg__().exp()).log()).mean()
+
+@procedure_set.register(static_argnames="ignore_index")
+def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
+    # NOTE: self is a logits input
+    loss_mask = Y != ignore_index
+    y_counter = Tensor.arange(self.shape[-1], dtype=slope.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
+    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
+    return self.log_softmax().mul(y).sum() / loss_mask.sum()
+
+# ***** cast ops *****
+
+def float(self) -> Tensor:
+    return self.cast(slope.float32)
+def half(self) -> Tensor:
+    return self.cast(slope.float16)
 
 numpy_backend = Backend(operator_set, procedure_set, compiler)

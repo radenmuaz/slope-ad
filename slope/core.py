@@ -205,7 +205,19 @@ class TensorBuffer:
     def __init__(self, val):
         self.val = val
 
+# class TensorMeta(type):
+#     def __getattr__(cls, attr):
+#         if attr in vars(slope.M().backend.operator_set).keys():
+#             op = getattr(slope.M().backend.operator_set, attr)
+#             return partial(op, cls)
+#         elif attr in vars(slope.M().backend.procedure_set).keys():
+#             procedure = getattr(slope.M().backend.procedure_set, attr)
+#             assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
+#             return partial(procedure, cls)
+#         else:
+#             return cls.__getattribute__(attr)
 
+# class Tensor(metaclass=TensorMeta):
 class Tensor:
     float32: Final[DType] = DType(4, 4, "float32", "f32", np.float32)
     uint8: Final[DType] = DType(0, 1, "uint8", "u8", np.uint8)
@@ -1945,7 +1957,7 @@ class Machine:
             jvp_flat_ret = f(*tracers_in, **static_args)
             if has_aux:
                 (outs, aux) = jvp_flat_ret
-                aux = aux.primal
+                aux = self.tree_map(lambda x: x.primal, aux)
             else:
                 outs = jvp_flat_ret
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -2351,22 +2363,22 @@ class Machine:
 
         return trans_program, consts
 
-    def value_and_grad(self, f):
-        def value_and_grad_fn(x, *xs, **static_args):
-            y, f_vjp = self.vjp(f, x, *xs, **static_args)
-            if np.shape(y) != ():
-                raise TypeError("grad output must be 0-dim scalar with shape ()")
-            x_bars = f_vjp(self.backend.ones(()))
-            return y, x_bars
+    # def value_and_grad(self, f):
+    #     def value_and_grad_fn(x, *xs, **static_args):
+    #         y, f_vjp = self.vjp(f, x, *xs, **static_args)
+    #         if np.shape(y) != ():
+    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
+    #         x_bars = f_vjp(self.backend.ones(()))
+    #         return y, x_bars
 
-        # TODO: if nested jit, rejit, find cleaner way
-        if isinstance(f, self.jit):
-            f = f.f
-            return self.jit(value_and_grad_fn)
-        else:
-            return value_and_grad_fn
+    #     # TODO: if nested jit, rejit, find cleaner way
+    #     if isinstance(f, self.jit):
+    #         f = f.f
+    #         return self.jit(value_and_grad_fn)
+    #     else:
+    #         return value_and_grad_fn
 
-    def grad(self, f, argnums=(0,), argnames="", has_aux=False):
+    def grad(self, f, argnums=(0,), argnames="", has_aux=False, return_value=False):
         if isinstance(f, self.jit):
             f = f.f
         if isinstance(argnums, int):
@@ -2382,12 +2394,17 @@ class Machine:
                 raise TypeError("grad output must be 0-dim scalar with shape ()")
             grad_L_xs = f_vjp(self.backend.ones(()))
             grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
-            return (grad_L_xs, aux) if has_aux else grad_L_xs
+            if return_value:
+                return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
+            else:
+                return (grad_L_xs, aux) if has_aux else grad_L_xs
 
         if isinstance(f, self.jit):
             return self.jit(grad_fn)
         else:
             return grad_fn
+    def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
+        return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
 
     class jit:
         def __init__(self, f, static_argnames=(), name=None):

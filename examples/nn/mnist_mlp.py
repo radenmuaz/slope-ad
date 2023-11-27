@@ -7,7 +7,7 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-from datasets.mnist import get_mnist
+from utils.datasets.mnist import get_mnist
 
 import numpy as np
 
@@ -17,7 +17,7 @@ def loss_fn(model, batch):
     preds = model(x)
     return -(preds * y_onehot).sum()
 
-value_and_grad_loss_fn = slope.value_and_grad(L)
+value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
 
 @slope.jit
 def train_step(model, batch, optimizer):

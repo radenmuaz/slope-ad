@@ -288,10 +288,50 @@ class Serial(Module):
         return x
 
 
-#
-# Optimizers
-#
+class BatchNorm(Module):
+    def __init__(self, channels:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+        self.eps = eps
+        self.track_running_stats = track_running_stats
+        self.momentum = momentum
 
+        self.weight = slope.ones(channels) if affine else None
+        self.bias = slope.zeros(channels)  if affine else None
+
+        self.running_mean = slope.zeros(channels)
+        self.running_var = slope.ones(channels)
+        self.num_batches_tracked = slope.zeros(1)
+
+    def __call__(self, x, training=False):
+        if training:
+            broadcast_shape = (1, -1) +  (1,)*len(x.shape[2:])
+            reduce_axes = (0,) + tuple(2+i for i in range(len(x.shape[2:])))
+            mean = x.mean(reduce_axes)#.stop_gradient()
+            z = (x - mean.reshape(broadcast_shape))
+            var = (z*z).mean(reduce_axes)#.stop_gradient()
+            invstd = (var + self.eps) ** -0.5
+            if self.track_running_stats:
+                z_numel = math.prod(z.shape)
+                self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
+                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_numel/(z_numel - z.shape[1]) * var
+                self.num_batches_tracked = self.num_batches_tracked + 1
+        else:
+            mean = self.running_mean
+            invstd = (self.running_var.reshape(1, -1, 1, 1).expand(x.shape) + self.eps).rsqrt()
+        return self._batchnorm(x, self.weight, self.bias, mean, invstd)
+
+    def _batchnorm(self, x, weight, bias, mean, invstd):
+        broadcast_shape = (1, -1) +  (1,)*len(x.shape[2:])
+        x = x - mean.reshape(broadcast_shape)
+        if weight is not None:
+            x = x * weight.reshape(broadcast_shape)
+        ret = (x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd)
+        return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
+
+   
+
+# ====================
+# Optimizers
+# ====================
 
 class Optimizer(Module):
     def __init__(self, params, lr: float):

@@ -21,7 +21,7 @@ value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
 
 @slope.jit
 def train_step(model, batch, optimizer):
-    loss, (grad_loss_model, _) = value_and_grad_loss_fn(model, batch)
+    loss, grad_loss_model = value_and_grad_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, grad_loss_model)
     return loss, new_model, new_optimizer
 

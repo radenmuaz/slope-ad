@@ -1236,12 +1236,6 @@ def zeros_like(y):
 def ones_like(y):
     return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
-
-@procedure_set.register()
-def relu(x):
-    return x.maximum(slope.zeros_like(x))
-
-
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
@@ -1379,11 +1373,6 @@ def log2(x):
 
 
 @procedure_set.register()
-def sigmoid(self):
-    return 1 / (1 + (-self).exp())
-
-
-@procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
     return Tensor.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
@@ -1446,76 +1435,6 @@ def reciprocal(self):
 
 
 # # ***** activation functions (unary) *****
-@procedure_set.register()
-def elu(self, alpha=1.0):
-    return self.relu() - alpha * (1 - self.exp()).relu()
-
-
-@procedure_set.register()
-def celu(self, alpha=1.0):
-    return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
-
-
-@procedure_set.register()
-def swish(self):
-    return self * self.sigmoid()
-
-
-@procedure_set.register()
-def silu(self):
-    return self.swish()  # The SiLU function is also known as the swish function.
-
-
-@procedure_set.register()
-def relu6(self):
-    return self.relu() - (self - 6).relu()
-
-
-@procedure_set.register()
-def hardswish(self):
-    return self * (self + 3).relu6() * (1 / 6)
-
-
-@procedure_set.register()
-def tanh(self):
-    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-
-
-@procedure_set.register()
-def hardtanh(self, min_val=-1, max_val=1):
-    return self.clip(min_val, max_val)
-
-
-@procedure_set.register()
-def gelu(self):
-    return 0.5 * self * (1 + (self * 0.7978845608 * (1 + 0.044715 * self * self)).tanh())
-
-
-@procedure_set.register()
-def quick_gelu(self):
-    return self * (self * 1.702).sigmoid()
-
-
-@procedure_set.register()
-def leakyrelu(self, neg_slope=0.01):
-    return self.relu() - (-neg_slope * self).relu()
-
-
-@procedure_set.register()
-def mish(self):
-    return self * self.softplus().tanh()
-
-
-@procedure_set.register()
-def softplus(self, beta=1):
-    return (1 / beta) * (1 + (self * beta).exp()).log()
-
-
-@procedure_set.register()
-def softsign(self):
-    return self / (1 + self.abs())
-
-
 @procedure_set.register()
 def matmul(x, w):
     x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
@@ -1881,44 +1800,44 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
     return x.conv(w, groups=groups, dilation=dilation, padding=padding)
 
 
-@procedure_set.register(static_argnames="groups stride dilation padding")
-def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
-    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-    assert groups * cin == cin_ and len(x.shape) == len(
-        w.shape
-    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-    if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
-    padding_ = (
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-    padding_ = tuple(padding_)
-    x_ = x
-    x = x.pad2d(padding_)
-    x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
-    rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
-    x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
-    x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
-    x = x.permute(
-        (
-            0,
-            1,
-            3,
-            *[4 + i for i in range(len(oyx))],
-            2,
-            *[4 + len(oyx) + i for i in range(len(HW))],
-        )
-    )
-    # (bs, groups, rcout, *oyx, cin, *HW)
-    x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
-    x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
-    x = x.reshape((bs, cout, *oyx))
-    ret = x
-    return ret
+# @procedure_set.register(static_argnames="groups stride dilation padding")
+# def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
+#     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+#     assert groups * cin == cin_ and len(x.shape) == len(
+#         w.shape
+#     ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+#     if isinstance(padding, (tuple, list)):
+#         assert len(padding) == 2 * len(HW) or len(padding) == len(
+#             HW
+#         ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+#     padding_ = (
+#         [padding] * 2 * len(HW)
+#         if isinstance(padding, int)
+#         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+#     )
+#     padding_ = tuple(padding_)
+#     x_ = x
+#     x = x.pad2d(padding_)
+#     x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+#     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
+#     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
+#     x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
+#     x = x.permute(
+#         (
+#             0,
+#             1,
+#             3,
+#             *[4 + i for i in range(len(oyx))],
+#             2,
+#             *[4 + len(oyx) + i for i in range(len(HW))],
+#         )
+#     )
+#     # (bs, groups, rcout, *oyx, cin, *HW)
+#     x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
+#     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
+#     x = x.reshape((bs, cout, *oyx))
+#     ret = x
+#     return ret
 
 
 @procedure_set.register(static_argnames="axis")
@@ -1938,11 +1857,6 @@ def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None] == slope.arange(k, dtype=dtype)).cast(dtype)
 
 @procedure_set.register(inline=True)
-def linear(x, w:Tensor, b:Optional[Tensor]=None):
-    return (x @ w) if b is not None else (x @ w + b)
-
-
-@procedure_set.register(inline=True)
 def serial(self, ll:List[Callable[[Tensor], Tensor]]):
     return functools.reduce(lambda x,f: f(x), ll, self)
 
@@ -1950,13 +1864,6 @@ def serial(self, ll:List[Callable[[Tensor], Tensor]]):
 def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
-
-@procedure_set.register(inline=True)
-def batchnorm(self, weight:Optional[Tensor], bias:Optional[Tensor], mean:Tensor, invstd:Tensor) -> Tensor:
-    x = (self - mean.reshape(shape=[1, -1, 1, 1]))
-    if weight: x = x * weight.reshape(shape=[1, -1, 1, 1])
-    ret = x.mul(invstd.reshape(shape=[1, -1, 1, 1]) if len(invstd.shape) == 1 else invstd)
-    return (ret + bias.reshape(shape=[1, -1, 1, 1])) if bias else ret
 
 @procedure_set.register(static_argnames="p")
 def dropout(self, p=0.5) -> Tensor:

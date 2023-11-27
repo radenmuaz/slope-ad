@@ -1,6 +1,6 @@
 import slope
 from slope.core import Tensor, Typecheckor
-from typing import Tuple
+from typing import Tuple, List
 
 import operator as operator_py
 
@@ -246,7 +246,21 @@ def glorot_uniform(
 
 
 class Linear(Module):
-    # def __init__(self, in_dim, out_dim, bias=True, W_init=glorot_normal(), b_init=normal()):
+    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
+        self.weight = W_init((out_dim, in_dim))
+        self.bias = b_init((out_dim,)) if bias else None
+
+    def __call__(self, x):
+        return self.linear(x, self.weight, self.bias)
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def linear(x, w, b=None):
+        x = x @ w.transpose(-2, -1)
+        return x + b[None, ...] if b is not None else x
+
+
+class ConvNd(Module):
     def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
         self.weight = W_init((out_dim, in_dim))
         self.bias = b_init((out_dim,)) if bias else None
@@ -254,6 +268,51 @@ class Linear(Module):
     def __call__(self, x):
         x = x @ self.weight.transpose(-2, -1)
         return x + self.bias[None, ...] if self.bias is not None else x
+    
+
+    @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding")
+    @staticmethod
+    def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
+        (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+        assert groups * cin == cin_ and len(x.shape) == len(
+            w.shape
+        ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+        if isinstance(padding, (tuple, list)):
+            assert len(padding) == 2 * len(HW) or len(padding) == len(
+                HW
+            ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+        padding_ = (
+            [padding] * 2 * len(HW)
+            if isinstance(padding, int)
+            else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+        )
+        padding_ = tuple(padding_)
+        def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
+            # (padding_left, padding_right, padding_top, padding_bottom)
+            slc = [(-p0, s + p1) for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
+            return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
+        x = pad2d(x, padding_)
+        x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+        rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
+        x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
+        x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
+        x = x.permute(
+            (
+                0,
+                1,
+                3,
+                *[4 + i for i in range(len(oyx))],
+                2,
+                *[4 + len(oyx) + i for i in range(len(HW))],
+            )
+        )
+        # (bs, groups, rcout, *oyx, cin, *HW)
+        x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
+        x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
+        x = x.reshape((bs, cout, *oyx))
+        ret = x
+        return ret
+
 
 
 class MLP(Module):
@@ -282,9 +341,9 @@ class Serial(Module):
         for i in range(len(modules)):
             setattr(self, f"m{i}", modules[i])
 
-    def __call__(self, x):
+    def __call__(self, x, *args, **kwargs):
         for i in range(self.num_modules):
-            x = getattr(self, f"m{i}")(x)
+            x = getattr(self, f"m{i}")(x, *args, **kwargs)
         return x
 
 
@@ -317,9 +376,11 @@ class BatchNorm(Module):
         else:
             mean = self.running_mean
             invstd = (self.running_var.reshape(1, -1, 1, 1).expand(x.shape) + self.eps).rsqrt()
-        return self._batchnorm(x, self.weight, self.bias, mean, invstd)
+        return x.batchnorm(self.weight, self.bias, mean, invstd)
 
-    def _batchnorm(self, x, weight, bias, mean, invstd):
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def batchnorm(x, weight, bias, mean, invstd):
         broadcast_shape = (1, -1) +  (1,)*len(x.shape[2:])
         x = x - mean.reshape(broadcast_shape)
         if weight is not None:
@@ -328,6 +389,68 @@ class BatchNorm(Module):
         return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
 
    
+
+
+class ReLU(Module):
+    def __call__(self, x):
+        return x.relu()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def relu(x):
+        return x.maximum(slope.zeros_like(x))
+
+
+class LeakyReLU(Module):
+    def __call__(self, x):
+        return x.relu()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def leakyrelu(x, neg_slope=0.01):
+        return x.relu() - (slope.full_like(x, -neg_slope) * x).relu()
+
+class Sigmoid(Module):
+    def __call__(self, x):
+        return x.sigmoid()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def sigmoid(x):
+        return 1 / (1 + (-x).exp())
+
+
+class Tanh(Module):
+    def __call__(self, x):
+        return x.tanh()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def tanh(x):
+        return 2.0 * ((2.0 * x).sigmoid()) - 1.0
+
+
+class Swish(Module):
+    def __call__(self, x):
+        return x.swish()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def swish(x):
+        return x * x.sigmoid()
+
+SiLU = Swish
+# slope.M().backend.procedure_set.alias(Swish.swish, "silu")
+
+class GELU(Module):
+    def __call__(self, x):
+        return x.gelu()
+    
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def gelu(x):
+        return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
+
 
 # ====================
 # Optimizers

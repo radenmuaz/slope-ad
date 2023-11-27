@@ -1,6 +1,6 @@
 import slope
 from slope.core import Tensor, Typecheckor
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 import operator as operator_py
 
@@ -245,10 +245,92 @@ def glorot_uniform(
 # ====================
 
 
+class Fn(Module):
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, x):
+        return self.fn(x)
+
+
+class ReLU(Module):
+    def __call__(self, x):
+        return x.relu()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def relu(x):
+        return x.maximum(slope.zeros_like(x))
+
+
+class LeakyReLU(Module):
+    def __call__(self, x):
+        return x.relu()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def leakyrelu(x, neg_slope=0.01):
+        return x.relu() - (slope.full_like(x, -neg_slope) * x).relu()
+
+
+class Sigmoid(Module):
+    def __call__(self, x):
+        return x.sigmoid()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def sigmoid(x):
+        return 1 / (1 + (-x).exp())
+
+
+class Tanh(Module):
+    def __call__(self, x):
+        return x.tanh()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def tanh(x):
+        return 2.0 * ((2.0 * x).sigmoid()) - 1.0
+
+
+class Swish(Module):
+    def __call__(self, x):
+        return x.swish()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def swish(x):
+        return x * x.sigmoid()
+
+
+SiLU = Swish
+
+
+class GELU(Module):
+    def __call__(self, x):
+        return x.gelu()
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def gelu(x):
+        return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
+
+
+class Embedding(Module):
+    def __init__(self, vocab_size: int, embed_size: int):
+        self.vocab_size = vocab_size
+        self.weight = Tensor.glorot_uniform(vocab_size, embed_size)
+
+    def __call__(self, idx: Tensor) -> Tensor:
+        if not hasattr(self, "vocab_counter"):
+            self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
+        return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+
+
 class Linear(Module):
-    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
-        self.weight = W_init((out_dim, in_dim))
-        self.bias = b_init((out_dim,)) if bias else None
+    def __init__(self, in_features, out_features, bias=False, W_init=glorot_normal()):
+        self.weight = W_init((out_features, in_features))
+        self.bias = Tensor.zeros(out_features) if bias else None
 
     def __call__(self, x):
         return self.linear(x, self.weight, self.bias)
@@ -260,15 +342,161 @@ class Linear(Module):
         return x + b[None, ...] if b is not None else x
 
 
-class ConvNd(Module):
-    def __init__(self, in_dim, out_dim, bias=False, W_init=glorot_normal(), b_init=normal()):
-        self.weight = W_init((out_dim, in_dim))
-        self.bias = b_init((out_dim,)) if bias else None
+class MLP(Module):
+    def __init__(self, in_dim, hid_dim, out_dim, act=ReLU()):
+        self.linear1 = Linear(in_dim, hid_dim)
+        self.linear2 = Linear(hid_dim, out_dim)
+        self.act = act
 
     def __call__(self, x):
-        x = x @ self.weight.transpose(-2, -1)
-        return x + self.bias[None, ...] if self.bias is not None else x
-    
+        x = self.linear1(x)
+        x = self.act(x)
+        x = self.linear2(x)
+        return x
+
+
+class Serial(Module):
+    def __init__(self, modules):
+        self.num_modules = len(modules)
+        for i in range(len(modules)):
+            setattr(self, f"m{i}", modules[i])
+
+    def __call__(self, x, *args, **kwargs):
+        modules = [getattr(self, f"m{i}") for i in range(self.num_modules)]
+        return x.serial(modules, *args, **kwargs)
+
+    @slope.M().backend.procedure_set.register(inline=True)
+    @staticmethod
+    def serial(x, modules, *args, **kwargs):
+        for module in modules:
+            x = module(x, *args, **kwargs)
+        return x
+
+
+Sequential = Serial
+
+
+class Pool(Module):
+    def __call__(x, kernel_size, stride=1, dilation=1):
+        return x.pool(kernel_size, stride, dilation)
+
+    @slope.M().backend.procedure_set.register(static_argnames="k_ stride dilation")
+    @staticmethod
+    def pool(
+        x,
+        kernel_size: Tuple[int, ...],
+        stride: Union[Tuple[int, ...], int] = 1,
+        dilation: Union[Tuple[int, ...], int] = 1,
+    ):
+        def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+            return (x,) * cnt if isinstance(x, int) else x
+
+        def flatten_seq(l):
+            return [item for sublist in l for item in sublist]
+
+        k_ = kernel_size
+        assert len(x.shape) >= len(k_), f"can't pool {x.shape} with {k_}"
+        s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
+        assert len(k_) == len(s_) and len(k_) == len(
+            d_
+        ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
+        slc_prefix, prefix, i_ = (
+            [(0, x) for x in x.shape[0 : -len(k_)]],
+            x.shape[0 : -len(k_)],
+            x.shape[-len(k_) :],
+        )
+        if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
+            o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
+            e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
+            xup = x
+            xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
+            xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
+            xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
+            # slide by dilation
+            xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
+            xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
+            xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
+            # handle stride, and permute to move reduce to the end
+            xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
+            xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
+            xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
+            return xup.permute(
+                (
+                    *range(len(prefix)),
+                    *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+                    *[len(prefix) + i * 2 for i in range(len(k_))],
+                )
+            )
+        o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
+        xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
+        xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
+        xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
+        return xup.permute(
+            (
+                *range(len(prefix)),
+                *[len(prefix) + i * 2 for i in range(len(k_))],
+                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
+            )
+        )
+
+
+class AvgPool2d(Module):
+    def __call__(x, kernel_size, stride=None):
+        return x.avgpool2d(kernel_size, stride)
+
+    @slope.M().backend.procedure_set.register(static_argnames="kernel_size stride")
+    @staticmethod
+    def avgpool2d(x, kernel_size=(2, 2), stride=None):
+        def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+            return (x,) * cnt if isinstance(x, int) else x
+
+        return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
+            axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+        )
+
+
+class MaxPool2d(Module):
+    def __call__(x, kernel_size, stride=None):
+        return x.maxpool2d(kernel_size, stride)
+
+    @slope.M().backend.procedure_set.register(static_argnames="kernel_size stride dilation")
+    @staticmethod
+    def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
+        def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+            return (x,) * cnt if isinstance(x, int) else x
+
+        return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
+            axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+        )
+
+
+class ConvNd(Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        W_init=glorot_normal(),
+        dims=2,
+    ):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.dims = dims
+        self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
+        self.bias = Tensor.zeros(out_channels) if bias else None
+
+    def __call__(self, x):
+        return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
 
     @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding")
     @staticmethod
@@ -287,10 +515,12 @@ class ConvNd(Module):
             else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
         )
         padding_ = tuple(padding_)
+
         def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
             # (padding_left, padding_right, padding_top, padding_bottom)
             slc = [(-p0, s + p1) for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
             return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
+
         x = pad2d(x, padding_)
         x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
         rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
@@ -314,64 +544,155 @@ class ConvNd(Module):
         return ret
 
 
+class Conv1d(ConvNd):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        W_init=glorot_normal(),
+    ):
+        super().__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=1
+        )
 
-class MLP(Module):
-    def __init__(self, in_dim, hid_dim, out_dim):
-        self.linear1 = Linear(in_dim, hid_dim)
-        self.linear2 = Linear(hid_dim, out_dim)
+
+class Conv2d(ConvNd):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        W_init=glorot_normal(),
+    ):
+        super().__init__(
+            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=1
+        )
+
+
+class ConvNdTranspose(Module):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size,
+        stride=1,
+        padding=0,
+        dilation=1,
+        groups=1,
+        bias=True,
+        dims=2,
+        output_padding=0,
+        W_init=glorot_normal(),
+    ):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+        self.groups = groups
+        self.dims = dims
+        if output_padding != 0:
+            raise NotImplementedError
+        self.output_padding = output_padding
+        self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
+        self.bias = Tensor.zeros(out_channels) if bias else None
 
     def __call__(self, x):
-        x = self.linear1(x)
-        x = x.relu()
-        x = self.linear2(x)
-        return x
+        return x.conv_transpose(
+            self.weight,
+            groups=self.groups,
+            stride=self.stride,
+            dilation=self.dilation,
+            padding=self.padding,
+            output_padding=self.output_padding,
+        )
+
+    @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding output_padding")
+    def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
+        def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
+            return (x,) * cnt if isinstance(x, int) else x
+
+        def flatten_seq(l):
+            return [item for sublist in l for item in sublist]
+
+        HW, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
+        w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
+        w = w.permute((0, 2, 1, *trailing)).flip(trailing)
+        stride = make_pair(stride, len(HW))
+        if any(s > 1 for s in stride):
+            x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
+            x = x.pad(((0, 0), (0, 0), *flatten_seq(((0, 0), (0, s - 1)) for s in stride)))
+            x = x.reshape((*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)]))
+            x = x.slice(
+                (
+                    (0, x.shape[0]),
+                    (0, x.shape[1]),
+                    *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
+                )
+            )
+        padding = flatten_seq(
+            (
+                ((k - 1) * d - p, (k - 1) * d - p + op)
+                for k, d, p, op in reversed(
+                    list(
+                        zip(
+                            HW,
+                            make_pair(dilation, len(HW)),
+                            make_pair(padding, len(HW)),
+                            make_pair(output_padding, len(HW)),
+                        )
+                    )
+                )
+            )
+        )
+        w = w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
+        return x.conv(w, groups=groups, dilation=dilation, padding=padding)
 
 
-class Fn(Module):
-    def __init__(self, fn):
-        self.fn = fn
-
-    def __call__(self, x):
-        return self.fn(x)
-
-
-class Serial(Module):
-    def __init__(self, modules):
-        self.num_modules = len(modules)
-        for i in range(len(modules)):
-            setattr(self, f"m{i}", modules[i])
-
-    def __call__(self, x, *args, **kwargs):
-        for i in range(self.num_modules):
-            x = getattr(self, f"m{i}")(x, *args, **kwargs)
-        return x
+# ==============
+# Regularization
+# =============
 
 
 class BatchNorm(Module):
-    def __init__(self, channels:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+    def __init__(self, num_features: int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
         self.eps = eps
         self.track_running_stats = track_running_stats
         self.momentum = momentum
 
-        self.weight = slope.ones(channels) if affine else None
-        self.bias = slope.zeros(channels)  if affine else None
+        self.weight = slope.ones(num_features) if affine else None
+        self.bias = slope.zeros(num_features) if affine else None
 
-        self.running_mean = slope.zeros(channels)
-        self.running_var = slope.ones(channels)
+        self.running_mean = slope.zeros(num_features)
+        self.running_var = slope.ones(num_features)
         self.num_batches_tracked = slope.zeros(1)
 
     def __call__(self, x, training=False):
         if training:
-            broadcast_shape = (1, -1) +  (1,)*len(x.shape[2:])
-            reduce_axes = (0,) + tuple(2+i for i in range(len(x.shape[2:])))
-            mean = x.mean(reduce_axes)#.stop_gradient()
-            z = (x - mean.reshape(broadcast_shape))
-            var = (z*z).mean(reduce_axes)#.stop_gradient()
+            broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
+            reduce_axes = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
+            mean = x.mean(reduce_axes)  # .stop_gradient()
+            z = x - mean.reshape(broadcast_shape)
+            var = (z * z).mean(reduce_axes)  # .stop_gradient()
             invstd = (var + self.eps) ** -0.5
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
-                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_numel/(z_numel - z.shape[1]) * var
+                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_numel / (
+                    z_numel - z.shape[1]
+                ) * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
         else:
             mean = self.running_mean
@@ -381,80 +702,165 @@ class BatchNorm(Module):
     @slope.M().backend.procedure_set.register(inline=True)
     @staticmethod
     def batchnorm(x, weight, bias, mean, invstd):
-        broadcast_shape = (1, -1) +  (1,)*len(x.shape[2:])
+        broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
         x = x - mean.reshape(broadcast_shape)
         if weight is not None:
             x = x * weight.reshape(broadcast_shape)
-        ret = (x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd)
+        ret = x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd
         return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
 
-   
 
+class LayerNorm(Module):
+    def __init__(
+        self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True
+    ):
+        self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+        self.axis, self.eps, self.elementwise_affine = (
+            tuple(-1 - i for i in range(len(self.normalized_shape))),
+            eps,
+            elementwise_affine,
+        )
+        self.weight, self.bias = (
+            (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape))
+            if elementwise_affine
+            else (None, None)
+        )
 
-class ReLU(Module):
-    def __call__(self, x):
-        return x.relu()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+    def __call__(self, x: Tensor):
+        assert (
+            self.normalized_shape == x.shape[-len(self.normalized_shape) :]
+        ), f"last dimensions of {x.shape} must match {self.normalized_shape}"
+        x = x.layernorm(eps=self.eps, axis=self.axis)
+        if not self.elementwise_affine:
+            return x
+        return x * self.weight + self.bias
+
+    @slope.M().backend.procedure_set.register(static_argnames="axis eps")
     @staticmethod
-    def relu(x):
-        return x.maximum(slope.zeros_like(x))
+    def layernorm(self, axis=-1, eps: float = 1e-5) -> Tensor:
+        y = self - self.mean(axis, keepdim=True)
+        return y.mul((y * y).mean(axis, keepdim=True).add(eps).rsqrt())
 
 
-class LeakyReLU(Module):
+class LayerNorm2d(LayerNorm):
     def __call__(self, x):
-        return x.relu()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+        return super().__call__(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
+
+
+class Dropout(Module):
+    def __init__(self, p: float):
+        self.p = p
+
+    def __call__(self, x, training=False):
+        return x.dropout(self.p, training)
+
+    @slope.M().backend.procedure_set.register(static_argnames="p")
+    def dropout(self, p, training=False) -> Tensor:
+        if not Tensor.training or p == 0:
+            return self
+        mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(slope.bool)
+        return self * mask * (1 / (1.0 - p))
+
+
+class ScaledDotProductAttention(Module):
+    def __call__(
+        x,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Optional[Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+    ):
+        return x.scaled_dot_product_attention(key, value, attn_mask, dropout_p, is_causal)
+
+    @slope.M().backend.procedure_set.register(static_argnames="dropout_p, is_causal")
+    def scaled_dot_product_attention(
+        x,
+        key: Tensor,
+        value: Tensor,
+        attn_mask: Optional[Tensor] = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+    ) -> Tensor:
+        if is_causal:
+            attn_mask = (
+                Tensor.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
+            )
+        if attn_mask is not None and attn_mask.dtype == slope.bool:
+            attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
+        return (x @ key.transpose(-2, -1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
+
+
+class BCELoss(Module):
+    def __call__(x, y):
+        return x.binary_cross_entropy(y)
+
+    @slope.M().backend.procedure_set.register()
     @staticmethod
-    def leakyrelu(x, neg_slope=0.01):
-        return x.relu() - (slope.full_like(x, -neg_slope) * x).relu()
+    def binary_cross_entropy(x, y: Tensor) -> Tensor:
+        return (-y * x.log() - (1 - y) * (1 - x).log()).mean()
 
-class Sigmoid(Module):
-    def __call__(self, x):
-        return x.sigmoid()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+
+class BCEWithLogitsLoss(Module):
+    def __call__(x, y):
+        return x.binary_cross_entropy_with_logits(y)
+
+    @slope.M().backend.procedure_set.register()
     @staticmethod
-    def sigmoid(x):
-        return 1 / (1 + (-x).exp())
+    def binary_cross_entropy_with_logits(x, y: Tensor) -> Tensor:
+        return (x.maximum(0) - y * x + (1 + x.abs().__neg__().exp()).log()).mean()
 
 
-class Tanh(Module):
-    def __call__(self, x):
-        return x.tanh()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+class CrossEntropyLoss(Module):
+    def __call__(x, y):
+        return x.cross_entropy(y)
+
+    @slope.M().backend.procedure_set.register(static_argnames="ignore_index")
     @staticmethod
-    def tanh(x):
-        return 2.0 * ((2.0 * x).sigmoid()) - 1.0
+    def cross_entropy(self, Y, ignore_index=-1) -> Tensor:
+        # NOTE: self is a logits input
+        loss_mask = Y != ignore_index
+        y_counter = (
+            Tensor.arange(self.shape[-1], dtype=slope.int32, requires_grad=False, device=self.device)
+            .unsqueeze(0)
+            .expand(Y.numel(), self.shape[-1])
+        )
+        y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(
+            *Y.shape, self.shape[-1]
+        )
+        return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
 
-class Swish(Module):
-    def __call__(self, x):
-        return x.swish()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+class Softmax(Module):
+    def __call__(x, axes=-1):
+        return x.softmax(axes)
+
+    @slope.M().backend.procedure_set.register(static_argnames="axes")
     @staticmethod
-    def swish(x):
-        return x * x.sigmoid()
+    def softmax(x, axes=-1):
+        m = x - x.max(axes, keepdims=True)
+        e = m.exp()
+        ss = e.sum(axes, keepdims=True)
+        return e / ss
 
-SiLU = Swish
-# slope.M().backend.procedure_set.alias(Swish.swish, "silu")
 
-class GELU(Module):
-    def __call__(self, x):
-        return x.gelu()
-    
-    @slope.M().backend.procedure_set.register(inline=True)
+class LogSoftmax(Module):
+    def __call__(x, axes=-1):
+        return x.log_softmax(axes)
+
+    @slope.M().backend.procedure_set.register(static_argnames="axes")
     @staticmethod
-    def gelu(x):
-        return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
+    def log_softmax(x, axes=-1):
+        m = x - x.max(axes, keepdims=True)
+        e = m.exp()
+        ss = e.sum(axes, keepdims=True)
+        return m - ss.log()
 
 
 # ====================
 # Optimizers
 # ====================
+
 
 class Optimizer(Module):
     def __init__(self, params, lr: float):
@@ -508,34 +914,26 @@ class SGD(Optimizer):
         return (p, (b,))
 
 
-def AdamW(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8, wd=0.01):
-    return LAMB(params, lr, b1, b2, eps, wd, adam=True)
-
-
-def Adam(params: Tuple[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-8):
-    return LAMB(params, lr, b1, b2, eps, 0.0, adam=True)
-
-
-class LAMB(Optimizer):
-    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, adam=False):
+class Adam(Optimizer):
+    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.0, lamb=False):
         super().__init__(params, lr)
         self.hp.b1 = b1
         self.hp.b2 = b2
         self.hp.eps = eps
         self.hp.wd = weight_decay
-        self.hp.adam = adam
+        self.hp.lamb = lamb
         self.state.m = slope.tree_map(lambda x: x.zeros_like(), self.params)
         self.state.v = slope.tree_map(lambda x: x.zeros_like(), self.params)
 
     def step(self, p, g, m, v):
-        lr, wd, adam = self.hp.lr, self.hp.wd, self.hp.adam
+        lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
         m_hat = m / (1.0 - b1**self.iters)
         v_hat = v / (1.0 - b2**self.iters)
         up = (m_hat / (v_hat.sqrt() + eps)) + wd * p
-        if not adam:
+        if self.hp.lamb:
             r1 = p.square().sum().sqrt()
             r2 = up.square().sum().sqrt()
             r = slope.where(r1 > 0, slope.where(r2 > 0, r1 / r2, 1.0), 1.0)

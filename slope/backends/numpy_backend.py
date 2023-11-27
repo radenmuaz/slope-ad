@@ -15,17 +15,7 @@ from slope.core import (
 
 import math
 import numpy as np
-from typing import (
-    Tuple,
-    List,
-    Dict,
-    Any,
-    Optional,
-    Sequence,
-    Union,
-    Iterator,
-    Callable
-)
+from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, Callable
 from collections import defaultdict
 import importlib
 import os
@@ -1236,6 +1226,7 @@ def zeros_like(y):
 def ones_like(y):
     return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
 
+
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
@@ -1311,7 +1302,9 @@ def argmax(x, axes=None, keepdims=False):
         return math.prod(x.shape) - idx.max() - 1
     axes = axes + len(x.shape) if axes < 0 else axes
     m = (x == x.max(axes=axes, keepdims=True)).cast(slope.int32)
-    idx = m * slope.arange(x.shape[axes] - 1, -1, -1, dtype=slope.int32).reshape((x.shape[axes], *[1] * (x.ndim - axes - 1)))
+    idx = m * slope.arange(x.shape[axes] - 1, -1, -1, dtype=slope.int32).reshape(
+        (x.shape[axes], *[1] * (x.ndim - axes - 1))
+    )
     ret = x.shape[axes] - idx.max(axes=axes, keepdims=keepdims) - 1
     return ret
 
@@ -1340,11 +1333,7 @@ def pow(x, w: Union[Tensor, float], reverse=False) -> Tensor:
     ar = x.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else x.mul(math.log(abs_py(x))).exp()
     # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
     sign = (
-        (x * math.pi).cos()
-        if isinstance(x, Tensor)
-        else math.cos(x * math.pi)
-        if not reverse
-        else (x * math.pi).cos()
+        (x * math.pi).cos() if isinstance(x, Tensor) else math.cos(x * math.pi) if not reverse else (x * math.pi).cos()
     )
     # we only need to correct the sign if the base is negative
     base_sign = ((x.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
@@ -1441,27 +1430,13 @@ def matmul(x, w):
     w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
+
 @procedure_set.register()
 def T(x):
     perm = list(range(x.ndim))
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return x.permute(tuple(perm))
 
-
-@procedure_set.register(static_argnames="axes")
-def softmax(x, axes=-1):
-    m = x - x.max(axes, keepdims=True)
-    e = m.exp()
-    ss = e.sum(axes, keepdims=True)
-    return e / ss
-
-
-@procedure_set.register(static_argnames="axes")
-def log_softmax(x, axes=-1):
-    m = x - x.max(axes, keepdims=True)
-    e = m.exp()
-    ss = e.sum(axes, keepdims=True)
-    return m - ss.log()
 
 @procedure_set.register(inline=True)
 def getitem(self, val):
@@ -1700,146 +1675,6 @@ def flatten(x, start_dim=0):
     return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
 
-@procedure_set.register(static_argnames="k_ stride dilation")
-def pool(
-    x,
-    k_: Tuple[int, ...],
-    stride: Union[Tuple[int, ...], int] = 1,
-    dilation: Union[Tuple[int, ...], int] = 1,
-):
-    assert len(x.shape) >= len(k_), f"can't pool {x.shape} with {k_}"
-    s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
-    assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-    slc_prefix, prefix, i_ = (
-        [(0, x) for x in x.shape[0 : -len(k_)]],
-        x.shape[0 : -len(k_)],
-        x.shape[-len(k_) :],
-    )
-    if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
-        o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
-        xup = x
-        xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
-        xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
-        xup = xup.reshape((*prefix, *[e * i for e, i in zip(e_, i_)]))
-        # slide by dilation
-        xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
-        xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
-        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
-        # handle stride, and permute to move reduce to the end
-        xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
-        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
-        xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
-        return xup.permute(
-            (
-                *range(len(prefix)),
-                *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-                *[len(prefix) + i * 2 for i in range(len(k_))],
-            )
-        )
-    o_ = [(i + (s - k)) // s for i, s, k in zip(i_, s_, k_)]
-    xup = x.padslice(slc_prefix + [(0, o * s) for o, s in zip(o_, s_)])
-    xup = xup.reshape((*prefix, *flatten_seq(((o, s) for o, s in zip(o_, s_)))))
-    xup = xup.padslice((slc_prefix + flatten_seq(((0, o), (0, k)) for o, k in zip(o_, k_))))
-    return xup.permute(
-        (
-            *range(len(prefix)),
-            *[len(prefix) + i * 2 for i in range(len(k_))],
-            *[len(prefix) + i * 2 + 1 for i in range(len(k_))],
-        )
-    )
-
-
-@procedure_set.register(static_argnames="kernel_size stride")
-def avgpool2d(x, kernel_size=(2, 2), stride=None):
-    return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
-        axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
-    )
-
-
-@procedure_set.register(static_argnames="kernel_size stride dilation")
-def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
-    return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
-        axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
-    )
-
-
-@procedure_set.register(static_argnames="groups stride dilation padding output_padding")
-def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
-    HW, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
-    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
-    w = w.permute((0, 2, 1, *trailing)).flip(trailing)
-    stride = make_pair(stride, len(HW))
-    if any(s > 1 for s in stride):
-        x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
-        x = x.pad(((0, 0), (0, 0), *flatten_seq(((0, 0), (0, s - 1)) for s in stride)))
-        x = x.reshape((*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)]))
-        x = x.slice(
-            (
-                (0, x.shape[0]),
-                (0, x.shape[1]),
-                *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
-            )
-        )
-    padding = flatten_seq(
-        (
-            ((k - 1) * d - p, (k - 1) * d - p + op)
-            for k, d, p, op in reversed(
-                list(
-                    zip(
-                        HW,
-                        make_pair(dilation, len(HW)),
-                        make_pair(padding, len(HW)),
-                        make_pair(output_padding, len(HW)),
-                    )
-                )
-            )
-        )
-    )
-    w = w.reshape((w.shape[0] * w.shape[1], *w.shape[2:]))
-    return x.conv(w, groups=groups, dilation=dilation, padding=padding)
-
-
-# @procedure_set.register(static_argnames="groups stride dilation padding")
-# def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
-#     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-#     assert groups * cin == cin_ and len(x.shape) == len(
-#         w.shape
-#     ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
-#     if isinstance(padding, (tuple, list)):
-#         assert len(padding) == 2 * len(HW) or len(padding) == len(
-#             HW
-#         ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
-#     padding_ = (
-#         [padding] * 2 * len(HW)
-#         if isinstance(padding, int)
-#         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-#     )
-#     padding_ = tuple(padding_)
-#     x_ = x
-#     x = x.pad2d(padding_)
-#     x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
-#     rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
-#     x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
-#     x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
-#     x = x.permute(
-#         (
-#             0,
-#             1,
-#             3,
-#             *[4 + i for i in range(len(oyx))],
-#             2,
-#             *[4 + len(oyx) + i for i in range(len(HW))],
-#         )
-#     )
-#     # (bs, groups, rcout, *oyx, cin, *HW)
-#     x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
-#     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
-#     x = x.reshape((bs, cout, *oyx))
-#     ret = x
-#     return ret
-
-
 @procedure_set.register(static_argnames="axis")
 def cumsum(x, axis: int = 0):
     return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0)).pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
@@ -1852,53 +1687,21 @@ def arange_with_cumsum(start, stop=None, step=1):
         stop, start = start, 0
     return slope.full((math.ceil((stop - start) / step),), step).cumsum() + (start - step)
 
+
 @procedure_set.register(static_argnames="dtype")
 def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None] == slope.arange(k, dtype=dtype)).cast(dtype)
 
-@procedure_set.register(inline=True)
-def serial(self, ll:List[Callable[[Tensor], Tensor]]):
-    return functools.reduce(lambda x,f: f(x), ll, self)
-
-@procedure_set.register(static_argnames="axis eps")
-def layernorm(self, axis=-1, eps:float=1e-5) -> Tensor:
-    y = (self - self.mean(axis, keepdim=True))
-    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
-
-@procedure_set.register(static_argnames="p")
-def dropout(self, p=0.5) -> Tensor:
-    if not Tensor.training or p == 0: return self
-    mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(slope.bool)
-    return self * mask * (1/(1.0 - p))
-
-@procedure_set.register()
-def scaled_dot_product_attention(x, key:Tensor, value:Tensor, attn_mask:Optional[Tensor]=None, dropout_p:float=0.0, is_causal:bool=False) -> Tensor:
-    if is_causal: 
-        attn_mask = Tensor.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
-    if attn_mask is not None and attn_mask.dtype == slope.bool: attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
-    return (x @ key.transpose(-2,-1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
-
-@procedure_set.register()
-def binary_crossentropy(x, y:Tensor) -> Tensor:
-    return (-y*x.log() - (1-y)*(1-x).log()).mean()
-
-@procedure_set.register()
-def binary_crossentropy_logits(x, y:Tensor) -> Tensor:
-    return (x.maximum(0) - y * x + (1 + x.abs().__neg__().exp()).log()).mean()
-
-@procedure_set.register(static_argnames="ignore_index")
-def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
-    # NOTE: self is a logits input
-    loss_mask = Y != ignore_index
-    y_counter = Tensor.arange(self.shape[-1], dtype=slope.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
-    y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
-    return self.log_softmax().mul(y).sum() / loss_mask.sum()
 
 # ***** cast ops *****
 
+
 def float(self) -> Tensor:
     return self.cast(slope.float32)
+
+
 def half(self) -> Tensor:
     return self.cast(slope.float16)
+
 
 numpy_backend = Backend(operator_set, procedure_set, compiler)

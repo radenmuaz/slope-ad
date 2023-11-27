@@ -205,6 +205,7 @@ class TensorBuffer:
     def __init__(self, val):
         self.val = val
 
+
 # class TensorMeta(type):
 #     def __getattr__(cls, attr):
 #         if attr in vars(slope.M().backend.operator_set).keys():
@@ -216,6 +217,7 @@ class TensorBuffer:
 #             return partial(procedure, cls)
 #         else:
 #             return cls.__getattribute__(attr)
+
 
 # class Tensor(metaclass=TensorMeta):
 class Tensor:
@@ -844,7 +846,7 @@ class Backend:
 
     def load(self, path: str) -> Tensor:
         return self.compiler.load(path)
-    
+
     def seed(self, seed):
         raise NotImplementedError
 
@@ -2403,6 +2405,7 @@ class Machine:
             return self.jit(grad_fn)
         else:
             return grad_fn
+
     def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
         return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
 

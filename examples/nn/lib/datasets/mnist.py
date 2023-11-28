@@ -33,7 +33,7 @@ def get_mnist():
         "t10k-images-idx3-ubyte.gz",
         "t10k-labels-idx1-ubyte.gz",
     ]:
-        download(base_url + filename, filename)
+        download(base_url + filename, os.path.join(_DATA, filename))
 
     train_images = parse_images(os.path.join(_DATA, "train-images-idx3-ubyte.gz"))
     train_labels = parse_labels(os.path.join(_DATA, "train-labels-idx1-ubyte.gz"))

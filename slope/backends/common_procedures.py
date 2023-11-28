@@ -16,14 +16,6 @@ slice_py = slice
 procedure_set = ProcedureSet()
 
 
-# Utils
-def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
-    return (x,) * cnt if isinstance(x, int) else x
-
-
-def flatten_seq(l: Iterator):
-    return [item for sublist in l for item in sublist]
-
 
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
@@ -258,6 +250,8 @@ def T(x):
     perm = list(range(x.ndim))
     perm[-2], perm[-1] = perm[-1], perm[-2]
     return x.permute(tuple(perm))
+
+
 
 
 @procedure_set.register(inline=True)

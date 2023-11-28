@@ -434,10 +434,13 @@ operator_set.register(reshape)
 
 
 @reshape.set_method
-# def args_fixer(self, x, *, shape):
-def args_fixer(self, x, *shape):
-    if isinstance(shape[0], (tuple, list)):
-        shape = shape[0]
+def args_fixer(self, x, *args, **kwargs):
+    if "shape" in kwargs.keys():
+        shape = kwargs["shape"]
+    elif isinstance(args[0], (tuple, list)):
+        shape = args[0]
+    else:
+        shape = args
     shape = tuple(shape)
     if -1 in shape:
         others = math.prod([d for d in shape if d != -1])

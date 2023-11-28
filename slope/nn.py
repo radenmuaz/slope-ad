@@ -441,8 +441,11 @@ class Pool(Module):
 
 
 class AvgPool2d(Module):
-    def __call__(x, kernel_size, stride=None):
-        return x.avgpool2d(kernel_size, stride)
+    def __init__(self, kernel_size=2, stride=None):
+        self.kernel_size = kernel_size
+        self.stride = stride
+    def __call__(self, x):
+        return x.avgpool2d(self.kernel_size, self.stride)
 
     @slope.M().backend.procedure_set.register(static_argnames="kernel_size stride")
     @staticmethod
@@ -451,7 +454,7 @@ class AvgPool2d(Module):
             return (x,) * cnt if isinstance(x, int) else x
 
         return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
-            axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+            axes=tuple(range(0 - len(make_pair(kernel_size)), 0))
         )
 
 
@@ -493,7 +496,7 @@ class ConvNd(Module):
         self.groups = groups
         self.dims = dims
         self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
-        self.bias = Tensor.zeros(out_channels) if bias else None
+        self.bias = slope.zeros(out_channels) if bias else None
 
     def __call__(self, x):
         return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
@@ -576,7 +579,7 @@ class Conv2d(ConvNd):
         W_init=glorot_normal(),
     ):
         super().__init__(
-            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=1
+            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=2
         )
 
 
@@ -696,7 +699,7 @@ class BatchNorm(Module):
                 self.num_batches_tracked = self.num_batches_tracked + 1
         else:
             mean = self.running_mean
-            invstd = (self.running_var.reshape(1, -1, 1, 1).expand(x.shape) + self.eps).rsqrt()
+            invstd = (self.running_var.reshape((1, -1, 1, 1)).expand(x.shape) + self.eps).rsqrt()
         return x.batchnorm(self.weight, self.bias, mean, invstd)
 
     @slope.M().backend.procedure_set.register(inline=True)

@@ -9,17 +9,49 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-import array
-import gzip
-import os
-from os import path
-import struct
-import urllib.request
-
 import numpy as np
+from lib.datasets.cifar10 import get_cifar10
 
 
-_DATA = "/tmp/slope_data/"
+class ResnetBlock(nn.Module):
+    def __init__(self, in_dim, out_dim, stride=1):
+        self.conv1 = nn.Conv2d(
+            in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm(out_dim)
+        self.conv2 = nn.Conv2d(out_dim, out_dim, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm(out_dim)
+
+        if stride != 1 or in_dim != out_dim:
+            self.shortcut = nn.Sequential([
+                nn.Conv2d(in_dim, out_dim, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm(out_dim)
+            ])
+        else:
+            self.shortcut = lambda x: x
+
+    def __call__(self, x):
+        out = self.bn1(self.conv1(x)).relu()
+        out = self.bn2(self.conv2(out))
+        out = out + self.shortcut(x)
+        out = out.relu()
+        return out
+
+class Net(nn.Module):
+    def __init__(self):
+        self.block1 = ResnetBlock(3, 32)
+        self.block2 = ResnetBlock(32, 32)
+        self.avgpool = nn.AvgPool2d(16)
+        self.linear = nn.Linear(128, 10)
+        self.flatten_fn = nn.Fn(lambda x: x.reshape((x.shape[0], -1)))
+
+    def __call__(self, x, training=False):
+        x = self.block1(x)
+        x = self.block2(x)
+        x = self.avgpool(x)
+        x = self.flatten_fn(x)
+        x = self.linear(x)
+        return x, self if self.training else x
+
 
 def loss_fn(model, batch):
     inputs, targets = batch
@@ -27,12 +59,13 @@ def loss_fn(model, batch):
     return -(preds * targets).sum()
 
 
-g_loss_fn = slope.value_and_grad(loss_fn)
+g_loss_fn = slope.value_and_grad(loss_fn, has_aux=True)
 
 
-@slope.jit
+# @slope.jit
 def train_step(model, batch, optimizer):
-    loss, (g_model, _) = g_loss_fn(model, batch)
+    (loss, model_), g_model = g_loss_fn(model, batch)
+    breakpoint()
     new_model, new_optimizer = optimizer(model, g_model)
     return loss, new_model, new_optimizer
 
@@ -45,24 +78,15 @@ def accuracy(model, batch):
 
 
 if __name__ == "__main__":
-    num_epochs = 3
-    batch_size = 200  # TODO: must be multiple of dataset.
-
-    train_images, train_labels, test_images, test_labels = mnist()
+    num_epochs = 10
+    batch_size = 50  # TODO: must be multiple of dataset
+    train_images, train_labels, test_images, test_labels = get_cifar10()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
     log_interval = 10
     # log_interval = num_batches // 4
-    model = nn.Serial(
-        [
-            nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-            # nn.Linear(784, 10),
-            nn.MLP(784, 100, 10),
-            nn.Fn(lambda x: x.log_softmax(axes=-1)),
-            # nn.Fn(lambda x: x.softmax(axes=-1)),
-        ]
-    )
+    model = Net()
     # optimizer = nn.SGD(model, lr=1e-9, momentum=0., weight_decay=0)
     optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
 

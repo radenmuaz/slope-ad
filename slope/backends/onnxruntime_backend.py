@@ -759,7 +759,7 @@ def T(self, cotangents, *xs, axis=0):
 
 
 # -----------------------
-# LoadOps
+# InitOps
 # -----------------------
 
 full = Operator.init("full")

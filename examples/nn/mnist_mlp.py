@@ -7,7 +7,7 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-from utils.datasets.mnist import get_mnist
+from lib.datasets.mnist import get_mnist
 
 import numpy as np
 
@@ -17,13 +17,16 @@ def loss_fn(model, batch):
     preds = model(x)
     return -(preds * y_onehot).sum()
 
+
 value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
+
 
 @slope.jit
 def train_step(model, batch, optimizer):
     loss, grad_loss_model = value_and_grad_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, grad_loss_model)
     return loss, new_model, new_optimizer
+
 
 def test_all(model, x, y):
     out = model(x)
@@ -60,7 +63,7 @@ if __name__ == "__main__":
                 x = slope.tensor(train_images[batch_idx])
                 y_onehot = slope.tensor(train_labels[batch_idx]).one_hot(10).cast(slope.float32)
                 yield x, y_onehot
-    
+
     x_test, y_test = slope.tensor(test_images), slope.tensor(test_labels).cast(slope.int32)
 
     batches = data_stream()
@@ -69,7 +72,7 @@ if __name__ == "__main__":
     print("\nStarting training...")
     for epoch in range(num_epochs):
         start_time = time.time()
-        for i in (pbar:=tqdm(range(num_batches))):
+        for i in (pbar := tqdm(range(num_batches))):
             batch = next(batches)
             loss, model, optimizer = train_step(model, batch, optimizer)
             pbar.set_description(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")

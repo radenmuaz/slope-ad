@@ -867,10 +867,9 @@ class Backend:
             return Tensor(val)
         elif isinstance(val, Tensor):
             return val
-        else:
-            if type(val) is bytes:
-                val = np.frombuffer(val, dtype=dtype)
-            return self.compiler.from_numpy(val, dtype)
+        if type(val) is bytes:
+            val = np.frombuffer(val, dtype=dtype)
+        return self.compiler.from_numpy(val, dtype)
 
     def save(self, tensor: Tensor, path: str) -> str:
         return self.compiler.save(tensor, path)

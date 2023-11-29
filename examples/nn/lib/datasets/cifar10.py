@@ -31,7 +31,7 @@ def get_cifar10():
             xs += [x]
             ys += [y]
         images = np.concatenate(xs, 0).reshape((-1, 3, 32, 32)).astype(np.float32) / 255.0
-        labels = np.concatenate(ys, 0).reshape((-1))
+        labels = np.concatenate(ys, 0).reshape((-1)).astype(np.int32)
         return images, labels
 
     tt = tarfile.open(save_path, mode="r:gz")

@@ -35,16 +35,13 @@ class ResnetBlock(nn.Module):
 
 class Net(nn.Module):
     def __init__(self):
-        self.block1 = ResnetBlock(3, 32)
-        self.block2 = ResnetBlock(32, 32)
-        self.avgpool = nn.AvgPool2d(16)
-        self.linear = nn.Linear(128, 10)
+        self.block1 = ResnetBlock(3, 4)
+        # self.avgpool = nn.AvgPool2d(8)
+        self.linear = nn.Linear(4096, 10)
         self.flatten_fn = nn.Fn(lambda x: x.reshape((x.shape[0], -1)))
 
     def __call__(self, x, training=False):
         x = self.block1(x)
-        x = self.block2(x)
-        x = self.avgpool(x)
         x = self.flatten_fn(x)
         x = self.linear(x)
         return (x, self) if training else x
@@ -59,10 +56,10 @@ def loss_fn(model, batch):
 g_loss_fn = slope.value_and_grad(loss_fn, has_aux=True)
 
 
-# @slope.jit
+@slope.jit
 def train_step(model, batch, optimizer):
     (loss, model_), g_model = g_loss_fn(model, batch)
-    new_model, new_optimizer = optimizer(model, g_model)
+    new_model, new_optimizer = optimizer(model_, g_model)
     return loss, new_model, new_optimizer
 
 

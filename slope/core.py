@@ -252,6 +252,24 @@ class Tensor:
     def is_unsigned(self) -> bool:
         return self.dtype is self.uint8
 
+    # def bool(self):
+    #     return self.cast(slope.bool)
+    
+    def short(self):
+        return self.cast(slope.int8)
+    
+    def int(self):
+        return self.cast(slope.int32)
+    
+    def long(self):
+        return self.cast(slope.int64)
+    
+    def half(self):
+        return self.cast(slope.float16)
+    
+    def float(self):
+        return self.cast(slope.float32)
+
     def __getattr__(self, attr):
         if attr in vars(slope.M().backend.operator_set).keys():
             op = getattr(slope.M().backend.operator_set, attr)
@@ -549,6 +567,8 @@ class Operator:
                 raise TypeError
             void_x = Typecheckor.like(x)
             void_y = Typecheckor.like(y)
+            if x.dtype != y.dtype:
+                raise TypeError
             if void_x == void_y:
                 return [void_x]
             shape_delta = len(void_x.shape) - len(void_y.shape)
@@ -613,7 +633,18 @@ class Operator:
     @classmethod
     def init(cls, name, **kwargs):
         op = cls(name, OperatorType.Init, **kwargs)
+
+        @op.set_method
+        def jvp(self, primals, tangents, **kwargs):
+            out = self(**kwargs)
+            out_jvp = slope.ones_like(out)
+            return [out], [out_jvp]
+
+        @op.set_method
+        def T(self, cotangents, **kwargs):
+            return [None]
         return op
+
 
     @classmethod
     def other(cls, name, **kwargs):

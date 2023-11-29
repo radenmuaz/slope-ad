@@ -359,39 +359,17 @@ def getitem(self, val):
     return ret
 
 
-@procedure_set.register(static_argnames="pad mode constant_values")
-def pad(x, pad, mode="constant", constant_values=0.0):
-    assert mode == "constant", "Other modes not supported"
-    if type(pad) is int:
-        pad = (pad, pad, 0) * x.ndim
-    elif all(type(pw) is int for pw in pad):
-        assert len(pad) == x.ndim
-        pad = tuple((pw, pw, 0) for pw in pad)
-    elif len(pad) == 2 and all(type(item) is int for item in pad):
-        pad = (*pad, 0) * x.ndim
-    elif len(pad) == 3 and all(type(item) is int for item in pad):
-        pad = (pad,) * x.ndim
-    else:
-        assert all(2 <= len(pw) <= 3 for pw in pad)
-        pad = tuple((*pw, 0) if len(pw) == 2 else pw for pw in pad)
-    lo, hi, interior = tuple(zip(*pad))
-    return x.pad_lowlevel(lo, hi, interior, value=constant_values)
-
-
-@procedure_set.register(static_argnames="arg")
-def slice(x, arg):
-    arg = tuple((*a, 1) if len(a) == 2 else a for a in arg)
-    starts, limits, strides = tuple(zip(*arg))
-    return x.slice_lowlevel(starts, limits, strides)
-
 
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
+    def flatten_seq(l: Iterator):
+        return [item for sublist in l for item in sublist]
+    # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(padding, constant_values=value)
-    slc = tuple([(p[0] + padding[i][0], p[1] + padding[i][0]) for i, p in enumerate(arg_)])
-    x = x.slice(slc)
+    x = x.pad(flatten_seq(padding), value=value) # flatten
+    starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
+    x = x.slice(starts, limits, strides)
     return x
 
 
@@ -506,17 +484,4 @@ def arange_with_cumsum(start, stop=None, step=1):
 
 @procedure_set.register(static_argnames="dtype")
 def one_hot(x, k, dtype=Tensor.int32):
-    return (x[:, None] == slope.arange(k, dtype=dtype)).cast(dtype)
-
-
-# ***** cast ops *****
-
-
-def float(self) -> Tensor:
-    return self.cast(slope.float32)
-
-
-def half(self) -> Tensor:
-    return self.cast(slope.float16)
-
-
+    return (x[:, None].cast(dtype) == slope.arange(k, dtype=dtype)).cast(dtype)

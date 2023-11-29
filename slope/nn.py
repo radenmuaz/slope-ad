@@ -686,9 +686,9 @@ class BatchNorm(Module):
         if training:
             broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
             reduce_axes = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
-            mean = x.mean(reduce_axes)  # .stop_gradient()
+            mean = x.mean(reduce_axes).stop_gradient()
             z = x - mean.reshape(broadcast_shape)
-            var = (z * z).mean(reduce_axes)  # .stop_gradient()
+            var = (z * z).mean(reduce_axes).stop_gradient()
             invstd = (var + self.eps) ** -0.5
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)

@@ -46,9 +46,10 @@ def jvp(self, primals, tangents, **params):
 
 @stop_gradient.set_method
 def T(self, cotangents, x):
-    (z,) = cotangents
-    assert type(x) is PrimalProxy
-    return [slope.zeros_like(z)]
+    return [None]
+    # (z,) = cotangents
+    # assert type(x) is PrimalProxy
+    # return [slope.zeros_like(x)]
 
 
 cast = Operator.unary("cast")
@@ -294,6 +295,8 @@ def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typechecko
         Typecheckor,
     ):
         raise TypeError
+    if x.dtype != y.dtype:
+        raise TypeError
     void_x = Typecheckor.like(x)
     void_y = Typecheckor.like(y)
     if void_x == void_y:
@@ -499,19 +502,22 @@ def T(self, cotangents, x, *, perm):
     return [z.permute(inv_perm)]
 
 
-pad_lowlevel = Operator.other("pad_lowlevel")
-operator_set.register(pad_lowlevel)
+pad = Operator.other("pad")
+operator_set.register(pad)
 
 
-@pad_lowlevel.set_method
-def args_fixer(self, x, *, lo, hi, interior=None, value=0.0):
-    if interior is None:
-        interior = tuple([0] * len(lo))
-    return (x,), dict(lo=lo, hi=hi, interior=interior, value=value)
+@pad.set_method
+def args_fixer(self, x, *, padding, mode='constant', value=0.0):
+    if isinstance(padding, int):
+        padding = (padding, padding) * x.ndim
+    elif all(isinstance(pw, int) for pw in padding):
+        assert (x.ndim * 2) % len(padding) == 0
+        padding = (0, 0) * (x.ndim - len(padding)//2) + tuple(padding)
+    return (x,), dict(padding=padding, mode=mode, value=value)
 
 
-@pad_lowlevel.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
+@pad.set_method
+def vmap(self, axis_size, vals_in, dims_in, *, padding, mode, value):
     raise NotImplementedError
     Operand, padding_value = batched_args
     Operand_bdim, padding_value_bdim = batch_dims
@@ -532,14 +538,17 @@ def vmap(self, axis_size, vals_in, dims_in, *, pinterior=None, value=0.0):
     return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
 
 
-@pad_lowlevel.set_method
-def jvp(self, primals, tangents, *, lo, hi, interior=None, value=0.0):
+@pad.set_method
+def jvp(self, primals, tangents, *, padding, mode, value):
     (x,), (x_dot,) = primals, tangents
-    return [x.pad_lowlevel(lo, hi, interior, value)], [x_dot.pad_lowlevel(lo, hi, interior, value)]
+    return [x.pad(padding, mode, value)], [x_dot.pad(padding, mode, value)]
 
 
-@pad_lowlevel.set_method
-def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List[Typecheckor]:
+@pad.set_method
+def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor]:
+    lo = [padding[i] for i in range(0, len(padding), 2)]
+    hi = [padding[i] for i in range(1, len(padding), 2)]
+    interior = [0] * (len(padding) // 2)
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -554,34 +563,33 @@ def typecheck(self, x: Typecheckor, *, lo, hi, interior=None, value=0.0) -> List
     return [res]
 
 
-@pad_lowlevel.set_method
+@pad.set_method
 def T(self, cotangents, x, *, lo, hi, interior=None, value=0.0):
     (z,) = cotangents
 
     def t_op():
-        unpadded = z.slice_lowlevel(
+        unpadded = z.slice(
             lo,
             tuple(s - h for s, h in list_zip(z.shape, hi)),
             tuple([1] * len(interior)),
         )
-        return unpadded.slice_lowlevel(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
+        return unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
     res = t_op() if isinstance(x, PrimalProxy) else None
     return [res]
 
+slice = Operator.other("slice")
+operator_set.register(slice)
 
-slice_lowlevel = Operator.other("slice_lowlevel")
-operator_set.register(slice_lowlevel)
 
-
-@slice_lowlevel.set_method
+@slice.set_method
 def args_fixer(self, x, *, starts, limits, strides=None):
     if strides is None:
         strides = (1,) * len(starts)
     return (x,), dict(starts=starts, limits=limits, strides=strides)
 
 
-@slice_lowlevel.set_method
+@slice.set_method
 def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
     (x,) = vals_in
@@ -599,17 +607,17 @@ def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
         new_strides = list(strides)
         new_strides.insert(x_bdim, 1)
 
-    out = x.slice_lowlevel(new_start_indices, new_limit_indices, new_strides)
+    out = x.slice(new_start_indices, new_limit_indices, new_strides)
     return out, x_bdim
 
 
-@slice_lowlevel.set_method
+@slice.set_method
 def jvp(self, primals, tangents, *, starts, limits, strides=None):
     (x,), (x_dot,) = primals, tangents
-    return [x.slice_lowlevel(starts, limits, strides)], [x_dot.slice_lowlevel(starts, limits, strides)]
+    return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
 
 
-@slice_lowlevel.set_method
+@slice.set_method
 def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typecheckor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
@@ -623,7 +631,7 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
         return [Typecheckor(x.shape, x.dtype)]
 
 
-@slice_lowlevel.set_method
+@slice.set_method
 def T(self, cotangents, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
@@ -648,7 +656,7 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
 
-    res = z.pad_lowlevel(lo, hi, interior)
+    res = z.pad(lo, hi, interior)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
@@ -753,7 +761,7 @@ def T(self, cotangents, *xs, axis=0):
         l[axis] = limit_points[i]
 
     return [
-        z.slice_lowlevel(start, limit) if type(o) is PrimalProxy else None
+        z.slice(start, limit) if type(o) is PrimalProxy else None
         for o, start, limit in zip(xs, starts, limits)
     ]
 
@@ -1498,14 +1506,14 @@ ret = Squeeze (ret_fill_value, ret_squeeze_dim)
     else:
         if len(shape) > 0:
             return f"""
-ret_fill_value = Constant < value = int64[1] {{ {fill_value} }}>()
+ret_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
 ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
 ret_expand = Expand (ret_fill_value, ret_shape)
 ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_expand)
 """
         else:  # scalar case
             return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+ret_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
 ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
 ret_squeeze = Squeeze (ret_fill_value, ret_squeeze_dim)
 ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_squeeze)
@@ -1563,23 +1571,29 @@ ret = Reshape({x}, ret_shape)
         ret = Squeeze (ret_reshape, ret_squeeze_dim)"""
 
 
-@compiler.set_impl(operator_set.pad_lowlevel)
-def pad_lowlevel_impl(self, x, *, lo, hi, interior, value):  # TODO: interior not used
-    padding = lo + hi
+@compiler.set_impl(operator_set.pad)
+def pad_impl(self, x, *, padding, mode, value):  # TODO: interior not used
+    padding = padding[0::2] + padding[1::2]
     return f"""
-ret_padding = Constant <value = int64[{len(padding)}] {padding}>()
-ret_constant_value =  Constant <value = {value} >()
-ret = Pad({x} ret_padding, ret_constant_value)
+ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+ret = Pad({x}, ret_padding)
 """
+#     return f"""
+# ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+# ret_constant_value =  Constant <value = {value} >()
+# ret = Pad({x}, ret_padding, ret_constant_value)
+# """
 
 
-@compiler.set_impl(operator_set.slice_lowlevel)
-def slice_lowlevel_impl(self, x, *, starts, limits, strides):
+
+@compiler.set_impl(operator_set.slice)
+def slice_impl(self, x, *, starts, limits, strides):
     return f"""
-ret_starts = Constant <value = int64[{len(starts)}] {starts}>()
-ret_ends = Constant <value = int64[{len(limits)}] {limits}>()
-ret_steps = Constant <value = int64[{len(strides)}] {strides}>()
-ret = Slice({x}, ret_starts, ret_ends, steps=ret_steps))])
+ret_starts = Constant <value = int64[{len(starts)}]  {{ {repr(list(starts))[1:-1]} }}>()
+ret_ends = Constant <value = int64[{len(limits)}]  {{ {repr(list(limits))[1:-1]} }}>()
+ret_axes = Constant <value = int64[{len(strides)}]  {{ {repr(list(range(len(starts))))[1:-1]} }}>()
+ret_steps = Constant <value = int64[{len(strides)}]  {{ {repr(list(strides))[1:-1]} }}>()
+ret = Slice({x}, ret_starts, ret_ends, ret_axes, ret_steps)
 """
 
 
@@ -1596,11 +1610,11 @@ def permute_impl(self, x, *, perm):
 @compiler.set_impl(operator_set.flip)
 def flip_impl(self, x, *, axes):
     return f"""
-ret_starts = Constant <value = int64[{len(axes)}] {", ".join(["0"] * len(axes))}>()
-ret_ends = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-ret_axes = Constant <value = int64[{len(axes)}] {repr(list(axes))[1:-1]}>()
-ret_steps = Constant <value = int64[{len(axes)}] {", ".join(["-1"] * len(axes))}>()
-ret = Slice({x}, ret_starts, ret_ends, ret_axes, steps)])
+ret_starts = Constant <value = int64[{len(axes)}] {{ {", ".join(["0"] * len(axes))} }}>()
+ret_ends = Constant <value = int64[{len(axes)}]  {{ {", ".join(["-1"] * len(axes))} }}>()
+ret_axes = Constant <value = int64[{len(axes)}]  {{ {repr(list(axes))[1:-1]} }}>()
+ret_steps = Constant <value = int64[{len(axes)}] {{ {", ".join(["-1"] * len(axes))} }}>()
+ret = Slice({x}, ret_starts, ret_ends, ret_axes, ret_steps)
 """
 
 

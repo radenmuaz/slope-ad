@@ -643,16 +643,15 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
 
 
 @slice.set_method
-def T(self, cotangents, x, *, starts, limits, strides=None):
+def T(self, cotangents, x, *, starts, limits, strides):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
     x_shape = x.aval.shape
     assert isinstance(x, PrimalProxy)
-    if strides is None or np.all(np.equal(strides, 1)):
-        lo, hi, interior = (
+    if np.all(np.equal(strides, 1)):
+        lo, hi = (
             starts,
-            tuple(np.subtract(x.aval.shape, limits)),
-            (0,) * len(starts),
+            tuple(np.subtract(x.aval.shape, limits))
         )
     else:
         real_limits = np.add(
@@ -665,9 +664,12 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
                 )
             ),
         )
-        lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
-
-    res = z.pad(lo, hi, interior)
+        lo, hi = list_zip(starts, np.subtract(x_shape, real_limits))
+    padding = []
+    for l, h in zip(lo, hi):
+        padding += [l]
+        padding += [h]
+    res = z.pad(tuple(padding))
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
@@ -1121,7 +1123,7 @@ compiler.set_impl(operator_set.full)(
 
 compiler.set_impl(operator_set.random_uniform)(
     lambda self, *, shape, dtype: (
-        f"ret = {'np.array(' if shape == () else ''}np.random.uniform(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
+        f"ret = {'np.array(' if shape == () else ''}np.random.uniform(low=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
     )
 )
 compiler.set_impl(operator_set.random_normal)(

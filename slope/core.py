@@ -1989,7 +1989,10 @@ class Machine:
             jvp_flat_ret = f(*tracers_in, **static_args)
             if has_aux:
                 (outs, aux) = jvp_flat_ret
+                # aux_ = aux
                 aux = self.tree_map(lambda x: x.primal, aux)
+                # aux = self.tree_map(lambda x: x.full_lower(), aux)
+                # breakpoint()
             else:
                 outs = jvp_flat_ret
             tracers_out = [self.full_raise(trace, out) for out in outs]
@@ -2029,7 +2032,9 @@ class Machine:
                 trace = ProgramTrace(main)
                 tracers_in = [trace.new_arg(aval) for aval in avals_in]
                 outs = f(*tracers_in, **{k: v for k, v in static_args})
-                tracers_out = [self.full_raise(trace, out) for out in outs]
+                # tracers_out = [self.full_raise(trace, out) for out in outs]
+                # raise check because of aux is not ProgramTracor
+                tracers_out = [self.full_raise(trace, out) if isinstance(out, ProgramTracor) else out.val for out in outs]
                 program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
         return program, consts, out_tree_store()
@@ -2395,21 +2400,6 @@ class Machine:
 
         return trans_program, consts
 
-    # def value_and_grad(self, f):
-    #     def value_and_grad_fn(x, *xs, **static_args):
-    #         y, f_vjp = self.vjp(f, x, *xs, **static_args)
-    #         if np.shape(y) != ():
-    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
-    #         x_bars = f_vjp(self.backend.ones(()))
-    #         return y, x_bars
-
-    #     # TODO: if nested jit, rejit, find cleaner way
-    #     if isinstance(f, self.jit):
-    #         f = f.f
-    #         return self.jit(value_and_grad_fn)
-    #     else:
-    #         return value_and_grad_fn
-
     def grad(self, f, argnums=(0,), argnames="", has_aux=False, return_value=False):
         if isinstance(f, self.jit):
             f = f.f
@@ -2435,9 +2425,34 @@ class Machine:
             return self.jit(grad_fn)
         else:
             return grad_fn
+    
 
     def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
         return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
+
+    
+    # def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
+    #     if isinstance(f, self.jit):
+    #         f = f.f
+    #     if isinstance(argnums, int):
+    #         argnums = (argnums,)
+
+    #     def grad_fn(x, *xs, **static_args):
+    #         vjp_ret = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
+    #         if has_aux:
+    #             y, f_vjp, aux = vjp_ret
+    #         else:
+    #             y, f_vjp = vjp_ret
+    #         if np.shape(y) != ():
+    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
+    #         grad_L_xs = f_vjp(self.backend.ones(()))
+    #         grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
+    #         return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
+
+    #     if isinstance(f, self.jit):
+    #         return self.jit(grad_fn)
+    #     else:
+    #         return grad_fn
 
     class jit:
         def __init__(self, f, static_argnames=(), name=None):

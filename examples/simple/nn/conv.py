@@ -6,17 +6,22 @@ class Block(nn.Module):
     def __init__(self, in_dim, out_dim, stride=1):
         self.conv1 = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm(out_dim)
-    def __call__(self, x):
-        return self.bn1(self.conv1(x)).relu()
+    def __call__(self, x, training=False):
+        x_ = x
+        x = self.conv1(x)
+        x = self.bn1(x, training)
+        x = x.relu()
+        return x
+        # return self.conv1(x).relu()
 
 class Net(nn.Module):
     def __init__(self):
-        self.block1 = Block(3, 2)
+        self.block1 = Block(3, 8)
         self.flatten_fn = nn.Fn(lambda x: x.reshape((x.shape[0], -1)))
-        self.linear = nn.Linear(2048, 10)
+        self.linear = nn.Linear(8192, 10)
 
     def __call__(self, x, training=False):
-        x = self.block1(x)
+        x = self.block1(x, training)
         x = self.flatten_fn(x)
         x = self.linear(x)
         return (x, self) if training else x
@@ -35,7 +40,9 @@ def grad_step(model, batch):
     return loss, g_model, model_
 
 model = Net()
-x = slope.ones((1,3,32,32))
+# x = slope.ones((1,3,32,32))
+x = slope.rand((1,3,32,32))
+# x = slope.arange(math.prod((1,3,32,32)), dtype=slope.float32).reshape((1,3,32,32)) * 0.001
 y = slope.ones((1,)).one_hot(10, dtype=slope.float32)
 loss, g_model, model_ = grad_step(model, (x,y)) 
 breakpoint()

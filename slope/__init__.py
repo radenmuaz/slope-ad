@@ -10,7 +10,7 @@ INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
 SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
 SLOPE_DTYPE = os.environ.get("SLOPE_DTYPE", "float32")
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
-
+NO_JIT = int(os.environ.get("NO_JIT", 0))
 
 def dblog(*msg, enable=True):
     if enable:

@@ -251,6 +251,30 @@ def T(self, cotangents, x, w):
     return [grad_L_y / w, None]
 
 
+pow = Operator.binary("pow")
+operator_set.register(pow)
+
+
+@pow.set_method
+def jvp(self, primals, tangents):
+    (x, w), (x_dot, w_dot) = primals, tangents
+    y = x*w
+    y_dot1 = (x_dot * (w * (x ** (w-slope.ones_like(w)))))
+    y_dot2 = (w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log() ))
+    return [y], [ y_dot1 + y_dot2 ]
+
+
+@pow.set_method
+def T(self, cotangents, x, w):
+    (grad_L_y,) = cotangents
+    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
+    if type(x) is PrimalProxy:
+        return [ (grad_L_y * (w * (x ** (w-slope.ones_like(w))))), None]
+    elif type(w) is PrimalProxy:
+        return [None, grad_L_y * (y * (x if x != 0.0 else slope.zeros_like(x)).log() )]
+
+
+
 maximum = Operator.binary("maximum")
 operator_set.register(maximum)
 
@@ -1105,6 +1129,7 @@ compiler.set_impl(operator_set.add)(lambda self, x, w: f"ret = np.add({x}, {w})"
 compiler.set_impl(operator_set.sub)(lambda self, x, w: f"ret = np.subtract({x}, {w})")
 compiler.set_impl(operator_set.mul)(lambda self, x, w: f"ret = np.multiply({x}, {w})")
 compiler.set_impl(operator_set.div)(lambda self, x, w: f"ret = np.divide({x}, {w})")
+compiler.set_impl(operator_set.pow)(lambda self, x, w: f"ret = np.power({x}, {w})")
 compiler.set_impl(operator_set.invert)(lambda self, x: f"ret = np.invert({x})")
 compiler.set_impl(operator_set.equal)(lambda self, x, w: f"ret = np.equal({x}, {w})")
 compiler.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = np.maximum({x}, {w})")
@@ -1299,48 +1324,6 @@ def argmax(x, axes=None, keepdims=False):
 @procedure_set.register(static_argnames="axes keepdims")
 def argmin(x, axes=None, keepdims=False):
     return (-x).argmax(axes=axes, keepdims=keepdims)
-
-
-@procedure_set.register(inline=True)
-def pow(x, w: Union[Tensor, float], reverse=False) -> Tensor:
-    if w.__class__ is not Tensor and not reverse:
-        # simple pow identities
-        if w < 0:
-            return (slope.ones_like(x) / x) ** (-w)
-        if w == 3.0:
-            return x * x * x
-        if w == 2.0:
-            return x * x
-        if w == 1.0:
-            return x
-        if w == 0.5:
-            return x.sqrt()
-    if not isinstance(x, Tensor) and reverse and x > 0:
-        return x.mul(math.log(x)).exp()
-    ar = x.abs().log().mul(x).exp() if not reverse or isinstance(x, Tensor) else x.mul(math.log(abs_py(x))).exp()
-    # correct sign of negative numbers raised to a power (cos has a period of 2pi so we use it here to get the oddness of the power)
-    sign = (
-        (x * math.pi).cos() if isinstance(x, Tensor) else math.cos(x * math.pi) if not reverse else (x * math.pi).cos()
-    )
-    # we only need to correct the sign if the base is negative
-    base_sign = ((x.sign() if not reverse else x.sign() if isinstance(x, Tensor) else math.copysign(1, x)) - 1) / -2
-    # we need 0 to be positive so we need to correct base_sign when the base is 0
-    base_sign = base_sign - (
-        1.5
-        * (1 - (x.sign().abs() if not reverse else x.sign().abs() if isinstance(x, Tensor) else abs_py(int(bool(x)))))
-    )
-    # inject nan if the base is negative and the power is not an integer
-    to_nan = (
-        ((x - x.trunc()) * 1e10).abs().clip(0, 1)
-        if isinstance(x, Tensor)
-        else int(bool(x - int(x)))
-        if not reverse
-        else ((x - x.trunc()) * 1e10).abs().clip(0, 1)
-    ) * base_sign
-    inject_nan = (
-        ((((-to_nan) * 2) + 1)).log().add(1) if isinstance(to_nan, Tensor) else 1 if not to_nan else float("nan")
-    )
-    return ar.mul(sign * base_sign + (1 - base_sign)).mul(inject_nan)
 
 
 @procedure_set.register()

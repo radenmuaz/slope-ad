@@ -21,7 +21,7 @@ def loss_fn(model, batch):
 value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
 
 
-@slope.jit
+# @slope.jit
 def train_step(model, batch, optimizer):
     loss, grad_loss_model = value_and_grad_loss_fn(model, batch)
     new_model, new_optimizer = optimizer(model, grad_loss_model)
@@ -52,7 +52,8 @@ if __name__ == "__main__":
             nn.Fn(lambda x: x.log_softmax(axes=-1)),
         ]
     )
-    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
+    # optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
+    optimizer = nn.Adam(model, lr=1e-3)
 
     def data_stream():
         rng = np.random.RandomState(0)

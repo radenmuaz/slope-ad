@@ -71,7 +71,7 @@ def test_all(model, x, y):
     return accuracy
 
 if __name__ == "__main__":
-    num_epochs = 10
+    num_epochs = 50
     batch_size = 50  # TODO: must be multiple of dataset
     train_images, train_labels, test_images, test_labels = get_cifar10()
     num_train = train_images.shape[0]
@@ -79,7 +79,8 @@ if __name__ == "__main__":
     num_batches = num_complete_batches + bool(leftover)
     model = Net()
     # optimizer = nn.SGD(model, lr=1e-9, momentum=0., weight_decay=0)
-    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
+    optimizer = nn.SGD(model, lr=1e-5, momentum=0.8, weight_decay=1e-9)
+    # optimizer = nn.Adam(model, lr=1e-3)
 
     def data_stream():
         rng = np.random.RandomState(0)
@@ -87,7 +88,7 @@ if __name__ == "__main__":
             perm = rng.permutation(num_train)
             for i in range(num_batches):
                 batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                x = slope.tensor(train_images[batch_idx])
+                x = slope.tensor(train_images[batch_idx]) * 0.5 - 0.5
                 y_onehot = slope.tensor(train_labels[batch_idx]).one_hot(10).cast(slope.float32)
                 yield x, y_onehot
 

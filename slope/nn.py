@@ -881,10 +881,7 @@ class Optimizer(Module):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
-        params_out, state_attrs_out = step_out_T
-        state = Module()
-        for k, v in zip(state_names, state_attrs_out):
-            setattr(state, k, v)
+        params_out, state = step_out_T
         self.state = state
         self.iters = self.iters + 1
         return (params_out, self)
@@ -914,36 +911,32 @@ class SGD(Optimizer):
         b = m * b + g
         g = (g + m * b) if self.hp.nesterov else b
         p = p - lr * g
-        return (p, (b,))
+        state = Module()
+        state.b = b
+        return (p, state)
 
 
 class Adam(Optimizer):
-    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-8, weight_decay=0.0, lamb=False):
+    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-3, weight_decay=0.0):
         super().__init__(params, lr)
         self.hp.b1 = b1
         self.hp.b2 = b2
         self.hp.eps = eps
         self.hp.wd = weight_decay
-        self.hp.lamb = lamb
-        self.state.m = slope.tree_map(lambda x: x.zeros_like(), self.params)
-        self.state.v = slope.tree_map(lambda x: x.zeros_like(), self.params)
+        self.state.m = slope.tree_map(lambda x: x.ones_like(), self.params)
+        self.state.v = slope.tree_map(lambda x: x.ones_like(), self.params)
 
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
-        m_hat = m / (1.0 - b1**self.iters)
-        v_hat = v / (1.0 - b2**self.iters)
+        m_hat = m / (2.0 - b1**(self.iters+1))
+        v_hat = v / (2.0 - b2**(self.iters+1))
         up = (m_hat / (v_hat.sqrt() + eps)) + wd * p
-        if self.hp.lamb:
-            r1 = p.square().sum().sqrt()
-            r2 = up.square().sum().sqrt()
-            r = slope.where(r1 > 0, slope.where(r2 > 0, r1 / r2, 1.0), 1.0)
-        else:
-            r = 1.0
+        r = 1.0
         p = p * lr * r * up
         state = Module()
         state.m = m
         state.v = v
-        return p, state
+        return (p, state)

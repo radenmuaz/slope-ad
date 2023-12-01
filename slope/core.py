@@ -302,9 +302,9 @@ class Tensor:
     __truediv__ = __div__
     __truerdiv__ = __rdiv__
     __pow__ = lambda self, other: self.pow(other)
-    __rpow__ = lambda self, other: self.pow.func(other, self)
+    __rpow__ = lambda self, other: self.pow.func(self, other)
     __matmul__ = lambda self, other: self.matmul(other)
-    __rmatmul__ = lambda self, other: self.matmul.func(other, self)
+    __rmatmul__ = lambda self, other: self.matmul.func(self, other)
     __invert__ = lambda self: self.invert()
     __eq__ = lambda self, other: self.equal(other)
     __ne__ = lambda self, other: self.not_equal(other)
@@ -2493,6 +2493,8 @@ class Machine:
             return program, consts, out_tree
 
         def __call__(self, *args, **static_args):
+            if slope.NO_JIT:
+                return self.f(*args, **static_args)
             program, consts, out_tree = self.get_program(*args, **static_args)
             args, in_tree = slope.M().tree_flatten(args)
             outs = slope.M().bind(jit_op, *consts, *args, program=program)

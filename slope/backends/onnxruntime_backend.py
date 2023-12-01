@@ -1039,7 +1039,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
 @conv.set_method
 def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
     (x, w), (x_dot, w_dot) = primals, tangents
-    y = x.conv(w)
+    y = x.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
     y_dot1 = x_dot.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
     y_dot2 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
 
@@ -1079,7 +1079,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         if output_padding != 0:
             raise NotImplementedError
     elif isinstance(output_padding, tuple):
-        if not all(o != 0 for o in output_padding):
+        if not all(o == 0 for o in output_padding):
             raise NotImplementedError
     (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(

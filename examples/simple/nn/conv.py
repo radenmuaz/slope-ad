@@ -7,12 +7,10 @@ class Block(nn.Module):
         self.conv1 = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm(out_dim)
     def __call__(self, x, training=False):
-        x_ = x
         x = self.conv1(x)
         x = self.bn1(x, training)
         x = x.relu()
         return x
-        # return self.conv1(x).relu()
 
 class Net(nn.Module):
     def __init__(self):
@@ -45,7 +43,6 @@ x = slope.rand((1,3,32,32))
 # x = slope.arange(math.prod((1,3,32,32)), dtype=slope.float32).reshape((1,3,32,32)) * 0.001
 y = slope.ones((1,)).one_hot(10, dtype=slope.float32)
 loss, g_model, model_ = grad_step(model, (x,y)) 
-breakpoint()
 
 
 # def loss_fn(model, batch):

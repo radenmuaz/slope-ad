@@ -18,8 +18,6 @@ pip install -e .
 
 # Quickstart
 
-# Quickstart
-
 Slope is an automatic diffentation (AD) library, where the Tensor semantics feel like pytorch, but AD semantics feels like JAX (maybe also functorch)
 
 # Slope have familiar Pytorch-like syntax

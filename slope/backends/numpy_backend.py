@@ -49,10 +49,6 @@ def jvp(self, primals, tangents, **params):
 @stop_gradient.set_method
 def T(self, cotangents, x):
     return [None]
-    # (z,) = cotangents
-    # assert type(x) is PrimalProxy
-    # return [slope.zeros_like(x)]
-
 
 cast = Operator.unary("cast")
 astype = cast
@@ -271,7 +267,7 @@ def T(self, cotangents, x, w):
     if type(x) is PrimalProxy:
         return [ (grad_L_y * (w * (x ** (w-slope.ones_like(w))))), None]
     elif type(w) is PrimalProxy:
-        return [None, grad_L_y * (y * (x if x != 0.0 else slope.zeros_like(x)).log() )]
+        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))) ]
 
 
 
@@ -1214,13 +1210,21 @@ procedure_set = ProcedureSet()
 
 
 
-@procedure_set.register(static_argnames="shape dtype")
-def zeros(shape, dtype=Tensor.float32):
+@procedure_set.register(inline=True)
+def zeros(*args, **kwargs):
+    dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
+    if kwargs.get("shape", None) is None:
+        shape = args[0] if isinstance(args[0], (tuple, list)) else args
+        assert all(i >= 0 for i in shape)
     return slope.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(static_argnames="shape dtype")
-def ones(shape, dtype=Tensor.float32):
+@procedure_set.register(inline=True)
+def ones(*args, **kwargs):
+    dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
+    if kwargs.get("shape", None) is None:
+        shape = args[0] if isinstance(args[0], (tuple, list)) else args
+        assert all(i >= 0 for i in shape)
     return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
@@ -1231,12 +1235,12 @@ def full_like(y, fill_value):
 
 @procedure_set.register()
 def zeros_like(y):
-    return zeros(shape=y.shape, dtype=y.dtype)
+    return full_like(y, 0.0)
 
 
 @procedure_set.register()
 def ones_like(y):
-    return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
+    return full_like(y, 1.0)
 
 
 @procedure_set.register()

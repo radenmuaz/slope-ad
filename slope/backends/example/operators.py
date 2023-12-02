@@ -1,7 +1,9 @@
 import slope
 from slope.core import (
     OperatorSet,
+    Operator,
     Tensor,
+    Typecheckor
 )
 
 import math

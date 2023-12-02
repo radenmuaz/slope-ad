@@ -49,9 +49,6 @@ def jvp(self, primals, tangents, **params):
 @stop_gradient.set_method
 def T(self, cotangents, x):
     return [None]
-    # (z,) = cotangents
-    # assert type(x) is PrimalProxy
-    # return [slope.zeros_like(x)]
 
 
 cast = Operator.unary("cast")

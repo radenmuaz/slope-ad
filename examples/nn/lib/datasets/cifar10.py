@@ -8,16 +8,16 @@ import numpy as np
 from urllib import request
 from tqdm import tqdm
 
-_DATA = "/tmp/slope_data/cifar10/"
+SLOPE_DATA = os.environ.get("SLOPE_DATA", os.path.join(os.path.expanduser("~"), "slope_data"))
 
 
 def get_cifar10():
     base_url = "https://www.cs.toronto.edu/~kriz/"
     filename = "cifar-10-python.tar.gz"
     url = base_url + filename
-    save_path = _DATA + filename
-    if not os.path.exists(_DATA):
-        os.makedirs(_DATA, exist_ok=True)
+    save_path = SLOPE_DATA + filename
+    if not os.path.exists(SLOPE_DATA):
+        os.makedirs(SLOPE_DATA, exist_ok=True)
         if not os.path.isfile(save_path):
             print(f"downloading {url}")
             request.urlretrieve(url, save_path)

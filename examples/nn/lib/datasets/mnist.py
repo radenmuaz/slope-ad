@@ -4,7 +4,7 @@ import struct
 import array
 from urllib import request
 
-_DATA = "/tmp/slope_data/mnist/"
+SLOPE_DATA = os.environ.get("SLOPE_DATA", os.path.join(os.path.expanduser("~"), "slope_data"))
 
 
 def get_mnist():
@@ -33,12 +33,12 @@ def get_mnist():
         "t10k-images-idx3-ubyte.gz",
         "t10k-labels-idx1-ubyte.gz",
     ]:
-        download(base_url + filename, os.path.join(_DATA, filename))
+        download(base_url + filename, os.path.join(SLOPE_DATA, filename))
 
-    train_images = parse_images(os.path.join(_DATA, "train-images-idx3-ubyte.gz"))
-    train_labels = parse_labels(os.path.join(_DATA, "train-labels-idx1-ubyte.gz"))
-    test_images = parse_images(os.path.join(_DATA, "t10k-images-idx3-ubyte.gz"))
-    test_labels = parse_labels(os.path.join(_DATA, "t10k-labels-idx1-ubyte.gz"))
+    train_images = parse_images(os.path.join(SLOPE_DATA, "train-images-idx3-ubyte.gz"))
+    train_labels = parse_labels(os.path.join(SLOPE_DATA, "train-labels-idx1-ubyte.gz"))
+    test_images = parse_images(os.path.join(SLOPE_DATA, "t10k-images-idx3-ubyte.gz"))
+    test_labels = parse_labels(os.path.join(SLOPE_DATA, "t10k-labels-idx1-ubyte.gz"))
 
     train_images = train_images / np.float32(255.0)
     train_labels = np.array(train_labels)

@@ -81,8 +81,8 @@ if __name__ == "__main__":
     num_batches = num_complete_batches + bool(leftover)
     model = Net()
     # optimizer = nn.SGD(model, lr=1e-9, momentum=0., weight_decay=0)
-    optimizer = nn.SGD(model, lr=1e-5, momentum=0.8, weight_decay=1e-9)
-    # optimizer = nn.Adam(model, lr=1e-3)
+    # optimizer = nn.SGD(model, lr=1e-5, momentum=0.8, weight_decay=1e-9)
+    optimizer = nn.Adam(model, lr=1e-3)
 
     def data_stream():
         rng = np.random.RandomState(0)

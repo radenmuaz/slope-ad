@@ -39,7 +39,6 @@ def test_all(model, x, y):
 if __name__ == "__main__":
     num_epochs = 3
     batch_size = 200  # TODO: must be multiple of dataset
-    batch_size = 1  # TODO: must be multiple of dataset
     train_images, train_labels, test_images, test_labels = get_mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)

@@ -355,8 +355,11 @@ class MLP(Module):
         return x
 
 
-class Serial(Module):
-    def __init__(self, modules):
+class Sequential(Module):
+    def __init__(self, *modules):
+        if isinstance(modules(tuple, list)):
+            assert len(modules) == 1
+            modules = modules[0]
         self.num_modules = len(modules)
         for i in range(len(modules)):
             setattr(self, f"m{i}", modules[i])
@@ -371,9 +374,6 @@ class Serial(Module):
         for module in modules:
             x = module(x, *args, **kwargs)
         return x
-
-
-Sequential = Serial
 
 
 class Pool(Module):
@@ -712,7 +712,7 @@ class BatchNorm(Module):
         ret = x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd
         return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
 
-
+BatchNorm1d = BatchNorm2d = BatchNorm
 class LayerNorm(Module):
     def __init__(
         self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True
@@ -743,6 +743,11 @@ class LayerNorm(Module):
     def layernorm(self, axis=-1, eps: float = 1e-5) -> Tensor:
         y = self - self.mean(axis, keepdim=True)
         return y.mul((y * y).mean(axis, keepdim=True).add(eps).rsqrt())
+
+
+class LayerNorm1d(LayerNorm):
+    def __call__(self, x):
+        return super().__call__(x.transpose(1, 2)).transpose(1, 2)
 
 
 class LayerNorm2d(LayerNorm):
@@ -934,7 +939,9 @@ class Adam(Optimizer):
         v = b2 * v + (1.0 - b2) * (g * g)
         m_hat = m / (1.0 - b1**(self.iters))
         v_hat = v / (1.0 - b2**(self.iters))
-        up = (m_hat / ((v_hat).sqrt() + eps )) + wd * p.stop_gradient()
+        up = (m_hat / ((v_hat).sqrt() + eps ))
+        if wd > 0:
+            up = up + wd * p.stop_gradient()
         p = p - lr * up
         state = Module()
         state.m = m

@@ -1,8 +1,14 @@
-# slope
+```
+   /|s
+  / |l
+ /  |o
+/___|p 
+ slope
+```
 
-My automatic differentiation engine.
-Loosely based on jax, autodidax, and tinygrad
-
+Slope is a small automatic differention engine.
+Tensor operations like Pytorch, Functional-like API like JAX.
+Small enough, but nowhere tiny like tinygrad.
 # Install
 
 Clone this repo then

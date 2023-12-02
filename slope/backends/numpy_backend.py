@@ -258,7 +258,7 @@ operator_set.register(pow)
 @pow.set_method
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
-    y = x*w
+    y = x**w
     y_dot1 = (x_dot * (w * (x ** (w-slope.ones_like(w)))))
     y_dot2 = (w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log() ))
     return [y], [ y_dot1 + y_dot2 ]
@@ -1119,7 +1119,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 ### Operator Impls
 
 compiler.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = {x}.astype(dtype={dtype})")
-compiler.set_impl(operator_set.stop_gradient)(lambda self, x, *, dtype: f"ret = {x}")
+compiler.set_impl(operator_set.stop_gradient)(lambda self, x: f"ret = {x}")
 compiler.set_impl(operator_set.neg)(lambda self, x: f"ret = np.negative({x})")
 compiler.set_impl(operator_set.sqrt)(lambda self, x: f"ret = np.sqrt({x})")
 compiler.set_impl(operator_set.exp)(lambda self, x: f"ret = np.exp({x})")

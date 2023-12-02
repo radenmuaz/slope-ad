@@ -39,6 +39,7 @@ def test_all(model, x, y):
 if __name__ == "__main__":
     num_epochs = 3
     batch_size = 200  # TODO: must be multiple of dataset
+    batch_size = 1  # TODO: must be multiple of dataset
     train_images, train_labels, test_images, test_labels = get_mnist()
     num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, batch_size)
@@ -53,7 +54,7 @@ if __name__ == "__main__":
         ]
     )
     # optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
-    optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.Adam(model, lr=1e-5)
 
     def data_stream():
         rng = np.random.RandomState(0)

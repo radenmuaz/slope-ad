@@ -302,9 +302,9 @@ class Tensor:
     __truediv__ = __div__
     __truerdiv__ = __rdiv__
     __pow__ = lambda self, other: self.pow(other)
-    __rpow__ = lambda self, other: self.pow.func(self, other)
+    __rpow__ = lambda self, other:  self.pow.func(other, self)
     __matmul__ = lambda self, other: self.matmul(other)
-    __rmatmul__ = lambda self, other: self.matmul.func(self, other)
+    __rmatmul__ = lambda self, other: self.matmul.func(other, self)
     __invert__ = lambda self: self.invert()
     __eq__ = lambda self, other: self.equal(other)
     __ne__ = lambda self, other: self.not_equal(other)

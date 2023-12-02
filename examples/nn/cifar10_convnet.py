@@ -15,16 +15,16 @@ from lib.datasets.cifar10 import get_cifar10
 
 class ResnetBlock(nn.Module):
     def __init__(self, in_dim, out_dim, stride=1):
-        self.conv1 = nn.Conv2d(
-            in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm(out_dim)
         self.conv2 = nn.Conv2d(out_dim, out_dim, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm(out_dim)
 
-        self.shortcut = nn.Sequential([
-                nn.Conv2d(in_dim, out_dim, kernel_size=1, stride=stride, bias=False),
-                nn.BatchNorm(out_dim)
-            ] if stride != 1 or in_dim != out_dim else [])
+        self.shortcut = nn.Sequential(
+            [nn.Conv2d(in_dim, out_dim, kernel_size=1, stride=stride, bias=False), nn.BatchNorm(out_dim)]
+            if stride != 1 or in_dim != out_dim
+            else []
+        )
 
     def __call__(self, x):
         out = self.bn1(self.conv1(x)).relu()
@@ -32,6 +32,7 @@ class ResnetBlock(nn.Module):
         out = out + self.shortcut(x)
         out = out.relu()
         return out
+
 
 class Net(nn.Module):
     def __init__(self):
@@ -69,6 +70,7 @@ def test_all(model, x, y):
     corrects = (y_hat == y).cast(slope.float32)
     accuracy = corrects.mean().numpy()
     return accuracy
+
 
 if __name__ == "__main__":
     num_epochs = 50

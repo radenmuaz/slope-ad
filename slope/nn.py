@@ -872,7 +872,8 @@ class Optimizer(Module):
         self.state = Module()
         self.hp = Module()
         self.hp.lr = slope.full((), lr)
-        self.iters = slope.zeros(())
+        # self.iters = slope.zeros(())
+        self.iters = slope.ones(())
 
     def step(self, p, g, *state_attrs):
         return p, state_attrs
@@ -917,7 +918,7 @@ class SGD(Optimizer):
 
 
 class Adam(Optimizer):
-    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-3, weight_decay=0.0):
+    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-5, weight_decay=1e-9):
         super().__init__(params, lr)
         self.hp.b1 = b1
         self.hp.b2 = b2
@@ -931,11 +932,10 @@ class Adam(Optimizer):
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
-        m_hat = m / (2.0 - b1**(self.iters+1))
-        v_hat = v / (2.0 - b2**(self.iters+1))
-        up = (m_hat / (v_hat.sqrt() + eps)) + wd * p
-        r = 1.0
-        p = p * lr * r * up
+        m_hat = m / (1.0 - b1**(self.iters))
+        v_hat = v / (1.0 - b2**(self.iters))
+        up = (m_hat / ((v_hat).sqrt() + eps )) + wd * p.stop_gradient()
+        p = p - lr * up
         state = Module()
         state.m = m
         state.v = v

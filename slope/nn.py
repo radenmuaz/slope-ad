@@ -1,5 +1,5 @@
 import slope
-from slope.core import Tensor, Typecheckor
+from slope.core import Tensor, Typecheckor, PyTreeDef
 from typing import Tuple, List, Optional
 
 import operator as operator_py
@@ -31,7 +31,7 @@ class Module:
         for k, v in self.__dict__.items():
             if isinstance(v, (Tensor, Typecheckor)):
                 tensor_attrs[k] = None
-            elif isinstance(v, (list, tuple)):
+            elif isinstance(v, (list, tuple)) and not isinstance(v, PyTreeDef):
                 v_flat, v_treedef = slope.tree_flatten(v)
                 if all(isinstance(vi, (Tensor, Typecheckor)) for vi in v_flat):
                     tensor_attrs[k] = None
@@ -861,7 +861,7 @@ class LogSoftmax(Module):
 class Optimizer(Module):
     def __init__(self, params, lr: float):
         self.params = params
-        self.params_flat, self.params_treedef = slope.tree_flatten(params)
+        self.params_treedef = slope.tree_flatten(params)[1]
         self.state = Module()
         self.hp = Module()
         self.hp.lr = slope.full((), lr)

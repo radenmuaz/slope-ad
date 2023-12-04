@@ -25,24 +25,24 @@ class Module:
         return hash(self) == hash(other)
 
     def get_metadata(self):
-        tensor_attrs = set()
-        module_attrs = set()
+        tensor_attrs = dict()
+        module_attrs = dict()
 
         for k, v in self.__dict__.items():
             if isinstance(v, (Tensor, Typecheckor)):
-                tensor_attrs.add(k)
+                tensor_attrs[k] = None
             elif isinstance(v, (list, tuple)):
                 v_flat, v_treedef = slope.tree_flatten(v)
                 if all(isinstance(vi, (Tensor, Typecheckor)) for vi in v_flat):
-                    tensor_attrs.add(k)
+                    tensor_attrs[k] = None
             elif isinstance(v, Module):
-                module_attrs.add(k)
+                module_attrs[k] = None
 
         static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
         return dict(
             cls=self.__class__,
-            tensor_attrs=tuple(tensor_attrs),
-            module_attrs=tuple(module_attrs),
+            tensor_attrs=tuple(tensor_attrs.keys()),
+            module_attrs=tuple(module_attrs.keys()),
             static_dict=static_dict,
         )
 
@@ -357,7 +357,7 @@ class MLP(Module):
 
 class Sequential(Module):
     def __init__(self, *modules):
-        if isinstance(modules,(tuple, list)):
+        if isinstance(modules[0],(tuple, list)):
             assert len(modules) == 1
             modules = modules[0]
         self.num_modules = len(modules)

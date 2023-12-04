@@ -1024,15 +1024,6 @@ class PyTreeDef(NamedTuple):
         ret = self.tree_repr(self)
         return ret
 
-    @property
-    def num_leaves(self):
-        def _get_num_leaves(x_):
-            if isinstance(x_, Leaf):
-                return 1
-            else:
-                return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
-
-        return sum(_get_num_leaves(x) for x in self.child_treedefs)
 
     def tree_repr(self, pytree, indent="  ", prefix="", last=True):
         ret = ""
@@ -1050,11 +1041,27 @@ class PyTreeDef(NamedTuple):
         return ret
 
 
+    @property
+    def num_leaves(self):
+        def _get_num_leaves(x_):
+            if isinstance(x_, Leaf):
+                return 1
+            else:
+                return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
+
+        return sum(_get_num_leaves(x) for x in self.child_treedefs)
+
+
 class Leaf:
     def __init__(self, val):
-        self.val = val
+        self.aval = Typecheckor.like(val)
     def __repr__(self):
-        return self.val.str_short()
+        return self.aval.str_short()
+    def __hash__(self):
+        return hash(self.aval)
+    def __eq__(self, other):
+        if isinstance(other, Leaf):
+            return self.aval == other.aval
 
 # ================
 #   jit operator
@@ -1070,8 +1077,8 @@ class JitObject:
         self.fn = fn
 
     def __call__(self, *args, **params):
-        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         args, in_tree = slope.M().tree_flatten(args)
+        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         try:
             outs = self.fn(*args, **params)
         except Exception as e:

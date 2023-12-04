@@ -38,6 +38,8 @@ def grad_step(model, batch):
     return loss, g_model, model_
 
 model = Net()
+_, treedef = slope.M().tree_flatten(model)
+print(treedef)
 # x = slope.ones((1,3,32,32))
 x = slope.rand((1,3,32,32))
 # x = slope.arange(math.prod((1,3,32,32)), dtype=slope.float32).reshape((1,3,32,32)) * 0.001

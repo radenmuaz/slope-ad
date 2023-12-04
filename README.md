@@ -6,8 +6,9 @@
  slope
 ```
 
-Slope is a small automatic differention engine.
-Tensor operations like Pytorch, Functional-like API like JAX.
+Slope is a small automatic differentation (AD) engine, focused on machine learning (ML).
+It is written to be educational and hackable, yet does things end-to-end, from training to deployment.
+Tensor operations are like Pytorch, but it has functional API like JAX.
 Small enough, but nowhere tiny like tinygrad.
 # Install
 

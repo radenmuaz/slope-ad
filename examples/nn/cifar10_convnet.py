@@ -28,16 +28,15 @@ class ResnetBlock(nn.Module):
 
     def __call__(self, x):
         out = self.bn1(self.conv1(x)).relu()
-        out = self.bn2(self.conv2(out))
+        out = self.bn2(self.conv2(out)).relu()
         out = out + self.shortcut(x)
-        out = out.relu()
         return out
 
 
 class Net(nn.Module):
     def __init__(self):
         self.block1 = ResnetBlock(3, 4)
-        # self.avgpool = nn.AvgPool2d(8)
+        # self.avgpool = nn.AvgPool2d(8)~
         self.linear = nn.Linear(4096, 10)
         self.flatten_fn = nn.Fn(lambda x: x.reshape((x.shape[0], -1)))
 
@@ -80,9 +79,7 @@ if __name__ == "__main__":
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
     model = Net()
-    # optimizer = nn.SGD(model, lr=1e-9, momentum=0., weight_decay=0)
-    # optimizer = nn.SGD(model, lr=1e-5, momentum=0.8, weight_decay=1e-9)
-    optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.Adam(model, lr=1e-4)
 
     def data_stream():
         rng = np.random.RandomState(0)

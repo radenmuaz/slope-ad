@@ -357,7 +357,7 @@ class MLP(Module):
 
 class Sequential(Module):
     def __init__(self, *modules):
-        if isinstance(modules(tuple, list)):
+        if isinstance(modules,(tuple, list)):
             assert len(modules) == 1
             modules = modules[0]
         self.num_modules = len(modules)
@@ -763,11 +763,11 @@ class Dropout(Module):
         return x.dropout(self.p, training)
 
     @slope.M().backend.procedure_set.register(static_argnames="p")
-    def dropout(self, p, training=False) -> Tensor:
+    def dropout(x, p, training=False) -> Tensor:
         if not Tensor.training or p == 0:
-            return self
-        mask = (Tensor.rand(*self.shape, requires_grad=False, device=self.device) >= p).cast(slope.bool)
-        return self * mask * (1 / (1.0 - p))
+            return x
+        mask = (Tensor.rand(*x.shape, requires_grad=False, device=x.device) >= p).cast(slope.bool)
+        return x * mask * (1 / (1.0 - p))
 
 
 class ScaledDotProductAttention(Module):
@@ -877,8 +877,8 @@ class Optimizer(Module):
         self.state = Module()
         self.hp = Module()
         self.hp.lr = slope.full((), lr)
-        # self.iters = slope.zeros(())
-        self.iters = slope.ones(())
+        self.iters = slope.zeros(())
+        # self.iters = slope.ones(())
 
     def step(self, p, g, *state_attrs):
         return p, state_attrs
@@ -923,7 +923,7 @@ class SGD(Optimizer):
 
 
 class Adam(Optimizer):
-    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-5, weight_decay=1e-9):
+    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-5, weight_decay=0.):
         super().__init__(params, lr)
         self.hp.b1 = b1
         self.hp.b2 = b2
@@ -935,10 +935,11 @@ class Adam(Optimizer):
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
+        i = self.iters+slope.ones_like(self.iters)
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
-        m_hat = m / (1.0 - b1**(self.iters))
-        v_hat = v / (1.0 - b2**(self.iters))
+        m_hat = m / (1.0 - b1**i)
+        v_hat = v / (1.0 - b2**i)
         up = (m_hat / ((v_hat).sqrt() + eps ))
         if wd > 0:
             up = up + wd * p.stop_gradient()
@@ -947,3 +948,5 @@ class Adam(Optimizer):
         state.m = m
         state.v = v
         return (p, state)
+
+AdamW = Adam

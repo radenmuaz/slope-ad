@@ -907,7 +907,7 @@ def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
 
 
 compile_py = compile
-compiler = Compiler(name="numpy", default_dtype=Tensor.dtype_names[slope.SLOPE_DTYPE])
+compiler = Compiler(name="numpy", default_dtype=slope.SLOPE_DTYPE)
 compiler.set_dtype_map(
     {
         Tensor.float32: np.dtype("float32"),

@@ -354,6 +354,17 @@ class Typecheckor:
     def __init__(self, shape, dtype):
         self.shape = tuple(shape)
         self.dtype = dtype
+        assert isinstance(dtype, DType)
+        assert all(isinstance(i, int) for i in self.shape)
+
+    
+    # @property
+    # def dtype(self):
+    #     return slope.M().backend.compiler.dtype_of(self)
+
+    # @property
+    # def device(self):
+    #     return slope.M().backend.compiler.device_of(self)
 
     @classmethod
     def like(cls, aval):
@@ -1010,12 +1021,8 @@ class PyTreeDef(NamedTuple):
     child_treedefs: Tuple["PyTreeDef", ...]
 
     def __repr__(self):
-        ret = self.to_s_expression()
+        ret = self.tree_repr(self)
         return ret
-        # ret = self.pretty_print()
-        # ret = f"tree {self.node_type.name}\n"
-        # for i, c in enumerate(self.child_treedefs):
-        #     ret += f"{i} {c}\n"
 
     @property
     def num_leaves(self):
@@ -1027,31 +1034,25 @@ class PyTreeDef(NamedTuple):
 
         return sum(_get_num_leaves(x) for x in self.child_treedefs)
 
-    def pretty_print(self, indent=0):
-        indent_str = " " * indent
-        child_str = ""
-        if self.child_treedefs:
-            child_str = "\n" + "\n".join(child.pretty_print(indent + 2) for child in self.child_treedefs)
-        return f"{indent_str}PyTreeDef({self.node_type},\n  {child_str})"
-
-    def to_s_expression(self, indent=0):
-        if not self.child_treedefs:
-            return f"({self.node_type.name})"
-        indent_str = " " * indent
-        child_s_expr = "\n".join(child.to_s_expression(indent + 2) for child in self.child_treedefs)
-        return f"{indent_str}({self.node_type.name} {child_s_expr})"
+    def tree_repr(self, pytree, indent="  ", prefix="", last=True):
+        ret = ""
+        def _tree_repr(pytree, indent, prefix, last):
+            nonlocal ret
+            if isinstance(pytree, PyTreeDef):
+                ret += f'{prefix} {("└─" if last else "├─")} {pytree.node_type.name}\n'
+                for i, item in enumerate(pytree.child_treedefs):
+                    new_prefix = prefix + (indent if not last else "   ")
+                    new_last = i == len(pytree.child_treedefs) - 1
+                    _tree_repr(item, indent, new_prefix, new_last)
+            else:
+                ret +=  f'{prefix} {("└─" if last else "├─")} {pytree}\n'
+        _tree_repr(pytree,  indent="  ", prefix="", last=True)
+        return ret
 
 
 class Leaf:
     def __repr__(self):
         return "Leaf"
-
-    def pretty_print(self, indent=0):
-        return " " * indent + repr(self)
-
-    def to_s_expression(self, indent=0):
-        return f"({repr(self)}"
-
 
 leaf = Leaf()
 

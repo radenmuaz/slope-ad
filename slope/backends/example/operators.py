@@ -3,7 +3,8 @@ from slope.core import (
     OperatorSet,
     Operator,
     Tensor,
-    Typecheckor
+    Typecheckor,
+    PrimalProxy
 )
 
 import math
@@ -242,6 +243,32 @@ def T(self, cotangents, x, w):
 
 maximum = Operator.binary("maximum")
 operator_set.register(maximum)
+
+
+
+pow = Operator.binary("pow")
+operator_set.register(pow)
+
+
+@pow.set_method
+def jvp(self, primals, tangents):
+    (x, w), (x_dot, w_dot) = primals, tangents
+    y = x**w
+    y_dot1 = (x_dot * (w * (x ** (w-slope.ones_like(w)))))
+    y_dot2 = (w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log() ))
+    return [y], [ y_dot1 + y_dot2 ]
+
+
+@pow.set_method
+def T(self, cotangents, x, w):
+    (grad_L_y,) = cotangents
+    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
+    if type(x) is PrimalProxy:
+        return [ (grad_L_y * (w * (x ** (w-slope.ones_like(w))))), None]
+    elif type(w) is PrimalProxy:
+        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))) ]
+
+
 
 
 @maximum.set_method

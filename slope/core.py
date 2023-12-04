@@ -254,19 +254,19 @@ class Tensor:
 
     # def bool(self):
     #     return self.cast(slope.bool)
-    
+
     def short(self):
         return self.cast(slope.int8)
-    
+
     def int(self):
         return self.cast(slope.int32)
-    
+
     def long(self):
         return self.cast(slope.int64)
-    
+
     def half(self):
         return self.cast(slope.float16)
-    
+
     def float(self):
         return self.cast(slope.float32)
 
@@ -288,7 +288,7 @@ class Tensor:
         raise NotImplementedError
 
     def str_short(self):
-        return f'Tensor: {self.dtype}, {self.shape}]'
+        return f"Tensor: {self.dtype}, {self.shape}]"
 
     __neg__ = lambda self: self.neg()
     __add__ = lambda self, other: self.add(other)
@@ -302,7 +302,7 @@ class Tensor:
     __truediv__ = __div__
     __truerdiv__ = __rdiv__
     __pow__ = lambda self, other: self.pow(other)
-    __rpow__ = lambda self, other:  self.pow.func(other, self)
+    __rpow__ = lambda self, other: self.pow.func(other, self)
     __matmul__ = lambda self, other: self.matmul(other)
     __rmatmul__ = lambda self, other: self.matmul.func(other, self)
     __invert__ = lambda self: self.invert()
@@ -357,7 +357,6 @@ class Typecheckor:
         assert isinstance(dtype, DType)
         assert all(isinstance(i, int) for i in self.shape)
 
-    
     # @property
     # def dtype(self):
     #     return slope.M().backend.compiler.dtype_of(self)
@@ -654,8 +653,8 @@ class Operator:
         @op.set_method
         def T(self, cotangents, **kwargs):
             return [None]
-        return op
 
+        return op
 
     @classmethod
     def other(cls, name, **kwargs):
@@ -1024,9 +1023,9 @@ class PyTreeDef(NamedTuple):
         ret = self.tree_repr(self)
         return ret
 
-
     def tree_repr(self, pytree, indent="  ", prefix="", last=True):
         ret = ""
+
         def _tree_repr(pytree, indent, prefix, last):
             nonlocal ret
             if isinstance(pytree, PyTreeDef):
@@ -1036,10 +1035,10 @@ class PyTreeDef(NamedTuple):
                     new_last = i == len(pytree.child_treedefs) - 1
                     _tree_repr(item, indent, new_prefix, new_last)
             else:
-                ret +=  f'{prefix} {("└─" if last else "├─")} {pytree}\n'
-        _tree_repr(pytree,  indent="  ", prefix="", last=True)
-        return ret
+                ret += f'{prefix} {("└─" if last else "├─")} {pytree}\n'
 
+        _tree_repr(pytree, indent="  ", prefix="", last=True)
+        return ret
 
     @property
     def num_leaves(self):
@@ -1055,13 +1054,17 @@ class PyTreeDef(NamedTuple):
 class Leaf:
     def __init__(self, val):
         self.aval = Typecheckor.like(val)
+
     def __repr__(self):
         return self.aval.str_short()
+
     def __hash__(self):
         return hash(self.aval)
+
     def __eq__(self, other):
         if isinstance(other, Leaf):
             return self.aval == other.aval
+
 
 # ================
 #   jit operator
@@ -1621,12 +1624,12 @@ class PrimalProxy(NamedTuple):
     @property
     def dtype(self):
         return self.aval.dtype
-    
+
     def __repr__(self):
         return f"PrimalProxy: {self.aval}"
-    
+
     def str_short(self):
-        return f'PrimalProxy: {self.dtype}, {self.shape}'
+        return f"PrimalProxy: {self.dtype}, {self.shape}"
 
 
 class PartialValue(NamedTuple):
@@ -2046,7 +2049,9 @@ class Machine:
                 outs = f(*tracers_in, **{k: v for k, v in static_args})
                 # tracers_out = [self.full_raise(trace, out) for out in outs]
                 # raise check because of aux is not ProgramTracor
-                tracers_out = [self.full_raise(trace, out) if isinstance(out, ProgramTracor) else out.val for out in outs]
+                tracers_out = [
+                    self.full_raise(trace, out) if isinstance(out, ProgramTracor) else out.val for out in outs
+                ]
                 program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
         return program, consts, out_tree_store()
@@ -2437,12 +2442,10 @@ class Machine:
             return self.jit(grad_fn)
         else:
             return grad_fn
-    
 
     def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
         return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
 
-    
     # def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
     #     if isinstance(f, self.jit):
     #         f = f.f

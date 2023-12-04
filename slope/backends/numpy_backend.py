@@ -50,6 +50,7 @@ def jvp(self, primals, tangents, **params):
 def T(self, cotangents, x):
     return [None]
 
+
 cast = Operator.unary("cast")
 astype = cast
 operator_set.register(cast)
@@ -66,10 +67,12 @@ def jvp(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
     return [x.cast(dtype)], [x_dot.cast(dtype)]
 
+
 @cast.set_method
 def T(self, cotangents, x):
     (grad_L_y,) = cotangents
     return [grad_L_y.cast(x.dtype)]
+
 
 sqrt = Operator.unary("sqrt")
 operator_set.register(sqrt)
@@ -255,9 +258,9 @@ operator_set.register(pow)
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x**w
-    y_dot1 = (x_dot * (w * (x ** (w-slope.ones_like(w)))))
-    y_dot2 = (w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log() ))
-    return [y], [ y_dot1 + y_dot2 ]
+    y_dot1 = x_dot * (w * (x ** (w - slope.ones_like(w))))
+    y_dot2 = w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log())
+    return [y], [y_dot1 + y_dot2]
 
 
 @pow.set_method
@@ -265,10 +268,9 @@ def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
     assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
     if type(x) is PrimalProxy:
-        return [ (grad_L_y * (w * (x ** (w-slope.ones_like(w))))), None]
+        return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
     elif type(w) is PrimalProxy:
-        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))) ]
-
+        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
 maximum = Operator.binary("maximum")
@@ -537,12 +539,12 @@ operator_set.register(pad)
 
 
 @pad.set_method
-def args_fixer(self, x, *, padding, mode='constant', value=0.0):
+def args_fixer(self, x, *, padding, mode="constant", value=0.0):
     if isinstance(padding, int):
         padding = (padding, padding) * x.ndim
     elif all(isinstance(pw, int) for pw in padding):
         assert (len(x.shape) * 2) % len(padding) == 0
-        padding = (0, 0) * (len(x.shape) - len(padding)//2) + tuple(padding)
+        padding = (0, 0) * (len(x.shape) - len(padding) // 2) + tuple(padding)
     return (x,), dict(padding=padding, mode=mode, value=value)
 
 
@@ -578,6 +580,7 @@ def jvp(self, primals, tangents, *, padding, mode, value):
 def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor]:
     lo, hi = padding[0::2], padding[1::2]
     interior = [0] * (len(padding) // 2)
+
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -593,10 +596,11 @@ def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor
 
 
 @pad.set_method
-def T(self, cotangents, x, *,  padding, mode, value):
+def T(self, cotangents, x, *, padding, mode, value):
     (z,) = cotangents
     lo, hi = padding[0::2], padding[1::2]
     interior = [0] * (len(padding) // 2)
+
     def t_op():
         unpadded = z.slice(
             lo,
@@ -614,7 +618,7 @@ operator_set.register(slice)
 
 
 @slice.set_method
-def args_fixer(self, x, *,  starts, limits, strides=None):
+def args_fixer(self, x, *, starts, limits, strides=None):
     if strides is None:
         strides = (1,) * len(starts)
     return (x,), dict(starts=starts, limits=limits, strides=strides)
@@ -669,10 +673,7 @@ def T(self, cotangents, x, *, starts, limits, strides):
     x_shape = x.aval.shape
     assert isinstance(x, PrimalProxy)
     if np.all(np.equal(strides, 1)):
-        lo, hi = (
-            starts,
-            tuple(np.subtract(x.aval.shape, limits))
-        )
+        lo, hi = (starts, tuple(np.subtract(x.aval.shape, limits)))
     else:
         real_limits = np.add(
             starts,
@@ -793,10 +794,7 @@ def T(self, cotangents, *xs, axis=0):
     for i, l in enumerate(limits):
         l[axis] = limit_points[i]
 
-    return [
-        z.slice(start, limit) if type(o) is PrimalProxy else None
-        for o, start, limit in zip(xs, starts, limits)
-    ]
+    return [z.slice(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
 
 
 # -----------------------
@@ -814,6 +812,7 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
     elif shape is None:
         shape = ()
     return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
+
 
 @full.set_method
 def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
@@ -834,6 +833,7 @@ def args_fixer(self, *, shape=None, dtype=Tensor.float32):
         shape = ()
     return (), dict(shape=shape, dtype=dtype)
 
+
 @random_uniform.set_method
 def typecheck(self, *, shape, dtype) -> List[Typecheckor]:
     return [Typecheckor(tuple(shape), dtype)]
@@ -853,6 +853,7 @@ def args_fixer(self, *, shape=None, dtype=Tensor.float32):
         shape = ()
     return (), dict(shape=shape, dtype=dtype)
 
+
 @random_normal.set_method
 def typecheck(self, *, shape, dtype=Tensor.float32) -> List[Typecheckor]:
     return [Typecheckor(tuple(shape), dtype)]
@@ -871,10 +872,10 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int32):
         stride = 1
     return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
 
+
 @arange.set_method
 def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
     return [Typecheckor((stop - start,) * stride, dtype)]
-
 
 
 # shape_ad = Operator.other("shape_ad")
@@ -1155,11 +1156,12 @@ compiler.set_impl(operator_set.random_normal)(
 compiler.set_impl(operator_set.expand)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
 
 compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
+
+
 @compiler.set_impl(operator_set.pad)
 def pad_impl(self, x, *, padding, mode, value):
-    pad_width = [ (lo, hi) for lo, hi in zip(padding[0::2], padding[1::2])]
+    pad_width = [(lo, hi) for lo, hi in zip(padding[0::2], padding[1::2])]
     return f"ret = np.pad({x}, {pad_width}, constant_values={value})"
-
 
 
 compiler.set_impl(operator_set.slice)(
@@ -1206,8 +1208,8 @@ def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
     rhs = f"{proc_name}({args_str})"
     return rhs, fn_defs
 
-procedure_set = ProcedureSet()
 
+procedure_set = ProcedureSet()
 
 
 @procedure_set.register(inline=True)
@@ -1411,8 +1413,6 @@ def T(x):
     return x.permute(tuple(perm))
 
 
-
-
 @procedure_set.register(inline=True)
 def getitem(self, val):
     # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
@@ -1518,15 +1518,15 @@ def getitem(self, val):
     return ret
 
 
-
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     def flatten_seq(l: Iterator):
         return [item for sublist in l for item in sublist]
+
     # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(flatten_seq(padding), value=value) # flatten
+    x = x.pad(flatten_seq(padding), value=value)  # flatten
     starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
     return x
@@ -1644,5 +1644,6 @@ def arange_with_cumsum(start, stop=None, step=1):
 @procedure_set.register(static_argnames="dtype")
 def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None].cast(dtype) == slope.arange(k, dtype=dtype)).cast(dtype)
+
 
 numpy_backend = Backend(operator_set, procedure_set, compiler)

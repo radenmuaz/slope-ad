@@ -1,11 +1,5 @@
 import slope
-from slope.core import (
-    Compiler,
-    Tensor,
-    TensorBuffer,
-    Typecheckor,
-    list_map
-)
+from slope.core import Compiler, Tensor, TensorBuffer, Typecheckor, list_map
 import os
 
 import math
@@ -13,6 +7,7 @@ import numpy as np
 from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, Callable
 from collections import defaultdict
 from operators import operator_set
+
 sum_py = sum
 max_py = max
 abs_py = abs
@@ -267,11 +262,12 @@ compiler.set_impl(operator_set.random_normal)(
 compiler.set_impl(operator_set.expand)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
 
 compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
+
+
 @compiler.set_impl(operator_set.pad)
 def pad_impl(self, x, *, padding, mode, value):
-    pad_width = [ (lo, hi) for lo, hi in zip(padding[0::2], padding[1::2])]
+    pad_width = [(lo, hi) for lo, hi in zip(padding[0::2], padding[1::2])]
     return f"ret = np.pad({x}, {pad_width}, constant_values={value})"
-
 
 
 compiler.set_impl(operator_set.slice)(

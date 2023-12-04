@@ -25,7 +25,7 @@ class Module:
         return hash(self) == hash(other)
 
     def get_metadata(self):
-        tensor_attrs = dict()
+        tensor_attrs = dict() # dict as ordered set
         module_attrs = dict()
 
         for k, v in self.__dict__.items():
@@ -51,10 +51,6 @@ class Module:
         for k, v in self.__dict__.items():
             if isinstance(v, attr_types):
                 attrs[k] = v
-            # elif isinstance(v, (list, tuple)):
-            #     v_flat, v_treedef = slope.tree_flatten(v)
-            #     if all(isinstance(vi, attr_types) for vi in v_flat):
-            #         attrs[k] = v
         return attrs if with_name else tuple(attrs.values())
 
     def get_tensors(self, with_name=False):
@@ -342,22 +338,10 @@ class Linear(Module):
         return x + b[None, ...] if b is not None else x
 
 
-class MLP(Module):
-    def __init__(self, in_dim, hid_dim, out_dim, act=ReLU()):
-        self.linear1 = Linear(in_dim, hid_dim)
-        self.linear2 = Linear(hid_dim, out_dim)
-        self.act = act
-
-    def __call__(self, x):
-        x = self.linear1(x)
-        x = self.act(x)
-        x = self.linear2(x)
-        return x
-
 
 class Sequential(Module):
     def __init__(self, *modules):
-        if isinstance(modules[0],(tuple, list)):
+        if isinstance(modules[0], (tuple, list)):
             assert len(modules) == 1
             modules = modules[0]
         self.num_modules = len(modules)
@@ -444,6 +428,7 @@ class AvgPool2d(Module):
     def __init__(self, kernel_size=2, stride=None):
         self.kernel_size = kernel_size
         self.stride = stride
+
     def __call__(self, x):
         return x.avgpool2d(self.kernel_size, self.stride)
 
@@ -712,7 +697,10 @@ class BatchNorm(Module):
         ret = x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd
         return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
 
+
 BatchNorm1d = BatchNorm2d = BatchNorm
+
+
 class LayerNorm(Module):
     def __init__(
         self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True
@@ -923,7 +911,7 @@ class SGD(Optimizer):
 
 
 class Adam(Optimizer):
-    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-5, weight_decay=0.):
+    def __init__(self, params, lr=0.001, b1=0.9, b2=0.999, eps=1e-5, weight_decay=0.0):
         super().__init__(params, lr)
         self.hp.b1 = b1
         self.hp.b2 = b2
@@ -935,12 +923,12 @@ class Adam(Optimizer):
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
-        i = self.iters+slope.ones_like(self.iters)
+        i = self.iters + slope.ones_like(self.iters)
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
         m_hat = m / (1.0 - b1**i)
         v_hat = v / (1.0 - b2**i)
-        up = (m_hat / ((v_hat).sqrt() + eps ))
+        up = m_hat / ((v_hat).sqrt() + eps)
         if wd > 0:
             up = up + wd * p.stop_gradient()
         p = p - lr * up
@@ -948,5 +936,6 @@ class Adam(Optimizer):
         state.m = m
         state.v = v
         return (p, state)
+
 
 AdamW = Adam

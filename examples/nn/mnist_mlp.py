@@ -15,7 +15,7 @@ import numpy as np
 def loss_fn(model, batch):
     x, y_onehot = batch
     preds = model(x)
-    return -(preds * y_onehot).sum()
+    return -(preds.log_softmax(-1) * y_onehot).sum()
 
 
 value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
@@ -35,6 +35,20 @@ def test_all(model, x, y):
     accuracy = corrects.mean().numpy()
     return accuracy
 
+class Net(nn.Module):
+    def __init__(self, in_dim, hid_dim, out_dim, act=nn.ReLU()):
+        self.flatten_fn = nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:]))))
+        self.linear1 = nn.Linear(in_dim, hid_dim)
+        self.linear2 = nn.Linear(hid_dim, out_dim)
+        self.act = act
+
+    def __call__(self, x):
+        x = self.flatten_fn(x)
+        x = self.linear1(x)
+        x = self.act(x)
+        x = self.linear2(x)
+        return x
+
 
 if __name__ == "__main__":
     num_epochs = 3
@@ -44,13 +58,9 @@ if __name__ == "__main__":
     num_complete_batches, leftover = divmod(num_train, batch_size)
     num_batches = num_complete_batches + bool(leftover)
     log_interval = 10
-    model = nn.Sequential(
-            nn.Fn(lambda x: x.reshape(shape=(x.shape[0], math.prod(x.shape[1:])))),
-            nn.MLP(784, 100, 10),
-            nn.Fn(lambda x: x.log_softmax(axes=-1)),
-    )
-    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
-    # optimizer = nn.Adam(model, lr=1e-4)
+    model = Net(in_dim=784, hid_dim=100, out_dim=10, act=nn.ReLU())
+    # optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
+    optimizer = nn.Adam(model, lr=1e-3)
 
     def data_stream():
         rng = np.random.RandomState(0)

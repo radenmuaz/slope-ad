@@ -16,7 +16,6 @@ slice_py = slice
 procedure_set = ProcedureSet()
 
 
-
 @procedure_set.register(static_argnames="shape dtype")
 def zeros(shape, dtype=Tensor.float32):
     return slope.full(shape, 0.0, dtype)
@@ -252,8 +251,6 @@ def T(x):
     return x.permute(tuple(perm))
 
 
-
-
 @procedure_set.register(inline=True)
 def getitem(self, val):
     # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
@@ -359,15 +356,15 @@ def getitem(self, val):
     return ret
 
 
-
 @procedure_set.register(static_argnames=("arg", "value"))
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     def flatten_seq(l: Iterator):
         return [item for sublist in l for item in sublist]
+
     # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(flatten_seq(padding), value=value) # flatten
+    x = x.pad(flatten_seq(padding), value=value)  # flatten
     starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
     return x

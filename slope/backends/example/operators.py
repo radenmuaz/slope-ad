@@ -1,11 +1,5 @@
 import slope
-from slope.core import (
-    OperatorSet,
-    Operator,
-    Tensor,
-    Typecheckor,
-    PrimalProxy
-)
+from slope.core import OperatorSet, Operator, Tensor, Typecheckor, PrimalProxy
 
 import math
 import numpy as np
@@ -60,10 +54,12 @@ def jvp(self, primals, tangents, *, dtype):
     (x,), (x_dot,) = primals, tangents
     return [x.cast(dtype)], [x_dot.cast(dtype)]
 
+
 @cast.set_method
 def T(self, cotangents, x):
     (grad_L_y,) = cotangents
     return [grad_L_y.cast(x.dtype)]
+
 
 sqrt = Operator.unary("sqrt")
 operator_set.register(sqrt)
@@ -245,7 +241,6 @@ maximum = Operator.binary("maximum")
 operator_set.register(maximum)
 
 
-
 pow = Operator.binary("pow")
 operator_set.register(pow)
 
@@ -254,9 +249,9 @@ operator_set.register(pow)
 def jvp(self, primals, tangents):
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x**w
-    y_dot1 = (x_dot * (w * (x ** (w-slope.ones_like(w)))))
-    y_dot2 = (w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log() ))
-    return [y], [ y_dot1 + y_dot2 ]
+    y_dot1 = x_dot * (w * (x ** (w - slope.ones_like(w))))
+    y_dot2 = w_dot * (y * (x if x != 0.0 else slope.zeros_like(x)).log())
+    return [y], [y_dot1 + y_dot2]
 
 
 @pow.set_method
@@ -264,11 +259,9 @@ def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
     assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
     if type(x) is PrimalProxy:
-        return [ (grad_L_y * (w * (x ** (w-slope.ones_like(w))))), None]
+        return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
     elif type(w) is PrimalProxy:
-        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))) ]
-
-
+        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
 @maximum.set_method
@@ -530,12 +523,12 @@ operator_set.register(pad)
 
 
 @pad.set_method
-def args_fixer(self, x, *, padding, mode='constant', value=0.0):
+def args_fixer(self, x, *, padding, mode="constant", value=0.0):
     if isinstance(padding, int):
         padding = (padding, padding) * x.ndim
     elif all(isinstance(pw, int) for pw in padding):
         assert (x.ndim * 2) % len(padding) == 0
-        padding = (0, 0) * (x.ndim - len(padding)//2) + tuple(padding)
+        padding = (0, 0) * (x.ndim - len(padding) // 2) + tuple(padding)
     return (x,), dict(padding=padding, mode=mode, value=value)
 
 
@@ -572,6 +565,7 @@ def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor
     lo = [padding[i] for i in range(0, len(padding), 2)]
     hi = [padding[i] for i in range(1, len(padding), 2)]
     interior = [0] * (len(padding) // 2)
+
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
@@ -600,6 +594,7 @@ def T(self, cotangents, x, *, lo, hi, interior=None, value=0.0):
 
     res = t_op() if isinstance(x, PrimalProxy) else None
     return [res]
+
 
 slice = Operator.other("slice")
 operator_set.register(slice)
@@ -783,10 +778,7 @@ def T(self, cotangents, *xs, axis=0):
     for i, l in enumerate(limits):
         l[axis] = limit_points[i]
 
-    return [
-        z.slice(start, limit) if type(o) is PrimalProxy else None
-        for o, start, limit in zip(xs, starts, limits)
-    ]
+    return [z.slice(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
 
 
 # -----------------------
@@ -976,8 +968,10 @@ operator_set.register(conv)
 def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
         return (x,) * cnt if isinstance(x, int) else x
+
     def flatten_seq(l: Iterator):
         return [item for sublist in l for item in sublist]
+
     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
@@ -1089,8 +1083,10 @@ operator_set.register(conv_transpose)
 def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
         return (x,) * cnt if isinstance(x, int) else x
+
     def flatten_seq(l: Iterator):
         return [item for sublist in l for item in sublist]
+
     if isinstance(output_padding, int):
         if output_padding != 0:
             raise NotImplementedError
@@ -1217,4 +1213,3 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
         grad_L_y_T = grad_L_y.transpose(0, 1)
         grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
         return [None, grad_L_w]
-

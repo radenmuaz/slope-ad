@@ -15,7 +15,7 @@ def get_cifar10():
     base_url = "https://www.cs.toronto.edu/~kriz/"
     filename = "cifar-10-python.tar.gz"
     url = base_url + filename
-    save_path = os.path.join(SLOPE_DATA,filename)
+    save_path = os.path.join(SLOPE_DATA, filename)
     if not os.path.exists(SLOPE_DATA):
         os.makedirs(SLOPE_DATA, exist_ok=True)
     if not os.path.isfile(save_path):

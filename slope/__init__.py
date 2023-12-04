@@ -12,6 +12,7 @@ SLOPE_DTYPE = core.Tensor.dtype_names[os.environ.get("SLOPE_DTYPE", "float32")]
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
 NO_JIT = int(os.environ.get("NO_JIT", 0))
 
+
 def dblog(*msg, enable=True):
     if enable:
         print(*msg)

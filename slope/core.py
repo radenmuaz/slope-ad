@@ -288,7 +288,7 @@ class Tensor:
         raise NotImplementedError
 
     def str_short(self):
-        return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
+        return f'Tensor: {self.dtype}, {self.shape}]'
 
     __neg__ = lambda self: self.neg()
     __add__ = lambda self, other: self.add(other)
@@ -1027,7 +1027,7 @@ class PyTreeDef(NamedTuple):
     @property
     def num_leaves(self):
         def _get_num_leaves(x_):
-            if x_ is leaf:
+            if isinstance(x_, Leaf):
                 return 1
             else:
                 return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
@@ -1051,11 +1051,10 @@ class PyTreeDef(NamedTuple):
 
 
 class Leaf:
+    def __init__(self, val):
+        self.val = val
     def __repr__(self):
-        return "Leaf"
-
-leaf = Leaf()
-
+        return self.val.str_short()
 
 # ================
 #   jit operator
@@ -1615,6 +1614,12 @@ class PrimalProxy(NamedTuple):
     @property
     def dtype(self):
         return self.aval.dtype
+    
+    def __repr__(self):
+        return f"PrimalProxy: {self.aval}"
+    
+    def str_short(self):
+        return f'PrimalProxy: {self.dtype}, {self.shape}'
 
 
 class PartialValue(NamedTuple):
@@ -1745,7 +1750,6 @@ class Machine:
             for k in self.node_types.keys():
                 if isinstance(x_, k):
                     node_type = self.node_types[k]
-            # node_type = self.node_types.get(type(x_), None)
 
             if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
@@ -1757,7 +1761,7 @@ class Machine:
                 return children_iter, treedef
             else:
                 # print(f'    leaf found: {x_}\n')
-                return (x_,), leaf
+                return (x_,), Leaf(x_)
 
         # print(f"flattening {x} of {type(x)}")
         children_iter, treedef = _tree_flatten(x)
@@ -1765,7 +1769,7 @@ class Machine:
 
     def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
         def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
-            if treedef_ is leaf:
+            if isinstance(treedef_, Leaf):
                 slope.dblog(f"    tree leaf found: {xs_}\n", enable=slope.LOG_PYTREE)
                 return next(xs_)
             else:

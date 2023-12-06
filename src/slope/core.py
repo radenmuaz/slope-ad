@@ -1385,7 +1385,7 @@ class RunTrace(Trace):
         return ret
     
     @staticmethod
-    @lru_cache_verbose()
+    # @lru_cache_verbose()
     def get_fn(op, *typecheckor_args, **params):
         def fn(*args, **params):
             return [op(*args, **params)]

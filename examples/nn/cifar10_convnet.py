@@ -59,7 +59,8 @@ if __name__ == "__main__":
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
     model = resnet(depth=8)
-    optimizer = nn.Adam(model, lr=1e-3)
+    # optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
     
     train_dataloader, ntrain_batches = get_dataloader(
         train_images, train_labels, train_batch_size, train_transforms_fn, shuffle=True)

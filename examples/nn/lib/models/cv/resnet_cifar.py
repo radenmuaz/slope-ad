@@ -32,6 +32,7 @@ class BasicBlock(nn.Module):
 
         if self.downsample is not None:
             residual = self.downsample(x)
+            # breakpoint()
 
         out = out + residual
         out = self.relu(out)

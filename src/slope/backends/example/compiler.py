@@ -236,12 +236,8 @@ compiler.set_impl(operator_set.pow)(lambda self, x, w: f"ret = np.power({x}, {w}
 compiler.set_impl(operator_set.invert)(lambda self, x: f"ret = np.invert({x})")
 compiler.set_impl(operator_set.equal)(lambda self, x, w: f"ret = np.equal({x}, {w})")
 compiler.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = np.maximum({x}, {w})")
-compiler.set_impl(operator_set.sum)(
-    lambda self, x, *, dim, keepdim: f"ret = np.sum({x}, dim={dim}, keepdim={keepdim})"
-)
-compiler.set_impl(operator_set.max)(
-    lambda self, x, *, dim, keepdim: f"ret = np.max({x}, dim={dim}, keepdim={keepdim})"
-)
+compiler.set_impl(operator_set.sum)(lambda self, x, *, dim, keepdim: f"ret = np.sum({x}, dim={dim}, keepdim={keepdim})")
+compiler.set_impl(operator_set.max)(lambda self, x, *, dim, keepdim: f"ret = np.max({x}, dim={dim}, keepdim={keepdim})")
 compiler.set_impl(operator_set.arange)(
     lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, step={stride}, dtype={dtype})"
 )

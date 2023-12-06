@@ -25,7 +25,7 @@ class Module:
         return hash(self) == hash(other)
 
     def get_metadata(self):
-        tensor_attrs = dict() # dict as ordered set
+        tensor_attrs = dict()  # dict as ordered set
         module_attrs = dict()
 
         for k, v in self.__dict__.items():
@@ -175,8 +175,8 @@ def variance_scaling(
     scale,
     mode: str,
     distribution: str,
-    in_dim: Union[int, Sequence[int]] = -2,
-    out_dim: Union[int, Sequence[int]] = -1,
+    in_dim: Union[int, Sequence[int]] = 1,
+    out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
@@ -203,8 +203,8 @@ def variance_scaling(
 
 
 def glorot_normal(
-    in_dim: Union[int, Sequence[int]] = -2,
-    out_dim: Union[int, Sequence[int]] = -1,
+    in_dim: Union[int, Sequence[int]] = 1,
+    out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
@@ -220,8 +220,8 @@ def glorot_normal(
 
 
 def glorot_uniform(
-    in_dim: Union[int, Sequence[int]] = -2,
-    out_dim: Union[int, Sequence[int]] = -1,
+    in_dim: Union[int, Sequence[int]] = 1,
+    out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
@@ -336,7 +336,6 @@ class Linear(Module):
     def linear(x, w, b=None):
         x = x @ w.transpose(-2, -1)
         return x + b[None, ...] if b is not None else x
-
 
 
 class Sequential(Module):
@@ -482,6 +481,7 @@ class ConvNd(Module):
         self.dims = dims
         self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
         self.bias = slope.zeros(out_channels) if bias else None
+        # m.weight.data.normal_(0, math.sqrt(2.0 / kernel_size * kernel_size * out_channels))
 
     def __call__(self, x):
         return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
@@ -673,8 +673,8 @@ class BatchNorm(Module):
             reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
             mean = x.stop_gradient().mean(reduce_dim)
             z = x.stop_gradient() - mean.reshape(broadcast_shape)
-            var = (z*z).mean(reduce_dim)
-            invstd = 1./(var + self.eps).sqrt()
+            var = (z * z).mean(reduce_dim)
+            invstd = 1.0 / (var + self.eps).sqrt()
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
@@ -817,9 +817,7 @@ class CrossEntropyLoss(Module):
         # NOTE: self is a logits input
         loss_mask = y != ignore_index
         y_counter = (
-            slope.arange(x.shape[-1], dtype=slope.int32, device=x.device)
-            .unsqueeze(0)
-            .expand(y.numel(), x.shape[-1])
+            slope.arange(x.shape[-1], dtype=slope.int32, device=x.device).unsqueeze(0).expand(y.numel(), x.shape[-1])
         )
         y = ((y_counter == y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(
             *y.shape, x.shape[-1]

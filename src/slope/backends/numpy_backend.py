@@ -461,7 +461,7 @@ def T(self, cotangents, x, *, shape):
     return [out]
 
 
-reshape = Operator.other("reshape", nary_inputs= True)
+reshape = Operator.other("reshape", nary_inputs=True)
 operator_set.register(reshape)
 operator_set.alias(reshape, "view")
 
@@ -795,7 +795,10 @@ def T(self, cotangents, *xs, dim=0):
     for i, l in enumerate(limits):
         l[dim] = limit_points[i]
 
-    return [z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
+    return [
+        z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None
+        for o, start, limit in zip(xs, starts, limits)
+    ]
 
 
 # -----------------------

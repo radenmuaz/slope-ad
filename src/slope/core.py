@@ -103,7 +103,7 @@ def lru_cache_verbose(maxsize=100, typed=False):
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
-                    
+
             slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
             # for a in args:
             #     try:
@@ -430,7 +430,7 @@ class Operator:
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
-    
+
     def __hash__(self):
         return hash(self.name)
 
@@ -438,7 +438,6 @@ class Operator:
         if not isinstance(other, Operator):
             return False
         return self.name == other.name
-
 
     def args_fixer(self, *args, **params):
         return args, params
@@ -1075,13 +1074,11 @@ class Leaf:
         if hasattr(val, "shape"):
             val = Typecheckor.like(val)
         self.aval = val
-        
 
     def __repr__(self):
         if isinstance(self.aval, Typecheckor):
             return self.aval.str_short()
         return repr(self)
-        
 
     def __hash__(self):
         return hash(self.aval)
@@ -1383,12 +1380,13 @@ class RunTrace(Trace):
             ret = slope.M().jit(fn, static_argnames=("params",), name=name)(*args, **params)
 
         return ret
-    
+
     @staticmethod
     # @lru_cache_verbose()
     def get_fn(op, *typecheckor_args, **params):
         def fn(*args, **params):
             return [op(*args, **params)]
+
         return fn
 
 

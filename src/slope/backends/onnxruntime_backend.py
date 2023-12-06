@@ -466,7 +466,7 @@ def T(self, cotangents, x, *, shape):
     return [grad_L_x]
 
 
-reshape = Operator.other("reshape", nary_inputs= True)
+reshape = Operator.other("reshape", nary_inputs=True)
 operator_set.register(reshape)
 operator_set.alias(reshape, "view")
 
@@ -485,7 +485,6 @@ def args_fixer(self, x, *args, **kwargs):
         numel = math.prod(x.shape)
         shape = tuple(d if d != -1 else (numel // others) for d in shape)
     return (x,), dict(shape=shape)
-
 
 
 @reshape.set_method
@@ -1027,13 +1026,13 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
         padding_h = padding_w = padding[0]
     else:
         padding_h = padding_w = padding
-    
+
     if isinstance(stride, tuple):
         # TODO
         stride_h = stride_w = stride[0]
     else:
         stride_h = stride_w = stride
-    
+
     if isinstance(dilation, tuple):
         # TODO
         dilation_h = dilation_w = dilation[0]
@@ -1702,7 +1701,6 @@ def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
 
 
 procedure_set = ProcedureSet()
-
 
 
 @procedure_set.register(inline=True)

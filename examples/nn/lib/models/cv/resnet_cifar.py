@@ -76,14 +76,6 @@ class ResNet(nn.Module):
             num_classes = 100
         self.fc = nn.Linear(64 * block.expansion, num_classes)
 
-        # for m in self.modules():
-        #     if isinstance(m, nn.Conv2d):
-        #         n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-        #         m.weight.data.normal_(0, math.sqrt(2.0 / n))
-        #     elif isinstance(m, nn.BatchNorm2d):
-        #         m.weight.data.fill_(1)
-        #         m.bias.data.zero_()
-
     def _make_layer(self, block, planes, blocks, cfg, stride=1):
         downsample = None
         if stride != 1 or self.inplanes != planes * block.expansion:

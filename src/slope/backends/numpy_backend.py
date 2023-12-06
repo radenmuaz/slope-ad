@@ -304,7 +304,7 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, w), _ = primals, tangents
     out_primal = x.equal(w)
-    return [out_primal], [slope.full(out_primal.shape, Tensor.bool)]
+    return [out_primal], [slope.full(out_primal.shape, True, Tensor.bool)]
 
 
 @equal.set_method

@@ -305,7 +305,7 @@ operator_set.register(equal)
 def jvp(self, primals, tangents):
     (x, w), _ = primals, tangents
     out_primal = x.equal(w)
-    return [out_primal], [slope.full(out_primal.shape, Tensor.bool)]
+    return [out_primal], [slope.full(out_primal.shape, True, Tensor.bool)]
 
 
 @equal.set_method
@@ -800,7 +800,7 @@ def T(self, cotangents, *xs, dim=0):
     for i, l in enumerate(limits):
         l[dim] = limit_points[i]
 
-    return [z.slice(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
+    return [z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
 
 
 # -----------------------
@@ -1517,6 +1517,9 @@ ret = Range(ret_start, ret_limit, ret_delta)
 @compiler.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
     if dtype is not Tensor.bool:
+        if "float" in dtype.name: fill_value = float(fill_value)
+        elif "int" in dtype.name: fill_value = int(fill_value)
+
         if len(shape) > 0:
             return f"""
 ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()

@@ -15,7 +15,8 @@ def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
         x, y = batch
         logits, model = model(x, training=True)
-        loss = -(logits.log_softmax() * y).sum()
+        y_oh = y.one_hot(10).cast(slope.float32)
+        loss = -(logits.log_softmax() * y_oh).sum()
         return loss, (model, logits)
     (loss, (model, logits)), grad_model = slope.value_and_grad(train_loss_fn, has_aux=True)(model, batch)
     model, new_optimizer = optimizer(model, grad_model)
@@ -34,9 +35,9 @@ def get_dataloader(images, labels, batch_size, transforms_fn, shuffle=False):
     def data_iter():
         for i in range(N//batch_size):
             batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-            x = transforms_fn(slope.tensor(images[batch_idx]))
-            y_onehot = slope.tensor(labels[batch_idx]).one_hot(10).cast(slope.float32)
-            yield x, y_onehot
+            x = transforms_fn(slope.tensor(images[batch_idx], dtype=slope.float32))
+            y = slope.tensor(labels[batch_idx], dtype=slope.int32)
+            yield x, y
     nbatches = images.shape[0] // batch_size + (1 if (images.shape[0] % batch_size != 0) else 0)
     return data_iter(), nbatches
         
@@ -60,7 +61,7 @@ if __name__ == "__main__":
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
     model = resnet(depth=8)
-    optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.Adam(model, lr=1e-5)
     # optimizer = nn.SGD(model, lr=0.01, momentum=0.9, weight_decay=1e-4)
     
     train_dataloader, ntrain_batches = get_dataloader(
@@ -78,7 +79,7 @@ if __name__ == "__main__":
         for i, batch in (pbar := tqdm(enumerate(train_dataloader))):
             loss, logits, model, optimizer = train_step(model, batch, optimizer)
             total_loss += float(loss.numpy())
-            y_hat, y =  logits.argmax(-1), batch[1].argmax(-1)
+            y_hat, y =  logits.argmax(-1), batch[1]
             true_positives += float((y_hat == y).cast(slope.float32).mean().numpy())
             N = train_batch_size * (i+1)
             msg = f"Train epoch: {epoch}, batch: {i}/{ntrain_batches}, loss: {total_loss/N:.4f}, acc: {true_positives/N:.4f}"
@@ -91,7 +92,7 @@ if __name__ == "__main__":
         for i, batch in (pbar := tqdm(enumerate(test_dataloader))):
             loss, logits, model, optimizer = train_step(model, batch, optimizer)
             total_loss += float(loss.numpy())
-            y_hat, y =  logits.argmax(-1), batch[1].argmax(-1)
+            y_hat, y =  logits.argmax(-1), batch[1]
             true_positives += float((y_hat == y).cast(slope.float32).mean().numpy())
             msg = f"Test epoch: {epoch}, batch: {i}/{ntest_batches}, loss: {total_loss/N:.4f}, acc: {true_positives/N:.4f}"
             pbar.set_description(msg)

@@ -466,17 +466,26 @@ def T(self, cotangents, x, *, shape):
     return [grad_L_x]
 
 
-reshape = Operator.other("reshape")
+reshape = Operator.other("reshape", nary_inputs= True)
 operator_set.register(reshape)
+operator_set.alias(reshape, "view")
 
 
 @reshape.set_method
-def args_fixer(self, x, *, shape):
+def args_fixer(self, x, *args, **kwargs):
+    if "shape" in kwargs.keys():
+        shape = kwargs["shape"]
+    elif isinstance(args[0], (tuple, list)):
+        shape = args[0]
+    else:
+        shape = args
+    shape = tuple(shape)
     if -1 in shape:
         others = math.prod([d for d in shape if d != -1])
         numel = math.prod(x.shape)
         shape = tuple(d if d != -1 else (numel // others) for d in shape)
     return (x,), dict(shape=shape)
+
 
 
 @reshape.set_method
@@ -1494,7 +1503,7 @@ compiler.set_impl(operator_set.matmul)(lambda self, x, w: f"ret = MatMul({x}, {w
 def sum_impl(self, x, *, dim, keepdim):
     return f"""
 ret_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-ret = ReduceSum<keepdim={int(keepdim)}> ({x}, ret_dim)
+ret = ReduceSum<keepdims={int(keepdim)}> ({x}, ret_dim)
 """
 
 
@@ -1502,7 +1511,7 @@ ret = ReduceSum<keepdim={int(keepdim)}> ({x}, ret_dim)
 def max_impl(self, x, *, dim, keepdim):
     return f"""
 ret_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-ret = ReduceMax<keepdim={int(keepdim)}> ({x}, ret_dim)
+ret = ReduceMax<keepdims={int(keepdim)}> ({x}, ret_dim)
 """
 
 
@@ -1715,13 +1724,22 @@ def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
 procedure_set = ProcedureSet()
 
 
-@procedure_set.register(static_argnames="shape dtype")
-def zeros(shape, dtype=Tensor.float32):
+
+@procedure_set.register(inline=True)
+def zeros(*args, **kwargs):
+    dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
+    if kwargs.get("shape", None) is None:
+        shape = args[0] if isinstance(args[0], (tuple, list)) else args
+        assert all(i >= 0 for i in shape)
     return slope.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(static_argnames="shape dtype")
-def ones(shape, dtype=Tensor.float32):
+@procedure_set.register(inline=True)
+def ones(*args, **kwargs):
+    dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
+    if kwargs.get("shape", None) is None:
+        shape = args[0] if isinstance(args[0], (tuple, list)) else args
+        assert all(i >= 0 for i in shape)
     return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
@@ -1732,12 +1750,12 @@ def full_like(y, fill_value):
 
 @procedure_set.register()
 def zeros_like(y):
-    return zeros(shape=y.shape, dtype=y.dtype)
+    return full_like(y, 0.0)
 
 
 @procedure_set.register()
 def ones_like(y):
-    return slope.full(shape=y.shape, fill_value=1.0, dtype=y.dtype)
+    return full_like(y, 1.0)
 
 
 @procedure_set.register()

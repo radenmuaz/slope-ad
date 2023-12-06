@@ -103,7 +103,14 @@ def lru_cache_verbose(maxsize=100, typed=False):
         def decorated_function(*args, **kwargs):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
+                    
             slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
+            # for a in args:
+            #     try:
+            #         slope.dblog(f"{a.val=}", enable=slope.LOG_LRU)
+            #     except:
+            #         pass
+
             return result
 
         decorated_function.cache_info = wrapper.cache_info
@@ -423,6 +430,15 @@ class Operator:
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
+    
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        if not isinstance(other, Operator):
+            return False
+        return self.name == other.name
+
 
     def args_fixer(self, *args, **params):
         return args, params
@@ -1350,25 +1366,30 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = op.run_impl(*args, **params)
         else:
-
-            def fn(*args, **params):
-                return [op(*args, **params)]
-
             name = f"{op.name}_"
+            tcs = []
             for t in args:
                 tc = Typecheckor.like(t)
+                tcs += [tc]
                 name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
             for k, v in params.items():
                 name += f"{k}_{v}_"
-            name = name.replace("(", "_leftparen_")
-            name = name.replace(")", "_rightparen_")
-            name = name.replace(",", "_comma_")
+            name = name.replace("(", "_lp_")
+            name = name.replace(")", "_rp_")
+            name = name.replace(",", "_cm_")
             name = name.replace(" ", "")
-            name = name.replace(".", "_dot_")
-
+            name = name.replace(".", "_dt_")
+            fn = self.get_fn(op, *tuple(tcs), **params)
             ret = slope.M().jit(fn, static_argnames=("params",), name=name)(*args, **params)
 
         return ret
+    
+    @staticmethod
+    @lru_cache_verbose()
+    def get_fn(op, *typecheckor_args, **params):
+        def fn(*args, **params):
+            return [op(*args, **params)]
+        return fn
 
 
 class Tracor(Tensor):

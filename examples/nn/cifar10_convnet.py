@@ -81,7 +81,7 @@ if __name__ == "__main__":
             N = train_batch_size * (i+1)
             msg = f"Train epoch: {epoch}, batch: {i}/{ntrain_batches}, loss: {total_loss/N:.4f}, acc: {true_positives/N:.4f}"
             pbar.set_description(msg)
-            if i == 3: break
+            # if i == 3: break
         # epoch_time = (time.perf_counter_ns() - start_time)*1e-9
 
         total_loss = 0.

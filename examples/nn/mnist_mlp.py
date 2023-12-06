@@ -28,6 +28,7 @@ def train_step(model, batch, optimizer):
     return loss, new_model, new_optimizer
 
 
+# @slope.jit
 def test_all(model, x, y):
     out = model(x)
     y_hat = out.argmax(-1)
@@ -59,8 +60,8 @@ if __name__ == "__main__":
     num_batches = num_complete_batches + bool(leftover)
     log_interval = 10
     model = Net(in_dim=784, hid_dim=100, out_dim=10, act=nn.ReLU())
-    # optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
-    optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
+    # optimizer = nn.Adam(model, lr=1e-4)
 
     def data_stream():
         rng = np.random.RandomState(0)

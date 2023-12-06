@@ -41,12 +41,13 @@ def get_dataloader(images, labels, batch_size, transforms_fn, shuffle=False):
     return data_iter(), nbatches
         
 
+@slope.jit
 def train_transforms_fn(x):
     mean = slope.tensor([0.4914, 0.4822, 0.4465])[None, ..., None, None]
     std = slope.tensor([0.2023, 0.1994, 0.2010])[None, ..., None, None]
     return (x - mean) / std
 
-
+@slope.jit
 def test_transforms_fn(x):
     mean = slope.tensor([0.4914, 0.4822, 0.4465])[None, ..., None, None]
     std = slope.tensor([0.2023, 0.1994, 0.2010])[None, ..., None, None]
@@ -59,8 +60,8 @@ if __name__ == "__main__":
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
     model = resnet(depth=8)
-    # optimizer = nn.Adam(model, lr=1e-3)
-    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
+    optimizer = nn.Adam(model, lr=1e-5)
+    # optimizer = nn.SGD(model, lr=0.01, momentum=0.9, weight_decay=1e-4)
     
     train_dataloader, ntrain_batches = get_dataloader(
         train_images, train_labels, train_batch_size, train_transforms_fn, shuffle=True)

@@ -671,10 +671,10 @@ class BatchNorm(Module):
         if training:
             broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
             reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
-            mean = x.mean(reduce_dim).stop_gradient()
-            z = x - mean.reshape(broadcast_shape)
-            var = (z * z).mean(reduce_dim).stop_gradient()
-            invstd = (var + self.eps) ** -0.5
+            mean = x.stop_gradient().mean(reduce_dim)
+            z = x.stop_gradient() - mean.reshape(broadcast_shape)
+            var = (z*z).mean(reduce_dim)
+            invstd = 1./(var + self.eps).sqrt()
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean

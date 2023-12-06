@@ -48,9 +48,9 @@ def where(x, trueval, falseval):
     return cond * trueval + (1.0 - cond) * falseval
 
 
-@procedure_set.register(static_argnames="axes keepdims")
-def mean(x, axes=None, keepdims=False):
-    out = x.sum(axes=axes, keepdims=keepdims)
+@procedure_set.register(static_argnames="dim keepdim")
+def mean(x, dim=None, keepdim=False):
+    out = x.sum(dim=dim, keepdim=keepdim)
     return out * (math.prod(out.shape) / math.prod(x.shape))
 
 
@@ -99,33 +99,33 @@ def minimum(x, w):
     return -x.maximum(-x, -w)
 
 
-@procedure_set.register(static_argnames="axes keepdims")
-def min(x, axes=None, keepdims=False):
-    return -((-x).max(x, axes, keepdims))
+@procedure_set.register(static_argnames="dim keepdim")
+def min(x, dim=None, keepdim=False):
+    return -((-x).max(x, dim, keepdim))
 
 
-@procedure_set.register(static_argnames="axes keepdims")
-def argmax(x, axes=None, keepdims=False):
-    if axes is None:
-        idx = (x == x.max(axes)) * slope.arange(
+@procedure_set.register(static_argnames="dim keepdim")
+def argmax(x, dim=None, keepdim=False):
+    if dim is None:
+        idx = (x == x.max(dim)) * slope.arange(
             math.prod(x.shape) - 1,
             -1,
             -1,
             dtype=slope.int32,
         ).reshape(x.shape)
         return math.prod(x.shape) - idx.max() - 1
-    axes = axes + len(x.shape) if axes < 0 else axes
-    m = (x == x.max(axes=axes, keepdims=True)).cast(slope.int32)
-    idx = m * slope.arange(x.shape[axes] - 1, -1, -1, dtype=slope.int32).reshape(
-        (x.shape[axes], *[1] * (x.ndim - axes - 1))
+    dim = dim + len(x.shape) if dim < 0 else dim
+    m = (x == x.max(dim=dim, keepdim=True)).cast(slope.int32)
+    idx = m * slope.arange(x.shape[dim] - 1, -1, -1, dtype=slope.int32).reshape(
+        (x.shape[dim], *[1] * (x.ndim - dim - 1))
     )
-    ret = x.shape[axes] - idx.max(axes=axes, keepdims=keepdims) - 1
+    ret = x.shape[dim] - idx.max(dim=dim, keepdim=keepdim) - 1
     return ret
 
 
-@procedure_set.register(static_argnames="axes keepdims")
-def argmin(x, axes=None, keepdims=False):
-    return (-x).argmax(axes=axes, keepdims=keepdims)
+@procedure_set.register(static_argnames="dim keepdim")
+def argmin(x, dim=None, keepdim=False):
+    return (-x).argmax(dim=dim, keepdim=keepdim)
 
 
 @procedure_set.register(inline=True)
@@ -286,7 +286,7 @@ def getitem(self, val):
         zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     )
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = self.padslice(new_slice).flip(axes=tuple([i for i, s in enumerate(strides) if s < 0]))
+    sliced_tensor = self.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs_py(s) != 1 for s in strides):
         strides = tuple(abs_py(s) for s in strides)
@@ -466,9 +466,9 @@ def flatten(x, start_dim=0):
     return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
 
-@procedure_set.register(static_argnames="axis")
-def cumsum(x, axis: int = 0):
-    return x.transpose(axis, -1).pad((x.shape[axis] - 1, 0)).pool((x.shape[axis],)).sum(-1).transpose(axis, -1)
+@procedure_set.register(static_argnames="dim")
+def cumsum(x, dim: int = 0):
+    return x.transpose(dim, -1).pad((x.shape[dim] - 1, 0)).pool((x.shape[dim],)).sum(-1).transpose(dim, -1)
 
 
 @staticmethod

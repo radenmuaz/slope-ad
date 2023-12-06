@@ -84,7 +84,7 @@ def _gather(arr, treedef, static_idx, dynamic_idx):
     if indexer.reversed_y_dims:
         # y = y.flip(indexer.reversed_y_dims)
         raise NotImplementedError
-    return y.expand_dims(indexer.newaxis_dims)
+    return y.expand_dims(indexer.newdim_dims)
 
 
 class GatherDimensionNumbers(NamedTuple):
@@ -99,7 +99,7 @@ class _Indexer(NamedTuple):
     gather_indices: Tensor
     dnums: GatherDimensionNumbers
     reversed_y_dims: Sequence[int]
-    newaxis_dims: Sequence[int]
+    newdim_dims: Sequence[int]
 
 
 def _split_index_for_jit(idx, shape):
@@ -174,8 +174,8 @@ def _is_int_tensorlike(x):
     )
 
 
-def _normalize_index(index, axis_size):
-    return (index < 0).select(index + axis_size, index)
+def _normalize_index(index, dim_size):
+    return (index < 0).select(index + dim_size, index)
 
 
 def broadcast_tensors(*args) -> List[Tensor]:
@@ -290,11 +290,11 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
     elif len_without_none < arr_ndim:
         colons = (slice(None),) * (arr_ndim - len_without_none)
         idx = tuple(idx) + colons
-    advanced_axes_are_contiguous = False
+    advanced_dim_are_contiguous = False
 
     advanced_indexes: Optional[Sequence[Union[Tensor, np.ndarray]]] = None
-    idx_advanced_axes: Sequence[int] = []
-    x_advanced_axes: Optional[Sequence[int]] = None
+    idx_advanced_dim: Sequence[int] = []
+    x_advanced_dim: Optional[Sequence[int]] = None
 
     def _is_advanced_int_indexer(idx):
         assert isinstance(idx, tuple)
@@ -314,12 +314,12 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
         advanced_pairs = ((Tensor(e), i, j) for j, (i, e) in enumerate(idx_no_nones) if e is not None)
         if normalize_indices:
             advanced_pairs = ((_normalize_index(e, x_shape[j]), i, j) for e, i, j in advanced_pairs)
-        advanced_indexes, idx_advanced_axes, x_advanced_axes = zip(*advanced_pairs)
-        advanced_axes_are_contiguous = bool(np.all(np.diff(idx_advanced_axes) == 1))
+        advanced_indexes, idx_advanced_dim, x_advanced_dim = zip(*advanced_pairs)
+        advanced_dim_are_contiguous = bool(np.all(np.diff(idx_advanced_dim) == 1))
 
-    x_axis = 0  # Current axis in x.
-    y_axis = 0  # Current axis in y, before collapsing. See below.
-    collapsed_y_axis = 0  # Current axis in y, after collapsing.
+    x_dim = 0  # Current dim in x.
+    y_dim = 0  # Current dim in y, before collapsing. See below.
+    collapsed_y_dim = 0  # Current dim in y, after collapsing.
 
     # Scatter dimension numbers.
     offset_dims: Sequence[int] = []
@@ -331,7 +331,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
     gather_indices_shape: List[int] = []
     slice_shape: Sequence[int] = []
 
-    newaxis_dims: Sequence[int] = []
+    newdim_dims: Sequence[int] = []
 
     reversed_y_dims: Sequence[int] = []
 
@@ -339,9 +339,9 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 
     for idx_pos, i in enumerate(idx):
         if advanced_indexes is not None and (
-            advanced_axes_are_contiguous
-            and idx_pos == idx_advanced_axes[0]
-            or not advanced_axes_are_contiguous
+            advanced_dim_are_contiguous
+            and idx_pos == idx_advanced_dim[0]
+            or not advanced_dim_are_contiguous
             and idx_pos == 0
         ):
             advanced_indexes = broadcast_tensors(*advanced_indexes)
@@ -352,15 +352,15 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             gather_indices += ((a.astype(index_dtype), start_dim) for a in advanced_indexes)
             gather_indices_shape += shape
 
-            start_index_map.extend(x_advanced_axes)
-            collapsed_slice_dims.extend(x_advanced_axes)
+            start_index_map.extend(x_advanced_dim)
+            collapsed_slice_dims.extend(x_advanced_dim)
             slice_shape.extend(shape)
-            y_axis += ndim
-            collapsed_y_axis += ndim
+            y_dim += ndim
+            collapsed_y_dim += ndim
 
         # Per-index bookkeeping for advanced indexes.
-        if idx_pos in idx_advanced_axes:
-            x_axis += 1
+        if idx_pos in idx_advanced_dim:
+            x_dim += 1
             gather_slice_shape.append(1)
             continue
 
@@ -370,21 +370,21 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             abstract_i = None
         # Handle basic int indexes.
         if isinstance(abstract_i, (Tensor,)) and (not abstract_i.shape and abstract_i.dtype == np.integer):
-            if x_shape[x_axis] == 0:
-                # XLA gives error when indexing into an axis of size 0
-                raise IndexError(f"index is out of bounds for axis {x_axis} with size 0")
-            i = _normalize_index(i, x_shape[x_axis]) if normalize_indices else i
+            if x_shape[x_dim] == 0:
+                # XLA gives error when indexing into an dim of size 0
+                raise IndexError(f"index is out of bounds for dim {x_dim} with size 0")
+            i = _normalize_index(i, x_shape[x_dim]) if normalize_indices else i
             i = i.astype(index_dtype)
             gather_indices.append((i, len(gather_indices_shape)))
-            collapsed_slice_dims.append(x_axis)
+            collapsed_slice_dims.append(x_dim)
             gather_slice_shape.append(1)
-            start_index_map.append(x_axis)
-            x_axis += 1
-        # Handle np.newaxis (None)
+            start_index_map.append(x_dim)
+            x_dim += 1
+        # Handle np.newdim (None)
         elif i is None:
             slice_shape.append(1)
-            newaxis_dims.append(y_axis)
-            y_axis += 1
+            newdim_dims.append(y_dim)
+            y_dim += 1
 
         elif isinstance(i, slice):
             # Normalize the slice to use None when possible
@@ -394,7 +394,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             if step is None:
                 if start is None or start == 0:
                     start = None
-                if stop is None or (not isinstance(stop, Tracor) and (stop >= x_shape[x_axis])):
+                if stop is None or (not isinstance(stop, Tracor) and (stop >= x_shape[x_dim])):
                     stop = None
             elif step == -1:
                 step = -1
@@ -402,13 +402,13 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             # Handle slice(None) and slice(None, None, -1)
             if start is None and stop is None and (step is None or isinstance(step, int) and step == -1):
                 if step == -1:
-                    reversed_y_dims.append(collapsed_y_axis)
-                slice_shape.append(x_shape[x_axis])
-                gather_slice_shape.append(x_shape[x_axis])
-                offset_dims.append(collapsed_y_axis)
-                collapsed_y_axis += 1
-                y_axis += 1
-                x_axis += 1
+                    reversed_y_dims.append(collapsed_y_dim)
+                slice_shape.append(x_shape[x_dim])
+                gather_slice_shape.append(x_shape[x_dim])
+                offset_dims.append(collapsed_y_dim)
+                collapsed_y_dim += 1
+                y_dim += 1
+                x_dim += 1
             # Handle slice index (only static, otherwise an error is raised)
             else:
                 if not all((elt == None or Tracor.get_aval(elt) is Tensor) for elt in (start, stop, step)):
@@ -422,23 +422,23 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
                         "tensors within JIT compiled functions)."
                     )
                     raise IndexError(msg)
-                # if not core.is_constant_dim(x_shape[x_axis]):
+                # if not core.is_constant_dim(x_shape[x_dim]):
                 #     msg = (
                 #         "Cannot use NumPy slice indexing on an tensor dimension whose "
-                #         f"size is not statically known ({x_shape[x_axis]}). "
+                #         f"size is not statically known ({x_shape[x_dim]}). "
                 #         "Try using lax.dynamic_slice/dynamic_update_slice"
                 #     )
                 #     raise IndexError(msg)
-                start, limit, stride, needs_rev = _static_idx(slice(start, stop, step), x_shape[x_axis])
+                start, limit, stride, needs_rev = _static_idx(slice(start, stop, step), x_shape[x_dim])
                 if needs_rev:
-                    reversed_y_dims.append(collapsed_y_axis)
+                    reversed_y_dims.append(collapsed_y_dim)
                 if stride == 1:
                     i = stamachine.astype(index_dtype)
                     gather_indices.append((i, len(gather_indices_shape)))
                     slice_shape.append(limit - start)
                     gather_slice_shape.append(limit - start)
-                    offset_dims.append(collapsed_y_axis)
-                    start_index_map.append(x_axis)
+                    offset_dims.append(collapsed_y_dim)
+                    start_index_map.append(x_dim)
                 else:
                     i = np.arange(start, limit, stride, dtype=index_dtype)
                     size = i.shape[0]
@@ -447,12 +447,12 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
                     gather_indices.append((i, len(gather_indices_shape)))
                     gather_indices_shape.append(size)
 
-                    start_index_map.append(x_axis)
-                    collapsed_slice_dims.append(x_axis)
+                    start_index_map.append(x_dim)
+                    collapsed_slice_dims.append(x_dim)
 
-                collapsed_y_axis += 1
-                y_axis += 1
-                x_axis += 1
+                collapsed_y_dim += 1
+                y_dim += 1
+                x_dim += 1
         else:
             raise NotImplementedError
 
@@ -471,7 +471,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 
     return _Indexer(
         slice_shape=slice_shape,
-        newaxis_dims=tuple(newaxis_dims),
+        newdim_dims=tuple(newdim_dims),
         gather_slice_shape=gather_slice_shape,
         reversed_y_dims=reversed_y_dims,
         dnums=GatherDimensionNumbers(

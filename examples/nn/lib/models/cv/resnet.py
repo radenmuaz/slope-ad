@@ -86,7 +86,7 @@ class BasicBlock(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-    def forward(self, x: Tensor) -> Tensor:
+    def __call__(self, x: Tensor) -> Tensor:
         identity = x
 
         out = self.conv1(x)
@@ -140,7 +140,7 @@ class Bottleneck(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-    def forward(self, x: Tensor) -> Tensor:
+    def __call__(self, x: Tensor) -> Tensor:
         identity = x
 
         out = self.conv1(x)
@@ -263,7 +263,7 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward_impl(self, x: Tensor) -> Tensor:
+    def ___call___impl(self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
@@ -281,8 +281,8 @@ class ResNet(nn.Module):
 
         return x
 
-    def forward(self, x: Tensor) -> Tensor:
-        return self._forward_impl(x)
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.___call___impl(x)
 
 
 def _resnet(

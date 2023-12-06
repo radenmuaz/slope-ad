@@ -1,110 +1,101 @@
 import slope
-
-
 import slope.nn as nn
 
 import time
-import itertools
-import math
 import numpy as np
 from tqdm import tqdm
 
 import numpy as np
 from lib.datasets.cifar10 import get_cifar10
-
-
-class ResnetBlock(nn.Module):
-    def __init__(self, in_dim, out_dim, stride=1):
-        self.conv1 = nn.Conv2d(in_dim, out_dim, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm(out_dim)
-        self.conv2 = nn.Conv2d(out_dim, out_dim, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm(out_dim)
-
-        self.shortcut = nn.Sequential(
-            [nn.Conv2d(in_dim, out_dim, kernel_size=1, stride=stride, bias=False), nn.BatchNorm(out_dim)]
-            if stride != 1 or in_dim != out_dim
-            else []
-        )
-
-    def __call__(self, x):
-        out = self.bn1(self.conv1(x)).relu()
-        out = self.bn2(self.conv2(out)).relu()
-        out = out + self.shortcut(x)
-        return out
-
-
-class Net(nn.Module):
-    def __init__(self):
-        self.block1 = ResnetBlock(3, 4)
-        # self.avgpool = nn.AvgPool2d(8)~
-        self.linear = nn.Linear(4096, 10)
-        self.flatten_fn = nn.Fn(lambda x: x.reshape((x.shape[0], -1)))
-
-    def __call__(self, x, training=False):
-        x = self.block1(x)
-        x = self.flatten_fn(x)
-        x = self.linear(x)
-        return (x, self) if training else x
-
-
-def loss_fn(model, batch):
-    inputs, targets = batch
-    preds, model_ = model(inputs, training=True)
-    return -(preds.log_softmax() * targets).sum(), model_
-
-
-g_loss_fn = slope.value_and_grad(loss_fn, has_aux=True)
+from lib.models.cv.resnet_cifar import resnet
 
 
 @slope.jit
 def train_step(model, batch, optimizer):
-    (loss, model_), g_model = g_loss_fn(model, batch)
-    new_model, new_optimizer = optimizer(model_, g_model)
-    return loss, new_model, new_optimizer
+    def train_loss_fn(model, batch):
+        x, y = batch
+        logits, model = model(x, training=True)
+        loss = -(logits.log_softmax() * y).sum()
+        return loss, (model, logits)
+    (loss, (model, logits)), grad_model = slope.value_and_grad(train_loss_fn, has_aux=True)(model, batch)
+    model, new_optimizer = optimizer(model, grad_model)
+    return loss, logits, model, new_optimizer
+
+@slope.jit
+def test_step(model, batch):
+    x, y = batch
+    logits = model(x, training=False)
+    loss = -(logits.log_softmax() * y).sum()
+    return loss, logits
+
+def get_dataloader(images, labels, batch_size, transforms_fn, shuffle=False):
+    N = images.shape[0]
+    perm = np.random.permutation(N) if shuffle else np.arange(N)
+    def data_iter():
+        for i in range(N//batch_size):
+            batch_idx = perm[i * batch_size : (i + 1) * batch_size]
+            x = transforms_fn(slope.tensor(images[batch_idx]))
+            y_onehot = slope.tensor(labels[batch_idx]).one_hot(10).cast(slope.float32)
+            yield x, y_onehot
+    nbatches = images.shape[0] // batch_size + (1 if (images.shape[0] % batch_size != 0) else 0)
+    return data_iter(), nbatches
+        
+
+def train_transforms_fn(x):
+    mean = slope.tensor([0.4914, 0.4822, 0.4465])[None, ..., None, None]
+    std = slope.tensor([0.2023, 0.1994, 0.2010])[None, ..., None, None]
+    return (x - mean) / std
 
 
-def test_all(model, x, y):
-    out = model(x)
-    y_hat = out.argmax(-1)
-    corrects = (y_hat == y).cast(slope.float32)
-    accuracy = corrects.mean().numpy()
-    return accuracy
-
+def test_transforms_fn(x):
+    mean = slope.tensor([0.4914, 0.4822, 0.4465])[None, ..., None, None]
+    std = slope.tensor([0.2023, 0.1994, 0.2010])[None, ..., None, None]
+    return (x - mean) / std
 
 if __name__ == "__main__":
-    num_epochs = 50
-    batch_size = 50  # TODO: must be multiple of dataset
+    nepochs = 50
+    train_batch_size = 50  # TODO: must be multiple of dataset
+    test_batch_size = 50 
     train_images, train_labels, test_images, test_labels = get_cifar10()
-    num_train = train_images.shape[0]
-    num_complete_batches, leftover = divmod(num_train, batch_size)
-    num_batches = num_complete_batches + bool(leftover)
-    model = Net()
-    optimizer = nn.Adam(model, lr=1e-4)
-
-    def data_stream():
-        rng = np.random.RandomState(0)
-        while True:
-            perm = rng.permutation(num_train)
-            for i in range(num_batches):
-                batch_idx = perm[i * batch_size : (i + 1) * batch_size]
-                x = slope.tensor(train_images[batch_idx]) * 0.5 - 0.5
-                y_onehot = slope.tensor(train_labels[batch_idx]).one_hot(10).cast(slope.float32)
-                yield x, y_onehot
-
-    x_test, y_test = slope.tensor(test_images), slope.tensor(test_labels).cast(slope.int32)
-
-    batches = data_stream()
-    itercount = itertools.count()
+    
+    model = resnet(depth=8)
+    optimizer = nn.Adam(model, lr=1e-3)
+    
+    train_dataloader, ntrain_batches = get_dataloader(
+        train_images, train_labels, train_batch_size, train_transforms_fn, shuffle=True)
+    test_dataloader, ntest_batches = get_dataloader(
+        test_images, test_labels, test_batch_size, test_transforms_fn, shuffle=False)
 
     print("\nStarting training...")
-    for epoch in range(num_epochs):
-        start_time = time.time()
-        for i in (pbar := tqdm(range(num_batches))):
-            batch = next(batches)
-            loss, model, optimizer = train_step(model, batch, optimizer)
-            pbar.set_description(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")
-        epoch_time = time.time() - start_time
+    best_acc = 0.
+    acc = 0.
+    for epoch in range(nepochs):
+        # start_time = time.perf_counter_ns()
+        total_loss = 0.
+        true_positives = 0.
+        for i, batch in (pbar := tqdm(enumerate(train_dataloader))):
+            loss, logits, model, optimizer = train_step(model, batch, optimizer)
+            total_loss += float(loss.numpy())
+            y_hat, y =  logits.argmax(-1), batch[1].argmax(-1)
+            true_positives += float((y_hat == y).cast(slope.float32).mean().numpy())
+            N = train_batch_size * (i+1)
+            msg = f"Train epoch: {epoch}, batch: {i}/{ntrain_batches}, loss: {total_loss/N:.4f}, acc: {true_positives/N:.4f}"
+            pbar.set_description(msg)
+            if i == 3: break
+        # epoch_time = (time.perf_counter_ns() - start_time)*1e-9
 
-        test_acc = test_all(model, x_test, y_test)
-        print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
-        print(f"Test set accuracy {test_acc:0.2f}")
+        total_loss = 0.
+        true_positives = 0.
+        for i, batch in (pbar := tqdm(enumerate(test_dataloader))):
+            loss, logits, model, optimizer = train_step(model, batch, optimizer)
+            total_loss += float(loss.numpy())
+            y_hat, y =  logits.argmax(-1), batch[1].argmax(-1)
+            true_positives += float((y_hat == y).cast(slope.float32).mean().numpy())
+            msg = f"Test epoch: {epoch}, batch: {i}/{ntest_batches}, loss: {total_loss/N:.4f}, acc: {true_positives/N:.4f}"
+            pbar.set_description(msg)
+        corrects = (y_hat == y)
+        acc = float(corrects.mean().numpy())
+        if acc > best_acc:
+            print(f"Best accuracy {acc:.2f} at epoch {epoch}")
+            best_acc = acc
+

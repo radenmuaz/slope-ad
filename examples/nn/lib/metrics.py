@@ -39,13 +39,13 @@ def one_hot(arr, num_classes=3):
     return arr
 
 
-def get_dice_score(prediction, target, channel_axis=1, smooth_nr=1e-6, smooth_dr=1e-6):
-    channel_axis, reduce_axis = 1, tuple(range(2, len(prediction.shape)))
-    prediction = prediction.argmax(axis=channel_axis)
+def get_dice_score(prediction, target, channel_dim=1, smooth_nr=1e-6, smooth_dr=1e-6):
+    channel_dim, reduce_dim = 1, tuple(range(2, len(prediction.shape)))
+    prediction = prediction.argmax(dim=channel_dim)
     prediction, target = one_hot(prediction)[:, 1:], one_hot(target)[:, 1:]
-    intersection = np.sum(prediction * target, axis=reduce_axis)
-    target_sum = np.sum(target, axis=reduce_axis)
-    prediction_sum = np.sum(prediction, axis=reduce_axis)
+    intersection = np.sum(prediction * target, dim=reduce_dim)
+    target_sum = np.sum(target, dim=reduce_dim)
+    prediction_sum = np.sum(prediction, dim=reduce_dim)
     result = (2.0 * intersection + smooth_nr) / (target_sum + prediction_sum + smooth_dr)
     return result[0]
 

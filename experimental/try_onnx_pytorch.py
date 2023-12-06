@@ -38,7 +38,7 @@ def create_model(type: torch.dtype = torch.float32):
     sample_y = torch.zeros(*SIZE, dtype=type)
 
     torch.onnx.export(model(), (sample_x, sample_y), MODEL_FILE, input_names=["x", "y"], output_names=["z"],
-                               dynamic_axes={"x": {0 : "array_length_x"}, "y": {0: "array_length_y"}})
+                               dynamic_dim={"x": {0 : "array_length_x"}, "y": {0: "array_length_y"}})
  
 # Create an ONNX Runtime session with the provided model
 def create_session(model: str) -> onnxruntime.InferenceSession:

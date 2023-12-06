@@ -340,31 +340,31 @@ operator_set.register(max)
 
 
 @max.set_method
-def jvp(self, primals, tangents, *, axes, keepdims):
+def jvp(self, primals, tangents, *, dim, keepdim):
     (x,), (x_dot,) = primals, tangents
-    y = x.max(axes, keepdims)
+    y = x.max(dim, keepdim)
     y_ = y
-    if not keepdims:
-        axes = tuple([a if a >= 0 else len(y.shape) + a + 1 for a in axes])
-        for a in reversed(sorted(axes)):
+    if not keepdim:
+        dim = tuple([a if a >= 0 else len(y.shape) + a + 1 for a in dim])
+        for a in reversed(sorted(dim)):
             y_ = y_.reshape(y.shape[:a] + (1,) + y.shape[a:])
     locs = x.equal(y_.expand(x.shape))
     locs = locs.cast(x_dot.dtype)
-    counts = locs.sum(axes, keepdims)
-    y_dot = (x_dot * locs).sum(axes, keepdims)
+    counts = locs.sum(dim, keepdim)
+    y_dot = (x_dot * locs).sum(dim, keepdim)
     y_dot = y_dot / counts.expand(y_dot.shape)
 
     return [y], [y_dot]
 
 
 @max.set_method
-def T(self, cotangents, x, *, axes, keepdims):
+def T(self, cotangents, x, *, dim, keepdim):
     # TODO: this is sum gradient, define max gradient
     (grad_L_y,) = cotangents
     grad_L_x = grad_L_y
-    if not keepdims:
-        axes = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in axes]
-        for a in reversed(sorted(axes)):
+    if not keepdim:
+        dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+        for a in reversed(sorted(dim)):
             grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
     grad_L_x = grad_L_x.expand(x.aval.shape)
 
@@ -374,20 +374,20 @@ operator_set.register(sum)
 
 
 @sum.set_method
-def jvp(self, primals, tangents, *, axes, keepdims):
+def jvp(self, primals, tangents, *, dim, keepdim):
     (x,), (x_dot,) = primals, tangents
-    y = x.sum(axes, keepdims)
-    y_dot = x_dot.sum(axes, keepdims)
+    y = x.sum(dim, keepdim)
+    y_dot = x_dot.sum(dim, keepdim)
     return [y], [y_dot]
 
 
 @sum.set_method
-def T(self, cotangents, x, *, axes, keepdims):
+def T(self, cotangents, x, *, dim, keepdim):
     (grad_L_y,) = cotangents
     grad_L_x = grad_L_y
-    if not keepdims:
-        axes = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in axes]
-        for a in reversed(sorted(axes)):
+    if not keepdim:
+        dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+        for a in reversed(sorted(dim)):
             grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
     grad_L_x = grad_L_x.expand(x.aval.shape)
 
@@ -409,17 +409,17 @@ def args_fixer(self, x, *, shape):
 
 
 @expand.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, shape):
+def vmap(self, dim_size, vals_in, dims_in, *, shape):
     (x,), (x_bdim,) = vals_in, dims_in
     shape = list(shape)
 
-    shape = shape[:x_bdim] + [axis_size] + shape[x_bdim:]
+    shape = shape[:x_bdim] + [dim_size] + shape[x_bdim:]
 
     return [self(x, shape)], [x_bdim]
 
 
 @expand.set_method
-def jvp(self, primals, tangents, *, shape, axes=None):
+def jvp(self, primals, tangents, *, shape, dim=None):
     (x,), (x_dot,) = primals, tangents
     return (
         [self(x, shape=shape)],
@@ -442,12 +442,12 @@ def T(self, cotangents, x, *, shape):
     if x.aval.shape == grad_L_x.shape:
         return [grad_L_x]
     else:
-        b_axes = []
+        b_dim = []
         assert len(x.aval.shape) == len(grad_L_x.shape)
         for i, (xd, od) in enumerate(zip(x.aval.shape, grad_L_x.shape)):
             if xd != od:
-                b_axes += [i]
-        grad_L_x = grad_L_x.sum(axes=tuple(b_axes), keepdims=True)
+                b_dim += [i]
+        grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
     if grad_L_x.shape != x.aval.shape:
         raise ValueError(f"not same {grad_L_x.shape=}, {x.aval.shape=}")
     return [grad_L_x]
@@ -488,7 +488,7 @@ operator_set.register(permute)
 
 
 @permute.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, perm):
+def vmap(self, dim_size, vals_in, dims_in, *, perm):
     (x,), (x_bdim,) = vals_in, dims_in
     perm_ = list(perm)
     x_bdim_ = int(x_bdim)
@@ -533,7 +533,7 @@ def args_fixer(self, x, *, padding, mode="constant", value=0.0):
 
 
 @pad.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, padding, mode, value):
+def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
     raise NotImplementedError
     Operand, padding_value = batched_args
     Operand_bdim, padding_value_bdim = batch_dims
@@ -608,7 +608,7 @@ def args_fixer(self, x, *, starts, limits, strides=None):
 
 
 @slice.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, starts, limits, strides=None):
+def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides=None):
     raise NotImplementedError
     (x,) = vals_in
     (x_bdim,) = dims_in
@@ -684,36 +684,36 @@ operator_set.register(flip)
 
 
 @flip.set_method
-def args_fixer(self, x, *, axes=None):
-    if axes is None:
-        axes = tuple(range((x.ndim)))
-    elif type(axes) is int:
-        axes = (axes,)
-    elif type(axes) is list:
-        axes = tuple(axes)
-    return (x,), dict(axes=axes)
+def args_fixer(self, x, *, dim=None):
+    if dim is None:
+        dim = tuple(range((x.ndim)))
+    elif type(dim) is int:
+        dim = (dim,)
+    elif type(dim) is list:
+        dim = tuple(dim)
+    return (x,), dict(dim=dim)
 
 
 @flip.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, axes):
+def vmap(self, dim_size, vals_in, dims_in, *, dim):
     raise NotImplementedError
 
 
 @flip.set_method
-def jvp(self, primals, tangents, *, axes):
+def jvp(self, primals, tangents, *, dim):
     (x,), (x_dot,) = primals, tangents
-    return [x.flip(axes)], [x_dot.flip(axes)]
+    return [x.flip(dim)], [x_dot.flip(dim)]
 
 
 @flip.set_method
-def typecheck(self, x: Typecheckor, *, axes):
+def typecheck(self, x: Typecheckor, *, dim):
     return [Typecheckor(tuple(x.shape), x.dtype)]
 
 
 @flip.set_method
-def T(self, cotangents, x, *, axes):
+def T(self, cotangents, x, *, dim):
     (z,) = cotangents
-    return [z.flip(axes)]
+    return [z.flip(dim)]
 
 
 cat = Operator.other("cat", nary_inputs=True)
@@ -722,32 +722,32 @@ operator_set.alias(cat, "cat")
 
 
 @cat.set_method
-def args_fixer(self, *xs, axis=0):
+def args_fixer(self, *xs, dim=0):
     if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
         xs = xs[0]
     xs = tuple(xs)
-    return xs, dict(axis=axis)
+    return xs, dict(dim=dim)
 
 
 @cat.set_method
-def vmap(self, axis_size, vals_in, dims_in, *, axis=0):
+def vmap(self, dim_size, vals_in, dims_in, *, dim=0):
     raise NotImplementedError
 
 
 @cat.set_method
-def jvp(self, primals, tangents, *, axis=0):
-    return [cat(*primals, axis=axis)], [cat(*tangents, axis=axis)]
+def jvp(self, primals, tangents, *, dim=0):
+    return [cat(*primals, dim=dim)], [cat(*tangents, dim=dim)]
 
 
 @cat.set_method
-def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
+def typecheck(self, *xs: Typecheckor, dim=0) -> List[Typecheckor]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot cat tensors with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
-    if not 0 <= axis < xs[0].ndim:
+    if not 0 <= dim < xs[0].ndim:
         msg = "cat dimension out of bounds: dimension {} for shapes {}."
-        raise TypeError(msg.format(axis, ", ".join([str(o.shape) for o in xs])))
-    shapes = [x.shape[:axis] + x.shape[axis + 1 :] for x in xs]
+        raise TypeError(msg.format(dim, ", ".join([str(o.shape) for o in xs])))
+    shapes = [x.shape[:dim] + x.shape[dim + 1 :] for x in xs]
     if not shapes[:-1] == shapes[1:]:
         msg = (
             "Cannot cat tensors with shapes that differ in dimensions "
@@ -755,28 +755,28 @@ def typecheck(self, *xs: Typecheckor, axis=0) -> List[Typecheckor]:
             "dimension {} for shapes {}."
         )
         shapes = [x.shape for x in xs]
-        raise TypeError(msg.format(axis, ", ".join(map(str, shapes))))
+        raise TypeError(msg.format(dim, ", ".join(map(str, shapes))))
 
-    concat_size = sum_py(x.shape[axis] for x in xs)
+    concat_size = sum_py(x.shape[dim] for x in xs)
     ex_shape = xs[0].shape
-    return [Typecheckor(ex_shape[:axis] + (concat_size,) + ex_shape[axis + 1 :], xs[0].dtype)]
+    return [Typecheckor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 
 
 @cat.set_method
-def T(self, cotangents, *xs, axis=0):
+def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
     x_shapes = [o.aval.shape if type(o) is PrimalProxy else o.shape for o in xs]
     if type(z) is None:
         return [None if type(o) is PrimalProxy else None for o in xs]
     else:  # TODO: replace numpy with pure Python
-        limit_points = np.cumsum([shape[axis] for shape in x_shapes]).tolist()
+        limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
         limits = np.tile(z.shape, (len(xs), 1)).tolist()
 
     for i, s in enumerate(starts[1:]):
-        s[axis] = limit_points[:-1][i]
+        s[dim] = limit_points[:-1][i]
     for i, l in enumerate(limits):
-        l[axis] = limit_points[i]
+        l[dim] = limit_points[i]
 
     return [z.slice(start, limit) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
 
@@ -975,7 +975,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
     (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
-    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
@@ -1004,7 +1004,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
     (bs, cin_), (cout, cin), HW = x_shape[:2], w_shape[:2], w_shape[2:]
     assert (
         groups * cin == cin_
-    ), f"Input axis shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input dim shape {x_shape} does not match the shape of the weights {w_shape}. ({groups*cin} vs. {cin_})"
 
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
@@ -1096,7 +1096,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
     (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
-    ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(
             HW
@@ -1138,7 +1138,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     (bs, cin_), (cin, cout), HW = x_shape[:2], w_shape[:2], w_shape[2:]
     assert (
         groups * cin == cin_
-    ), f"Input axis shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
+    ), f"Input dim shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
 
     if isinstance(padding, (tuple, list)):
         assert len(padding) == 2 * len(HW) or len(padding) == len(

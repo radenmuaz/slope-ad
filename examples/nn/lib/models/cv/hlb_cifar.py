@@ -52,9 +52,9 @@ def whitening(X, kernel_size=hyp["net"]["kernel_size"]):
     def _patches(data, patch_size=(kernel_size, kernel_size)):
         h, w = patch_size
         c = data.shape[1]
-        axis: SupportsIndex = (2, 3)  # type: ignore
+        dim: SupportsIndex = (2, 3)  # type: ignore
         return (
-            np.lib.stride_tricks.sliding_window_view(data, window_shape=(h, w), axis=axis)
+            np.lib.stride_tricks.sliding_window_view(data, window_shape=(h, w), dim=dim)
             .transpose((0, 3, 2, 1, 4, 5))
             .reshape((-1, c, h, w))
         )

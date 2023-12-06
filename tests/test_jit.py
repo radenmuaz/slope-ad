@@ -70,7 +70,7 @@ class TestJit(unittest.TestCase):
         def f(x, y):
             print("tracing")
             out = x + y
-            out = out.sum(keepdims=True)
+            out = out.sum(keepdim=True)
             return out
 
         # print(f"{f.get_jit_fn()=}")
@@ -90,7 +90,7 @@ class TestJit(unittest.TestCase):
             out = x + y
             out = out + z
             out = out + 1.0
-            out = out.sum(keepdims=True)
+            out = out.sum(keepdim=True)
             # out = x + Tensor([4.0, 5.0, 6.0])
             return out
 
@@ -113,7 +113,7 @@ class TestJit(unittest.TestCase):
         def f(x):
             print("tracing!")
             out = x + x
-            out = out.sum(keepdims=True)
+            out = out.sum(keepdim=True)
             # out = x + Tensor([4.0, 5.0, 6.0])
             return out
 

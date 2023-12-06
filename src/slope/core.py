@@ -318,6 +318,9 @@ class Tensor:
 
     val = property(lambda self: self.buf.val)
 
+    def size(self, i):
+        return self.shape[i]
+
     @property
     def dtype(self):
         return slope.M().backend.compiler.dtype_of(self)
@@ -352,10 +355,10 @@ class Tensor:
 
 class Typecheckor:
     def __init__(self, shape, dtype):
-        self.shape = tuple(shape)
+        self.shape = tuple(int(i) for i in shape)
         self.dtype = dtype
         assert isinstance(dtype, DType)
-        assert all(isinstance(i, int) for i in self.shape)
+        # assert all(isinstance(i, int) for i in self.shape)
 
     # @property
     # def dtype(self):
@@ -505,7 +508,7 @@ class Operator:
         op = cls(name, OperatorType.Unary, **kwargs)
 
         @op.set_method
-        def vmap(self, x, *, axis_size, vals_in, dims_in, **params):
+        def vmap(self, x, *, dim_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
             return [self(x, **params)], [x_bdim]
 
@@ -558,14 +561,14 @@ class Operator:
             return (x, w), params
 
         @op.set_method
-        def vmap(self, axis_size, vals_in, dims_in, **params):
+        def vmap(self, dim_size, vals_in, dims_in, **params):
             (x, w), (x_bdim, y_bdim) = vals_in, dims_in
             if x_bdim != y_bdim:
                 if x_bdim is None:
-                    x = BatchTrace.move_batch_axis(axis_size, x_bdim, y_bdim, x)
+                    x = BatchTrace.move_batch_dim(dim_size, x_bdim, y_bdim, x)
                     x_bdim = y_bdim
                 else:
-                    y = BatchTrace.move_batch_axis(axis_size, y_bdim, x_bdim, y)
+                    y = BatchTrace.move_batch_dim(dim_size, y_bdim, x_bdim, y)
             return [self(x, w, **params)], [x_bdim]
 
         @op.set_method
@@ -611,31 +614,31 @@ class Operator:
         op = cls(name, OperatorType.Reduce, **kwargs)
 
         @op.set_method
-        def args_fixer(self, x, *, axes=None, keepdims=False):
-            if axes is None:
-                axes = tuple(range(x.ndim))
-            elif isinstance(axes, int):
-                axes = (axes,)
-            axes = tuple(a if a >= 0 else a + len(x.shape) for a in axes)
-            return (x,), dict(axes=axes, keepdims=keepdims)
+        def args_fixer(self, x, *, dim=None, keepdim=False):
+            if dim is None:
+                dim = tuple(range(x.ndim))
+            elif isinstance(dim, int):
+                dim = (dim,)
+            dim = tuple(a if a >= 0 else a + len(x.shape) for a in dim)
+            return (x,), dict(dim=dim, keepdim=keepdim)
 
         @op.set_method
-        def vmap(self, axis_size, vals_in, dims_in, **params):
+        def vmap(self, dim_size, vals_in, dims_in, **params):
             (x,), (x_bdim,) = vals_in, dims_in
-            axes = list(params["axes"])
-            axes = tuple(a + (x_bdim <= a) for a in axes)
-            out_bdim = x_bdim - sum(a < x_bdim for a in axes)
-            params["axes"] = tuple(axes)
+            dim = list(params["dim"])
+            dim = tuple(a + (x_bdim <= a) for a in dim)
+            out_bdim = x_bdim - sum(a < x_bdim for a in dim)
+            params["dim"] = tuple(dim)
             return [cls.do(x, **params)], [out_bdim]
 
         @op.set_method
-        def typecheck(self, x: Typecheckor, *, axes=None, keepdims=False) -> List[Typecheckor]:
-            axes = [a + len(x.shape) if a < 0 else a for a in axes]
-            axes_ = set(axes)
-            if keepdims:
-                new_shape = [d if i not in axes_ else 1 for i, d in enumerate(x.shape)]
+        def typecheck(self, x: Typecheckor, *, dim=None, keepdim=False) -> List[Typecheckor]:
+            dim = [a + len(x.shape) if a < 0 else a for a in dim]
+            dim_ = set(dim)
+            if keepdim:
+                new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
             else:
-                new_shape = [d for i, d in enumerate(x.shape) if i not in axes_]
+                new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
             return [Typecheckor(tuple(new_shape), x.dtype)]
 
         return op
@@ -1053,10 +1056,16 @@ class PyTreeDef(NamedTuple):
 
 class Leaf:
     def __init__(self, val):
-        self.aval = Typecheckor.like(val)
+        if hasattr(val, "shape"):
+            val = Typecheckor.like(val)
+        self.aval = val
+        
 
     def __repr__(self):
-        return self.aval.str_short()
+        if isinstance(self.aval, Typecheckor):
+            return self.aval.str_short()
+        return repr(self)
+        
 
     def __hash__(self):
         return hash(self.aval)
@@ -1395,11 +1404,11 @@ class Tracor(Tensor):
         return f"{self.__class__.__name__}({repr(self.aval)})"
 
 
-BatchAxis = Union[None, int]
+Batchdim = Union[None, int]
 
 
 class BatchTracor(Tracor):
-    def __init__(self, trace, val, batch_dim: BatchAxis):
+    def __init__(self, trace, val, batch_dim: Batchdim):
         self._trace = trace
         self.val = val
         self.batch_dim = batch_dim
@@ -1426,18 +1435,18 @@ class BatchTrace(Trace):
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
-        val_outs, bdim_outs = op.vmap(self.axis_size, vals_in, bdims_in, **params)
+        val_outs, bdim_outs = op.vmap(self.dim_size, vals_in, bdims_in, **params)
         return [BatchTracor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @property
-    def axis_size(self):
+    def dim_size(self):
         return self.main.global_data
 
     @staticmethod
-    def move_batch_axis(axis_size, src, dst, x):
+    def move_batch_dim(dim_size, src, dst, x):
         if src is None:
             target_shape = list(x.shape)
-            target_shape.insert(dst, axis_size)
+            target_shape.insert(dst, dim_size)
             out_ndim = len(target_shape)
             if type(dst) in (tuple, list):
                 out_ndim += 1
@@ -1970,29 +1979,29 @@ class Machine:
     def program_as_fun(self, program: Program):
         return lambda *args: self.run_program(program, args)
 
-    def vmap_flat(self, f, in_axes, *args):
-        axi_set = {x.shape[ax] for x, ax in list_zip(args, in_axes) if ax is not None}
+    def vmap_flat(self, f, in_dim, *args):
+        axi_set = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
         assert len(axi_set) == 1
-        (axis_size,) = axi_set
-        with self.new_main(BatchTrace, axis_size) as main:
+        (dim_size,) = axi_set
+        with self.new_main(BatchTrace, dim_size) as main:
             trace = BatchTrace(main)
-            tracers_in = [BatchTracor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_axes)]
+            tracers_in = [BatchTracor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
             outs = f(*tracers_in)
             tracers_out = [self.full_raise(trace, out) for out in outs]
             vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
         outs_permuted = [
-            BatchTrace.move_batch_axis(axis_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
+            BatchTrace.move_batch_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
         ]
         return outs_permuted
 
-    def vmap(self, f, in_axes=0, out_axes=0):
+    def vmap(self, f, in_dim=0, out_dim=0):
         def batched_f(*args):
             args_flat, in_tree = self.tree_flatten(args)
-            in_axes_flat, in_tree2 = self.tree_flatten(in_axes)
+            in_dim_flat, in_tree2 = self.tree_flatten(in_dim)
             if in_tree != in_tree2:
                 raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
             f_flat, out_tree_store = self.flatten_fn(f, in_tree)
-            outs_flat = self.vmap_flat(f_flat, in_axes_flat, *args_flat)
+            outs_flat = self.vmap_flat(f_flat, in_dim_flat, *args_flat)
             return self.tree_unflatten(out_tree_store(), outs_flat)
 
         return batched_f

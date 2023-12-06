@@ -2,12 +2,12 @@ class Gather(ShapeOp):
     get_impl = lambda: slope.RT.compiler.GatherImpl
 
     @staticmethod
-    def run(x, idx, *, axis):
+    def run(x, idx, *, dim):
         return [x.gather(idx)]
 
     @staticmethod
     def _gather_batching_rule(
-        axis_size,
+        dim_size,
         vals_in,
         dims_in,
         # batched_args,
@@ -24,7 +24,7 @@ class Gather(ShapeOp):
         operand_bdim, indices_bdim = batch_dims
 
         if operand_bdim is not None and indices_bdim is None:
-            operand = batching.moveaxis(operand, operand_bdim, 0)
+            operand = batching.movedim(operand, operand_bdim, 0)
             slice_sizes = (operand.shape[0],) + slice_sizes
             offset_dims = (0,) + tuple(np.add(1, dimension_numbers.offset_dims))
             collapsed_slice_dims = tuple(np.add(1, dimension_numbers.collapsed_slice_dims))
@@ -49,7 +49,7 @@ class Gather(ShapeOp):
             )
 
         elif operand_bdim is None and indices_bdim is not None:
-            indices = batching.moveaxis(indices, indices_bdim, 0)
+            indices = batching.movedim(indices, indices_bdim, 0)
             offset_dims = tuple(1 + d for d in dimension_numbers.offset_dims)
             dnums = GatherDimensionNumbers(
                 offset_dims=offset_dims,
@@ -74,8 +74,8 @@ class Gather(ShapeOp):
 
         else:
             # move batch dimensions to the front to simplify logic
-            operand = batching.moveaxis(operand, operand_bdim, 0)
-            indices = batching.moveaxis(indices, indices_bdim, 0)
+            operand = batching.movedim(operand, operand_bdim, 0)
+            indices = batching.movedim(indices, indices_bdim, 0)
 
             # This slightly awkward special case is needed because the shape rule for
             # gather does not allow size-1 slices out of a size-0 dimension, even if
@@ -322,12 +322,12 @@ class Scatter(ShapeOp):
     get_impl = lambda: slope.RT.compiler.ScatterImpl
 
     @staticmethod
-    def run(x, idx, *, axis):
+    def run(x, idx, *, dim):
         return [x.gatter(idx)]
 
     @staticmethod
     def vmap(
-        axis_size,
+        dim_size,
         vals_in,
         dims_in,
         # scatter_op,
@@ -450,8 +450,8 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def typecheck(x: Typecheckor, idx, *, axis: Sequence[int]) -> List[Typecheckor]:
-        shape = [x.shape[i] for i in axis]
+    def typecheck(x: Typecheckor, idx, *, dim: Sequence[int]) -> List[Typecheckor]:
+        shape = [x.shape[i] for i in dim]
         return [Typecheckor(shape, x.dtype)]
 
     @staticmethod
@@ -523,15 +523,15 @@ def fn(
     return """
 # SmallVector<Tensor> runScatterOp(
 #     TensorRef<Tensor> inputs, const Tensor &scatterIndices,
-#     TensorRef<Tensor> updates, const Axes &updateWindowDims,
-#     const Axes &insertedWindowDims, const Axes &scatterDimsToOperandDims,
-#     Axis indexVectorDim, Region &updateComputation, Scope &scope,
+#     TensorRef<Tensor> updates, const dim &updateWindowDims,
+#     const dim &insertedWindowDims, const dim &scatterDimsToOperandDims,
+#     dim indexVectorDim, Region &updateComputation, Scope &scope,
 #     TensorRef<ShapedType> resultTypes) {
 #   SmallVector<Tensor> results;
 #   for (auto input : inputs) results.push_back(input);
 
-#   Axes updateScatterDims;
-#   for (auto d : updates[0].getAxes())
+#   dim updateScatterDims;
+#   for (auto d : updates[0].getdim())
 #     if (!llvm::is_contained(updateWindowDims, d))
 #       updateScatterDims.push_back(d);
 
@@ -549,7 +549,7 @@ def fn(
 #     auto startIndex = runIndex(runSliceOp(scatterIndices, startIndicesIndex));
 
 #     Index fullStartIndex(inputs[0].getRank(), 0);
-#     for (auto dInput : inputs[0].getAxes()) {
+#     for (auto dInput : inputs[0].getdim()) {
 #       auto dStartIt = llvm::find(scatterDimsToOperandDims, dInput);
 #       if (dStartIt == scatterDimsToOperandDims.end()) continue;
 #       auto dStart = dStartIt - scatterDimsToOperandDims.begin();

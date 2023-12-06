@@ -145,19 +145,19 @@ slope.M().register_node(Module, Module.flatten, Module.unflatten, "Module")
 # ====================
 
 
-def compute_fans(shape: Sequence, in_axis=-2, out_axis=-1, batch_axis=()):
-    if isinstance(in_axis, int):
-        in_size = shape[in_axis]
+def compute_fans(shape: Sequence, in_dim=-2, out_dim=-1, batch_dim=()):
+    if isinstance(in_dim, int):
+        in_size = shape[in_dim]
     else:
-        in_size = int(np.prod([shape[i] for i in in_axis]))
-    if isinstance(out_axis, int):
-        out_size = shape[out_axis]
+        in_size = int(np.prod([shape[i] for i in in_dim]))
+    if isinstance(out_dim, int):
+        out_size = shape[out_dim]
     else:
-        out_size = int(np.prod([shape[i] for i in out_axis]))
-    if isinstance(batch_axis, int):
-        batch_size = shape[batch_axis]
+        out_size = int(np.prod([shape[i] for i in out_dim]))
+    if isinstance(batch_dim, int):
+        batch_size = shape[batch_dim]
     else:
-        batch_size = int(np.prod([shape[i] for i in batch_axis]))
+        batch_size = int(np.prod([shape[i] for i in batch_dim]))
     receptive_field_size = math.prod(shape) / in_size / out_size / batch_size
     fan_in = in_size * receptive_field_size
     fan_out = out_size * receptive_field_size
@@ -175,13 +175,13 @@ def variance_scaling(
     scale,
     mode: str,
     distribution: str,
-    in_axis: Union[int, Sequence[int]] = -2,
-    out_axis: Union[int, Sequence[int]] = -1,
-    batch_axis: Sequence[int] = (),
+    in_dim: Union[int, Sequence[int]] = -2,
+    out_dim: Union[int, Sequence[int]] = -1,
+    batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
     def init(shape, dtype=dtype):
-        fan_in, fan_out = compute_fans(shape, in_axis, out_axis, batch_axis)
+        fan_in, fan_out = compute_fans(shape, in_dim, out_dim, batch_dim)
         if mode == "fan_in":
             denominator = fan_in
         elif mode == "fan_out":
@@ -203,35 +203,35 @@ def variance_scaling(
 
 
 def glorot_normal(
-    in_axis: Union[int, Sequence[int]] = -2,
-    out_axis: Union[int, Sequence[int]] = -1,
-    batch_axis: Sequence[int] = (),
+    in_dim: Union[int, Sequence[int]] = -2,
+    out_dim: Union[int, Sequence[int]] = -1,
+    batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,
         "fan_avg",
         "normal",
-        in_axis=in_axis,
-        out_axis=out_axis,
-        batch_axis=batch_axis,
+        in_dim=in_dim,
+        out_dim=out_dim,
+        batch_dim=batch_dim,
         dtype=dtype,
     )
 
 
 def glorot_uniform(
-    in_axis: Union[int, Sequence[int]] = -2,
-    out_axis: Union[int, Sequence[int]] = -1,
-    batch_axis: Sequence[int] = (),
+    in_dim: Union[int, Sequence[int]] = -2,
+    out_dim: Union[int, Sequence[int]] = -1,
+    batch_dim: Sequence[int] = (),
     dtype=slope.float32,
 ) -> Callable:
     return variance_scaling(
         1.0,
         "fan_avg",
         "uniform",
-        in_axis=in_axis,
-        out_axis=out_axis,
-        batch_axis=batch_axis,
+        in_dim=in_dim,
+        out_dim=out_dim,
+        batch_dim=batch_dim,
         dtype=dtype,
     )
 
@@ -439,7 +439,7 @@ class AvgPool2d(Module):
             return (x,) * cnt if isinstance(x, int) else x
 
         return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size).mean(
-            axes=tuple(range(0 - len(make_pair(kernel_size)), 0))
+            dim=tuple(range(0 - len(make_pair(kernel_size)), 0))
         )
 
 
@@ -454,7 +454,7 @@ class MaxPool2d(Module):
             return (x,) * cnt if isinstance(x, int) else x
 
         return x.pool(make_pair(kernel_size), stride if stride is not None else kernel_size, dilation).max(
-            axis=tuple(range(0 - len(make_pair(kernel_size)), 0))
+            dim=tuple(range(0 - len(make_pair(kernel_size)), 0))
         )
 
 
@@ -492,7 +492,7 @@ class ConvNd(Module):
         (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
         assert groups * cin == cin_ and len(x.shape) == len(
             w.shape
-        ), f"Input axis shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+        ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
         if isinstance(padding, (tuple, list)):
             assert len(padding) == 2 * len(HW) or len(padding) == len(
                 HW
@@ -526,7 +526,7 @@ class ConvNd(Module):
         )
         # (bs, groups, rcout, *oyx, cin, *HW)
         x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
-        x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdims=True)
+        x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdim=True)
         x = x.reshape((bs, cout, *oyx))
         ret = x
         return ret
@@ -670,10 +670,10 @@ class BatchNorm(Module):
     def __call__(self, x, training=False):
         if training:
             broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
-            reduce_axes = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
-            mean = x.mean(reduce_axes).stop_gradient()
+            reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
+            mean = x.mean(reduce_dim).stop_gradient()
             z = x - mean.reshape(broadcast_shape)
-            var = (z * z).mean(reduce_axes).stop_gradient()
+            var = (z * z).mean(reduce_dim).stop_gradient()
             invstd = (var + self.eps) ** -0.5
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)
@@ -706,7 +706,7 @@ class LayerNorm(Module):
         self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True
     ):
         self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
-        self.axis, self.eps, self.elementwise_affine = (
+        self.dim, self.eps, self.elementwise_affine = (
             tuple(-1 - i for i in range(len(self.normalized_shape))),
             eps,
             elementwise_affine,
@@ -721,16 +721,16 @@ class LayerNorm(Module):
         assert (
             self.normalized_shape == x.shape[-len(self.normalized_shape) :]
         ), f"last dimensions of {x.shape} must match {self.normalized_shape}"
-        x = x.layernorm(eps=self.eps, axis=self.axis)
+        x = x.layernorm(eps=self.eps, dim=self.dim)
         if not self.elementwise_affine:
             return x
         return x * self.weight + self.bias
 
-    @slope.M().backend.procedure_set.register(static_argnames="axis eps")
+    @slope.M().backend.procedure_set.register(static_argnames="dim eps")
     @staticmethod
-    def layernorm(self, axis=-1, eps: float = 1e-5) -> Tensor:
-        y = self - self.mean(axis, keepdim=True)
-        return y.mul((y * y).mean(axis, keepdim=True).add(eps).rsqrt())
+    def layernorm(self, dim=-1, eps: float = 1e-5) -> Tensor:
+        y = self - self.mean(dim, keepdim=True)
+        return y.mul((y * y).mean(dim, keepdim=True).add(eps).rsqrt())
 
 
 class LayerNorm1d(LayerNorm):
@@ -813,43 +813,43 @@ class CrossEntropyLoss(Module):
 
     @slope.M().backend.procedure_set.register(static_argnames="ignore_index")
     @staticmethod
-    def cross_entropy(self, Y, ignore_index=-1) -> Tensor:
+    def cross_entropy(x, y, ignore_index=-1) -> Tensor:
         # NOTE: self is a logits input
-        loss_mask = Y != ignore_index
+        loss_mask = y != ignore_index
         y_counter = (
-            Tensor.arange(self.shape[-1], dtype=slope.int32, requires_grad=False, device=self.device)
+            slope.arange(x.shape[-1], dtype=slope.int32, device=x.device)
             .unsqueeze(0)
-            .expand(Y.numel(), self.shape[-1])
+            .expand(y.numel(), x.shape[-1])
         )
-        y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(
-            *Y.shape, self.shape[-1]
+        y = ((y_counter == y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(
+            *y.shape, x.shape[-1]
         )
-        return self.log_softmax().mul(y).sum() / loss_mask.sum()
+        return (x.log_softmax(-1) * y).sum() / loss_mask.sum()
 
 
 class Softmax(Module):
-    def __call__(x, axes=-1):
-        return x.softmax(axes)
+    def __call__(x, dim=-1):
+        return x.softmax(dim)
 
-    @slope.M().backend.procedure_set.register(static_argnames="axes")
+    @slope.M().backend.procedure_set.register(static_argnames="dim")
     @staticmethod
-    def softmax(x, axes=-1):
-        m = x - x.max(axes, keepdims=True)
+    def softmax(x, dim=-1):
+        m = x - x.max(dim, keepdim=True)
         e = m.exp()
-        ss = e.sum(axes, keepdims=True)
+        ss = e.sum(dim, keepdim=True)
         return e / ss
 
 
 class LogSoftmax(Module):
-    def __call__(x, axes=-1):
-        return x.log_softmax(axes)
+    def __call__(x, dim=-1):
+        return x.log_softmax(dim)
 
-    @slope.M().backend.procedure_set.register(static_argnames="axes")
+    @slope.M().backend.procedure_set.register(static_argnames="dim")
     @staticmethod
-    def log_softmax(x, axes=-1):
-        m = x - x.max(axes, keepdims=True)
+    def log_softmax(x, dim=-1):
+        m = x - x.max(dim, keepdim=True)
         e = m.exp()
-        ss = e.sum(axes, keepdims=True)
+        ss = e.sum(dim, keepdim=True)
         return m - ss.log()
 
 

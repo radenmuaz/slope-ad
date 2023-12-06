@@ -167,7 +167,7 @@ def _threefry_split_foldlike(key, num):
     k1, k2 = key
     counts1, counts2 = iota_2x32_shape((num,))
     bits1, bits2 = threefry2x32(k1, k2, counts1, counts2)
-    return stack([bits1, bits2], axis=1)
+    return stack([bits1, bits2], dim=1)
 
 
 def threefry_fold_in(key, data):
@@ -272,12 +272,12 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
         reshaped_base = jnp.reshape(self._base_tensor, (*newshape, -1), order=order)
         return PRNGKeyTensorImpl(self.impl, reshaped_base)
 
-    def cat(self, key_arrs, axis, dtype=None) -> PRNGKeyTensorImpl:
+    def cat(self, key_arrs, dim, dtype=None) -> PRNGKeyTensorImpl:
         if dtype is not None:
             raise ValueError("dtype argument not supported for concatenating PRNGKeyTensor")
-        axis = canonicalize_axis(axis, self.ndim)
+        dim = canonicalize_dim(dim, self.ndim)
         arrs = [self._base_tensor, *[k._base_tensor for k in key_arrs]]
-        return PRNGKeyTensorImpl(self.impl, jnp.cat(arrs, axis))
+        return PRNGKeyTensorImpl(self.impl, jnp.cat(arrs, dim))
 
     def expand(self, shape) -> PRNGKeyTensorImpl:
         if jnp.ndim(shape) == 0:
@@ -288,7 +288,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     def expand_dims(self, dimensions: Sequence[int]) -> PRNGKeyTensorImpl:
         # follows lax.expand_dims, not jnp.expand_dims, so dimensions is a sequence
         ndim_out = self.ndim + len(set(dimensions))
-        dimensions = [canonicalize_axis(d, ndim_out) for d in dimensions]
+        dimensions = [canonicalize_dim(d, ndim_out) for d in dimensions]
         return PRNGKeyTensorImpl(self.impl, lax.expand_dims(self._base_tensor, dimensions))
 
     def __repr__(self):

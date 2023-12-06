@@ -53,7 +53,7 @@ _known_dtypes = [d[2] for d in _dtypes]
 for d in _known_dtypes:
     globals()[d] = d
 
-newaxis = None
+newdim = None
 
 nan = float("nan")
 
@@ -116,16 +116,16 @@ def _shape_from_object(obj):
     shape = []
 
     # todo: make more efficient, use len() etc
-    def _shape_from_object_r(index, element, axis):
+    def _shape_from_object_r(index, element, dim):
         try:
             for i, e in enumerate(element):
-                _shape_from_object_r(i, e, axis + 1)
-            while len(shape) <= axis:
+                _shape_from_object_r(i, e, dim + 1)
+            while len(shape) <= dim:
                 shape.append(0)
             l = i + 1
-            s = shape[axis]
+            s = shape[dim]
             if l > s:
-                shape[axis] = l
+                shape[dim] = l
         except TypeError:
             pass
 
@@ -150,13 +150,13 @@ def _assign_from_object(Tensor, obj):
 
 
 def _increment_mutable_key(key, shape):
-    for axis in reversed(xrange(len(shape))):
-        key[axis] += 1
-        if key[axis] < shape[axis]:
+    for dim in reversed(xrange(len(shape))):
+        key[dim] += 1
+        if key[dim] < shape[dim]:
             return True
-        if axis == 0:
+        if dim == 0:
             return False
-        key[axis] = 0
+        key[dim] = 0
 
 
 def _key_for_index(index, shape):
@@ -732,16 +732,16 @@ class Tensor(object):
             return "<Tensor %s %s at 0x%x>" % (shapestr, self.dtype, id(self))
 
         # Otherwise, try to show in nice way
-        def _repr_r(s, axis, offset):
-            axisindent = min(2, max(0, (self.ndim - axis - 1)))
-            if axis < len(self.shape):
+        def _repr_r(s, dim, offset):
+            dimindent = min(2, max(0, (self.ndim - dim - 1)))
+            if dim < len(self.shape):
                 s += "["
-                for k_index, k in enumerate(xrange(self.shape[axis])):
+                for k_index, k in enumerate(xrange(self.shape[dim])):
                     if k_index > 0:
-                        s += ("\n       " + " " * axis) * axisindent
-                    offset_ = offset + k * self._strides[axis] // self.itemsize
-                    s = _repr_r(s, axis + 1, offset_)
-                    if k_index < self.shape[axis] - 1:
+                        s += ("\n       " + " " * dim) * dimindent
+                    offset_ = offset + k * self._strides[dim] // self.itemsize
+                    s = _repr_r(s, dim + 1, offset_)
+                    if k_index < self.shape[dim] - 1:
                         s += ", "
                 s += "]"
             else:
@@ -1033,37 +1033,37 @@ class Tensor(object):
         if not isinstance(key, tuple):
             key = (key,)
 
-        axis = 0
+        dim = 0
         shape = []
         strides = []
         offset = self._offset
 
         for k in key:
-            axissize = self._shape[axis]
+            dimsize = self._shape[dim]
             if isinstance(k, int):
-                if k >= axissize:
-                    raise IndexError("index %i is out of bounds for axis %i " "with size %s" % (k, axis, axissize))
-                offset += k * self._strides[axis] // self.itemsize
-                axis += 1
+                if k >= dimsize:
+                    raise IndexError("index %i is out of bounds for dim %i " "with size %s" % (k, dim, dimsize))
+                offset += k * self._strides[dim] // self.itemsize
+                dim += 1
             elif isinstance(k, slice):
-                start, stop, step = k.indices(self.shape[axis])
+                start, stop, step = k.indices(self.shape[dim])
                 shape.append(_ceildiv(stop - start, step))
-                strides.append(step * self._strides[axis])
-                offset += start * self._strides[axis] // self.itemsize
-                axis += 1
+                strides.append(step * self._strides[dim])
+                offset += start * self._strides[dim] // self.itemsize
+                dim += 1
             elif k is Ellipsis:
                 raise TypeError("ellipsis are not supported.")
             elif k is None:
                 shape.append(1)
                 stride = 1
-                for s in self._strides[axis:]:
+                for s in self._strides[dim:]:
                     stride *= s
                 strides.append(stride)
             else:
                 raise TypeError("key elements must be instaces of int or slice.")
 
-        shape.extend(self.shape[axis:])
-        strides.extend(self._strides[axis:])
+        shape.extend(self.shape[dim:])
+        strides.extend(self._strides[dim:])
 
         return offset, tuple(shape), tuple(strides)
 
@@ -1228,9 +1228,9 @@ class Tensor(object):
     def ravel(self):
         return self.reshape((self.size,))
 
-    def repeat(self, repeats, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def repeat(self, repeats, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         out = empty((self.size * repeats,), self.dtype)
         for i in range(repeats):
             out[i * self.size : (i + 1) * self.size] = self
@@ -1294,43 +1294,43 @@ class Tensor(object):
     # We use the self.flat generator here. self._toflatlist() would be
     # faster, but it might take up significantly more memory.
 
-    def all(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def all(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return all(self.flat)
 
-    def any(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def any(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return any(self.flat)
 
-    def min(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def min(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return min(self.flat)
 
-    def max(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def max(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return max(self.flat)
         # return max(self._toflatlist())  # almost twice as fast
 
-    def sum(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def sum(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return sum(self.flat)
 
-    def prod(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def prod(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         p = 1.0
         for i in self.flat:
             p *= float(i)
         return p
 
-    def ptp(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def ptp(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         mn = self.data[self._offset]
         mx = mn
         for i in self.flat:
@@ -1340,14 +1340,14 @@ class Tensor(object):
                 mn = i
         return mx - mn
 
-    def mean(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def mean(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         return self.sum() / self.size
 
-    def argmax(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def argmax(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         r = self.data[self._offset]
         r_index = 0
         for i_index, i in enumerate(self.flat):
@@ -1356,9 +1356,9 @@ class Tensor(object):
                 r_index = i_index
         return r_index
 
-    def argmin(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def argmin(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         r = self.data[self._offset]
         r_index = 0
         for i_index, i in enumerate(self.flat):
@@ -1367,9 +1367,9 @@ class Tensor(object):
                 r_index = i_index
         return r_index
 
-    def cumprod(self, axis=None, out=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def cumprod(self, dim=None, out=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         if out is None:
             out = empty((self.size,), self.dtype)
         p = 1
@@ -1380,9 +1380,9 @@ class Tensor(object):
         out[:] = L
         return out
 
-    def cumsum(self, axis=None, out=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def cumsum(self, dim=None, out=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         if out is None:
             out = empty((self.size,), self.dtype)
         p = 0
@@ -1393,17 +1393,17 @@ class Tensor(object):
         out[:] = L
         return out
 
-    def var(self, axis=None):
-        if axis:
-            raise (TypeError, "axis argument is not supported")
+    def var(self, dim=None):
+        if dim:
+            raise (TypeError, "dim argument is not supported")
         m = self.mean()
         acc = 0
         for x in self.flat:
             acc += abs(x - m) ** 2
         return acc / self.size
 
-    def std(self, axis=None):
-        return sqrt(self.var(axis))
+    def std(self, dim=None):
+        return sqrt(self.var(dim))
 
     def argwhere(self, val):
         # assumes that list has only values of same dtype

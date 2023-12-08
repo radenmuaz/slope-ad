@@ -281,9 +281,8 @@ operator_set.register(maximum)
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
         xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
-        yz = (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
-        eps = slope.ones_like(z)
-        return xz / (yz + eps)  # TODO: nan if no eps for onnxruntime
+        yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+        return xz / yz
 
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.maximum(w)
@@ -817,6 +816,10 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
         shape = (shape,)
     elif shape is None:
         shape = ()
+    if "float" in dtype.name:
+        fill_value = float(fill_value)
+    elif "int" in dtype.name:
+        fill_value = int(fill_value)
     return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
 
@@ -1357,7 +1360,11 @@ def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
-    session = onnxruntime.InferenceSession(model.SerializeToString(), providers=["CPUExecutionProvider"])
+    sess_options = onnxruntime.SessionOptions()
+    # sess_options.intra_op_num_threads = 8
+    # sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+    session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"])
 
     def fn(*args):
         io_binding = session.io_binding()

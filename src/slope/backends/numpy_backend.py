@@ -280,9 +280,9 @@ operator_set.register(maximum)
 @maximum.set_method
 def jvp(self, primals, tangents):
     def _balanced_eq(x, z, y):
-        return ((x == z).where(slope.ones_like(z), slope.zeros_like(z))) / (
-            (y == z).where(slope.full_like(z, 2.0 if "float" in z.dtype.name else 2), slope.ones_like(z))
-        )
+        xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
+        yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+        return xz / yz
 
     (x, w), (x_dot, w_dot) = primals, tangents
     y = x.maximum(w)
@@ -815,6 +815,10 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
         shape = (shape,)
     elif shape is None:
         shape = ()
+    if "float" in dtype.name:
+        fill_value = float(fill_value)
+    elif "int" in dtype.name:
+        fill_value = int(fill_value)
     return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
 

@@ -674,7 +674,7 @@ class BatchNorm(Module):
             mean = x.stop_gradient().mean(reduce_dim)
             z = x.stop_gradient() - mean.reshape(broadcast_shape)
             var = (z * z).mean(reduce_dim)
-            invstd = 1.0 / (var + self.eps).sqrt()
+            invstd = slope.ones_like(var) / (var + self.eps).sqrt()
             if self.track_running_stats:
                 z_numel = math.prod(z.shape)
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
@@ -890,7 +890,7 @@ class GD(Optimizer):
 
 
 class SGD(Optimizer):
-    def __init__(self, params, lr=0.001, momentum: float = 0.9, weight_decay=0.0, nesterov=False):
+    def __init__(self, params, lr=0.001, momentum: float = 0, weight_decay=0.0, nesterov=False):
         super().__init__(params, lr)
         self.hp.momentum = momentum
         self.hp.weight_decay = weight_decay

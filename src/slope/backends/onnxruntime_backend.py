@@ -694,8 +694,11 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
             ),
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
-
-    res = z.pad(lo, hi, interior)
+    padding = []
+    for (l,h) in zip(lo, hi):
+        padding += [l, h]
+    padding = tuple(padding)
+    res = z.pad(padding)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
 
@@ -1061,7 +1064,7 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
     return [y], [y_dot1 + y_dot2]
 
 # https://deeplearning.cs.cmu.edu/F21/document/recitation/Recitation5/CNN_Backprop_Recitation_5_F21.pdf
-# x_grad = F.conv_transpose2d(y.grad, w, stride=stride, padding=padding, dilation=dilation, output_padding=1)
+# x_grad = F.conv_transpose2d(y.grad, w, stride=stride, padding=padding, dilation=dilation, output_padding=stride-padding)
 # assert torch.allclose(x_grad, x.grad)
 # w_grad = F.conv2d(x.transpose(0,1), y.grad.transpose(0,1), stride=dilation, padding=padding, dilation=stride, groups=groups).transpose(0,1)
 # w_grad = w_grad[:,:,:w.size(2),:w.size(3)]
@@ -1072,20 +1075,10 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
         grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0]-padding[0])
-        # _grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0)
-        # if _grad_L_x.shape[2:] != x.shape[2:]:
-        #     output_padding = x.shape[2] - _grad_L_x.shape[2]
-        #     assert output_padding > 0
-        #     grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
-        # else:
-        #     grad_L_x = _grad_L_x
         assert grad_L_x.shape == x.shape
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
-        x_T = x.transpose(0, 1)
-        grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=dilation, dilation=stride, padding=padding).transpose(0, 1)
-        # if grad_L_w.shape != w.shape:
+        grad_L_w = x.transpose(0, 1).conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding).transpose(0, 1)
         starts = (0,)*len(grad_L_w.shape)
         ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
         grad_L_w = grad_L_w.slice(starts, ends)
@@ -1131,13 +1124,12 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         )
     )
     if isinstance(stride, int):
-        stride = make_pair(dilation, len(HW))
+        stride = make_pair(stride, len(HW))
     if isinstance(dilation, int):
         dilation = make_pair(dilation, len(HW))
     assert len(HW) == len(stride) and len(HW) == len(
         dilation
     ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
-    # if 1 in output_padding: breakpoint()
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
 

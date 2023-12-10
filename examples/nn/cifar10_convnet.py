@@ -56,6 +56,7 @@ if __name__ == "__main__":
     model = resnet(depth=8)
     # optimizer = nn.Adam(model, lr=1e-3)
     optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
+    # optimizer = nn.SGD(model, lr=0., momentum=0., weight_decay=0)
     
     train_dataloader, ntrain_batches = get_dataloader(train_images, train_labels, train_batch_size, shuffle=True)
     test_dataloader, ntest_batches = get_dataloader(test_images, test_labels, test_batch_size, shuffle=False)
@@ -73,8 +74,8 @@ if __name__ == "__main__":
             true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             train_loss = total_loss/(i+1)
             train_acc = true_positives/ (train_batch_size * (i+1))
-            msg = (f"Train epoc: {epoch}, batch: {i+1}/{ntrain_batches}, "
-                   f"curr_loss: {loss_numpy:.4f}, "
+            msg = (f"Train epoch: {epoch}, batch: {i+1}/{ntrain_batches}, "
+                   f"batch_loss: {loss_numpy:.4f}, "
                    f"loss: {train_loss:.4f}, acc: {train_acc:.4f}")
             pbar.set_description(msg)
 
@@ -88,8 +89,8 @@ if __name__ == "__main__":
             true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             test_loss = total_loss/(i+1)
             test_acc = true_positives/ (test_batch_size * (i+1))
-            msg = (f"Tets epoch: {epoch}, batch: {i+1}/{ntest_batches}, "
-                   f"curr_loss: {loss_numpy:.4f}, "
+            msg = (f"Test epoch: {epoch}, batch: {i+1}/{ntest_batches}, "
+                   f"batch_loss: {loss_numpy:.4f}, "
                    f"loss: {test_loss:.4f}, acc: {test_acc:.4f}")
             pbar.set_description(msg)
         if test_acc > best_acc:

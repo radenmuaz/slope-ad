@@ -622,14 +622,12 @@ class ConvNdTranspose(Module):
         stride = make_pair(stride, len(HW))
         if any(s > 1 for s in stride):
             x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
-            x = x.pad(((0, 0), (0, 0), *flatten_seq(((0, 0), (0, s - 1)) for s in stride)))
-            x = x.reshape((*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)]))
+            x = x.pad((0, 0, 0, 0, *flatten_seq((0, 0, 0, s - 1) for s in stride)))
+            x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
             x = x.slice(
-                (
                     (0, x.shape[0]),
                     (0, x.shape[1]),
                     *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
-                )
             )
         padding = flatten_seq(
             (

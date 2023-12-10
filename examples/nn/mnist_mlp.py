@@ -28,12 +28,12 @@ def train_step(model, batch, optimizer):
     return loss, new_model, new_optimizer
 
 
-# @slope.jit
+@slope.jit
 def test_all(model, x, y):
     out = model(x)
     y_hat = out.argmax(-1)
     corrects = (y_hat == y).cast(slope.float32)
-    accuracy = corrects.mean().numpy()
+    accuracy = corrects.mean()
     return accuracy
 
 class Net(nn.Module):
@@ -60,8 +60,8 @@ if __name__ == "__main__":
     num_batches = num_complete_batches + bool(leftover)
     log_interval = 10
     model = Net(in_dim=784, hid_dim=100, out_dim=10, act=nn.ReLU())
-    optimizer = nn.SGD(model, lr=1e-3, momentum=0.8, weight_decay=1e-5)
-    # optimizer = nn.Adam(model, lr=1e-4)
+    # optimizer = nn.SGD(model, lr=1e-3, momentum=0.9, weight_decay=1e-4)
+    optimizer = nn.Adam(model, lr=1e-2)
 
     def data_stream():
         rng = np.random.RandomState(0)
@@ -87,6 +87,6 @@ if __name__ == "__main__":
             pbar.set_description(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")
         epoch_time = time.time() - start_time
 
-        test_acc = test_all(model, x_test, y_test)
+        test_acc = test_all(model, x_test, y_test).numpy()
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         print(f"Test set accuracy {test_acc:0.2f}")

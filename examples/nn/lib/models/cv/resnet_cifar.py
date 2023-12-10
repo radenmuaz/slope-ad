@@ -20,19 +20,18 @@ class BasicBlock(nn.Module):
         self.downsample = downsample
         self.stride = stride
 
-    def __call__(self, x):
+    def __call__(self, x, training=False):
         residual = x
 
         out = self.conv1(x)
-        out = self.bn1(out)
+        out = self.bn1(out, training)
         out = self.relu(out)
 
         out = self.conv2(out)
-        out = self.bn2(out)
+        out = self.bn2(out, training)
 
         if self.downsample is not None:
             residual = self.downsample(x)
-            # breakpoint()
 
         out = out + residual
         out = self.relu(out)
@@ -91,12 +90,12 @@ class ResNet(nn.Module):
 
     def __call__(self, x, training=False):
         x = self.conv1(x)
-        x = self.bn1(x)
+        x = self.bn1(x, training)
         x = self.relu(x)  # 32x32
 
-        x = self.layer1(x)  # 32x32
-        x = self.layer2(x)  # 16x16
-        x = self.layer3(x)  # 8x8
+        x = self.layer1(x, training)  # 32x32
+        x = self.layer2(x, training)  # 16x16
+        x = self.layer3(x, training)  # 8x8
 
         x = self.avgpool(x)
         x = x.reshape(x.size(0), -1)

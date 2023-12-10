@@ -2395,28 +2395,26 @@ class Machine:
         return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
 
     def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
-        primal_backend: Dict[Var, Any] = {}
-        ct_backend: Dict[Var, Any] = {}
+        primal_env: Dict[Var, Any] = {}
+        ct_env: Dict[Var, Any] = {}
 
         def read_primal(x: Atom) -> Any:
-            return primal_backend.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
+            return primal_env.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
 
         def write_primal(v: Var, val: Any) -> None:
             if type(val) is not PrimalProxy:
-                primal_backend[v] = val
+                primal_env[v] = val
 
         def read_cotangent(v: Var) -> Any:
-            return ct_backend.pop(v, self.backend.zeros(v.aval.shape, v.aval.dtype))
+            return ct_env.pop(v, self.backend.zeros(v.aval.shape, v.aval.dtype))
 
         def write_cotangent(x: Atom, val: Any):
             if type(x) is Var and val is not None:
-                ct_backend[x] = ct_backend[x] + val if x in ct_backend else val
+                ct_env[x] = ct_env[x] + val if x in ct_env else val
 
         list_map(write_primal, program.in_binders, args)
         list_map(write_cotangent, program.outs, cotangents)
-        # i = len(program.instructions)-1
         for instruction in program.instructions[::-1]:
-            # print(i, instruction); i -= 1
             primals_in = list_map(read_primal, instruction.inputs)
             cotangents_in = list_map(read_cotangent, instruction.out_binders)
             inp, params = primals_in, instruction.params

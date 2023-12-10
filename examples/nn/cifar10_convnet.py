@@ -9,7 +9,6 @@ import numpy as np
 from lib.datasets.cifar10 import get_cifar10
 from lib.models.cv.resnet_cifar import resnet
 
-
 @slope.jit
 def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
@@ -48,15 +47,15 @@ def get_dataloader(images, labels, batch_size, shuffle=False):
         
 
 if __name__ == "__main__":
-    nepochs = 10
-    train_batch_size = 100  # TODO: must be multiple of dataset
-    test_batch_size = 100 
+    nepochs = 50
+    train_batch_size = 50  # TODO: must be multiple of dataset
+    test_batch_size = 50
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
-    model = resnet(depth=20)
-    # model = resnet(depth=8)
-    optimizer = nn.Adam(model, lr=1e-3)
-    # optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-5)
+    # model = resnet(depth=20)
+    model = resnet(depth=8)
+    # optimizer = nn.Adam(model, lr=1e-3)
+    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
     
     train_dataloader, ntrain_batches = get_dataloader(train_images, train_labels, train_batch_size, shuffle=True)
     test_dataloader, ntest_batches = get_dataloader(test_images, test_labels, test_batch_size, shuffle=False)
@@ -64,7 +63,6 @@ if __name__ == "__main__":
     print("\nStarting training...")
     best_acc = 0.
     for epoch in range(nepochs):
-        # start_time = time.perf_counter_ns()
         total_loss = 0.
         true_positives = 0.
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()))):
@@ -74,7 +72,7 @@ if __name__ == "__main__":
             y_hat, y =  logits.argmax(-1), batch[1]
             true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             train_loss = total_loss/(i+1)
-            train_acc = true_positives/train_batch_size * (i+1)
+            train_acc = true_positives/ (train_batch_size * (i+1))
             msg = (f"Train epoc: {epoch}, batch: {i+1}/{ntrain_batches}, "
                    f"curr_loss: {loss_numpy:.4f}, "
                    f"loss: {train_loss:.4f}, acc: {train_acc:.4f}")
@@ -83,14 +81,14 @@ if __name__ == "__main__":
         total_loss = 0.
         true_positives = 0.
         for i, batch in (pbar := tqdm(enumerate(test_dataloader()))):
-            loss, logits, model, optimizer = train_step(model, batch, optimizer)
+            loss, logits, = test_step(model, batch)
             loss_numpy =  float(loss.numpy())
             total_loss += loss_numpy
             y_hat, y =  logits.argmax(-1), batch[1]
             true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             test_loss = total_loss/(i+1)
-            test_acc = true_positives/test_batch_size * (i+1)
-            msg = (f"Train epoc: {epoch}, batch: {i+1}/{ntest_batches}, "
+            test_acc = true_positives/ (test_batch_size * (i+1))
+            msg = (f"Tets epoch: {epoch}, batch: {i+1}/{ntest_batches}, "
                    f"curr_loss: {loss_numpy:.4f}, "
                    f"loss: {test_loss:.4f}, acc: {test_acc:.4f}")
             pbar.set_description(msg)

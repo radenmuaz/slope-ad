@@ -468,7 +468,8 @@ class ConvNd(Module):
         dilation=1,
         groups=1,
         bias=True,
-        W_init=glorot_normal(),
+        # W_init=glorot_normal(),
+        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0]*math.prod(shape[2:])))),
         dims=2,
     ):
         self.in_channels = in_channels
@@ -481,9 +482,9 @@ class ConvNd(Module):
         self.dims = dims
         self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
         self.bias = slope.zeros(out_channels) if bias else None
-        # m.weight.data.normal_(0, math.sqrt(2.0 / kernel_size * kernel_size * out_channels))
 
     def __call__(self, x):
+        # return slope.M().backend.procedure_set.conv(x, self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
         return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
 
     @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding")
@@ -653,6 +654,23 @@ class ConvNdTranspose(Module):
 # Regularization
 # =============
 
+#   def __call__(self, x:Tensor):
+#     if Tensor.training:
+#       batch_mean = x.mean(axis=(0,2,3))
+#       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
+#       batch_var = (y*y).mean(axis=(0,2,3))
+#       batch_invstd = batch_var.add(self.eps).pow(-0.5)
+
+#       if self.track_running_stats:
+#         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
+#         self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
+#         self.num_batches_tracked += 1
+#     else:
+#       batch_mean = self.running_mean
+#       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
+
+#     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
+
 
 class BatchNorm(Module):
     def __init__(self, num_features: int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
@@ -667,12 +685,13 @@ class BatchNorm(Module):
         self.running_var = slope.ones(num_features)
         self.num_batches_tracked = slope.zeros(1)
 
-    def __call__(self, x, training=False):
+    def __call__(self, x, training=True):
         if training:
             broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
             reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
-            mean = x.stop_gradient().mean(reduce_dim)
-            z = x.stop_gradient() - mean.reshape(broadcast_shape)
+            xsg = x.stop_gradient()
+            mean = xsg.mean(reduce_dim)
+            z = xsg - mean.reshape(broadcast_shape)
             var = (z * z).mean(reduce_dim)
             invstd = slope.ones_like(var) / (var + self.eps).sqrt()
             if self.track_running_stats:
@@ -921,7 +940,7 @@ class Adam(Optimizer):
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
-        i = self.iters + slope.ones_like(self.iters)
+        i = self.iters + 1#slope.ones_like(self.iters)
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
         m_hat = m / (1.0 - b1**i)

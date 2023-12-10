@@ -1060,22 +1060,35 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 
     return [y], [y_dot1 + y_dot2]
 
+# https://deeplearning.cs.cmu.edu/F21/document/recitation/Recitation5/CNN_Backprop_Recitation_5_F21.pdf
+# x_grad = F.conv_transpose2d(y.grad, w, stride=stride, padding=padding, dilation=dilation, output_padding=1)
+# assert torch.allclose(x_grad, x.grad)
+# w_grad = F.conv2d(x.transpose(0,1), y.grad.transpose(0,1), stride=dilation, padding=padding, dilation=stride, groups=groups).transpose(0,1)
+# w_grad = w_grad[:,:,:w.size(2),:w.size(3)]
+# assert torch.allclose(w_grad, w.grad)
 
 @conv.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(
-            w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0
-        )
+        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0]-padding[0])
+        # _grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=0)
+        # if _grad_L_x.shape[2:] != x.shape[2:]:
+        #     output_padding = x.shape[2] - _grad_L_x.shape[2]
+        #     assert output_padding > 0
+        #     grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
+        # else:
+        #     grad_L_x = _grad_L_x
         assert grad_L_x.shape == x.shape
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=stride, dilation=dilation, padding=padding).transpose(
-            0, 1
-        )
+        grad_L_w = x_T.conv(grad_L_y_T, groups=groups, stride=dilation, dilation=stride, padding=padding).transpose(0, 1)
+        # if grad_L_w.shape != w.shape:
+        starts = (0,)*len(grad_L_w.shape)
+        ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
+        grad_L_w = grad_L_w.slice(starts, ends)
         assert grad_L_w.shape == w.shape
         return [None, grad_L_w]
 
@@ -1089,15 +1102,6 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
         return (x,) * cnt if isinstance(x, int) else x
 
-    def flatten_seq(l: Iterator):
-        return [item for sublist in l for item in sublist]
-
-    if isinstance(output_padding, int):
-        if output_padding != 0:
-            raise NotImplementedError
-    elif isinstance(output_padding, tuple):
-        if not all(o == 0 for o in output_padding):
-            raise NotImplementedError
     (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
@@ -1117,6 +1121,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
     output_padding = tuple(
+        # [output_padding, 0] * len(x.shape[2:])
         [output_padding] * 2 * len(HW)
         if isinstance(output_padding, int)
         else (
@@ -1132,6 +1137,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
     assert len(HW) == len(stride) and len(HW) == len(
         dilation
     ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    # if 1 in output_padding: breakpoint()
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
 
@@ -1155,22 +1161,6 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
             HW
         ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x_shape}"
 
-    padding = tuple(
-        [padding] * 2 * len(HW)
-        if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
-    )
-
-    output_padding = tuple(
-        [output_padding] * 2 * len(HW)
-        if isinstance(output_padding, int)
-        else (
-            output_padding
-            if len(output_padding) == 2 * len(HW)
-            else [p for p in output_padding for _ in range(2)][::-1]
-        )
-    )
-
     if isinstance(stride, int):
         stride = [stride] * len(HW)
 
@@ -1185,7 +1175,8 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     result_shape = tuple(
         [bs, cout]
         + [
-            (s - 1) * stride[i] - 2 * padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1
+            (s - 1) * stride[i] - (padding[i*2]+padding[i*2+1]) + dilation[i] * (HW[i] - 1) + (output_padding[i*2]+output_padding[i*2+1])//2 + 1
+            # (s - 1) * stride[i] - 2*padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1
             for i, s in enumerate(x_shape[2:])
         ]
     )
@@ -1361,7 +1352,7 @@ def compile(self, codegen_out):
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
     sess_options = onnxruntime.SessionOptions()
-    # sess_options.intra_op_num_threads = 8
+    # sess_options.intra_op_num_threads = 4
     # sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
     sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
     session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"])
@@ -1608,7 +1599,7 @@ ret = Reshape({x}, ret_shape)
 
 
 @compiler.set_impl(operator_set.pad)
-def pad_impl(self, x, *, padding, mode, value):  # TODO: interior not used
+def pad_impl(self, x, *, padding, mode, value):
     padding = padding[0::2] + padding[1::2]
     return f"""
 ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
@@ -1668,7 +1659,7 @@ def conv_impl(self, x, w, *, groups, stride, dilation, padding):
 def conv_transpose_impl(self, x, w, *, groups, stride, dilation, padding, output_padding):
     dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
     pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
-    output_padding_attr = f"pads=[{repr(list(output_padding))[1:-1]}]"
+    output_padding_attr = f"output_padding=[{repr(list(output_padding))[1:-1]}]"
     strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
     group_attr = f"group={groups}"
     return f"""ret = ConvTranspose<{dilations_attr}, {group_attr}, {output_padding_attr}, {pads_attr}, {strides_attr}>({x}, {w})"""

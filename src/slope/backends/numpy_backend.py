@@ -1256,6 +1256,10 @@ def ones_like(y):
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
+    if not isinstance(trueval, Tensor):
+        trueval = slope.full((), trueval)
+    if not isinstance(falseval, Tensor):
+        falseval = slope.full((), falseval)
     cond = cond.cast(trueval.dtype)
     return cond * trueval + (1.0 - cond) * falseval
 

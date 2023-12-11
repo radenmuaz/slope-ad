@@ -469,7 +469,7 @@ class ConvNd(Module):
         groups=1,
         bias=True,
         # W_init=glorot_normal(),
-        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0]*math.prod(shape[2:])))),
+        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
         dims=2,
     ):
         self.in_channels = in_channels
@@ -625,9 +625,9 @@ class ConvNdTranspose(Module):
             x = x.pad((0, 0, 0, 0, *flatten_seq((0, 0, 0, s - 1) for s in stride)))
             x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
             x = x.slice(
-                    (0, x.shape[0]),
-                    (0, x.shape[1]),
-                    *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
+                (0, x.shape[0]),
+                (0, x.shape[1]),
+                *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
             )
         padding = flatten_seq(
             (
@@ -652,28 +652,10 @@ class ConvNdTranspose(Module):
 # Regularization
 # =============
 
-#   def __call__(self, x:Tensor):
-#     if Tensor.training:
-#       batch_mean = x.mean(axis=(0,2,3))
-#       y = (x - batch_mean.reshape(shape=[1, -1, 1, 1]))
-#       batch_var = (y*y).mean(axis=(0,2,3))
-#       batch_invstd = batch_var.add(self.eps).pow(-0.5)
-
-#       if self.track_running_stats:
-#         self.running_mean.assign((1 - self.momentum) * self.running_mean + self.momentum * batch_mean.detach())
-#         self.running_var.assign((1 - self.momentum) * self.running_var + self.momentum * prod(y.shape)/(prod(y.shape) - y.shape[1]) * batch_var.detach() )
-#         self.num_batches_tracked += 1
-#     else:
-#       batch_mean = self.running_mean
-#       batch_invstd = self.running_var.reshape(1, -1, 1, 1).expand(x.shape).add(self.eps).rsqrt()
-
-#     return x.batchnorm(self.weight, self.bias, batch_mean, batch_invstd)
-
 
 class BatchNorm(Module):
-    def __init__(self, num_features: int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
+    def __init__(self, num_features: int, eps=1e-5, affine=True, momentum=0.1):
         self.eps = eps
-        self.track_running_stats = track_running_stats
         self.momentum = momentum
 
         self.weight = slope.ones(num_features) if affine else None
@@ -683,7 +665,7 @@ class BatchNorm(Module):
         self.running_var = slope.ones(num_features)
         self.num_batches_tracked = slope.zeros(1)
 
-    def __call__(self, x, training=True):
+    def __call__(self, x, training=True, track_running_stats=True):
         if training:
             broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
             reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
@@ -691,28 +673,29 @@ class BatchNorm(Module):
             mean = xsg.mean(reduce_dim)
             z = xsg - mean.reshape(broadcast_shape)
             var = (z * z).mean(reduce_dim)
-            invstd = slope.ones_like(var) / (var + self.eps).sqrt()
-            if self.track_running_stats:
+            invstd = (var + self.eps).rsqrt()
+            if track_running_stats:
                 z_numel = math.prod(z.shape)
+                z_ratio = z_numel / (z_numel - z.shape[1])
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
-                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_numel / (
-                    z_numel - z.shape[1]
-                ) * var
+                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
+                # mean = self.running_mean
+                # invstd = (self.running_var + self.eps).rsqrt()
         else:
             mean = self.running_mean
-            invstd = (self.running_var.reshape((1, -1, 1, 1)).expand(x.shape) + self.eps).rsqrt()
+            invstd = (self.running_var + self.eps).rsqrt()
+
         return x.batchnorm(self.weight, self.bias, mean, invstd)
 
     @slope.M().backend.procedure_set.register(inline=True)
     @staticmethod
     def batchnorm(x, weight, bias, mean, invstd):
         broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
-        x = x - mean.reshape(broadcast_shape)
-        if weight is not None:
-            x = x * weight.reshape(broadcast_shape)
-        ret = x * invstd.reshape(broadcast_shape) if len(invstd.shape) == 1 else invstd
-        return (ret + bias.reshape(broadcast_shape)) if bias is not None else ret
+        x = (x - mean.reshape(broadcast_shape)) * invstd.reshape(broadcast_shape)
+        if weight is not None and bias is not None:
+            x = x * weight.reshape(broadcast_shape) + bias.reshape(broadcast_shape)
+        return x
 
 
 BatchNorm1d = BatchNorm2d = BatchNorm
@@ -831,15 +814,11 @@ class CrossEntropyLoss(Module):
     @slope.M().backend.procedure_set.register(static_argnames="ignore_index")
     @staticmethod
     def cross_entropy(x, y, ignore_index=-1) -> Tensor:
-        # NOTE: self is a logits input
-        loss_mask = y != ignore_index
-        y_counter = (
-            slope.arange(x.shape[-1], dtype=slope.int32, device=x.device).unsqueeze(0).expand(y.numel(), x.shape[-1])
-        )
-        y = ((y_counter == y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(
-            *y.shape, x.shape[-1]
-        )
-        return (x.log_softmax(-1) * y).sum() / loss_mask.sum()
+        # loss_mask = (y != ignore_index).reshape(-1, 1)
+        y_counter = slope.arange(x.shape[-1], dtype=slope.int32)[None, ..., None]
+        y_oh = (y_counter == y[..., None, None]).where(-1.0, 0.0).squeeze(-1)
+        # y = y * loss_mask
+        return (x.log_softmax(-1) * y_oh).sum()  # / loss_mask.sum()
 
 
 class Softmax(Module):
@@ -862,10 +841,9 @@ class LogSoftmax(Module):
     @slope.M().backend.procedure_set.register(static_argnames="dim")
     @staticmethod
     def log_softmax(x, dim=-1):
-        m = x - x.max(dim, keepdim=True)
-        e = m.exp()
-        ss = e.sum(dim, keepdim=True)
-        return m - ss.log()
+        x = x - x.max(dim, keepdim=True)
+        logsumexp_x = x.exp().sum(dim, keepdim=True).log()
+        return x - logsumexp_x
 
 
 # ====================
@@ -888,11 +866,14 @@ class Optimizer(Module):
 
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
+        # g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
         params_out, state = step_out_T
+        # params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
         self.state = state
         self.iters = self.iters + 1
+
         return (params_out, self)
 
 
@@ -916,6 +897,7 @@ class SGD(Optimizer):
 
     def step(self, p, g, b):
         lr, m, wd = self.hp.lr, self.hp.momentum, self.hp.weight_decay
+        g = g + (g != 0.0).where(wd * p, 0.0)
         g = g + wd * p
         b = m * b + g
         g = (g + m * b) if self.hp.nesterov else b
@@ -938,7 +920,7 @@ class Adam(Optimizer):
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd
         b1, b2, eps = self.hp.b1, self.hp.b2, self.hp.eps
-        i = self.iters + 1#slope.ones_like(self.iters)
+        i = self.iters + 1  # slope.ones_like(self.iters)
         m = b1 * m + (1.0 - b1) * g
         v = b2 * v + (1.0 - b2) * (g * g)
         m_hat = m / (1.0 - b1**i)

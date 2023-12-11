@@ -695,7 +695,7 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
         )
         lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
     padding = []
-    for (l,h) in zip(lo, hi):
+    for l, h in zip(lo, hi):
         padding += [l, h]
     padding = tuple(padding)
     res = z.pad(padding)
@@ -802,7 +802,10 @@ def T(self, cotangents, *xs, dim=0):
     for i, l in enumerate(limits):
         l[dim] = limit_points[i]
 
-    return [z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None for o, start, limit in zip(xs, starts, limits)]
+    return [
+        z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None
+        for o, start, limit in zip(xs, starts, limits)
+    ]
 
 
 # -----------------------
@@ -1063,6 +1066,7 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 
     return [y], [y_dot1 + y_dot2]
 
+
 # https://deeplearning.cs.cmu.edu/F21/document/recitation/Recitation5/CNN_Backprop_Recitation_5_F21.pdf
 # x_grad = F.conv_transpose2d(y.grad, w, stride=stride, padding=padding, dilation=dilation, output_padding=stride-padding)
 # assert torch.allclose(x_grad, x.grad)
@@ -1070,18 +1074,26 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 # w_grad = w_grad[:,:,:w.size(2),:w.size(3)]
 # assert torch.allclose(w_grad, w.grad)
 
+
 @conv.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
     if type(x) is PrimalProxy:
-        grad_L_x = grad_L_y.conv_transpose(w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0]-padding[0])
+        grad_L_x = grad_L_y.conv_transpose(
+            w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0] - dilation[0]
+        )
         assert grad_L_x.shape == x.shape
         return [grad_L_x, None]
     elif type(w) is PrimalProxy:
-        grad_L_w = x.transpose(0, 1).conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding).transpose(0, 1)
-        starts = (0,)*len(grad_L_w.shape)
-        ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
-        grad_L_w = grad_L_w.slice(starts, ends)
+        grad_L_w = (
+            x.transpose(0, 1)
+            .conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
+            .transpose(0, 1)
+        )
+        if grad_L_w.shape != w.shape:
+            starts = (0,) * len(grad_L_w.shape)
+            ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
+            grad_L_w = grad_L_w.slice(starts, ends)
         assert grad_L_w.shape == w.shape
         return [None, grad_L_w]
 
@@ -1114,7 +1126,6 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
     )
     output_padding = tuple(
-        # [output_padding, 0] * len(x.shape[2:])
         [output_padding] * 2 * len(HW)
         if isinstance(output_padding, int)
         else (
@@ -1167,8 +1178,11 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     result_shape = tuple(
         [bs, cout]
         + [
-            (s - 1) * stride[i] - (padding[i*2]+padding[i*2+1]) + dilation[i] * (HW[i] - 1) + (output_padding[i*2]+output_padding[i*2+1])//2 + 1
-            # (s - 1) * stride[i] - 2*padding[i] + dilation[i] * (HW[i] - 1) + output_padding[i] + 1
+            (s - 1) * stride[i]
+            - (padding[i * 2] + padding[i * 2 + 1])
+            + dilation[i] * (HW[i] - 1)
+            + (output_padding[i * 2] + output_padding[i * 2 + 1]) // 2
+            + 1
             for i, s in enumerate(x_shape[2:])
         ]
     )
@@ -1344,10 +1358,14 @@ def compile(self, codegen_out):
     code = "\n".join(code_lines)
     model = onnx.parser.parse_model(code)
     sess_options = onnxruntime.SessionOptions()
+    # sess_options.log_severity_level = 3
+    sess_options.use_deterministic_compute = True
     # sess_options.intra_op_num_threads = 4
-    # sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
-    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
     session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"])
+    # session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CoreMLExecutionProvider"])
 
     def fn(*args):
         io_binding = session.io_binding()
@@ -1362,7 +1380,9 @@ def compile(self, codegen_out):
             )
         for o in codegen_out["outs"]:
             io_binding.bind_output(o["name"], self.default_device)
-        session.run_with_iobinding(io_binding)
+        run_options = onnxruntime.RunOptions()
+        run_options.log_severity_level = 3
+        session.run_with_iobinding(io_binding, run_options)
         outputs = tuple(io_binding.get_outputs())
         return outputs
 
@@ -1507,8 +1527,10 @@ ret = Range(ret_start, ret_limit, ret_delta)
 @compiler.set_impl(operator_set.full)
 def full_impl(self, *, shape, fill_value, dtype):
     if dtype is not Tensor.bool:
-        if "float" in dtype.name: fill_value = float(fill_value)
-        elif "int" in dtype.name: fill_value = int(fill_value)
+        if "float" in dtype.name:
+            fill_value = float(fill_value)
+        elif "int" in dtype.name:
+            fill_value = int(fill_value)
 
         if len(shape) > 0:
             return f"""
@@ -1732,6 +1754,10 @@ def ones_like(y):
 @procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
+    if not isinstance(trueval, Tensor):
+        trueval = slope.full((), trueval)
+    if not isinstance(falseval, Tensor):
+        falseval = slope.full((), falseval)
     cond = cond.cast(trueval.dtype)
     return cond * trueval + (1.0 - cond) * falseval
 

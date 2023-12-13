@@ -1252,9 +1252,10 @@ onnx_dtype_enum_map = {
 
 @compiler.set_method
 def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.default_device):
-    device_type, device_id = device.split(":") if ":" in device else (device, 0)
+    # device_type, device_id = device.split(":") if ":" in device else (device, 0)
     np_val = np.array(val, dtype=dtype.numpy)
-    val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
+    iree_device = iree.runtime.get_device("local-task")
+    val = iree.runtime.asdevicearray(iree_device, np_val)
     return Tensor(TensorBuffer(val))
 
 
@@ -1357,29 +1358,22 @@ def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     code = "\n".join(code_lines)
     instance = iree.runtime.VmInstance()
-    device = iree.runtime.get_device(iree.compiler.core.DEFAULT_TESTING_DRIVER)
-    hal_module = iree.runtime.create_hal_module(instance, device)
-
-    def fn(*args):
-        io_binding = session.io_binding()
-        for a, in_binder in zip(args, codegen_out["in_binders"]):
-            io_binding.bind_input(
-                name=in_binder["name"],
-                device_type=a.device_name(),
-                device_id=0,
-                element_type=self.dtype_map_inv[a.data_type().replace("tensor(", "").replace(")", "")].numpy,
-                shape=a.shape(),
-                buffer_ptr=a.data_ptr(),
-            )
-        for o in codegen_out["outs"]:
-            io_binding.bind_output(o["name"], self.default_device)
-        run_options = onnxruntime.RunOptions()
-        run_options.log_severity_level = 3
-        session.run_with_iobinding(io_binding, run_options)
-        outputs = tuple(io_binding.get_outputs())
-        return outputs
-
-    return fn, code
+    iree_device = iree.runtime.get_device("local-task")
+    hal_module = iree.runtime.create_hal_module(instance, iree_device)
+    binary = iree.compiler.compile_str(
+        """
+        func.func @simple_mul(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
+          %0 = arith.mulf %arg0, %arg1 : tensor<4xf32>
+          return %0 : tensor<4xf32>
+        }
+        """,
+        target_backends=iree.compiler.core.DEFAULT_TESTING_BACKENDS,
+    )
+    m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
+    context = iree.runtime.VmContext(instance, modules=[hal_module, m])
+    f = m.lookup_function("simple_mul")
+    finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
+    return finv, code
 
 
 @compiler.set_method

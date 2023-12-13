@@ -47,13 +47,13 @@ def get_dataloader(images, labels, batch_size, shuffle=False):
 
 if __name__ == "__main__":
     nepochs = 100
-    train_batch_size = 200 # TODO: must be multiple of dataset
-    test_batch_size = 200
+    train_batch_size = 50 # TODO: must be multiple of dataset
+    test_batch_size = 50
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
     model = resnet(depth=20)
-    # optimizer = nn.AdamW(model, lr=0.01)#,weight_decay=1e-5)
-    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
+    # optimizer = nn.AdamW(model, lr=0.05)#,weight_decay=1e-5)
+    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-5)
     # optimizer = nn.SGD(model, lr=0., momentum=0., weight_decay=0)
     
     train_dataloader, ntrain_batches = get_dataloader(train_images, train_labels, train_batch_size, shuffle=True)

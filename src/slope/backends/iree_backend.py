@@ -17,8 +17,8 @@ import math
 import numpy as np
 from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
 from collections import defaultdict
-import onnx
-import onnxruntime
+import iree.compiler
+import iree.runtime
 import os
 
 sum_py = sum
@@ -1224,7 +1224,7 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
 #
 
 compile_py = compile
-compiler = Compiler(name="onnxruntime", default_dtype=Tensor.float32, default_device=slope.SLOPE_DEVICE)
+compiler = Compiler(name="iree", default_dtype=Tensor.float32, default_device=slope.SLOPE_DEVICE)
 compiler.set_dtype_map(
     {
         Tensor.float32: "float",
@@ -1260,7 +1260,7 @@ def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.de
 
 @compiler.set_method
 def numpy_of(self, tensor):
-    return tensor.buf.val.numpy()
+    return tensor.buf.val.to_host()
 
 
 @compiler.set_method
@@ -1356,16 +1356,9 @@ if __name__ == "__main__":
 def compile(self, codegen_out):
     code_lines = codegen_out["code_lines"]
     code = "\n".join(code_lines)
-    model = onnx.parser.parse_model(code)
-    sess_options = onnxruntime.SessionOptions()
-    # sess_options.log_severity_level = 3
-    # sess_options.use_deterministic_compute = True
-    # sess_options.intra_op_num_threads = 4
-    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
-    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-    session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CPUExecutionProvider"])
-    # session = onnxruntime.InferenceSession(model.SerializeToString(), sess_options, providers=["CoreMLExecutionProvider"])
+    instance = iree.runtime.VmInstance()
+    device = iree.runtime.get_device(iree.compiler.core.DEFAULT_TESTING_DRIVER)
+    hal_module = iree.runtime.create_hal_module(instance, device)
 
     def fn(*args):
         io_binding = session.io_binding()
@@ -2156,4 +2149,4 @@ def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None].cast(dtype) == slope.arange(k, dtype=dtype)).cast(dtype)
 
 
-onnxruntime_backend = Backend(operator_set, procedure_set, compiler)
+iree_backend = Backend(operator_set, procedure_set, compiler)

@@ -654,7 +654,7 @@ class ConvNdTranspose(Module):
 
 
 class BatchNorm(Module):
-    def __init__(self, num_features: int, eps=1e-5, affine=True, momentum=0.1):
+    def __init__(self, num_features: int, eps=1e-6, affine=True, momentum=0.1):
         self.eps = eps
         self.momentum = momentum
 
@@ -898,6 +898,7 @@ class SGD(Optimizer):
     def step(self, p, g, b):
         lr, m, wd = self.hp.lr, self.hp.momentum, self.hp.weight_decay
         g = g + (g != 0.0).where(wd * p, 0.0)
+        # g = g + wd * p
         b = m * b + g
         g = (g + m * b) if self.hp.nesterov else b
         p = p - lr * g

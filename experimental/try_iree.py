@@ -70,38 +70,72 @@ def create_simple_dynamic_abs_module(instance):
     return m
 
 
+def create_stablehlo_module(instance):
+    binary = iree.compiler.compile_str(
+        """
+func.func @main(
+  %image: tensor<28x28xf32>,
+  %weights: tensor<784x10xf32>,
+  %bias: tensor<1x10xf32>
+) -> tensor<1x10xf32> {
+  %0 = "stablehlo.reshape"(%image) : (tensor<28x28xf32>) -> tensor<1x784xf32>
+  %1 = "stablehlo.dot"(%0, %weights) : (tensor<1x784xf32>, tensor<784x10xf32>) -> tensor<1x10xf32>
+  %2 = "stablehlo.add"(%1, %bias) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
+  %3 = "stablehlo.constant"() { value = dense<0.0> : tensor<1x10xf32> } : () -> tensor<1x10xf32>
+  %4 = "stablehlo.maximum"(%2, %3) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
+  "func.return"(%4): (tensor<1x10xf32>) -> ()
+}
+        """,
+        target_backends=iree.compiler.DEFAULT_TESTING_BACKENDS,
+    )
+    m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
+    return m
+
+
 instance = iree.runtime.VmInstance()
 device = iree.runtime.get_device(iree.compiler.core.DEFAULT_TESTING_DRIVER)
 # device = iree.runtime.get_device("local-task")
 allocator = device.allocator
 hal_module = iree.runtime.create_hal_module(instance, device)
 
-m = create_add_scalar_module(instance)
-context = iree.runtime.VmContext(instance, modules=[hal_module, m])
-f = m.lookup_function("add_scalar")
-finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
-result = finv(5, 6)
-logging.info("result: %s", result)
 
-m = create_simple_dynamic_abs_module(instance)
+m = create_stablehlo_module(instance)
 context = iree.runtime.VmContext(instance, modules=[hal_module, m])
-f = m.lookup_function("dynamic_abs")
+f = m.lookup_function("main")
 finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
-arg0 = np.array([[-1.0, 2.0], [3.0, -4.0]], dtype=np.float32)
-result = finv(arg0)
-logging.info("result: %s", result)
-np.testing.assert_allclose(result, [[1.0, 2.0], [3.0, 4.0]])
+image =  iree.runtime.asdevicearray(device, np.ones((28,28), dtype=np.float32))
+weights =  iree.runtime.asdevicearray(device,np.ones((784,10), dtype=np.float32))
+bias =  iree.runtime.asdevicearray(device,np.ones((1,10), dtype=np.float32))
+result = finv(image, weights, bias)
+print("result:", result.to_host())
 
-m = create_simple_static_mul_module(instance)
-context = iree.runtime.VmContext(instance, modules=[hal_module, m])
-f = m.lookup_function("simple_mul")
-finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
-arg0 =  iree.runtime.asdevicearray(device, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
-arg1 =  iree.runtime.asdevicearray(device,np.array([4.0, 5.0, 6.0, 7.0], dtype=np.float32))
-result = finv(arg0, arg1)
-logging.info("result: %s", result)
-np.testing.assert_allclose(result, [4.0, 10.0, 18.0, 28.0])
 breakpoint()
+
+# m = create_add_scalar_module(instance)
+# context = iree.runtime.VmContext(instance, modules=[hal_module, m])
+# f = m.lookup_function("add_scalar")
+# finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
+# result = finv(5, 6)
+# logging.info("result: %s", result)
+
+# m = create_simple_dynamic_abs_module(instance)
+# context = iree.runtime.VmContext(instance, modules=[hal_module, m])
+# f = m.lookup_function("dynamic_abs")
+# finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
+# arg0 = np.array([[-1.0, 2.0], [3.0, -4.0]], dtype=np.float32)
+# result = finv(arg0)
+# logging.info("result: %s", result)
+# np.testing.assert_allclose(result, [[1.0, 2.0], [3.0, 4.0]])
+
+# m = create_simple_static_mul_module(instance)
+# context = iree.runtime.VmContext(instance, modules=[hal_module, m])
+# f = m.lookup_function("simple_mul")
+# finv = iree.runtime.FunctionInvoker(context, device, f, tracer=None)
+# arg0 =  iree.runtime.asdevicearray(device, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
+# arg1 =  iree.runtime.asdevicearray(device,np.array([4.0, 5.0, 6.0, 7.0], dtype=np.float32))
+# result = finv(arg0, arg1)
+# logging.info("result: %s", result)
+# np.testing.assert_allclose(result, [4.0, 10.0, 18.0, 28.0])
 
 # class DeviceHalTest(unittest.TestCase):
 #     def setUp(self):

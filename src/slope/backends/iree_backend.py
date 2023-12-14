@@ -1227,28 +1227,15 @@ compile_py = compile
 compiler = Compiler(name="iree", default_dtype=Tensor.float32, default_device=slope.SLOPE_DEVICE)
 compiler.set_dtype_map(
     {
-        Tensor.float32: "float",
-        Tensor.uint8: "uint8",
-        Tensor.int8: "int8",
-        Tensor.bool: "bool",
-        Tensor.int32: "int32",
-        Tensor.int64: "int64",
-        Tensor.float16: "float16",
+        Tensor.float32: np.dtypes.Float32DType(),
+        Tensor.uint8: np.dtypes.UInt8DType(),
+        Tensor.int8: np.dtypes.Int8DType(),
+        Tensor.bool: np.dtypes.BoolDType(),
+        Tensor.int32: np.dtypes.Int32DType(),
+        Tensor.int64: np.dtypes.Float64DType(),
+        Tensor.float16: np.dtypes.Float16DType(),
     }
 )
-
-# https://github.com/onnx/onnx/blob/main/onnx/onnx.proto3
-# used for impl args
-onnx_dtype_enum_map = {
-    Tensor.float32: 1,
-    Tensor.uint8: 2,
-    Tensor.int8: 3,
-    Tensor.int32: 6,
-    Tensor.int64: 7,
-    Tensor.bool: 9,
-    Tensor.float16: 10,
-}
-
 
 @compiler.set_method
 def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.default_device):
@@ -1271,12 +1258,12 @@ def device_of(self, tensor):
 
 @compiler.set_method
 def shape_of(self, tensor):
-    return tuple(tensor.buf.val.shape())
+    return tuple(tensor.buf.val.shape)
 
 
 @compiler.set_method
 def dtype_of(self, tensor):
-    return self.dtype_map_inv[tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")]
+    return self.dtype_map_inv[tensor.buf.val.dtype]
 
 
 @compiler.set_method
@@ -1360,24 +1347,22 @@ def compile(self, codegen_out):
     instance = iree.runtime.VmInstance()
     iree_device = iree.runtime.get_device("local-task")
     hal_module = iree.runtime.create_hal_module(instance, iree_device)
-    binary = iree.compiler.compile_str(
-        """
-        func.func @simple_mul(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
-          %0 = arith.mulf %arg0, %arg1 : tensor<4xf32>
-          return %0 : tensor<4xf32>
-        }
-        """,
-        target_backends=iree.compiler.core.DEFAULT_TESTING_BACKENDS,
+    # iree.compiler.core.DEFAULT_TESTING_BACKENDS
+    binary = iree.compiler.compile_str(code, target_backends='llvm-cpu',
     )
     m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
     context = iree.runtime.VmContext(instance, modules=[hal_module, m])
-    f = m.lookup_function("simple_mul")
+    f = m.lookup_function("main")
     finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
     return finv, code
 
 
 @compiler.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
+    def typecheckor_mlir_format(typecheckor):
+        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
+        xdtype = typecheckor.dtype.short_name
+        return f"tensor<{xshape}x{xdtype}>"
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
@@ -1436,8 +1421,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     out_type_str = ", ".join(out_type_strs)
 
     head_code_lines = []
-    head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
-    head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
+    head_code_lines += [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
     model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
 
     functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
@@ -1448,11 +1432,26 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     slope.dblog(
         f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n", enable=slope.LOG_JIT
     )
+    breakpoint()
 
     if fn_name == "main":
         del self.fn_count
     assert len(outs) == len(program.outs)
     return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
+'''
+func.func @main(
+  %image: tensor<28x28xf32>,
+  %weights: tensor<784x10xf32>,
+  %bias: tensor<1x10xf32>
+) -> tensor<1x10xf32> {
+  %0 = "stablehlo.reshape"(%image) : (tensor<28x28xf32>) -> tensor<1x784xf32>
+  %1 = "stablehlo.dot"(%0, %weights) : (tensor<1x784xf32>, tensor<784x10xf32>) -> tensor<1x10xf32>
+  %2 = "stablehlo.add"(%1, %bias) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
+  %3 = "stablehlo.constant"() { value = dense<0.0> : tensor<1x10xf32> } : () -> tensor<1x10xf32>
+  %4 = "stablehlo.maximum"(%2, %3) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
+  "func.return"(%4): (tensor<1x10xf32>) -> ()
+}
+'''
 
 
 ### Operator Impls

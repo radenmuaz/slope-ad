@@ -1359,10 +1359,7 @@ def compile(self, codegen_out):
 
 @compiler.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
-    def typecheckor_mlir_format(typecheckor):
-        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
-        xdtype = typecheckor.dtype.short_name
-        return f"tensor<{xshape}x{xdtype}>"
+   
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
@@ -1378,30 +1375,32 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     body_code_lines = []
 
     for inb in program.in_binders:
-        prefix = "x" if type(inb.aval) is Typecheckor else "c"
+        prefix = "%x" if type(inb.aval) is Typecheckor else "%c"
         idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
         backend[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
             continue
-        in_vals = list_map(lambda x: backend[x]["name"], instruction.inputs)
+        in_vals = list_map(lambda x: backend[x], instruction.inputs)
         for outb in instruction.out_binders:
-            prefix = "y" if outb in program.outs else "z"
+            prefix = "%y" if outb in program.outs else "z"
             idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
             backend[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
-        out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
+        out_vals = list_map(lambda z: backend[z], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
+            raise NotImplementedError
             lhs = ", ".join(out_vals)
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
             impl_code = f"{lhs} = {rhs}"
         else:
-            impl_code = self.impls[instruction.op](*in_vals, **instruction.params)
+            impl_code = self.impls[instruction.op](*in_vals, **instruction.params, **out_vals)
             if len(out_vals) == 1:
                 impl_code = impl_code.replace("ret", out_vals[0])
             else:
                 raise NotImplementedError
+            # impl_code += f" : {','.join(type_format(t) for t in in_types)} -> {type_format(out_types[0])}"
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
@@ -1455,24 +1454,50 @@ func.func @main(
 
 
 ### Operator Impls
+def get_typing_mlir(in_avals, out_avals):
+    assert len(out_avals) == 1, "out > 1 not supported"
+    def type_mlir(typecheckor):
+        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
+        xdtype = typecheckor.dtype.short_name
+        return f"tensor<{xshape}x{xdtype}>"
+    impl_code = f" : {','.join(type_mlir(t) for t in in_avals)} -> {type_mlir(out_avals[0])}"
 
 
-compiler.set_impl(operator_set.cast)(lambda self, x, *, dtype: f"ret = Cast<to={onnx_dtype_enum_map[dtype]}>({x})")
-compiler.set_impl(operator_set.stop_gradient)(lambda self, x: f"ret = Identity({x})")
-compiler.set_impl(operator_set.neg)(lambda self, x: f"ret =  Neg({x})")
-compiler.set_impl(operator_set.sqrt)(lambda self, x: f"ret = Sqrt({x})")
-compiler.set_impl(operator_set.exp)(lambda self, x: f"ret = Exp({x})")
-compiler.set_impl(operator_set.log)(lambda self, x: f"ret = Log({x})")
-compiler.set_impl(operator_set.sin)(lambda self, x: f"ret = Sin({x})")
-compiler.set_impl(operator_set.add)(lambda self, x, w: f"ret = Add({x}, {w})")
-compiler.set_impl(operator_set.sub)(lambda self, x, w: f"ret = Sub({x}, {w})")
-compiler.set_impl(operator_set.mul)(lambda self, x, w: f"ret = Mul({x}, {w})")
-compiler.set_impl(operator_set.div)(lambda self, x, w: f"ret = Div({x}, {w})")
-compiler.set_impl(operator_set.pow)(lambda self, x, w: f"ret = Pow({x}, {w})")
-compiler.set_impl(operator_set.invert)(lambda self, x: f"ret = Not({x})")
-compiler.set_impl(operator_set.equal)(lambda self, x, w: f"ret = Equal({x}, {w})")
-compiler.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = Max({x}, {w})")
-compiler.set_impl(operator_set.matmul)(lambda self, x, w: f"ret = MatMul({x}, {w})")
+@compiler.set_impl(operator_set.cast)
+def cast_impl(self, x, *, dtype, y):
+    return f'ret = "stablehlo.convert"({x["name"]}) : {get_typing_mlir(x["type"], y["type"])}'
+@compiler.set_impl(operator_set.stop_grad)
+def stop_grad_impl(self, x, *, y):
+    return f'ret = "stablehlo.convert"({x["name"]}) : {get_typing_mlir(x["type"], x["type"])}'
+@compiler.set_impl(operator_set.neg)
+def neg_impl(self, x):
+    return f'ret = "stablehlo.convert"neg({x})'
+@compiler.set_impl(operator_set.sqrt)
+def impl(self, x: f"ret = Sqrt({x})"
+@compiler.set_impl(operator_set.exp
+def impl(self, x: f"ret = Exp({x})")
+@compiler.set_impl(operator_set.log)
+def impl(self, x: f"ret = Log({x})")
+@compiler.set_impl(operator_set.sin)
+def impl(self, x: f"ret = Sin({x})")
+@compiler.set_impl(operator_set.add)
+def impl(self, x, w: f"ret = Add({x}, {w})")
+@compiler.set_impl(operator_set.sub)
+def impl(self, x, w: f"ret = Sub({x}, {w})")
+@compiler.set_impl(operator_set.mul)
+def impl(self, x, w: f"ret = Mul({x}, {w})")
+@compiler.set_impl(operator_set.div)
+def impl(self, x, w: f"ret = Div({x}, {w})")
+@compiler.set_impl(operator_set.pow)
+def impl(self, x, w: f"ret = Pow({x}, {w})")
+@compiler.set_impl(operator_set.invert)
+def impl(self, x: f"ret = Not({x})")
+@compiler.set_impl(operator_set.equal)
+def impl(self, x, w: f"ret = Equal({x}, {w})")
+@compiler.set_impl(operator_set.maximum)
+def impl(self, x, w: f"ret = Max({x}, {w})")
+@compiler.set_impl(operator_set.matmul)
+def impl(self, x, w: f"ret = MatMul({x}, {w})")
 
 
 @compiler.set_impl(operator_set.sum)

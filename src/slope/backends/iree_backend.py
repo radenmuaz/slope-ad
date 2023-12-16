@@ -1237,6 +1237,7 @@ compiler.set_dtype_map(
     }
 )
 
+
 @compiler.set_method
 def from_numpy(self, val, dtype=compiler.default_dtype_value, device=compiler.default_device):
     # device_type, device_id = device.split(":") if ":" in device else (device, 0)
@@ -1253,7 +1254,7 @@ def numpy_of(self, tensor):
 
 @compiler.set_method
 def device_of(self, tensor):
-    return tensor.buf.val.device_name()
+    return tensor.buf.val._device
 
 
 @compiler.set_method
@@ -1348,7 +1349,9 @@ def compile(self, codegen_out):
     iree_device = iree.runtime.get_device("local-task")
     hal_module = iree.runtime.create_hal_module(instance, iree_device)
     # iree.compiler.core.DEFAULT_TESTING_BACKENDS
-    binary = iree.compiler.compile_str(code, target_backends='llvm-cpu',
+    binary = iree.compiler.compile_str(
+        code,
+        target_backends=("llvm-cpu",),
     )
     m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
     context = iree.runtime.VmContext(instance, modules=[hal_module, m])
@@ -1357,9 +1360,22 @@ def compile(self, codegen_out):
     return finv, code
 
 
+def type_mlir(typecheckor):
+    xdtype = typecheckor.dtype.short_name
+    if len(typecheckor.shape) > 0:
+        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
+        return f"tensor<{xshape}x{xdtype}>"
+    else:
+        return f"tensor<{xdtype}>"
+
+
+def get_typing_mlir(in_avals, out_aval):
+    typing_code = f" : ({','.join(type_mlir(t) for t in in_avals)}) -> {type_mlir(out_aval)}"
+    return typing_code
+
+
 @compiler.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
-   
     if fn_name == "main":
         assert not hasattr(self, "fn_count")
         self.fn_count = 0
@@ -1376,7 +1392,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
     for inb in program.in_binders:
         prefix = "%x" if type(inb.aval) is Typecheckor else "%c"
-        idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
+        idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in backend.values()])
         backend[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
 
     for instruction in program.instructions:
@@ -1384,8 +1400,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             continue
         in_vals = list_map(lambda x: backend[x], instruction.inputs)
         for outb in instruction.out_binders:
-            prefix = "%y" if outb in program.outs else "z"
-            idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
+            prefix = "%y" if outb in program.outs else "%z"
+            idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in backend.values()])
             backend[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
         out_vals = list_map(lambda z: backend[z], instruction.out_binders)
@@ -1395,12 +1411,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
             rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
             impl_code = f"{lhs} = {rhs}"
         else:
-            impl_code = self.impls[instruction.op](*in_vals, **instruction.params, **out_vals)
-            if len(out_vals) == 1:
-                impl_code = impl_code.replace("ret", out_vals[0])
-            else:
-                raise NotImplementedError
-            # impl_code += f" : {','.join(type_format(t) for t in in_types)} -> {type_format(out_types[0])}"
+            impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
@@ -1408,36 +1419,31 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
 
     in_binders = list_map(lambda x: backend[x], program.in_binders)
-    arg_type_strs = [
-        f"{self.dtype_map[i['type'].dtype]}[{repr(list(i['type'].shape))[1:-1]}] {i['name']}" for i in in_binders
-    ]
-    fn_args_str = ", ".join(arg_type_strs)
+    fn_args_str = ", ".join([f"{i['name']}: {type_mlir(i['type'])}" for i in in_binders])
 
     outs = list_map(lambda x: backend[x], program.outs)  # TODO: input that is output should has identity op
-    out_type_strs = [
-        f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
-    ]
-    out_type_str = ", ".join(out_type_strs)
+    out_str = ", ".join([f"{o['name']}" for o in outs])
+    out_type_str = ", ".join([f"{type_mlir(o['type'])}" for o in outs])
 
-    head_code_lines = []
-    head_code_lines += [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
-    model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
+    head_code_line = [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
+    tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()', il1)]
+    model_code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
 
-    functions_head_def = '<domain: "slope",  opset_import: ["" : 18, "slope":1]>'
     functions_code_lines = []
     for op, fn_def_code_lines in fn_defs.items():
-        functions_code_lines += [functions_head_def] + fn_def_code_lines
+        functions_code_lines += fn_def_code_lines
     code_lines = model_code_lines + functions_code_lines
     slope.dblog(
         f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n", enable=slope.LOG_JIT
     )
-    breakpoint()
 
     if fn_name == "main":
         del self.fn_count
     assert len(outs) == len(program.outs)
     return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
-'''
+
+
+"""
 func.func @main(
   %image: tensor<28x28xf32>,
   %weights: tensor<784x10xf32>,
@@ -1450,62 +1456,107 @@ func.func @main(
   %4 = "stablehlo.maximum"(%2, %3) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
   "func.return"(%4): (tensor<1x10xf32>) -> ()
 }
-'''
-
-
-### Operator Impls
-def get_typing_mlir(in_avals, out_avals):
-    assert len(out_avals) == 1, "out > 1 not supported"
-    def type_mlir(typecheckor):
-        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
-        xdtype = typecheckor.dtype.short_name
-        return f"tensor<{xshape}x{xdtype}>"
-    impl_code = f" : {','.join(type_mlir(t) for t in in_avals)} -> {type_mlir(out_avals[0])}"
+"""
 
 
 @compiler.set_impl(operator_set.cast)
-def cast_impl(self, x, *, dtype, y):
-    return f'ret = "stablehlo.convert"({x["name"]}) : {get_typing_mlir(x["type"], y["type"])}'
-@compiler.set_impl(operator_set.stop_grad)
-def stop_grad_impl(self, x, *, y):
-    return f'ret = "stablehlo.convert"({x["name"]}) : {get_typing_mlir(x["type"], x["type"])}'
+def cast_impl(self, x, y, *, dtype):
+    return f'{y["name"]} = "stablehlo.convert"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
+@compiler.set_impl(operator_set.stop_gradient)
+def stop_gradient_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.convert"({x["name"]}){get_typing_mlir((x["type"],), y["type"])}'
+
+
 @compiler.set_impl(operator_set.neg)
-def neg_impl(self, x):
-    return f'ret = "stablehlo.convert"neg({x})'
+def neg_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.neg"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
 @compiler.set_impl(operator_set.sqrt)
-def impl(self, x: f"ret = Sqrt({x})"
-@compiler.set_impl(operator_set.exp
-def impl(self, x: f"ret = Exp({x})")
+def sqrt_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
+@compiler.set_impl(operator_set.exp)
+def exp_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.exp"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
 @compiler.set_impl(operator_set.log)
-def impl(self, x: f"ret = Log({x})")
+def log_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.log"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
 @compiler.set_impl(operator_set.sin)
-def impl(self, x: f"ret = Sin({x})")
-@compiler.set_impl(operator_set.add)
-def impl(self, x, w: f"ret = Add({x}, {w})")
-@compiler.set_impl(operator_set.sub)
-def impl(self, x, w: f"ret = Sub({x}, {w})")
-@compiler.set_impl(operator_set.mul)
-def impl(self, x, w: f"ret = Mul({x}, {w})")
-@compiler.set_impl(operator_set.div)
-def impl(self, x, w: f"ret = Div({x}, {w})")
-@compiler.set_impl(operator_set.pow)
-def impl(self, x, w: f"ret = Pow({x}, {w})")
+def sin_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.sin"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
 @compiler.set_impl(operator_set.invert)
-def impl(self, x: f"ret = Not({x})")
+def invert_impl(self, x, y):
+    return f'{y["name"]} = "stablehlo.not"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+
+
+@compiler.set_impl(operator_set.add)
+def add_impl(self, x, w, y):
+    return (
+        f'{y["name"]} = "stablehlo.add"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    )
+
+
+@compiler.set_impl(operator_set.sub)
+def sub_impl(self, x, w, y):
+    return f'{y["name"]} = "stablehlo.subtract"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+
+
+@compiler.set_impl(operator_set.mul)
+def mul_impl(self, x, w, y):
+    return f'{y["name"]} = "stablehlo.multiply"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+
+
+@compiler.set_impl(operator_set.div)
+def div_impl(self, x, w, y):
+    return (
+        f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    )
+
+
+@compiler.set_impl(operator_set.pow)
+def pow_impl(self, x, w, *, y):
+    return f'{y["name"]} = "stablehlo.power"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+
+
 @compiler.set_impl(operator_set.equal)
-def impl(self, x, w: f"ret = Equal({x}, {w})")
+def equal_impl(self, x, w, y):
+    return f'{y["name"]} = "stablehlo.equal"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+
+
 @compiler.set_impl(operator_set.maximum)
-def impl(self, x, w: f"ret = Max({x}, {w})")
+def maximum_impl(self, x, w, y):
+    return f'{y["name"]} = "stablehlo.maximum"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+
+
 @compiler.set_impl(operator_set.matmul)
-def impl(self, x, w: f"ret = MatMul({x}, {w})")
+def matmul_impl(self, x, w, y):
+    return f'{y["name"]} = "stablehlo.matmul"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sum)
-def sum_impl(self, x, *, dim, keepdim):
-    return f"""
-ret_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-ret = ReduceSum<keepdims={int(keepdim)}> ({x}, ret_dim)
+def sum_impl(self, x, y, *, dim, keepdim):
+    return f'''
+{y["name"]} = "stablehlo.reduce"({x["name"]}, dense<0> : {type_mlir(x['type'])}) ({{
+  ^bb0(%arg0: tensor<i64>, %arg1: tensor<i64>):
+    %0 = "stablehlo.add"(%arg0, %arg1) : (tensor<i64>, tensor<i64>) -> tensor<i64>
+    "stablehlo.return"(%0) : (tensor<i64>) -> ()
+}}) {{
+  dimensions = dense<{repr(list(dim))[1:-1]}> : tensor<1xi64>
+}} {get_typing_mlir((x["type"], y["type"]))}
+
+
 """
+'''
 
 
 @compiler.set_impl(operator_set.max)
@@ -1536,40 +1587,8 @@ ret = Range(ret_start, ret_limit, ret_delta)
 # ret_range = Range(ret_start, ret_limit, ret_delta)
 # {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
 @compiler.set_impl(operator_set.full)
-def full_impl(self, *, shape, fill_value, dtype):
-    if dtype is not Tensor.bool:
-        if "float" in dtype.name:
-            fill_value = float(fill_value)
-        elif "int" in dtype.name:
-            fill_value = int(fill_value)
-
-        if len(shape) > 0:
-            return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand (ret_fill_value, ret_shape)
-"""
-        else:  # scalar case
-            return f"""
-ret_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_fill_value, ret_squeeze_dim)
-"""
-    else:
-        if len(shape) > 0:
-            return f"""
-ret_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret_expand = Expand (ret_fill_value, ret_shape)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_expand)
-"""
-        else:  # scalar case
-            return f"""
-ret_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret_squeeze = Squeeze (ret_fill_value, ret_squeeze_dim)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_squeeze)
-"""
+def full_impl(self, y, *, shape, fill_value, dtype):
+    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {get_typing_mlir((), y["type"])}'
 
 
 @compiler.set_impl(operator_set.random_uniform)

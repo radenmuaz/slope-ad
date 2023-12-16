@@ -1106,6 +1106,8 @@ class JitObject:
         args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         try:
             outs = self.fn(*args, **params)
+            if not isinstance(outs, tuple):  # TODO: IREE FunctionInvoker destructure 1-tuple, need to undo
+                outs = (outs,)
         except Exception as e:
             slope.dblog(self.code, enable=slope.LOG_JIT)
             raise

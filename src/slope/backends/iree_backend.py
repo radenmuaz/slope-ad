@@ -1367,7 +1367,7 @@ def type_mlir(typecheckor):
     else:
         return f"tensor<{xdtype}>"
 
-def get_typing_mlir(in_avals, out_aval):
+def type_mlir_sig(in_avals, out_aval):
     typing_code = f" : ({','.join(type_mlir(t) for t in in_avals)}) -> {type_mlir(out_aval)}"
     return typing_code
 
@@ -1451,82 +1451,82 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
 @compiler.set_impl(operator_set.cast)
 def cast_impl(self, x, y, *, dtype):
-    return f'{y["name"]} = "stablehlo.convert"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.convert"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.stop_gradient)
 def stop_gradient_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.convert"({x["name"]}){get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.convert"({x["name"]}){type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.neg)
 def neg_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.neg"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.neg"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sqrt)
 def sqrt_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.exp)
 def exp_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.exp"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.exp"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.log)
 def log_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.log"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.log"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sin)
 def sin_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.sin"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.sin"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.invert)
 def invert_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.not"({x["name"]}) {get_typing_mlir((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.not"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.add)
 def add_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.add"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.add"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sub)
 def sub_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.subtract"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.subtract"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.mul)
 def mul_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.multiply"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.multiply"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.div)
 def div_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.pow)
 def pow_impl(self, x, w, *, y):
-    return f'{y["name"]} = "stablehlo.power"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.power"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.equal)
 def equal_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.equal"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.equal"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.maximum)
 def maximum_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.maximum"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.maximum"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.matmul"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.matmul"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sum)
@@ -1534,23 +1534,34 @@ def sum_impl(self, x, y, *, dim, keepdim):
     zero = '0.' if 'f' in y["type"].dtype.short_name else '0'
     y_init_type = Typecheckor((), y["type"].dtype)
     y_mlir_type = type_mlir(y_init_type)
+    y_out_type  = y["type"] if not keepdim else Typecheckor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
     return f'''
 {y["name"]}_init = stablehlo.constant dense<{zero}> : {type_mlir(y_init_type)}
-{y["name"]} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
+{y["name"]}{'_' if keepdim else ''} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
-    %0 = "stablehlo.add"(%arg0, %arg1) {get_typing_mlir((y_init_type, y_init_type), y_init_type)}
+    %0 = "stablehlo.add"(%arg0, %arg1) {type_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
-  dimensions = dense<{repr(list(dim))[1:-1]}> : tensor<1xi64>
-}} {get_typing_mlir((x["type"], y_init_type), y["type"])}
+  dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
+}} {type_mlir_sig((x["type"], y_init_type), y_out_type)}
+{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if keepdim else ''}
 '''
 
 @compiler.set_impl(operator_set.max)
-def max_impl(self, x, *, dim, keepdim):
-    return f"""
-ret_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-ret = ReduceMax<keepdims={int(keepdim)}> ({x}, ret_dim)
-"""
+def max_impl(self, x, y, *, dim, keepdim):
+    min_val = '1e-38' if 'f' in y["type"].dtype.short_name else '-128' # TODO: follow dtype min val
+    y_init_type = Typecheckor((), y["type"].dtype)
+    y_mlir_type = type_mlir(y_init_type)
+    return f'''
+{y["name"]}_init = stablehlo.constant dense<{min_val}> : {type_mlir(y_init_type)}
+{y["name"]} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
+  ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
+    %0 = "stablehlo.maximum"(%arg0, %arg1) {type_mlir_sig((y_init_type, y_init_type), y_init_type)}
+    "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
+}}) {{
+  dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
+}} {type_mlir_sig((x["type"], y_init_type), y["type"])}
+'''
 
 
 @compiler.set_impl(operator_set.arange)
@@ -1574,7 +1585,7 @@ ret = Range(ret_start, ret_limit, ret_delta)
 # {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
 @compiler.set_impl(operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype):
-    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {get_typing_mlir((), y["type"])}'
+    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {type_mlir_sig((), y["type"])}'
 
 @compiler.set_impl(operator_set.random_uniform)
 def random_uniform_impl(self, *, shape, dtype):
@@ -1613,18 +1624,8 @@ ret = Expand ({x}, ret_shape)
 
 
 @compiler.set_impl(operator_set.reshape)
-def reshape_impl(self, x, *, shape):
-    if len(shape) > 0:
-        return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Reshape({x}, ret_shape)
-"""
-    else:  # scalar case
-        f"""
-        ret_shape = Constant <value = int64[1] {1} >()
-        ret_reshape = Reshape({x}, ret_shape)
-        ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-        ret = Squeeze (ret_reshape, ret_squeeze_dim)"""
+def reshape_impl(self, x, y, *, shape):
+    return f'{y["name"]} = "stablehlo.reshape"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.pad)

@@ -1549,18 +1549,23 @@ def sum_impl(self, x, y, *, dim, keepdim):
 
 @compiler.set_impl(operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
-    min_val = '1e-38' if 'f' in y["type"].dtype.short_name else '-128' # TODO: follow dtype min val
+    min_val = {Tensor.float32:'1.E-38',
+               Tensor.int8:'-128',
+               Tensor.int32:'-65536'
+               }[x["type"].dtype]
     y_init_type = Typecheckor((), y["type"].dtype)
     y_mlir_type = type_mlir(y_init_type)
+    y_out_type  = y["type"] if not keepdim else Typecheckor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
     return f'''
 {y["name"]}_init = stablehlo.constant dense<{min_val}> : {type_mlir(y_init_type)}
-{y["name"]} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
+{y["name"]}{'_' if keepdim else ''} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
     %0 = "stablehlo.maximum"(%arg0, %arg1) {type_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
-}} {type_mlir_sig((x["type"], y_init_type), y["type"])}
+}} {type_mlir_sig((x["type"], y_init_type), y_out_type)}
+{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if keepdim else ''}
 '''
 
 

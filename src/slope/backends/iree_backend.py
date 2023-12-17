@@ -1224,7 +1224,7 @@ def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_paddi
 #
 
 compile_py = compile
-compiler = Compiler(name="iree", default_dtype=Tensor.float32, default_device=slope.SLOPE_DEVICE)
+compiler = Compiler(name="iree", default_dtype=slope.SLOPE_DTYPE, default_device=slope.SLOPE_DEVICE)
 compiler.set_dtype_map(
     {
         Tensor.float32: np.dtypes.Float32DType(),
@@ -1256,7 +1256,6 @@ def numpy_of(self, tensor):
 def device_of(self, tensor):
     return tensor.buf.val._device
 
-
 @compiler.set_method
 def shape_of(self, tensor):
     return tuple(tensor.buf.val.shape)
@@ -1269,6 +1268,7 @@ def dtype_of(self, tensor):
 
 @compiler.set_method
 def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
+    raise NotImplementedError
     code = jit_object.code
     model = onnx.parser.parse_model(code)
     os.makedirs(output_path, exist_ok=True)
@@ -1359,7 +1359,6 @@ def compile(self, codegen_out):
     finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
     return finv, code
 
-
 def type_mlir(typecheckor):
     xdtype = typecheckor.dtype.short_name
     if len(typecheckor.shape) > 0:
@@ -1368,11 +1367,9 @@ def type_mlir(typecheckor):
     else:
         return f"tensor<{xdtype}>"
 
-
 def get_typing_mlir(in_avals, out_aval):
     typing_code = f" : ({','.join(type_mlir(t) for t in in_avals)}) -> {type_mlir(out_aval)}"
     return typing_code
-
 
 @compiler.set_method
 def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
@@ -1419,14 +1416,20 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
 
     in_binders = list_map(lambda x: backend[x], program.in_binders)
-    fn_args_str = ", ".join([f"{i['name']}: {type_mlir(i['type'])}" for i in in_binders])
+    fn_args_str = ", ".join([
+        f"{i['name']}: {type_mlir(i['type'])}" for i in in_binders
+    ])
 
     outs = list_map(lambda x: backend[x], program.outs)  # TODO: input that is output should has identity op
-    out_str = ", ".join([f"{o['name']}" for o in outs])
-    out_type_str = ", ".join([f"{type_mlir(o['type'])}" for o in outs])
-
+    out_str = ", ".join([
+        f"{o['name']}" for o in outs
+    ])
+    out_type_str = ", ".join([
+        f"{type_mlir(o['type'])}" for o in outs
+    ])
+    
     head_code_line = [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
-    tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()', il1)]
+    tail_code_line =  [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()', il1)]
     model_code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
 
     functions_code_lines = []
@@ -1443,20 +1446,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
 
 
-"""
-func.func @main(
-  %image: tensor<28x28xf32>,
-  %weights: tensor<784x10xf32>,
-  %bias: tensor<1x10xf32>
-) -> tensor<1x10xf32> {
-  %0 = "stablehlo.reshape"(%image) : (tensor<28x28xf32>) -> tensor<1x784xf32>
-  %1 = "stablehlo.dot"(%0, %weights) : (tensor<1x784xf32>, tensor<784x10xf32>) -> tensor<1x10xf32>
-  %2 = "stablehlo.add"(%1, %bias) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
-  %3 = "stablehlo.constant"() { value = dense<0.0> : tensor<1x10xf32> } : () -> tensor<1x10xf32>
-  %4 = "stablehlo.maximum"(%2, %3) : (tensor<1x10xf32>, tensor<1x10xf32>) -> tensor<1x10xf32>
-  "func.return"(%4): (tensor<1x10xf32>) -> ()
-}
-"""
+
 
 
 @compiler.set_impl(operator_set.cast)
@@ -1501,9 +1491,7 @@ def invert_impl(self, x, y):
 
 @compiler.set_impl(operator_set.add)
 def add_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.add"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.add"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.sub)
@@ -1518,9 +1506,7 @@ def mul_impl(self, x, w, y):
 
 @compiler.set_impl(operator_set.div)
 def div_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {get_typing_mlir((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.pow)
@@ -1545,19 +1531,19 @@ def matmul_impl(self, x, w, y):
 
 @compiler.set_impl(operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
+    zero = '0.' if 'f' in y["type"].dtype.short_name else '0'
+    y_init_type = Typecheckor((), y["type"].dtype)
+    y_mlir_type = type_mlir(y_init_type)
     return f'''
-{y["name"]} = "stablehlo.reduce"({x["name"]}, dense<0> : {type_mlir(x['type'])}) ({{
-  ^bb0(%arg0: tensor<i64>, %arg1: tensor<i64>):
-    %0 = "stablehlo.add"(%arg0, %arg1) : (tensor<i64>, tensor<i64>) -> tensor<i64>
-    "stablehlo.return"(%0) : (tensor<i64>) -> ()
+{y["name"]}_init = stablehlo.constant dense<{zero}> : {type_mlir(y_init_type)}
+{y["name"]} = "stablehlo.reduce"({x["name"]}, {y["name"]}_init) ({{
+  ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
+    %0 = "stablehlo.add"(%arg0, %arg1) {get_typing_mlir((y_init_type, y_init_type), y_init_type)}
+    "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
   dimensions = dense<{repr(list(dim))[1:-1]}> : tensor<1xi64>
-}} {get_typing_mlir((x["type"], y["type"]))}
-
-
-"""
+}} {get_typing_mlir((x["type"], y_init_type), y["type"])}
 '''
-
 
 @compiler.set_impl(operator_set.max)
 def max_impl(self, x, *, dim, keepdim):
@@ -1589,7 +1575,6 @@ ret = Range(ret_start, ret_limit, ret_delta)
 @compiler.set_impl(operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype):
     return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {get_typing_mlir((), y["type"])}'
-
 
 @compiler.set_impl(operator_set.random_uniform)
 def random_uniform_impl(self, *, shape, dtype):

@@ -140,20 +140,20 @@ def T(self, cotangents, x):
     return [1 / grad_L_y]
 
 
-neg = Operator.unary("neg")
-operator_set.register(neg)
+# neg = Operator.unary("neg")
+# operator_set.register(neg)
 
 
-@neg.set_method
-def jvp(self, primals, tangents, **params):
-    (x,), (x_dot,) = primals, tangents
-    return [-x], [-x_dot]
+# @neg.set_method
+# def jvp(self, primals, tangents, **params):
+#     (x,), (x_dot,) = primals, tangents
+#     return [-x], [-x_dot]
 
 
-@neg.set_method
-def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [-grad_L_y]
+# @neg.set_method
+# def T(self, cotangents, x):
+#     (grad_L_y,) = cotangents
+#     return [-grad_L_y]
 
 
 invert = Operator.unary("invert")
@@ -1459,11 +1459,6 @@ def stop_gradient_impl(self, x, y):
     return f'{y["name"]} = "stablehlo.convert"({x["name"]}){type_mlir_sig((x["type"],), y["type"])}'
 
 
-@compiler.set_impl(operator_set.neg)
-def neg_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.neg"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
-
-
 @compiler.set_impl(operator_set.sqrt)
 def sqrt_impl(self, x, y):
     return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
@@ -1471,7 +1466,7 @@ def sqrt_impl(self, x, y):
 
 @compiler.set_impl(operator_set.exp)
 def exp_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.exp"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.exponential"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.log)
@@ -1506,17 +1501,21 @@ def mul_impl(self, x, w, y):
 
 @compiler.set_impl(operator_set.div)
 def div_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.sqrt"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.divide"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.pow)
-def pow_impl(self, x, w, *, y):
+def pow_impl(self, x, w, y):
     return f'{y["name"]} = "stablehlo.power"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @compiler.set_impl(operator_set.equal)
 def equal_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.equal"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
+    return f'''{y["name"]} = "stablehlo.compare"({x["name"]}, {w["name"]}) {{
+  comparison_direction = #stablehlo<comparison_direction EQ>,
+  compare_type = #stablehlo<comparison_type FLOAT>
+}}  {type_mlir_sig((x["type"], w["type"]), y["type"])}
+'''
 
 
 @compiler.set_impl(operator_set.maximum)
@@ -1526,7 +1525,21 @@ def maximum_impl(self, x, w, y):
 
 @compiler.set_impl(operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.matmul"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
+    return f'{y["name"]} = "stablehlo.dot"({x["name"]}, {w["name"]}) {type_mlir_sig((x["type"], w["type"]), y["type"])}'
+#     lhs_c = len(x["type"].shape)-1
+#     do_reshape = len(w["type"].shape) == 2
+#     w_type = Typecheckor((1,) + w["type"].shape, w["type"].dtype) if do_reshape else w["type"]
+#     rhs_c = len(w_type.shape)-2
+#     return f'''{f'{w["name"]}_ = "stablehlo.reshape"({w["name"]}) {type_mlir_sig((w["type"],), w_type)}' if do_reshape else ""}
+# {y["name"]} = "stablehlo.dot_general"({x["name"]}, {w["name"]}{"_" if do_reshape else ""}) {{
+#   dot_dimension_numbers = #stablehlo.dot<
+#     lhs_batching_dimensions = [0],
+#     rhs_batching_dimensions = [0],
+#     lhs_contracting_dimensions = [{lhs_c}],
+#     rhs_contracting_dimensions = [{rhs_c}]
+#   >,
+#   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+# }} {type_mlir_sig((x["type"], w_type), y["type"])}'''
 
 
 @compiler.set_impl(operator_set.sum)
@@ -1544,8 +1557,7 @@ def sum_impl(self, x, y, *, dim, keepdim):
 }}) {{
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
 }} {type_mlir_sig((x["type"], y_init_type), y_out_type)}
-{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if keepdim else ''}
-'''
+{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if keepdim else ''}'''
 
 @compiler.set_impl(operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
@@ -1570,62 +1582,54 @@ def max_impl(self, x, y, *, dim, keepdim):
 
 
 @compiler.set_impl(operator_set.arange)
-def arange_impl(self, *, start, stop, stride, dtype):
-    return f"""
-ret_start = Constant <value_int = {start}> ()
-ret_limit = Constant <value_int = {stop}> ()
-ret_delta = Constant <value_int = {stride}> ()
-{f'''
-ret_range = Range(ret_start, ret_limit, ret_delta)
-ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)
-''' if dtype is not Tensor.int64 else
-f'''
-ret = Range(ret_start, ret_limit, ret_delta)
-'''
-}
-"""
+def arange_impl(self, y, *, start, stop, stride, dtype):
+    return f'{y["name"]} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {type_mlir_sig((), y["type"])}'
 
-
-# ret_range = Range(ret_start, ret_limit, ret_delta)
-# {f'ret = Cast<to={onnx_dtype_enum_map[dtype]}>(ret_range)'}
 @compiler.set_impl(operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype):
-    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {type_mlir_sig((), y["type"])}'
+    fill_value = float(fill_value) if 'f' in dtype.short_name else int(fill_value)
+    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{repr(fill_value).replace("e",".E").replace("..",".")}> : {type_mlir(y["type"])} }} {type_mlir_sig((), y["type"])}'
 
 @compiler.set_impl(operator_set.random_uniform)
-def random_uniform_impl(self, *, shape, dtype):
-    if len(shape) > 0:
-        return f"""
-ret = RandomUniform<dtype={onnx_dtype_enum_map[dtype]},shape={repr(list(shape))}>()
-"""
-    else:  # scalar case
-        return f"""
-ret_rand = RandomUniform<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_rand, ret_squeeze_dim)
-"""
-
+def random_uniform_impl(self, y,*, shape, dtype):
+    zero = '0.' if 'f' in y["type"].dtype.short_name else '0'
+    one = '1.' if 'f' in y["type"].dtype.short_name else '1'
+    a_type = b_type = Typecheckor((), dtype)
+    is_scalar = shape == ()
+    shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
+    shape_type = Typecheckor((1,) if is_scalar else (len(shape),), Tensor.int64)
+    y_out_type = y["type"] if not is_scalar else Typecheckor((1,), y["type"].dtype)
+    return f'''{y["name"]}_a = stablehlo.constant dense<{zero}> : {type_mlir(a_type)}
+{y["name"]}_b = stablehlo.constant dense<{one}> : {type_mlir(b_type)}
+{y["name"]}_shape = stablehlo.constant {shape_val}> : {type_mlir(shape_type)}
+{y["name"]}{'_' if is_scalar else ''} = "stablehlo.rng"({y["name"]}_a, {y["name"]}_b,{y["name"]}_shape) {{
+        rng_distribution = #stablehlo<rng_distribution UNIFORM>}} {type_mlir_sig((a_type, b_type, shape_type), y_out_type)}
+{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if is_scalar else ''}'''
 
 @compiler.set_impl(operator_set.random_normal)
-def random_normal_impl(self, *, shape, dtype):
-    if len(shape) > 0:
-        return f"""
-ret = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}>()
-"""
-    else:  # scalar case
-        return f"""
-ret_randn = RandomNormal<dtype={onnx_dtype_enum_map[dtype]}, shape=[1]>()
-ret_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-ret = Squeeze (ret_randn, ret_squeeze_dim)
-"""
+def random_normal_impl(self, y, *, shape, dtype):
+    zero = '0.' if 'f' in y["type"].dtype.short_name else '0'
+    one = '1.' if 'f' in y["type"].dtype.short_name else '1'
+    a_type = b_type = Typecheckor((), dtype)
+    is_scalar = shape == ()
+    shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
+    shape_type = Typecheckor((1,) if is_scalar else (len(shape),), Tensor.int64)
+    y_out_type = y["type"] if not is_scalar else Typecheckor((1,), y["type"].dtype)
+    return f'''{y["name"]}_a = stablehlo.constant dense<{zero}> : {type_mlir(a_type)}
+{y["name"]}_b = stablehlo.constant dense<{one}> : {type_mlir(b_type)}
+{y["name"]}_shape = stablehlo.constant {shape_val}> : {type_mlir(shape_type)}
+{y["name"]}{'_' if is_scalar else ''} = "stablehlo.rng"({y["name"]}_a, {y["name"]}_b,{y["name"]}_shape) {{
+        rng_distribution = #stablehlo<rng_distribution NORMAL>}} {type_mlir_sig((a_type, b_type, shape_type), y_out_type)}
+{f'{y["name"]} = "stablehlo.reshape"({y["name"]}_) {type_mlir_sig((y_out_type,), y["type"])}' if is_scalar else ''}'''
+
 
 
 @compiler.set_impl(operator_set.expand)
-def expand_impl(self, x, *, shape):
-    return f"""
-ret_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-ret = Expand ({x}, ret_shape)
-"""
+def expand_impl(self, x, y, *, shape):
+    return f'''{y["name"]} = "stablehlo.broadcast_in_dim"({x["name"]}) {{
+        broadcast_dimensions = dense<{repr(list(range(len(shape))))}>: tensor<{len(shape)}xi64>
+        }} {type_mlir_sig(( x["type"],), y["type"])}
+'''
 
 
 @compiler.set_impl(operator_set.reshape)
@@ -1634,30 +1638,29 @@ def reshape_impl(self, x, y, *, shape):
 
 
 @compiler.set_impl(operator_set.pad)
-def pad_impl(self, x, *, padding, mode, value):
-    padding = padding[0::2] + padding[1::2]
-    return f"""
-ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
-ret = Pad({x}, ret_padding)
-"""
+def pad_impl(self, x, y, *, padding, mode, value):
+    value = float(value) if 'f' in x["type"].dtype.short_name else int(value)
+    value_type = Typecheckor((), x["type"].dtype)
+    lo = padding[0::2]
+    hi = padding[1::2]
+    return f'''{y["name"]}_value = stablehlo.constant dense<{value}> : {type_mlir(value_type)}
+{y["name"]} = "stablehlo.pad"({x["name"]}, {y["name"]}_value) {{
+  edge_padding_low = dense<{repr(list(lo))}> : tensor<{len(lo)}xi64>,
+  edge_padding_high = dense<{repr(list(hi))}> : tensor<{len(hi)}xi64>,
+  interior_padding = dense<{repr([0]*len(lo))}> : tensor<{len(lo)}xi64>
+}} {type_mlir_sig((x["type"], value_type), y["type"])}
+'''
 
-
-#     return f"""
-# ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
-# ret_constant_value =  Constant <value = {value} >()
-# ret = Pad({x}, ret_padding, ret_constant_value)
-# """
 
 
 @compiler.set_impl(operator_set.slice)
-def slice_impl(self, x, *, starts, limits, strides):
-    return f"""
-ret_starts = Constant <value = int64[{len(starts)}]  {{ {repr(list(starts))[1:-1]} }}>()
-ret_ends = Constant <value = int64[{len(limits)}]  {{ {repr(list(limits))[1:-1]} }}>()
-ret_dim = Constant <value = int64[{len(strides)}]  {{ {repr(list(range(len(starts))))[1:-1]} }}>()
-ret_steps = Constant <value = int64[{len(strides)}]  {{ {repr(list(strides))[1:-1]} }}>()
-ret = Slice({x}, ret_starts, ret_ends, ret_dim, ret_steps)
-"""
+def slice_impl(self, x, y, *, starts, limits, strides):
+    return f''' {y["name"]} ="stablehlo.slice"({x["name"]}) {{
+  start_indices = dense<{repr(list(starts))}> : tensor<{len(starts)}xi64>,
+  limit_indices = dense<{repr(list(limits))}> : tensor<{len(limits)}xi64>,
+  strides = dense<{repr(list(strides))}> : tensor<{len(strides)}xi64>
+}} {type_mlir_sig((x["type"],), y["type"])}
+'''
 
 
 @compiler.set_impl(operator_set.cat)
@@ -1666,19 +1669,18 @@ def cat_impl(self, *xs, dim):
 
 
 @compiler.set_impl(operator_set.permute)
-def permute_impl(self, x, *, perm):
-    return f"ret = Transpose<perm={repr(list(perm))}>({x})"
+def permute_impl(self, x, y, *, perm):
+    return f'''{y["name"]} = "stablehlo.transpose"({x["name"]}) {{
+  permutation = dense<{repr(list(perm))}> : tensor<{len(perm)}xi64>
+}} {type_mlir_sig((x["type"],), y["type"])}'''
 
 
 @compiler.set_impl(operator_set.flip)
-def flip_impl(self, x, *, dim):
-    return f"""
-ret_starts = Constant <value = int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))} }}>()
-ret_ends = Constant <value = int64[{len(dim)}]  {{ {", ".join(["-1"] * len(dim))} }}>()
-ret_dim = Constant <value = int64[{len(dim)}]  {{ {repr(list(dim))[1:-1]} }}>()
-ret_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["-1"] * len(dim))} }}>()
-ret = Slice({x}, ret_starts, ret_ends, ret_dim, ret_steps)
-"""
+def flip_impl(self, x, y, *, dim):
+    return f'''{y["name"]} = "stablehlo.reverse"({x["name"]}) {{
+  dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
+}}  {type_mlir_sig((x["type"],), y["type"])}
+'''
 
 
 @compiler.set_impl(operator_set.conv)
@@ -1803,6 +1805,10 @@ def cos(x):
 def tan(x):
     return x.sin() / x.cos()
 
+
+@procedure_set.register()
+def neg(x):
+    return full_like(x, -1) * x
 
 @procedure_set.register()
 def not_equal(x, w):

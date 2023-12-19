@@ -41,7 +41,7 @@ import inspect
 from functools import partial, lru_cache
 import slope
 import mmap
-import struct
+import traceback
 
 
 # ================
@@ -94,7 +94,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     return lst1, lst2
 
 
-def lru_cache_verbose(maxsize=100, typed=False):
+def lru_cache_verbose(maxsize=100, typed=False, tb_start=-12, tb_end=-7):
     def decorator(fn):
         @lru_cache(maxsize=maxsize, typed=typed)
         def wrapper(*args, **kwargs):
@@ -104,7 +104,10 @@ def lru_cache_verbose(maxsize=100, typed=False):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
 
+            # slope.dblog(f"{args}", enable=slope.LOG_LRU)
             slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
+            tb = ''.join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace('\n    ', ':\t') + '-'*20 + '\n'
+            slope.dblog(f"{tb}", enable=slope.LOG_LRU)
             # for a in args:
             #     try:
             #         slope.dblog(f"{a.val=}", enable=slope.LOG_LRU)
@@ -1384,7 +1387,7 @@ class RunTrace(Trace):
         return ret
 
     @staticmethod
-    # @lru_cache_verbose()
+    @lru_cache_verbose()
     def get_fn(op, *typecheckor_args, **params):
         def fn(*args, **params):
             return [op(*args, **params)]
@@ -2473,29 +2476,6 @@ class Machine:
 
     def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
         return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
-
-    # def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
-    #     if isinstance(f, self.jit):
-    #         f = f.f
-    #     if isinstance(argnums, int):
-    #         argnums = (argnums,)
-
-    #     def grad_fn(x, *xs, **static_args):
-    #         vjp_ret = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
-    #         if has_aux:
-    #             y, f_vjp, aux = vjp_ret
-    #         else:
-    #             y, f_vjp = vjp_ret
-    #         if np.shape(y) != ():
-    #             raise TypeError("grad output must be 0-dim scalar with shape ()")
-    #         grad_L_xs = f_vjp(self.backend.ones(()))
-    #         grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
-    #         return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
-
-    #     if isinstance(f, self.jit):
-    #         return self.jit(grad_fn)
-    #     else:
-    #         return grad_fn
 
     class jit:
         def __init__(self, f, static_argnames=(), name=None):

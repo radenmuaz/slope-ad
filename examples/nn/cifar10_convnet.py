@@ -101,3 +101,9 @@ if __name__ == "__main__":
             print(f"Best accuracy {test_acc:.2f} at epoch {epoch}")
             best_acc = test_acc
 
+# def test_all(model, x, y):
+#     out = model(x)
+#     y_hat2 = np.argmax(out.numpy() ,-1)
+#     corrects2 = (y_hat2 == y.numpy()).astype(np.float32)
+#     accuracy2 = np.mean(corrects2)
+#     return accuracy2

@@ -992,7 +992,7 @@ def T(self, cotangents, x, w):
 
 
 conv = Operator.other("conv")
-operator_set.register(conv)
+# operator_set.register(conv)
 
 
 @conv.set_method
@@ -1588,7 +1588,9 @@ def arange_impl(self, y, *, start, stop, stride, dtype):
 @compiler.set_impl(operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype):
     fill_value = float(fill_value) if 'f' in dtype.short_name else int(fill_value)
-    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{repr(fill_value).replace("e",".E").replace("..",".")}> : {type_mlir(y["type"])} }} {type_mlir_sig((), y["type"])}'
+    fill_value = repr(fill_value)
+    fill_value = fill_value.replace('e','E') if '.' in fill_value else fill_value.replace('e','.E')
+    return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {type_mlir(y["type"])} }} {type_mlir_sig((), y["type"])}'
 
 @compiler.set_impl(operator_set.random_uniform)
 def random_uniform_impl(self, y,*, shape, dtype):
@@ -1655,7 +1657,7 @@ def pad_impl(self, x, y, *, padding, mode, value):
 
 @compiler.set_impl(operator_set.slice)
 def slice_impl(self, x, y, *, starts, limits, strides):
-    return f''' {y["name"]} ="stablehlo.slice"({x["name"]}) {{
+    return f'''{y["name"]} = "stablehlo.slice"({x["name"]}) {{
   start_indices = dense<{repr(list(starts))}> : tensor<{len(starts)}xi64>,
   limit_indices = dense<{repr(list(limits))}> : tensor<{len(limits)}xi64>,
   strides = dense<{repr(list(strides))}> : tensor<{len(strides)}xi64>
@@ -1665,7 +1667,10 @@ def slice_impl(self, x, y, *, starts, limits, strides):
 
 @compiler.set_impl(operator_set.cat)
 def cat_impl(self, *xs, dim):
-    return f"ret = Concat< axis={dim}>({','.join(xs)})"
+    xs, y = xs[:-1], xs[-1]
+    return f'''{y["name"]} = "stablehlo.concatenate"({','.join([x["name"] for x in xs])}) {{
+ dimension = {dim} : i64
+}} {type_mlir_sig(([x["type"] for x in xs]), y["type"])}'''
 
 
 @compiler.set_impl(operator_set.permute)
@@ -1683,7 +1688,7 @@ def flip_impl(self, x, y, *, dim):
 '''
 
 
-@compiler.set_impl(operator_set.conv)
+# @compiler.set_impl(operator_set.conv)
 def conv_impl(self, x, w, *, groups, stride, dilation, padding):
     dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
     pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"

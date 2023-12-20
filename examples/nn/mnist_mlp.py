@@ -28,12 +28,19 @@ def train_step(model, batch, optimizer):
     return loss, new_model, new_optimizer
 
 
-@slope.jit
+# @slope.jit
 def test_all(model, x, y):
     out = model(x)
     y_hat = out.argmax(-1)
     corrects = (y_hat == y).cast(slope.float32)
+    # breakpoint()
     accuracy = corrects.mean()
+
+    y_hat2 = np.argmax(out.numpy() ,-1)
+    corrects2 = (y_hat2 == y.numpy()).astype(np.float32)
+    accuracy2 = np.mean(corrects2)
+    breakpoint()
+    
     return accuracy
 
 class Net(nn.Module):
@@ -85,6 +92,7 @@ if __name__ == "__main__":
             batch = next(batches)
             loss, model, optimizer = train_step(model, batch, optimizer)
             pbar.set_description(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")
+            # if i % 10 == 0: print(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")
         epoch_time = time.time() - start_time
 
         test_acc = test_all(model, x_test, y_test).numpy()

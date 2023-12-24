@@ -622,13 +622,14 @@ class ConvNdTranspose(Module):
         stride = make_pair(stride, len(HW))
         if any(s > 1 for s in stride):
             x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
-            x = x.pad((0, 0, 0, 0, *flatten_seq((0, 0, 0, s - 1) for s in stride)))
+            x_ = x
+            pads = (0, 0, 0, 0, *flatten_seq((0, 0, 0, s - 1) for s in stride))
+            pads = pads[::-1]
+            x = x.pad(pads)
             x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
-            x = x.slice(
-                (0, x.shape[0]),
-                (0, x.shape[1]),
-                *[(0, k - (s - 1)) for k, s in zip(x.shape[2:], stride)],
-            )
+            x = x.slice((0,0) + (0,)*len(x.shape[2:]),
+                        (x.shape[0], x.shape[1]) + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1])
+        padding_ = padding
         padding = flatten_seq(
             (
                 ((k - 1) * d - p, (k - 1) * d - p + op)
@@ -853,7 +854,6 @@ class LogSoftmax(Module):
 
 class Optimizer(Module):
     def __init__(self, params, lr: float):
-        self.params = params
         self.params_treedef = slope.tree_flatten(params)[1]
         self.state = Module()
         self.hp = Module()
@@ -893,7 +893,7 @@ class SGD(Optimizer):
         self.hp.momentum = momentum
         self.hp.weight_decay = weight_decay
         self.hp.nesterov = nesterov
-        self.state.b = slope.tree_map(lambda x: x.zeros_like(), self.params)
+        self.state.b = slope.tree_map(lambda x: x.zeros_like(), params)
 
     def step(self, p, g, b):
         lr, m, wd = self.hp.lr, self.hp.momentum, self.hp.weight_decay
@@ -914,8 +914,8 @@ class Adam(Optimizer):
         self.hp.b2 = b2
         self.hp.eps = eps
         self.hp.wd = weight_decay
-        self.state.m = slope.tree_map(lambda x: x.ones_like(), self.params)
-        self.state.v = slope.tree_map(lambda x: x.ones_like(), self.params)
+        self.state.m = slope.tree_map(lambda x: x.ones_like(), params)
+        self.state.v = slope.tree_map(lambda x: x.ones_like(), params)
 
     def step(self, p, g, m, v):
         lr, wd = self.hp.lr, self.hp.wd

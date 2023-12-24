@@ -662,7 +662,7 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
         return [Typecheckor(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
-        x = np.zeros_like(x.shape)
+        x = np.zeros(x.shape)
         x = x[[slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides)]]
         return [Typecheckor(x.shape, x.dtype)]
 

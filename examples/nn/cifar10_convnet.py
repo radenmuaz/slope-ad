@@ -47,8 +47,8 @@ def get_dataloader(images, labels, batch_size, shuffle=False):
 
 if __name__ == "__main__":
     nepochs = 100
-    train_batch_size = 50 # TODO: must be multiple of dataset
-    test_batch_size = 50
+    train_batch_size = 100 # TODO: must be multiple of dataset
+    test_batch_size = 100
     train_images, train_labels, test_images, test_labels = get_cifar10()
     
     model = resnet(depth=8)
@@ -64,22 +64,24 @@ if __name__ == "__main__":
     for epoch in range(nepochs):
         total_loss = 0.
         true_positives = 0.
+        print(f"\n{model.bn1.running_mean=}")
+        print(f"{model.bn1.running_var=}\n")
         
-        for i, batch in (pbar := tqdm(enumerate(train_dataloader()))):
+        for i, batch in (pbar := tqdm(enumerate(train_dataloader()),total=ntrain_batches, leave=False)):
             loss, logits, model, optimizer, grad_model = train_step(model, batch, optimizer)
             loss_numpy =  float(loss.numpy())
             total_loss += loss_numpy
-            y_hat, y =  logits.argmax(-1), batch[1]
-            true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
+            y_hat, y =  np.argmax(logits.numpy(),-1), batch[1].numpy()
+            true_positives += float(np.sum(y_hat == y).astype(np.float32))
+            # y_hat, y =  logits.argmax(-1), batch[1]
+            # true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             train_loss = total_loss/(i+1)
             train_acc = true_positives/ (train_batch_size * (i+1))
-            msg = (f"Train epoch: {epoch}, batch: {i+1}/{ntrain_batches}, "
+            msg = (f"Train epoch: {epoch}, "
                    f"batch_loss: {loss_numpy:.4f}, "
                    f"loss: {train_loss:.4f}, acc: {train_acc:.4f}")
             pbar.set_description(msg)
-            if i % 200 == 0:
-                print(f"\n{model.bn1.running_mean=}")
-                print(f"{model.bn1.running_var=}\n")
+                
             # if i == 5:break
 
         total_loss = 0.
@@ -88,11 +90,13 @@ if __name__ == "__main__":
             loss, logits, = test_step(model, batch)
             loss_numpy =  float(loss.numpy())
             total_loss += loss_numpy
-            y_hat, y =  logits.argmax(-1), batch[1]
-            true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
+            y_hat, y =  np.argmax(logits.numpy(),-1), batch[1].numpy()
+            true_positives += float(np.sum(y_hat == y).astype(np.float32))
+            # y_hat, y =  logits.argmax(-1), batch[1]
+            # true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             test_loss = total_loss/(i+1)
             test_acc = true_positives/ (test_batch_size * (i+1))
-            msg = (f"Test epoch: {epoch}, batch: {i+1}/{ntest_batches}, "
+            msg = (f"Test epoch: {epoch}, "
                    f"batch_loss: {loss_numpy:.4f}, "
                    f"loss: {test_loss:.4f}, acc: {test_acc:.4f}")
             pbar.set_description(msg)

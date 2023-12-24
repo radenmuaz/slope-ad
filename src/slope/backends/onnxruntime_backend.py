@@ -582,6 +582,7 @@ def jvp(self, primals, tangents, *, padding, mode, value):
 
 @pad.set_method
 def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor]:
+    padding = padding[::-1]
     lo, hi = padding[0::2], padding[1::2]
     interior = [0] * (len(padding) // 2)
 
@@ -666,7 +667,7 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
-        x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
+        x = x[tuple(slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
         return [Typecheckor(x.shape, x.dtype)]
 
 
@@ -697,7 +698,7 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
     padding = []
     for l, h in zip(lo, hi):
         padding += [l, h]
-    padding = tuple(padding)
+    padding = tuple(padding[::-1])
     res = z.pad(padding)
     assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
     return [res]
@@ -1030,26 +1031,11 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
     x_shape = x.shape
     w_shape = w.shape
     # Calculate output spatial dimensions
-    if isinstance(padding, tuple):
-        # TODO
-        padding_h = padding_w = padding[0]
-    else:
-        padding_h = padding_w = padding
-
-    if isinstance(stride, tuple):
-        # TODO
-        stride_h = stride_w = stride[0]
-    else:
-        stride_h = stride_w = stride
-
-    if isinstance(dilation, tuple):
-        # TODO
-        dilation_h = dilation_w = dilation[0]
-    else:
-        dilation_h = dilation_w = dilation
+    padding_h = padding_w = padding[0]
+    stride_h = stride_w = stride[0]
+    dilation_h = dilation_w = dilation[0]
     out_h = ((x_shape[2] + 2 * padding_h - dilation_h * (w_shape[2] - 1) - 1) // stride_h) + 1
     out_w = ((x_shape[3] + 2 * padding_w - dilation_w * (w_shape[3] - 1) - 1) // stride_w) + 1
-
     # Calculate output shape
     out_channels = w_shape[0]
     out_shape = (x_shape[0], out_channels, out_h, out_w)
@@ -1614,6 +1600,7 @@ ret = Reshape({x}, ret_shape)
 
 @compiler.set_impl(operator_set.pad)
 def pad_impl(self, x, *, padding, mode, value):
+    padding = padding[::-1]
     padding = padding[0::2] + padding[1::2]
     return f"""
 ret_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
@@ -1964,7 +1951,7 @@ def getitem(self, val):
         strides = tuple(abs_py(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
-            tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))
+            tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))[::-1]
         )
         # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
         reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
@@ -2036,7 +2023,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
-    x = x.pad(flatten_seq(padding), value=value)  # flatten
+    x = x.pad(flatten_seq(padding)[::-1], value=value)  # flatten
     starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
     return x

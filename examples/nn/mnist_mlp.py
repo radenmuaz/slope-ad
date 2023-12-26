@@ -33,13 +33,11 @@ def test_all(model, x, y):
     out = model(x)
     y_hat = out.argmax(-1)
     corrects = (y_hat == y).cast(slope.float32)
-    # breakpoint()
     accuracy = corrects.mean()
 
-    y_hat2 = np.argmax(out.numpy() ,-1)
-    corrects2 = (y_hat2 == y.numpy()).astype(np.float32)
-    accuracy2 = np.mean(corrects2)
-    breakpoint()
+    # y_hat2 = np.argmax(out.numpy() ,-1)
+    # corrects2 = (y_hat2 == y.numpy()).astype(np.float32)
+    # accuracy2 = np.mean(corrects2)
     
     return accuracy
 

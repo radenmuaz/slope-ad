@@ -36,6 +36,7 @@ def M():
 
         # backend_registry = dict(numpy=numpy_backend, onnxruntime=onnxruntime_backend, iree=iree_backend)
         backend_registry = dict(iree=iree_backend)
+        # backend_registry = dict(iree=numpy_backend)
         if SLOPE_BACKEND not in backend_registry.keys():
             raise ValueError(f"{SLOPE_BACKEND} is nonexistent backend in: {list(backend_registry.keys())}")
         machine = core.Machine(backend=backend_registry[SLOPE_BACKEND])

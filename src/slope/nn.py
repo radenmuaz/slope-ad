@@ -136,7 +136,7 @@ class Module:
         return mod
 
 
-slope.M().register_node(Module, Module.flatten, Module.unflatten, "Module")
+slope.M().backend.register_node(Module, Module.flatten, Module.unflatten, "Module")
 # slope.M().register_node(Module, Module.leaf_flatten, Module.leaf_unflatten, "Module")
 
 

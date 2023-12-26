@@ -6,24 +6,18 @@ from typing import (
     Callable,
     NamedTuple,
     Dict,
-    Type,
     Hashable,
-    Tuple,
     List,
     Any,
     Iterable,
     Iterator,
     Type,
-    List,
     Tuple,
     Optional,
-    Any,
     Union,
-    NamedTuple,
     Dict,
     Set,
     DefaultDict,
-    Callable,
     Final,
 )
 import weakref
@@ -104,15 +98,9 @@ def lru_cache_verbose(maxsize=100, typed=False, tb_start=-12, tb_end=-7):
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
 
-            # slope.dblog(f"{args}", enable=slope.LOG_LRU)
             slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
             tb = ''.join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace('\n    ', ':\t') + '-'*20 + '\n'
             slope.dblog(f"{tb}", enable=slope.LOG_LRU)
-            # for a in args:
-            #     try:
-            #         slope.dblog(f"{a.val=}", enable=slope.LOG_LRU)
-            #     except:
-            #         pass
 
             return result
 
@@ -415,7 +403,6 @@ class Typecheckor:
 #   Operator
 # ================
 
-
 class OperatorType(Enum):
     Unary = auto()
     Binary = auto()
@@ -426,14 +413,13 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False, is_procedure=False):
+    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False):
         self.name = name
         self.op_type = op_type
         self.nary_inputs = nary_inputs
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
-        self.is_procedure = is_procedure
     
     def procedure(self, *args, **kwargs):
         raise NotImplementedError
@@ -711,11 +697,36 @@ class ProcedureSet:
         setattr(self, name, fn)
 
 
-@dataclass
 class Backend:
-    operator_set: OperatorSet
-    procedure_set: ProcedureSet
-    compiler: "Compiler"
+    def __init__(self,
+                  operator_set: OperatorSet,
+                    procedure_set: ProcedureSet,
+                    compiler: "Compiler",):
+        self.operator_set = operator_set
+        self.procedure_set = procedure_set
+        self.compiler = compiler
+        self.operator_set.register(jit_op)
+        self.node_types = dict()
+        self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
+        self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
+        self.register_node(
+            dict,
+            lambda d: list_map(tuple, unzip2(sorted(d.items()))),
+            lambda keys, vals: dict(list_zip(keys, vals)),
+            "dict",
+        )
+        self.register_node(
+            PrimalProxy,
+            lambda u: (u.aval, ()),
+            lambda aval, _: PrimalProxy(aval),
+            "PrimalProxy",
+        )
+    
+
+    def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable, name=None) -> None:
+        if name is None:
+            name = str(ty)
+        self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
     def __getattr__(self, attr):
         try:
@@ -1210,8 +1221,6 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = op.run_impl(*args, **params)
         else:
-            if op.is_procedure:
-                return op.procedure(*args, **params)
             name = f"{op.name}_"
             tcs = []
             for t in args:
@@ -1586,24 +1595,8 @@ class Machine:
         self.trace_stack: List[MainTrace] = []
         self.dynamic_trace: Optional[MainTrace] = None
         self.trace_stack += [MainTrace(self, 0, RunTrace, None)]
-
         self.backend = backend
-        self.backend.operator_set.register(jit_op)
-        self.node_types = dict()
-        self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
-        self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
-        self.register_node(
-            dict,
-            lambda d: list_map(tuple, unzip2(sorted(d.items()))),
-            lambda keys, vals: dict(list_zip(keys, vals)),
-            "dict",
-        )
-        self.register_node(
-            PrimalProxy,
-            lambda u: (u.aval, ()),
-            lambda aval, _: PrimalProxy(aval),
-            "PrimalProxy",
-        )
+        
 
     def __repr__(self):
         ret = f"{self.__class__.__name__}\n"
@@ -1633,9 +1626,9 @@ class Machine:
     def tree_flatten(self, x: Any) -> Any:
         def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
             node_type = None
-            for k in self.node_types.keys():
+            for k in self.backend.node_types.keys():
                 if isinstance(x_, k):
-                    node_type = self.node_types[k]
+                    node_type = self.backend.node_types[k]
 
             if node_type is not None:
                 node_metadata, children = node_type.flatten(x_)
@@ -1698,10 +1691,6 @@ class Machine:
 
         return flat_fn, store
 
-    def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable, name=None) -> None:
-        if name is None:
-            name = str(ty)
-        self.node_types[ty] = NodeType(name, to_iter, from_iter)
 
     def tree_map(self, f: Callable[..., Any], tree, *rest, out_leaf=False) -> Any:
         leaves, treedef = self.tree_flatten(tree)
@@ -1745,8 +1734,8 @@ class Machine:
         top_trace = self.find_top_trace(args)
         # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
-        if op.is_procedure:
-            return op.procedure(*tracers, **params)
+        if op not in slope.M().backend.compiler.impls.keys():
+            return getattr(slope.M().backend.procedure_set, op.name)(*tracers, **params)
         outs = top_trace.run_op(op, tracers, params)
         # lowered = self.tree_map(self.full_lower, outs)
         lowered = tuple([self.full_lower(out) for out in outs])

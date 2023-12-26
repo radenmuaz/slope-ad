@@ -1,14 +1,14 @@
 import slope
 
-
-relu = slope.core.Operator.unary("relu", is_procedure=True)
-slope.M().backend.operator_set.register(relu)
-
-@relu.set_method
-def procedure(self, x):
+@slope.M().backend.procedure_set.register()
+def relu(x):
     w = slope.zeros_like(x)
     y = x.maximum(w)
-    return [y]
+    return y
+relu = slope.core.Operator.unary("relu")
+slope.M().backend.operator_set.register(relu)
+
+
 
 @relu.set_method
 def jvp(self, primals, tangents):

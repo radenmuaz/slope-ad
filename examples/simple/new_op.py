@@ -29,7 +29,13 @@ def T(self, cotangents, x):
     (grad_L_y,) = cotangents
     return [grad_L_y, None]
 
+@slope.jit
+def f(x):
+    y = x.relu()
+    y = y + 10
+    return y
+
 x1 = slope.tensor([1., 2., -1., 0.])
 print(f"{x1=}")
-y1 = x1.relu()
+y1 = f(x1)
 print(f"{y1=}")

@@ -1387,12 +1387,15 @@ class ProgramTrace(Trace):
         return tracer
 
     def run_op(self, op, tracers, params):
+        if op.is_procedure:
+            return op.procedure(*tracers, **params)
         avals_in = [t.aval for t in tracers]
         avals_in = slope.M().tree_map(lambda x: x.aval, tracers)
         avals_out = op.typecheck(*avals_in, **params)
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
+        
         self.builder.add_instruction(Instruction(op, inputs, params, outvars))
         return out_tracers
 
@@ -1915,7 +1918,6 @@ class Machine:
     ) -> Tuple[Program, List[Any], PyTreeDef]:
         avals_in, in_tree = self.tree_flatten(avals_in)
         f, out_tree_store = self.flatten_fn(f, in_tree)
-
         builder = ProgramBuilder()
         with self.new_main(ProgramTrace, builder) as main:
             with self.new_dynamic(main):

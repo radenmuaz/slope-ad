@@ -33,9 +33,17 @@ def T(self, cotangents, x):
 def f(x):
     y = x.relu()
     y = y + 10
+    y = y.sum()
     return y
 
 x1 = slope.tensor([1., 2., -1., 0.])
 print(f"{x1=}")
 y1 = f(x1)
 print(f"{y1=}")
+
+x1_dot = slope.ones_like(x1)
+y1, y1_dot = slope.jvp(f, (x1,), (x1_dot,))
+print(f"{y1=}, {y1_dot=}")
+
+grad_f_x1 = slope.grad(f)(x1)
+print(grad_f_x1)

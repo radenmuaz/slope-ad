@@ -923,7 +923,7 @@ class Leaf:
     def __repr__(self):
         if isinstance(self.aval, Typecheckor):
             return self.aval.str_short()
-        return repr(self)
+        return repr(self.aval)
 
     def __hash__(self):
         return hash(self.aval)
@@ -1387,8 +1387,6 @@ class ProgramTrace(Trace):
         return tracer
 
     def run_op(self, op, tracers, params):
-        if op.is_procedure:
-            return op.procedure(*tracers, **params)
         avals_in = [t.aval for t in tracers]
         avals_in = slope.M().tree_map(lambda x: x.aval, tracers)
         avals_out = op.typecheck(*avals_in, **params)
@@ -1747,6 +1745,8 @@ class Machine:
         top_trace = self.find_top_trace(args)
         # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
+        if op.is_procedure:
+            return op.procedure(*tracers, **params)
         outs = top_trace.run_op(op, tracers, params)
         # lowered = self.tree_map(self.full_lower, outs)
         lowered = tuple([self.full_lower(out) for out in outs])

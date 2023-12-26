@@ -253,7 +253,7 @@ class ReLU(Module):
     def __call__(self, x):
         return x.relu()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def relu(x):
         return x.maximum(slope.zeros_like(x))
@@ -263,7 +263,7 @@ class LeakyReLU(Module):
     def __call__(self, x):
         return x.relu()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def leakyrelu(x, neg_slope=0.01):
         return x.relu() - (slope.full_like(x, -neg_slope) * x).relu()
@@ -273,7 +273,7 @@ class Sigmoid(Module):
     def __call__(self, x):
         return x.sigmoid()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def sigmoid(x):
         return 1 / (1 + (-x).exp())
@@ -283,7 +283,7 @@ class Tanh(Module):
     def __call__(self, x):
         return x.tanh()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def tanh(x):
         return 2.0 * ((2.0 * x).sigmoid()) - 1.0
@@ -293,7 +293,7 @@ class Swish(Module):
     def __call__(self, x):
         return x.swish()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def swish(x):
         return x * x.sigmoid()
@@ -306,7 +306,7 @@ class GELU(Module):
     def __call__(self, x):
         return x.gelu()
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def gelu(x):
         return 0.5 * x * (1 + (x * 0.7978845608 * (1 + 0.044715 * x * x)).tanh())
@@ -331,7 +331,7 @@ class Linear(Module):
     def __call__(self, x):
         return self.linear(x, self.weight, self.bias)
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def linear(x, w, b=None):
         x = x @ w.transpose(-2, -1)
@@ -351,7 +351,7 @@ class Sequential(Module):
         modules = [getattr(self, f"m{i}") for i in range(self.num_modules)]
         return x.serial(modules, *args, **kwargs)
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def serial(x, modules, *args, **kwargs):
         for module in modules:
@@ -363,7 +363,7 @@ class Pool(Module):
     def __call__(x, kernel_size, stride=1, dilation=1):
         return x.pool(kernel_size, stride, dilation)
 
-    @slope.M().backend.procedure_set.register(static_argnames="k_ stride dilation")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def pool(
         x,
@@ -431,7 +431,7 @@ class AvgPool2d(Module):
     def __call__(self, x):
         return x.avgpool2d(self.kernel_size, self.stride)
 
-    @slope.M().backend.procedure_set.register(static_argnames="kernel_size stride")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def avgpool2d(x, kernel_size=(2, 2), stride=None):
         def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
@@ -446,7 +446,7 @@ class MaxPool2d(Module):
     def __call__(x, kernel_size, stride=None):
         return x.maxpool2d(kernel_size, stride)
 
-    @slope.M().backend.procedure_set.register(static_argnames="kernel_size stride dilation")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
         def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
@@ -487,7 +487,7 @@ class ConvNd(Module):
         # return slope.M().backend.procedure_set.conv(x, self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
         return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
 
-    @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
         (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
@@ -608,7 +608,7 @@ class ConvNdTranspose(Module):
             output_padding=self.output_padding,
         )
 
-    @slope.M().backend.procedure_set.register(static_argnames="groups stride dilation padding output_padding")
+    @slope.M().backend.procedure_set.register()
     def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
         def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
             return (x,) * cnt if isinstance(x, int) else x
@@ -689,7 +689,7 @@ class BatchNorm(Module):
 
         return x.batchnorm(self.weight, self.bias, mean, invstd)
 
-    @slope.M().backend.procedure_set.register(inline=True)
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def batchnorm(x, weight, bias, mean, invstd):
         broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
@@ -727,7 +727,7 @@ class LayerNorm(Module):
             return x
         return x * self.weight + self.bias
 
-    @slope.M().backend.procedure_set.register(static_argnames="dim eps")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def layernorm(self, dim=-1, eps: float = 1e-5) -> Tensor:
         y = self - self.mean(dim, keepdim=True)
@@ -751,7 +751,7 @@ class Dropout(Module):
     def __call__(self, x, training=False):
         return x.dropout(self.p, training)
 
-    @slope.M().backend.procedure_set.register(static_argnames="p")
+    @slope.M().backend.procedure_set.register()
     def dropout(x, p, training=False) -> Tensor:
         if not Tensor.training or p == 0:
             return x
@@ -770,7 +770,7 @@ class ScaledDotProductAttention(Module):
     ):
         return x.scaled_dot_product_attention(key, value, attn_mask, dropout_p, is_causal)
 
-    @slope.M().backend.procedure_set.register(static_argnames="dropout_p, is_causal")
+    @slope.M().backend.procedure_set.register()
     def scaled_dot_product_attention(
         x,
         key: Tensor,
@@ -812,7 +812,7 @@ class CrossEntropyLoss(Module):
     def __call__(x, y):
         return x.cross_entropy(y)
 
-    @slope.M().backend.procedure_set.register(static_argnames="ignore_index")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def cross_entropy(x, y, ignore_index=-1) -> Tensor:
         # loss_mask = (y != ignore_index).reshape(-1, 1)
@@ -826,7 +826,7 @@ class Softmax(Module):
     def __call__(x, dim=-1):
         return x.softmax(dim)
 
-    @slope.M().backend.procedure_set.register(static_argnames="dim")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def softmax(x, dim=-1):
         m = x - x.max(dim, keepdim=True)
@@ -839,7 +839,7 @@ class LogSoftmax(Module):
     def __call__(x, dim=-1):
         return x.log_softmax(dim)
 
-    @slope.M().backend.procedure_set.register(static_argnames="dim")
+    @slope.M().backend.procedure_set.register()
     @staticmethod
     def log_softmax(x, dim=-1):
         x = x - x.max(dim, keepdim=True)

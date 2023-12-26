@@ -1198,29 +1198,10 @@ def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     rhs = f"{jit_name}({args_str})"
     return rhs, fn_defs
 
-
-@compiler.set_impl(slope.core.procedure_op)
-def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
-    proc_program = instruction.params["program"]
-    proc_name = f"{proc_program.name}_{self.fn_count}"
-    self.fn_count += 1
-    proc_codegen_out = self.codegen(
-        proc_program,
-        args,
-        fn_name=proc_name,
-        fn_defs=fn_defs,
-    )
-    fn_defs[proc_name] = proc_codegen_out["code_lines"]
-    fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-    args_str = ", ".join(in_vals)
-    rhs = f"{proc_name}({args_str})"
-    return rhs, fn_defs
-
-
 procedure_set = ProcedureSet()
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def zeros(*args, **kwargs):
     dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
     if kwargs.get("shape", None) is None:
@@ -1229,7 +1210,7 @@ def zeros(*args, **kwargs):
     return slope.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def ones(*args, **kwargs):
     dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
     if kwargs.get("shape", None) is None:
@@ -1425,7 +1406,7 @@ def T(x):
     return x.permute(tuple(perm))
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def getitem(self, val):
     # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):

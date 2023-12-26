@@ -1722,28 +1722,11 @@ def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     return rhs, fn_defs
 
 
-@compiler.set_impl(slope.core.procedure_op)
-def procedure_op_impl(self, program, args, instruction, in_vals, fn_defs):
-    proc_program = instruction.params["program"]
-    proc_name = f"{proc_program.name}_{self.fn_count}"
-    self.fn_count += 1
-    proc_codegen_out = self.codegen(
-        proc_program,
-        args,
-        fn_name=proc_name,
-        fn_defs=fn_defs,
-    )
-    fn_defs[proc_name] = proc_codegen_out["code_lines"]
-    fn_defs = {**fn_defs, **proc_codegen_out["fn_defs"]}
-    args_str = ", ".join(in_vals)
-    rhs = f"slope.{proc_name}({args_str})"
-    return rhs, fn_defs
-
 
 procedure_set = ProcedureSet()
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def zeros(*args, **kwargs):
     dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
     if kwargs.get("shape", None) is None:
@@ -1752,7 +1735,7 @@ def zeros(*args, **kwargs):
     return slope.full(shape, 0.0, dtype)
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def ones(*args, **kwargs):
     dtype = kwargs.get("dtype", slope.SLOPE_DTYPE)
     if kwargs.get("shape", None) is None:
@@ -1761,7 +1744,7 @@ def ones(*args, **kwargs):
     return slope.full(shape=shape, fill_value=1.0, dtype=dtype)
 
 
-@procedure_set.register(static_argnames="fill_value")
+@procedure_set.register()
 def full_like(y, fill_value):
     return slope.full(shape=y.shape, fill_value=fill_value, dtype=y.dtype)
 
@@ -1787,7 +1770,7 @@ def where(x, trueval, falseval):
     return cond * trueval + (1.0 - cond) * falseval
 
 
-@procedure_set.register(static_argnames="dim keepdim")
+@procedure_set.register()
 def mean(x, dim=None, keepdim=False):
     out = x.sum(dim=dim, keepdim=keepdim)
     return out * (math.prod(out.shape) / math.prod(x.shape))
@@ -1842,12 +1825,12 @@ def minimum(x, w):
     return -x.maximum(-x, -w)
 
 
-@procedure_set.register(static_argnames="dim keepdim")
+@procedure_set.register()
 def min(x, dim=None, keepdim=False):
     return -((-x).max(x, dim, keepdim))
 
 
-@procedure_set.register(static_argnames="dim keepdim")
+@procedure_set.register()
 def argmax(x, dim=None, keepdim=False):
     if dim is None:
         idx = (x == x.max(dim)) * slope.arange(
@@ -1866,7 +1849,7 @@ def argmax(x, dim=None, keepdim=False):
     return ret
 
 
-@procedure_set.register(static_argnames="dim keepdim")
+@procedure_set.register()
 def argmin(x, dim=None, keepdim=False):
     return (-x).argmax(dim=dim, keepdim=keepdim)
 
@@ -1952,7 +1935,7 @@ def T(x):
     return x.permute(tuple(perm))
 
 
-@procedure_set.register(inline=True)
+@procedure_set.register()
 def getitem(self, val):
     # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
@@ -2057,7 +2040,7 @@ def getitem(self, val):
     return ret
 
 
-@procedure_set.register(static_argnames=("arg", "value"))
+@procedure_set.register()
 def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     def flatten_seq(l: Iterator):
         return tuple(item for sublist in l for item in sublist)
@@ -2071,14 +2054,14 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     return x
 
 
-@procedure_set.register(static_argnames="padding value")
+@procedure_set.register()
 def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
     # (padding_left, padding_right, padding_top, padding_bottom)
     slc = [(-p0, s + p1) for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
     return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
@@ -2109,7 +2092,7 @@ def gather(x, idx, dim: int):
     )
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 @staticmethod
 def stack(tensors, dim=0):
     first = tensors[0].expand_dims(dim)
@@ -2117,7 +2100,7 @@ def stack(tensors, dim=0):
     return first.cat(*expand_dimsd_tensors, dim=dim)
 
 
-@procedure_set.register(static_argnames="repeats")
+@procedure_set.register()
 def repeat(x, repeats):
     base_shape = (1,) * (len(repeats) - x.ndim) + x.shape
     new_shape = [x for b in base_shape for x in [1, b]]
@@ -2126,14 +2109,14 @@ def repeat(x, repeats):
     return x.reshape(new_shape).broadcast(expand_shape).reshape(final_shape)
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
     slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
     return tuple(x[tuple(sl)] for sl in slice_params)
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 def squeeze(x, dim=None):
     if dim is None:
         return x if 1 not in x.shape else x.reshape(*[size for size in x.shape if size != 1])
@@ -2148,39 +2131,39 @@ def squeeze(x, dim=None):
     return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 def expand_dims(x, dim):
     if dim < 0:
         dim = len(x.shape) + dim + 1
     return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
 
 
-@procedure_set.register(static_argnames="ax aw")
+@procedure_set.register()
 def transpose(x, ax=1, aw=0):
     order = list(range(len(x.shape)))
     order[ax], order[aw] = order[aw], order[ax]
     return x.permute(tuple(order))
 
 
-@procedure_set.register(static_argnames="start_dim")
+@procedure_set.register()
 def flatten(x, start_dim=0):
     return x.reshape(shape=x.shape[:start_dim] + (-1,))
 
 
-@procedure_set.register(static_argnames="dim")
+@procedure_set.register()
 def cumsum(x, dim: int = 0):
     return x.transpose(dim, -1).pad((x.shape[dim] - 1, 0)).pool((x.shape[dim],)).sum(-1).transpose(dim, -1)
 
 
 @staticmethod
-@procedure_set.register(static_argnames="start stop step")
+@procedure_set.register()
 def arange_with_cumsum(start, stop=None, step=1):
     if stop is None:
         stop, start = start, 0
     return slope.full((math.ceil((stop - start) / step),), step).cumsum() + (start - step)
 
 
-@procedure_set.register(static_argnames="dtype")
+@procedure_set.register()
 def one_hot(x, k, dtype=Tensor.int32):
     return (x[:, None].cast(dtype) == slope.arange(k, dtype=dtype)).cast(dtype)
 

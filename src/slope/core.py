@@ -426,13 +426,17 @@ class OperatorType(Enum):
 
 
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False):
+    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False, is_procedure=False):
         self.name = name
         self.op_type = op_type
         self.nary_inputs = nary_inputs
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
+        self.is_procedure = is_procedure
+    
+    def procedure(self, *args, **kwargs):
+        raise NotImplementedError
 
     def __hash__(self):
         return hash(self.name)
@@ -694,179 +698,17 @@ class OperatorSet:
 
 
 class ProcedureSet:
-    def register(self, static_argnames=(), inline=True):
+    def register(self):
         def wrap(f):
-            f_procedure = self.new_procedure(f, static_argnames) if not (inline or slope.INLINE_PROCEDURE) else f
-            # f_procedure = self.new_procedure(f, static_argnames) if not inline else f
             assert f.__name__ not in vars(self)
-            setattr(self, f.__name__, f_procedure)
-            return f_procedure
+            setattr(self, f.__name__, f)
+            return f
 
         return wrap
 
     def alias(self, fn, name):
         assert fn in vars(self).values()
         setattr(self, name, fn)
-
-    def new_procedure(self, f, static_argnames=()):
-        if type(static_argnames) is str:
-            static_argnames = tuple(static_argnames.split(" "))
-        assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
-        impl_f = f
-        static_argnames = static_argnames
-        jvp_f = f
-        T_f = f
-        vmap_f = f
-        typecheck_f = f
-
-        def override_rule(f):
-            if f.__name__ == "jvp":
-                nonlocal jvp_f
-                jvp_f = f
-            elif f.__name__ == "T":
-                nonlocal T_f
-                T_f = f
-            elif f.__name__ == "vmap_f":
-                nonlocal vmap_f
-                vmap_f = f
-            elif f.__name__ == "typecheck":
-                nonlocal typecheck_f
-                typecheck_f = f
-            else:
-                raise ValueError
-
-        def f_procedured(*args, **static_args):
-            nonlocal impl_f, jvp_f, T_f, vmap_f, typecheck_f
-
-            sig = inspect.signature(f)
-            args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in static_argnames]
-            static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in static_argnames]
-
-            if args:
-                if len(args) > len(args_strs):
-                    assert static_args_strs
-                    args, rest = args[: len(args_strs)], args[len(args_strs) :]
-                    new_static_args = {
-                        k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
-                    }
-                    static_args = {**new_static_args, **static_args}
-            else:
-                args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
-            assert len(args) == len(args_strs)
-
-            # TODO: this doesn't work
-            # static_args = slope.M().tree_map(lambda x: tuple(x) if isinstance(x, list) else x, static_args)
-            for k, v in static_args.items():
-                if type(v) is list:
-                    static_args[k] = tuple(v)
-                    for i, vov in enumerate(v):
-                        if type(vov) is list:
-                            static_args[k][i] = tuple(static_args[k][i])
-
-            static_args = tuple(static_args.items())
-            assert all([k in static_argnames for k, v in static_args])
-
-            # fix for binary ops with python types, e.g. equal(x, 0.0)
-            args = tuple(slope.full(shape=(), fill_value=a) if type(a) in Tracor.PYTHON_TYPES else a for a in args)
-
-            avals_in = slope.M().tree_map(lambda x: Typecheckor.like(slope.M().get_aval(x)), args)
-            program, consts, out_tree = slope.M().make_program(
-                impl_f, *avals_in, static_args=static_args, name=f.__name__
-            )
-
-            args, in_tree = slope.M().tree_flatten(args)
-            outs = slope.M().bind(
-                procedure_op,
-                *consts,
-                *args,
-                program=program,
-            )
-            return slope.M().tree_unflatten(out_tree, outs)
-
-        f_procedured.override_rule = override_rule
-        return f_procedured
-
-
-procedure_op = Operator("procedure", op_type=OperatorType.Meta)
-
-
-@procedure_op.set_method
-def run_impl(self, *args, program):
-    num_consts = program.num_consts
-    consts, args = args[:num_consts], args[num_consts:]
-    outs = slope.M().run_program(program, consts + args)
-    return outs
-
-
-@procedure_op.set_method
-def jvp(self, primals, tangents, *, program):
-    new_program, new_consts = slope.M().jvp_program(program)
-    outs = slope.M().bind(self, *new_consts, *primals, *tangents, program=new_program)
-    n = len(outs) // 2
-    primals_out, tangents_out = outs[:n], outs[n:]
-    return primals_out, tangents_out
-
-
-@procedure_op.set_method
-def typecheck(self, *in_types, program):
-    program_type = slope.M().typecheck_program(program)
-    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-        slope.dblog(f"Typecheck error:")
-        for i, j in zip(program_type.in_types, in_types):
-            slope.dblog(f"{i == j=}: {i=}, {j=}")
-        raise TypeError
-    return program_type.out_types
-
-
-@procedure_op.set_method
-def T(self, cotangents, *invals, program):
-    undef_primals = [type(x) is PrimalProxy for x in invals]
-    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
-
-    residuals, _ = partition_list(undef_primals, invals)
-    outs = slope.M().bind(self, *new_consts, *residuals, *cotangents, program=transposed_program)
-    outs = iter(outs)
-    return [next(outs) if undef else None for undef in undef_primals]
-
-
-@procedure_op.set_method
-def partial_run(self, trace, tracers, *, program):
-    in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, in_unknowns)
-    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
-    known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = slope.M().bind(self, *known_vals, program=program1)
-    outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-    res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
-    outs2 = [PartialEvalTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
-    instruction = InstructionDraft(
-        self,
-        res_tracers + unknown_tracers,
-        dict(program=program2),
-        [v.aval for v in program2.outs],
-        list_map(weakref.ref, outs2),
-    )
-    for t in outs2:
-        t.draft = instruction
-
-    return merge_lists(out_unknowns, outs1, outs2)
-
-
-@procedure_op.set_method
-def partial_run_instruction(self, unks_in, instruction) -> Tuple["Instruction", "Instruction", List[bool], List["Var"]]:
-    program = instruction.params["program"]
-    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, unks_in)
-    ins1, ins2 = partition_list(unks_in, instruction.inputs)
-    out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
-    res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
-    instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
-    return instruction1, instruction2, out_unknowns, res
-
-
-@procedure_op.set_method
-def reorg_args(self, args, params):
-    return args, params
 
 
 @dataclass
@@ -1368,6 +1210,8 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = op.run_impl(*args, **params)
         else:
+            if op.is_procedure:
+                return op.procedure(*args, **params)
             name = f"{op.name}_"
             tcs = []
             for t in args:
@@ -1744,8 +1588,6 @@ class Machine:
 
         self.backend = backend
         self.backend.operator_set.register(jit_op)
-        self.backend.operator_set.register(procedure_op)
-
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
         self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")

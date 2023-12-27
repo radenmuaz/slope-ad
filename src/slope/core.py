@@ -420,9 +420,18 @@ class Operator:
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
-    
-    def procedure(self, *args, **kwargs):
-        raise NotImplementedError
+    def get_jit_name(self, args, params):
+        name = f"{self.name}_"
+        for a in args:
+            name += f"shape_{a.shape}_dtype_{a.dtype}_"
+        for k, v in params.items():
+            name += f"{k}_{v}_"
+        name = name.replace("(", "_lp_")
+        name = name.replace(")", "_rp_")
+        name = name.replace(",", "_cm_")
+        name = name.replace(" ", "")
+        name = name.replace(".", "_dt_")
+        return name
 
     def __hash__(self):
         return hash(self.name)
@@ -1223,21 +1232,8 @@ class RunTrace(Trace):
             args, params = op.args_fixer(*args, **params)
             ret = op.run_impl(*args, **params)
         else:
-            name = f"{op.name}_"
-            tcs = []
-            for t in args:
-                tc = Typecheckor.like(t)
-                tcs += [tc]
-                name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
-            for k, v in params.items():
-                name += f"{k}_{v}_"
-            name = name.replace("(", "_lp_")
-            name = name.replace(")", "_rp_")
-            name = name.replace(",", "_cm_")
-            name = name.replace(" ", "")
-            name = name.replace(".", "_dt_")
-            fn = self.get_fn(op, *tuple(tcs), **params)
-            ret = slope.M().jit(fn, static_argnames=("params",), name=name)(*args, **params)
+            fn = self.get_fn(op, *tuple(Typecheckor.like(a) for a in args), **params)
+            ret = slope.M().jit(fn, static_argnames=("params",), name=op.get_jit_name(args, params))(*args, **params)
 
         return ret
 

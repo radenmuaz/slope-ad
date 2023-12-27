@@ -1394,24 +1394,12 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         else:
             if instruction.op not in slope.M().backend.compiler.impls.keys():
                 op = instruction.op
-                avals_in = (inp.aval for inp in instruction.inputs)
+                avals_in = tuple(inp.aval for inp in instruction.inputs)
                 params = instruction.params
                 op_program, consts, _ = slope.M().make_program(
                     getattr(slope.M().backend.procedure_set, op.name),
                     *avals_in,static_args=tuple(params.items()), name=op.name)
-                name = f"{op.name}_"
-                tcs = []
-                for t in args:
-                    tc = Typecheckor.like(t)
-                    tcs += [tc]
-                    name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
-                for k, v in params.items():
-                    name += f"{k}_{v}_"
-                name = name.replace("(", "_lp_")
-                name = name.replace(")", "_rp_")
-                name = name.replace(",", "_cm_")
-                name = name.replace(" ", "")
-                name = name.replace(".", "_dt_")
+                name = op.get_jit_name(tuple(avals_in), params)
                 if name not in fn_defs.keys():
                     op_codegen_out = self.codegen(
                         op_program,

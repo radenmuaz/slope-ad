@@ -1390,12 +1390,43 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
 
         out_vals = list_map(lambda z: backend[z], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
-            raise NotImplementedError
-            lhs = ", ".join(out_vals)
-            rhs, fn_defs = self.impls[instruction.op](program, args, instruction, in_vals, fn_defs)
-            impl_code = f"{lhs} = {rhs}"
+            impl_code, fn_defs = self.impls[instruction.op](args, instruction, in_vals, fn_defs)
         else:
-            impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
+            if instruction.op not in slope.M().backend.compiler.impls.keys():
+                op = instruction.op
+                avals_in = (inp.aval for inp in instruction.inputs)
+                params = instruction.params
+                op_program, consts, _ = slope.M().make_program(
+                    getattr(slope.M().backend.procedure_set, op.name),
+                    *avals_in,static_args=tuple(params.items()), name=op.name)
+                name = f"{op.name}_"
+                tcs = []
+                for t in args:
+                    tc = Typecheckor.like(t)
+                    tcs += [tc]
+                    name += f"shape_{tc.shape}_dtype_{tc.dtype}_"
+                for k, v in params.items():
+                    name += f"{k}_{v}_"
+                name = name.replace("(", "_lp_")
+                name = name.replace(")", "_rp_")
+                name = name.replace(",", "_cm_")
+                name = name.replace(" ", "")
+                name = name.replace(".", "_dt_")
+                if name not in fn_defs.keys():
+                    op_codegen_out = self.codegen(
+                        op_program,
+                        args,
+                        fn_name=name,
+                        fn_defs=fn_defs,
+                    )
+                    fn_defs = {**fn_defs, **op_codegen_out["fn_defs"]}
+                    fn_defs[name] = op_codegen_out["code_lines"]
+                in_names = ", ".join(i["name"] for i in in_vals)
+                out_names = ", ".join(o["name"] for o in out_vals)
+                sig = type_mlir_sig( tuple(i['type'] for i in in_vals), out_vals[0]['type'])
+                impl_code = f"{out_names} = func.call @{name}({in_names}) {sig}"
+            else:
+                impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
             body_code_lines += [indent(impl_code_line, il1)]
 
@@ -1705,9 +1736,9 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 
 
 @compiler.set_impl(slope.core.jit_op)
-def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
+def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
-    jit_name = f"{program.name}"
+    jit_name = f"{jit_program.name}"
     jit_codegen_out = self.codegen(
         jit_program,
         args,
@@ -1718,8 +1749,8 @@ def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
     fn_defs[jit_name] = jit_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
     args_str = ", ".join(in_vals)
-    rhs = f"slope.{jit_name}({args_str})"
-    return rhs, fn_defs
+    ret = f"{out_vals} = slope.{jit_name}({args_str})"
+    return ret, fn_defs
 
 
 

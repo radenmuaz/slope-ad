@@ -17,8 +17,9 @@ def jvp(self, primals, tangents):
         yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
         return xz / yz
 
-    (x), (x_dot,) = primals, tangents
+    (x,), (x_dot,) = primals, tangents
     w = slope.zeros_like(x)
+    w_dot  = slope.ones_like(x)
     y = x.maximum(w)
     y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
     return [y], [y_dot]
@@ -34,6 +35,7 @@ def f(x):
     y = x.relu()
     y = y + 10
     y = y.sum()
+
     return y
 
 x1 = slope.tensor([1., 2., -1., 0.])

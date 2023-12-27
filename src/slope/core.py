@@ -483,7 +483,7 @@ class Operator:
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.typecheck(*avals_in, **params)
-        tracers_out = [PartialEvalTracor(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
+        tracers_out = [PartialRunTracor(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
         instruction = InstructionDraft(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
             t.draft = instruction
@@ -1045,7 +1045,7 @@ def partial_run(self, trace, tracers, *, program):
     outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
-    outs2 = [PartialEvalTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
+    outs2 = [PartialRunTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionDraft(
         self,
         res_tracers + unknown_tracers,
@@ -1216,6 +1216,8 @@ class RunTrace(Trace):
     pure = lambda self, x: x
 
     def run_op(self, op: Operator, args, params):
+        if op not in slope.M().backend.compiler.impls.keys():
+            return getattr(slope.M().backend.procedure_set, op.name)(*args, **params)
         if op.op_type is OperatorType.Meta:
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
@@ -1399,6 +1401,7 @@ class ProgramTrace(Trace):
         avals_in = [t.aval for t in tracers]
         avals_in = slope.M().tree_map(lambda x: x.aval, tracers)
         avals_out = op.typecheck(*avals_in, **params)
+        
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
@@ -1537,16 +1540,16 @@ class ConstDraft(NamedTuple):
 
 class InstructionDraft(NamedTuple):
     prim: Operator
-    tracers_in: List["PartialEvalTracor"]
+    tracers_in: List["PartialRunTracor"]
     params: Dict[str, Any]
     avals_out: List[Typecheckor]
-    tracer_refs_out: List[weakref.ReferenceType["PartialEvalTracor"]]
+    tracer_refs_out: List[weakref.ReferenceType["PartialRunTracor"]]
 
 
 ProgramDraft = Union[LambdaBindingDraft, ConstDraft, InstructionDraft]
 
 
-class PartialEvalTracor(Tracor):
+class PartialRunTracor(Tracor):
     def __init__(self, trace, pval, draft):
         self._trace = trace
         self.pval = pval
@@ -1563,20 +1566,22 @@ class PartialEvalTracor(Tracor):
 
 class PartialRunTrace(Trace):
     def new_arg(self, pval: PartialValue) -> Any:
-        return PartialEvalTracor(self, pval, LambdaBindingDraft())
+        return PartialRunTracor(self, pval, LambdaBindingDraft())
 
-    def pure(self, val: Any) -> PartialEvalTracor:
-        return PartialEvalTracor(self, slope.M().make_known_pval(val), None)
+    def pure(self, val: Any) -> PartialRunTracor:
+        return PartialRunTracor(self, slope.M().make_known_pval(val), None)
 
-    def instantiate_const(self, tracer: PartialEvalTracor) -> PartialEvalTracor:
+    def instantiate_const(self, tracer: PartialRunTracor) -> PartialRunTracor:
         if tracer.pval.is_unknown:
             return tracer
         else:
             pval = slope.M().make_unknown_pval(Typecheckor.like(tracer.aval))
-            return PartialEvalTracor(self, pval, ConstDraft(tracer.pval.const))
+            return PartialRunTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
+       
         is_knowns = tuple(t.pval.is_known for t in tracers)
+        
         if all(is_knowns):
             return slope.M().bind(op, *list_map(slope.M().full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
@@ -1734,8 +1739,6 @@ class Machine:
         top_trace = self.find_top_trace(args)
         # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
         tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
-        if op not in slope.M().backend.compiler.impls.keys():
-            return getattr(slope.M().backend.procedure_set, op.name)(*tracers, **params)
         outs = top_trace.run_op(op, tracers, params)
         # lowered = self.tree_map(self.full_lower, outs)
         lowered = tuple([self.full_lower(out) for out in outs])
@@ -2101,10 +2104,10 @@ class Machine:
 
     def tracers_to_program(
         self,
-        tracers_in: List["PartialEvalTracor"],
-        tracers_out: List["PartialEvalTracor"],
+        tracers_in: List["PartialRunTracor"],
+        tracers_out: List["PartialRunTracor"],
     ):
-        def tracer_parents(t: PartialEvalTracor) -> List[PartialEvalTracor]:
+        def tracer_parents(t: PartialRunTracor) -> List[PartialRunTracor]:
             return t.draft.tracers_in if isinstance(t.draft, InstructionDraft) else []
 
         def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
@@ -2374,7 +2377,7 @@ class Machine:
         outs1_res = jit_op(*known_vals, program=program)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
-        outs2 = [PartialEvalTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
+        outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
         draft = InstructionDraft(
             jit_op,
             res_tracers + unknown_tracers,

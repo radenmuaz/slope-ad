@@ -1225,8 +1225,6 @@ class RunTrace(Trace):
     pure = lambda self, x: x
 
     def run_op(self, op: Operator, args, params):
-        if op not in slope.M().backend.compiler.impls.keys():
-            return getattr(slope.M().backend.procedure_set, op.name)(*args, **params)
         if op.op_type is OperatorType.Meta:
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
@@ -1364,6 +1362,9 @@ class JVPTrace(Trace):
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
+        # if self.main.global_data == "vjp":
+        #     primals_out, tangents_out = (op(*primals_in, **params),), (op(*tangents_in, **params),)
+        # else:
         primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
         return [JVPTracor(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
@@ -1575,10 +1576,9 @@ class PartialRunTrace(Trace):
             return PartialRunTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
-       
         is_knowns = tuple(t.pval.is_known for t in tracers)
         
-        if all(is_knowns):
+        if all(is_knowns):# and op in slope.M().backend.compiler.impls.keys():
             return slope.M().bind(op, *list_map(slope.M().full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
 
@@ -1863,8 +1863,8 @@ class Machine:
 
         return batched_f
 
-    def jvp_flat(self, f, primals, tangents, *, has_aux, **static_args):
-        with self.new_main(JVPTrace) as main:
+    def jvp_flat(self, f, primals, tangents, *, has_aux, global_data, **static_args):
+        with self.new_main(JVPTrace, global_data) as main:
             trace = JVPTrace(main)
             tracers_in = [JVPTracor(trace, x, t) for x, t in list_zip(primals, tangents)]
             jvp_flat_ret = f(*tracers_in, **static_args)
@@ -1880,13 +1880,13 @@ class Machine:
             primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
         return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
-    def jvp(self, f, primals, tangents, *, has_aux=False, **static_args):
+    def jvp(self, f, primals, tangents, *, has_aux=False,  global_data=None, **static_args):
         primals_flat, in_tree = self.tree_flatten(primals)
         tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
         f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
-        jvp_ret = self.jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux, **static_args)
+        jvp_ret = self.jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux,  global_data=global_data, **static_args)
         if has_aux:
             (primals_out_flat, tangents_out_flat), aux = jvp_ret
         else:
@@ -2193,7 +2193,7 @@ class Machine:
         _, tangent_pvals_in = split_half(pvals_in)
 
         def f_jvp(*primals_tangents_in):
-            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, **static_args)
+            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, global_data="vjp", **static_args)
             if has_aux:
                 ((primals_out, tangents_out), aux) = jvp_ret
             else:

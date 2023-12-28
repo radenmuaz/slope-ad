@@ -37,20 +37,12 @@ from functools import partial, lru_cache
 import slope
 import mmap
 import traceback
-import importlib
 
 
 # ================
 #   Utils
 # ================
-
-
-def dblog(*msg, enable=True):
-    if enable:
-        print(*msg)
-
-
-def unzip2(pairs) -> Tuple[List[Any], List[Any]]:
+def unzip2(pairs: Iterable[Iterable, Iterable]) -> Tuple[List[Any], List[Any]]:
     lst1, lst2 = [], []
     for i1, i2 in pairs:
         lst1.append(i1)
@@ -107,13 +99,13 @@ def lru_cache_verbose(maxsize: int = 100, typed: bool = False, tb_start: int = -
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
 
-            dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=LOG_LRU)
+            slope.dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=slope.LOG_LRU)
             tb = (
                 "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace("\n    ", ":\t")
                 + "-" * 20
                 + "\n"
             )
-            dblog(f"{tb}", enable=LOG_LRU)
+            slope.dblog(f"{tb}", enable=slope.LOG_LRU)
 
             return result
 
@@ -237,7 +229,7 @@ class Tensor:
 
     @property
     def default_dtype(self):
-        return backend.compiler.default_dtype
+        return slope.M().backend.compiler.default_dtype
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -248,31 +240,31 @@ class Tensor:
     def is_unsigned(self) -> bool:
         return self.dtype is self.uint8
 
-    def to_bool(self):
-        return self.cast(self.bool)
+    # def bool(self):
+    #     return self.cast(slope.bool)
 
     def short(self):
-        return self.cast(self.int8)
+        return self.cast(slope.int8)
 
     def int(self):
-        return self.cast(self.int32)
+        return self.cast(slope.int32)
 
     def long(self):
-        return self.cast(self.int64)
+        return self.cast(slope.int64)
 
     def half(self):
-        return self.cast(self.float16)
+        return self.cast(slope.float16)
 
     def float(self):
-        return self.cast(self.float32)
+        return self.cast(slope.float32)
 
     def __getattr__(self, attr):
-        if attr in vars(backend.operator_set).keys():
-            op = getattr(backend.operator_set, attr)
+        if attr in vars(slope.M().backend.operator_set).keys():
+            op = getattr(slope.M().backend.operator_set, attr)
             return partial(op, self)
-        elif attr in vars(backend.procedure_set).keys():
-            procedure = getattr(backend.procedure_set, attr)
-            assert not isinstance(procedure, classmethod), f"use {attr} instead of self.{attr}"
+        elif attr in vars(slope.M().backend.procedure_set).keys():
+            procedure = getattr(slope.M().backend.procedure_set, attr)
+            assert not isinstance(procedure, classmethod), f"use slope.{attr} instead of self.{attr}"
             return partial(procedure, self)
         else:
             return self.__getattribute__(attr)
@@ -319,18 +311,18 @@ class Tensor:
 
     @property
     def dtype(self):
-        return backend.compiler.dtype_of(self)
+        return slope.M().backend.compiler.dtype_of(self)
 
     @property
     def device(self):
-        return backend.compiler.device_of(self)
+        return slope.M().backend.compiler.device_of(self)
 
     def numpy(self):
-        return backend.compiler.numpy_of(self)
+        return slope.M().backend.compiler.numpy_of(self)
 
     @property
     def shape(self):
-        return backend.compiler.shape_of(self)
+        return slope.M().backend.compiler.shape_of(self)
 
     @property
     def ndim(self):
@@ -358,11 +350,11 @@ class Typecheckor:
 
     # @property
     # def dtype(self):
-    #     return backend.compiler.dtype_of(self)
+    #     return slope.M().backend.compiler.dtype_of(self)
 
     # @property
     # def device(self):
-    #     return backend.compiler.device_of(self)
+    #     return slope.M().backend.compiler.device_of(self)
 
     @classmethod
     def like(cls, aval):
@@ -447,7 +439,7 @@ class Operator:
     def __call__(self, *args, **params):
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
-        ret = bind(self, *args, **params)
+        ret = slope.M().bind(self, *args, **params)
         if not self.nary_outputs:
             ret = ret[0]
         return ret
@@ -492,7 +484,7 @@ class Operator:
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         avals_in = [t.aval for t in tracers_in]
         avals_out = self.typecheck(*avals_in, **params)
-        tracers_out = [PartialRunTracor(trace, make_unknown_pval(aval), None) for aval in avals_out]
+        tracers_out = [PartialRunTracor(trace, slope.M().make_unknown_pval(aval), None) for aval in avals_out]
         instruction = InstructionDraft(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
             t.draft = instruction
@@ -551,9 +543,9 @@ class Operator:
                 return (x, w), params
 
             if type(x) in Tracor.PYTHON_TYPES:
-                x = full(shape=(), fill_value=x, dtype=w.dtype)
+                x = slope.full(shape=(), fill_value=x, dtype=w.dtype)
             elif type(w) in Tracor.PYTHON_TYPES:
-                w = full(shape=(), fill_value=w, dtype=x.dtype)
+                w = slope.full(shape=(), fill_value=w, dtype=x.dtype)
 
             if type(x) is Tensor and isinstance(w, Tracor):
                 x = w._trace.pure(x)
@@ -667,7 +659,7 @@ class Operator:
         @op.set_method
         def jvp(self, primals, tangents, **kwargs):
             out = self(**kwargs)
-            out_jvp = ones_like(out)
+            out_jvp = slope.ones_like(out)
             return [out], [out_jvp]
 
         @op.set_method
@@ -740,16 +732,16 @@ class Backend:
 
     def __getattr__(self, attr):
         try:
-            dblog(f"Looking {self}.{attr} in operator_set", enable=LOG_BACKEND)
+            slope.dblog(f"Looking {self}.{attr} in operator_set", enable=slope.LOG_BACKEND)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            dblog(f"Looking {self}.{attr} in procedure_set", enable=LOG_BACKEND)
+            slope.dblog(f"Looking {self}.{attr} in procedure_set", enable=slope.LOG_BACKEND)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        dblog(f"Fallback to default {self} getattribute", enable=LOG_BACKEND)
+        slope.dblog(f"Fallback to default {self} getattribute", enable=slope.LOG_BACKEND)
         super().__getattribute__(attr)
 
     def tensor(
@@ -793,7 +785,7 @@ class Lit:
     aval: Typecheckor
 
     def __init__(self, val):
-        self.aval = Typecheckor.like(get_aval(val))
+        self.aval = Typecheckor.like(slope.M().get_aval(val))
         self.val = val
 
 
@@ -968,19 +960,19 @@ class JitObject:
         self.fn = fn
 
     def __call__(self, *args, **params):
-        args, in_tree = tree_flatten(args)
-        args = tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
+        args, in_tree = slope.M().tree_flatten(args)
+        args = slope.M().tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         try:
             outs = self.fn(*args, **params)
             if not isinstance(outs, tuple):  # TODO: IREE FunctionInvoker destructure 1-tuple, need to undo
                 outs = (outs,)
         except Exception as e:
-            dblog(self.code, enable=LOG_JIT)
+            slope.dblog(self.code, enable=slope.LOG_JIT)
             raise
-        return [backend.tensor(TensorBuffer(o)) for o in outs]
+        return [slope.M().backend.tensor(TensorBuffer(o)) for o in outs]
 
     def export(self, output_path, *args, **params):
-        return backend.compiler.export(self, output_path, *args, **params)
+        return slope.M().backend.compiler.export(self, output_path, *args, **params)
 
 
 jit_op = Operator("jit_op", op_type=OperatorType.Meta)
@@ -992,7 +984,7 @@ def run_impl(self, *args, program):
     num_consts = program.num_consts
     consts, args = args[:num_consts], args[num_consts:]
     hashed_consts = tuple(map(Hashed, consts))
-    jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
+    jit_object = slope.M().backend.compiler.gen_jit_object(hashed_program, hashed_consts)
     ret = jit_object(*consts, *args)
     return ret
 
@@ -1004,8 +996,8 @@ def reorg_args(self, args, params):
 
 @jit_op.set_method
 def jvp(self, primals, tangents, *, program):
-    new_program, new_consts = jvp_program(program)
-    outs = bind(
+    new_program, new_consts = slope.M().jvp_program(program)
+    outs = slope.M().bind(
         self,
         *new_consts,
         *primals,
@@ -1019,7 +1011,7 @@ def jvp(self, primals, tangents, *, program):
 
 @jit_op.set_method
 def typecheck(self, *in_types, program):
-    program_type = typecheck_program(program)
+    program_type = slope.M().typecheck_program(program)
     if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
         for i, j in zip(program_type.in_types, in_types):
             print(i, j, i == j)
@@ -1031,10 +1023,10 @@ def typecheck(self, *in_types, program):
 @jit_op.set_method
 def T(self, cotangents, *invals, program):
     undef_primals = [type(x) is PrimalProxy for x in invals]
-    transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
+    transposed_program, new_consts = slope.M().transpose_program(program, tuple(undef_primals))
 
     residuals, _ = partition_list(undef_primals, invals)
-    outs = bind(
+    outs = slope.M().bind(
         self,
         *new_consts,
         *residuals,
@@ -1049,13 +1041,13 @@ def T(self, cotangents, *invals, program):
 @jit_op.set_method
 def partial_run(self, trace, tracers, *, program):
     in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = partial_run_program(program, in_unknowns)
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = bind(jit_op, *known_vals, program=program1)
+    outs1_res = slope.M().bind(jit_op, *known_vals, program=program1)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-    res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTracor(trace, make_unknown_pval(v.aval), None) for v in program2.outs]
+    res_tracers = [trace.instantiate_const(slope.M().full_raise(trace, x)) for x in res]
+    outs2 = [PartialRunTracor(trace, slope.M().make_unknown_pval(v.aval), None) for v in program2.outs]
     instruction = InstructionDraft(
         self,
         res_tracers + unknown_tracers,
@@ -1072,7 +1064,7 @@ def partial_run(self, trace, tracers, *, program):
 @jit_op.set_method
 def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
     program = instruction.params["program"]
-    program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
+    program1, program2, out_unknowns, num_res = slope.M().partial_run_program(program, unks_in)
     ins1, ins2 = partition_list(unks_in, instruction.inputs)
     out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
     res = [Var(v.aval) for v in program2.in_binders[:num_res]]
@@ -1124,7 +1116,7 @@ class Compiler:
         hashed_consts: Tuple[Hashed, ...],
     ):
         program: Program = hashed_program.val
-        typecheck_program(program)
+        slope.M().typecheck_program(program)
         consts = [x.val for x in hashed_consts]
         in_avals = [v.aval for v in program.in_binders[len(consts) :]]
         codegen_out = self.codegen(program, consts + in_avals, fn_name="main")
@@ -1166,7 +1158,7 @@ class Compiler:
                         data_start = start + v["data_offsets"][0]
                         data_end = start + v["data_offsets"][1]
                         t_np = np.frombuffer(m[data_start:data_end], dtype=dtype.numpy())
-                        t = backend.tensor(t_np, dtype=dtype)
+                        t = slope.tensor(t_np, dtype=dtype)
                         t = t.reshape(tuple(v["shape"]))
                         ret[k] = t
                 if len(ret) == 1 and single_key in ret.keys():
@@ -1203,6 +1195,7 @@ class Compiler:
 
 
 class MainTrace(NamedTuple):
+    rt: "Machine"
     level: int
     trace_type: Type["Trace"]
     global_data: Optional[Any]
@@ -1231,7 +1224,7 @@ class RunTrace(Trace):
             ret = op.run_impl(*args, **params)
         else:
             fn = self.get_fn(op, *tuple(Typecheckor.like(a) for a in args), **params)
-            ret = jit(fn, static_argnames=("params",), name=op.get_jit_name(args, params))(*args, **params)
+            ret = slope.M().jit(fn, static_argnames=("params",), name=op.get_jit_name(args, params))(*args, **params)
 
         return ret
 
@@ -1255,7 +1248,7 @@ class Tracor(Tensor):
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
-    aval = property(lambda self: get_aval(self.val))
+    aval = property(lambda self: slope.M().get_aval(self.val))
     dtype = property(lambda self: self.aval.dtype)
     shape = property(lambda self: self.aval.shape)
 
@@ -1288,7 +1281,7 @@ class BatchTracor(Tracor):
 
     @property
     def aval(self):
-        aval = get_aval(self.val)
+        aval = slope.M().get_aval(self.val)
         if self.batch_dim is None:
             return aval
         else:
@@ -1298,7 +1291,7 @@ class BatchTracor(Tracor):
 
     def full_lower(self):
         if self.batch_dim is None:
-            return full_lower(self.val)
+            return slope.M().full_lower(self.val)
         else:
             return self
 
@@ -1343,7 +1336,7 @@ class JVPTracor(Tracor):
 
     @property
     def aval(self):
-        return get_aval(self.primal)
+        return slope.M().get_aval(self.primal)
 
     @property
     def val(self):
@@ -1358,7 +1351,7 @@ class JVPTrace(Trace):
     def pure(self, val):
         if isinstance(val, PartialRunTrace):
             val = val.pval.const
-        return JVPTracor(self, val, backend.zeros_like(val))
+        return JVPTracor(self, val, slope.M().backend.zeros_like(val))
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
@@ -1387,13 +1380,13 @@ class ProgramTrace(Trace):
         # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, get_aval(val))
+            tracer = self.builder.new_tracer(self, slope.M().get_aval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
     def run_op(self, op, tracers, params):
         avals_in = [t.aval for t in tracers]
-        avals_in = tree_map(lambda x: x.aval, tracers)
+        avals_in = slope.M().tree_map(lambda x: x.aval, tracers)
         avals_out = op.typecheck(*avals_in, **params)
 
         out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
@@ -1452,13 +1445,13 @@ class ProgramBuilder:
         in_binders = constvars + [t2v(t) for t in in_tracers]
         out_vars = [t2v(t) for t in out_tracers]
         program = Program(in_binders, self.instructions, out_vars, len(constvals), static_args, name)
-        typecheck_program(program)
+        slope.M().typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
         return program, constvals
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in Tracor.PYTHON_TYPES and not get_aval(x).shape for x in consts]
+        scalars = [type(x) in Tracor.PYTHON_TYPES and not slope.M().get_aval(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1480,7 +1473,7 @@ class ProgramBuilder:
             program.static_args,
             program.name,
         )
-        typecheck_program(new_program)
+        slope.M().typecheck_program(new_program)
         return new_program, tuple(new_consts)
 
     def get_current_scope_info(self):
@@ -1554,7 +1547,7 @@ class PartialRunTracor(Tracor):
 
     def full_lower(self):
         if self.pval.is_known:
-            return full_lower(self.pval.const)
+            return slope.M().full_lower(self.pval.const)
         return self
 
 
@@ -1563,879 +1556,822 @@ class PartialRunTrace(Trace):
         return PartialRunTracor(self, pval, LambdaBindingDraft())
 
     def pure(self, val: Any) -> PartialRunTracor:
-        return PartialRunTracor(self, make_known_pval(val), None)
+        return PartialRunTracor(self, slope.M().make_known_pval(val), None)
 
     def instantiate_const(self, tracer: PartialRunTracor) -> PartialRunTracor:
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = make_unknown_pval(Typecheckor.like(tracer.aval))
+            pval = slope.M().make_unknown_pval(Typecheckor.like(tracer.aval))
             return PartialRunTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         is_knowns = tuple(t.pval.is_known for t in tracers)
 
-        if all(is_knowns):  # and op in backend.compiler.impls.keys():
-            return bind(op, *list_map(full_lower, tracers), **params)
+        if all(is_knowns):  # and op in slope.M().backend.compiler.impls.keys():
+            return slope.M().bind(op, *list_map(slope.M().full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
 
 
-# global vars
+# ================
+#   Machine
+# ================
 
 
-LOG_LRU = int(os.environ.get("LOG_LRU", 0))
-LOG_JIT = int(os.environ.get("LOG_JIT", 0))
-LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
-LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
-LOG_INIT = int(os.environ.get("LOG_INIT", 1))
-INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
-SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
-SLOPE_DTYPE = Tensor.dtype_names[os.environ.get("SLOPE_DTYPE", "float32")]
-SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
-NO_JIT = int(os.environ.get("NO_JIT", 0))
-backend_registry = dict(
-    numpy="backends.numpy_backend", onnxruntime="backends.numpy_backend", iree="backends.iree_backend.iree_backend"
-)
+class Machine:
+    def __init__(
+        self,
+        backend,
+    ):
+        self.trace_stack: List[MainTrace] = []
+        self.dynamic_trace: Optional[MainTrace] = None
+        self.trace_stack += [MainTrace(self, 0, RunTrace, None)]
+        self.backend = backend
 
-trace_stack: List[MainTrace] = []
-dynamic_trace: Optional[MainTrace] = None
-trace_stack += [MainTrace(0, RunTrace, None)]
+    def __repr__(self):
+        ret = f"{self.__class__.__name__}\n"
+        for trace in self.trace_stack:
+            ret += f"{trace.level}: {trace.trace_type.__name__}\t{trace.global_data=}\n"
+        return ret
 
+    def make_known_pval(self, val: Any):
+        return PartialValue(self.get_aval(val), val)
 
-class LazyInitBackend:
-    def __getattr__(self, attr):
-        return getattr(get_backend(), attr)
+    def make_unknown_pval(self, aval: Typecheckor):
+        return PartialValue(aval, None)
 
-
-backend = LazyInitBackend()
-
-
-def get_backend():
-    global backend
-    if type(backend) is LazyInitBackend:
-        backend = importlib.import_module("slope", backend_registry[SLOPE_BACKEND])
-        dblog(f"Auto init with {backend}", enable=LOG_INIT)
-    return backend
-
-
-def stack_str():
-    ret = ""
-    for trace in trace_stack:
-        ret += f"{trace.level}: {trace.trace_type.__name__}\t{trace.global_data=}\n"
-    return ret
-
-
-def make_known_pval(val: Any):
-    return PartialValue(get_aval(val), val)
-
-
-def make_unknown_pval(aval: Typecheckor):
-    return PartialValue(aval, None)
-
-
-def get_aval(x):
-    if isinstance(x, Tracor):
-        return x.aval
-    elif type(x) in Tracor.PYTHON_TYPES:
-        # return Typecheckor.like(backend.tensor(x))
-        return backend.tensor(x)
-    elif isinstance(x, Tensor):
-        return x
-    elif isinstance(x, Typecheckor):
-        return x
-    else:
-        raise TypeError(type(x))
-
-
-def tree_flatten(x: Any) -> Any:
-    def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
-        node_type = None
-        for k in backend.node_types.keys():
-            if isinstance(x_, k):
-                node_type = backend.node_types[k]
-
-        if node_type is not None:
-            node_metadata, children = node_type.flatten(x_)
-
-            # print(f'flattened {x_}\n\n  children:\n{children}\n\n  metadata:\n{node_metadata}\n')
-            children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
-            children_iter = itertools.chain.from_iterable(children_flat)
-            treedef = PyTreeDef(node_type, node_metadata, tuple(child_trees))
-            return children_iter, treedef
+    def get_aval(self, x):
+        if isinstance(x, Tracor):
+            return x.aval
+        elif type(x) in Tracor.PYTHON_TYPES:
+            # return Typecheckor.like(self.backend.tensor(x))
+            return self.backend.tensor(x)
+        elif isinstance(x, Tensor):
+            return x
+        elif isinstance(x, Typecheckor):
+            return x
         else:
-            # print(f'    leaf found: {x_}\n')
-            return (x_,), Leaf(x_)
+            raise TypeError(type(x))
 
-    # print(f"flattening {x} of {type(x)}")
-    children_iter, treedef = _tree_flatten(x)
-    return tuple(children_iter), treedef
+    def tree_flatten(self, x: Any) -> Any:
+        def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
+            node_type = None
+            for k in self.backend.node_types.keys():
+                if isinstance(x_, k):
+                    node_type = self.backend.node_types[k]
 
+            if node_type is not None:
+                node_metadata, children = node_type.flatten(x_)
 
-def tree_unflatten(treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
-    def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
-        if isinstance(treedef_, Leaf):
-            dblog(f"    tree leaf found: {xs_}\n", enable=LOG_PYTREE)
-            return next(xs_)
-        else:
-            dblog(f"    now\n  {treedef_}", enable=LOG_PYTREE)
-            children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-            dblog(f"{children=}\n", enable=LOG_PYTREE)
-            return treedef_.node_type.unflatten(treedef_.node_metadata, children)
+                # print(f'flattened {x_}\n\n  children:\n{children}\n\n  metadata:\n{node_metadata}\n')
+                children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
+                children_iter = itertools.chain.from_iterable(children_flat)
+                treedef = PyTreeDef(node_type, node_metadata, tuple(child_trees))
+                return children_iter, treedef
+            else:
+                # print(f'    leaf found: {x_}\n')
+                return (x_,), Leaf(x_)
 
-    dblog(f"unflattening {treedef}", enable=LOG_PYTREE)
-    return _tree_unflatten(treedef, iter(xs))
+        # print(f"flattening {x} of {type(x)}")
+        children_iter, treedef = _tree_flatten(x)
+        return tuple(children_iter), treedef
 
+    def tree_unflatten(self, treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
+        def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
+            if isinstance(treedef_, Leaf):
+                slope.dblog(f"    tree leaf found: {xs_}\n", enable=slope.LOG_PYTREE)
+                return next(xs_)
+            else:
+                slope.dblog(f"    now\n  {treedef_}", enable=slope.LOG_PYTREE)
+                children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
+                slope.dblog(f"{children=}\n", enable=slope.LOG_PYTREE)
+                return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-def tree_transpose(
-    self,
-    outer_treedef: PyTreeDef,
-    inner_treedef: PyTreeDef,
-    pytree_to_permute: Any,
-) -> Any:
-    flat, treedef = tree_flatten(pytree_to_permute)
-    inner_size = inner_treedef.num_leaves
-    outer_size = outer_treedef.num_leaves
-    if treedef.num_leaves != (inner_size * outer_size):
-        raise TypeError
-    iter_flat = iter(flat)
-    lol = [[next(iter_flat) for _ in range(inner_size)] for __ in range(outer_size)]
-    permuted_lol = zip(*lol)
-    subtrees = map(partial(tree_unflatten, outer_treedef), permuted_lol)
-    return tree_unflatten(inner_treedef, subtrees)
+        slope.dblog(f"unflattening {treedef}", enable=slope.LOG_PYTREE)
+        return _tree_unflatten(treedef, iter(xs))
 
-
-def flatten_fn(f, in_tree, *, has_aux=False):
-    store = Store()
-
-    def flat_fn(*args_flat, **params):
-        pytree_args = tree_unflatten(in_tree, args_flat)
-        out = f(*pytree_args, **params)
-        if has_aux:
-            out, aux = out
-        out_flat, out_tree = tree_flatten(out)
-        store.set_value(out_tree)
-        return (out_flat, aux) if has_aux else out_flat
-
-    return flat_fn, store
-
-
-def tree_map(f: Callable[..., Any], tree, *rest, out_leaf=False) -> Any:
-    leaves, treedef = tree_flatten(tree)
-    if len(rest) == 0:
-        out_tree_flat = tuple(f(leaf) for leaf in leaves)
-        out_tree = tree_unflatten(treedef, out_tree_flat)
-    else:
-        all_leaves = [leaves]
-        for t in rest:
-            t_leaves, t_treedef = tree_flatten(t)
-            assert t_treedef == treedef
-            all_leaves += [t_leaves]
-
-        out_tree_flat = tuple(f(*xs) for xs in zip(*all_leaves))
-        out_tree = tree_unflatten(treedef, out_tree_flat)
-    ret = out_tree
-    if out_leaf:
-        ret = (ret, tree_flatten(out_tree_flat[0]))
-    return ret
-
-
-@contextmanager
-def new_main(trace_type: Type["Trace"], global_data=None):
-    level = len(trace_stack)
-    main = MainTrace(level, trace_type, global_data)
-    trace_stack.append(main)
-
-    try:
-        yield main
-    finally:
-        trace_stack.pop()
-
-
-@contextmanager
-def new_dynamic(main: MainTrace):
-    prev_dynamic_trace, dynamic_trace = dynamic_trace, main
-    try:
-        yield
-    finally:
-        dynamic_trace = prev_dynamic_trace
-
-
-def bind(op, *args, **params):
-    top_trace = find_top_trace(args)
-    # tracers = tree_map(partial(full_raise, top_trace), args)
-    tracers = tuple([full_raise(top_trace, arg) for arg in args])
-    outs = top_trace.run_op(op, tracers, params)
-    # lowered = tree_map(full_lower, outs)
-    lowered = tuple([full_lower(out) for out in outs])
-    return lowered
-
-
-def find_top_trace(xs) -> Trace:
-    arrs = []
-
-    def get_arr_from_seq(seq):
-        nonlocal arrs
-        for x in seq:
-            if type(x) in (tuple, list):
-                get_arr_from_seq(x)
-            elif isinstance(x, Tracor):
-                arrs += [x]
-
-    get_arr_from_seq(xs)
-    arrs = tuple(arrs)
-    top_main = max(
-        (x._trace.main for x in arrs),
-        default=trace_stack[0],
-        key=operator_py.attrgetter("level"),
-    )
-    if dynamic_trace and dynamic_trace.level > top_main.level:
-        top_main = dynamic_trace
-    return top_main.trace_type(top_main)
-
-
-def full_raise(trace: Trace, val: Any) -> Tracor:
-    if not isinstance(val, Tracor):
-        return trace.pure(val)
-    level = trace.main.level
-    if val._trace.main is trace.main:
-        return val
-    elif val._trace.main.level < level:
-        return trace.pure(val)
-    elif val._trace.main.level > level:
-        raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
-    else:  # val._trace.level == level
-        raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
-
-
-def full_lower(val: Any):
-    if isinstance(val, Tracor):
-        return val.full_lower()
-    elif type(val) in (list, tuple):
-        return tuple(full_lower(v) for v in val)
-    else:
-        return val
-
-
-def typecheck_program(program: Program) -> ProgramType:
-    backend: Set[Var] = set()
-
-    for v in program.in_binders:
-        if v in backend:
+    def tree_transpose(
+        self,
+        outer_treedef: PyTreeDef,
+        inner_treedef: PyTreeDef,
+        pytree_to_permute: Any,
+    ) -> Any:
+        flat, treedef = self.tree_flatten(pytree_to_permute)
+        inner_size = inner_treedef.num_leaves
+        outer_size = outer_treedef.num_leaves
+        if treedef.num_leaves != (inner_size * outer_size):
             raise TypeError
-        backend.add(v)
+        iter_flat = iter(flat)
+        lol = [[next(iter_flat) for _ in range(inner_size)] for __ in range(outer_size)]
+        permuted_lol = zip(*lol)
+        subtrees = map(partial(self.tree_unflatten, outer_treedef), permuted_lol)
+        return self.tree_unflatten(inner_treedef, subtrees)
 
-    for instruction in program.instructions:
-        in_types = [typecheck_atom(backend, x) for x in instruction.inputs]
-        out_types = instruction.op.typecheck(*in_types, **instruction.params)
-        for out_binder, out_type in list_zip(instruction.out_binders, out_types):
-            if not out_type == out_binder.aval:
-                raise TypeError
-        for out_binder in instruction.out_binders:
-            if out_binder in backend:
-                raise TypeError
-            backend.add(out_binder)
+    def flatten_fn(self, f, in_tree, *, has_aux=False):
+        store = Store()
 
-    in_types = [v.aval for v in program.in_binders]
-    out_types = [typecheck_atom(backend, x) for x in program.outs]
-    return ProgramType(tuple(in_types), tuple(out_types))
+        def flat_fn(*args_flat, **params):
+            pytree_args = self.tree_unflatten(in_tree, args_flat)
+            out = f(*pytree_args, **params)
+            if has_aux:
+                out, aux = out
+            out_flat, out_tree = self.tree_flatten(out)
+            store.set_value(out_tree)
+            return (out_flat, aux) if has_aux else out_flat
 
+        return flat_fn, store
 
-def typecheck_atom(backend: Set[Var], x: Atom) -> Typecheckor:
-    if isinstance(x, Var):
-        if x not in backend:
-            raise TypeError("unbound variable")
-        return x.aval
-    elif isinstance(x, Lit):
-        return get_aval(x.val)
-    else:
-        assert False
-
-
-def run_program(program: Program, args: List[Any]) -> List[Any]:
-    backend: Dict[Var, Any] = {}
-
-    def read(x: Atom) -> Any:
-        return backend[x] if type(x) is Var else x.val
-
-    def write(v: Var, val: Any) -> None:
-        assert v not in backend  # single-assignment
-        backend[v] = val
-
-    list_map(write, program.in_binders, args)
-    for instruction in program.instructions:
-        in_vals = list_map(read, instruction.inputs)
-        outs = bind(instruction.op, *in_vals, **instruction.params)
-        list_map(write, instruction.out_binders, outs)
-    return list_map(read, program.outs)
-
-
-def program_as_fun(program: Program):
-    return lambda *args: run_program(program, args)
-
-
-def vmap_flat(f, in_dim, *args):
-    axi_set = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
-    assert len(axi_set) == 1
-    (dim_size,) = axi_set
-    with new_main(BatchTrace, dim_size) as main:
-        trace = BatchTrace(main)
-        tracers_in = [BatchTracor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
-        outs = f(*tracers_in)
-        tracers_out = [full_raise(trace, out) for out in outs]
-        vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
-    outs_permuted = [
-        BatchTrace.move_batch_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
-    ]
-    return outs_permuted
-
-
-def vmap(f, in_dim=0, out_dim=0):
-    def batched_f(*args):
-        args_flat, in_tree = tree_flatten(args)
-        in_dim_flat, in_tree2 = tree_flatten(in_dim)
-        if in_tree != in_tree2:
-            raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
-        f_flat, out_tree_store = flatten_fn(f, in_tree)
-        outs_flat = vmap_flat(f_flat, in_dim_flat, *args_flat)
-        return tree_unflatten(out_tree_store(), outs_flat)
-
-    return batched_f
-
-
-def jvp_flat(f, primals, tangents, *, has_aux, global_data, **static_args):
-    with new_main(JVPTrace, global_data) as main:
-        trace = JVPTrace(main)
-        tracers_in = [JVPTracor(trace, x, t) for x, t in list_zip(primals, tangents)]
-        jvp_flat_ret = f(*tracers_in, **static_args)
-        if has_aux:
-            (outs, aux) = jvp_flat_ret
-            # aux_ = aux
-            aux = tree_map(lambda x: x.primal, aux)
-            # aux = tree_map(lambda x: x.full_lower(), aux)
-            # breakpoint()
+    def tree_map(self, f: Callable[..., Any], tree, *rest, out_leaf=False) -> Any:
+        leaves, treedef = self.tree_flatten(tree)
+        if len(rest) == 0:
+            out_tree_flat = tuple(f(leaf) for leaf in leaves)
+            out_tree = self.tree_unflatten(treedef, out_tree_flat)
         else:
-            outs = jvp_flat_ret
-        tracers_out = [full_raise(trace, out) for out in outs]
-        primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
-    return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
+            all_leaves = [leaves]
+            for t in rest:
+                t_leaves, t_treedef = self.tree_flatten(t)
+                assert t_treedef == treedef
+                all_leaves += [t_leaves]
 
+            out_tree_flat = tuple(f(*xs) for xs in zip(*all_leaves))
+            out_tree = self.tree_unflatten(treedef, out_tree_flat)
+        ret = out_tree
+        if out_leaf:
+            ret = (ret, self.tree_flatten(out_tree_flat[0]))
+        return ret
 
-def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args):
-    primals_flat, in_tree = tree_flatten(primals)
-    tangents_flat, in_tree2 = tree_flatten(tangents)
-    if in_tree != in_tree2:
-        raise TypeError
-    f, out_tree_store = flatten_fn(f, in_tree, has_aux=has_aux)
-    jvp_ret = jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux, global_data=global_data, **static_args)
-    if has_aux:
-        (primals_out_flat, tangents_out_flat), aux = jvp_ret
-    else:
-        (primals_out_flat, tangents_out_flat) = jvp_ret
-    primals_out = tree_unflatten(out_tree_store(), primals_out_flat)
-    tangents_out = tree_unflatten(out_tree_store(), tangents_out_flat)
-    return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
+    @contextmanager
+    def new_main(self, trace_type: Type["Trace"], global_data=None):
+        level = len(self.trace_stack)
+        main = MainTrace(self, level, trace_type, global_data)
+        self.trace_stack.append(main)
 
+        try:
+            yield main
+        finally:
+            self.trace_stack.pop()
 
-# def jacfwd(f, x):
-#     pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-#     vecs_in = eye(math.prod(x.shape)).reshape(x.shape * 2)
-#     return vmap(pushfwd, (0,))(vecs_in)
+    @contextmanager
+    def new_dynamic(self, main: MainTrace):
+        prev_dynamic_trace, self.dynamic_trace = self.dynamic_trace, main
+        try:
+            yield
+        finally:
+            self.dynamic_trace = prev_dynamic_trace
 
+    def bind(self, op, *args, **params):
+        top_trace = self.find_top_trace(args)
+        # tracers = self.tree_map(partial(self.full_raise, top_trace), args)
+        tracers = tuple([self.full_raise(top_trace, arg) for arg in args])
+        outs = top_trace.run_op(op, tracers, params)
+        # lowered = self.tree_map(self.full_lower, outs)
+        lowered = tuple([self.full_lower(out) for out in outs])
+        return lowered
 
-@lru_cache_verbose()
-def make_program(f: Callable, *avals_in: Typecheckor, static_args, name) -> Tuple[Program, List[Any], PyTreeDef]:
-    avals_in, in_tree = tree_flatten(avals_in)
-    f, out_tree_store = flatten_fn(f, in_tree)
-    builder = ProgramBuilder()
-    with new_main(ProgramTrace, builder) as main:
-        with new_dynamic(main):
-            trace = ProgramTrace(main)
-            tracers_in = [trace.new_arg(aval) for aval in avals_in]
-            outs = f(*tracers_in, **{k: v for k, v in static_args})
-            # tracers_out = [full_raise(trace, out) for out in outs]
-            # raise check because of aux is not ProgramTracor
-            tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTracor) else out.val for out in outs]
-            program, consts = builder.build(tracers_in, tracers_out, static_args, name)
+    def find_top_trace(self, xs) -> Trace:
+        arrs = []
 
-    return program, consts, out_tree_store()
+        def get_arr_from_seq(seq):
+            nonlocal arrs
+            for x in seq:
+                if type(x) in (tuple, list):
+                    get_arr_from_seq(x)
+                elif isinstance(x, Tracor):
+                    arrs += [x]
 
+        get_arr_from_seq(xs)
+        arrs = tuple(arrs)
+        top_main = max(
+            (x._trace.main for x in arrs),
+            default=self.trace_stack[0],
+            key=operator_py.attrgetter("level"),
+        )
+        if self.dynamic_trace and self.dynamic_trace.level > top_main.level:
+            top_main = self.dynamic_trace
+        return top_main.trace_type(top_main)
 
-@lru_cache_verbose()
-def jvp_program(program: Program, static_args=()) -> Tuple[Program, List[Any]]:
-    def jvp_traceable(*primals_and_tangents):
-        n = len(primals_and_tangents) // 2
-        primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
-        return jvp(program_as_fun(program), primals, tangents)
+    def full_raise(self, trace: Trace, val: Any) -> Tracor:
+        if not isinstance(val, Tracor):
+            return trace.pure(val)
+        level = trace.main.level
+        if val._trace.main is trace.main:
+            return val
+        elif val._trace.main.level < level:
+            return trace.pure(val)
+        elif val._trace.main.level > level:
+            raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
+        else:  # val._trace.level == level
+            raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
-    in_avals = tree_map(lambda v: v.aval, program.in_binders)
-    new_program, new_consts, _ = make_program(
-        jvp_traceable,
-        *in_avals,
-        *in_avals,
-        static_args=static_args,
-        name=f"{program.name}_jvp",
-    )
-    return new_program, new_consts
-
-
-def partial_run_flat(
-    f: Callable, pvals_in: List["PartialValue"], has_aux, global_data=None
-) -> Tuple[Program, List["PartialValue"], List[Any]]:
-    with new_main(PartialRunTrace, global_data) as main:
-        trace = PartialRunTrace(main)
-        tracers_in = [trace.new_arg(pval) for pval in pvals_in]
-        outs = f(*tracers_in)
-        if has_aux:
-            outs, aux = outs
-        tracers_out = [full_raise(trace, out) for out in outs]
-        pvals_out = [t.pval for t in tracers_out]
-        unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
-        unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
-        program, consts = tracers_to_program(unk_tracers_in, unk_tracers_out)
-
-    return (program, pvals_out, consts, aux) if has_aux else (program, pvals_out, consts)
-
-
-def partial_run_program(
-    self,
-    program: Program,
-    in_unknowns: List[bool],
-    instantiate: Optional[List[bool]] = None,
-) -> Tuple[Program, Program, List[bool], int]:
-    backend: Dict[Var, bool] = {}
-    residuals: Set[Var] = set()
-
-    def read(x: Atom) -> bool:
-        return type(x) is Var and backend[x]
-
-    def write(unk: bool, v: Var) -> None:
-        backend[v] = unk
-
-    instructions1, instructions2 = [], []
-    list_map(write, in_unknowns, program.in_binders)
-
-    for instruction in program.instructions:
-        unks_in = list_map(read, instruction.inputs)
-        (
-            instruction1,
-            instruction2,
-            unks_out,
-            res,
-        ) = instruction.op.partial_run_instruction(unks_in, instruction)
-        if instruction1 is not None:
-            instructions1.append(instruction1)
-        if instruction2 is not None:
-            instructions2.append(instruction2)
-        if res is not None:
-            residuals.update(res)
-        list_map(write, unks_out, instruction.out_binders)
-
-    out_unknowns = list_map(read, program.outs)
-    if instantiate is not None:
-        for v, uk, inst in zip(program.outs, out_unknowns, instantiate):
-            if inst and not uk:
-                if type(v) is Var:
-                    residuals.add(v)
-        out_unknowns = list_map(operator_py.or_, out_unknowns, instantiate)
-
-    residuals, num_res = list(residuals), len(residuals)
-    assert all(type(v) is Var for v in residuals), residuals
-
-    ins1, ins2 = partition_list(in_unknowns, program.in_binders)
-    outs1, outs2 = partition_list(out_unknowns, program.outs)
-
-    program1 = Program(
-        ins1,
-        instructions1,
-        outs1 + residuals,
-        0,
-        program.static_args,
-        f"{program.name}_partial1",
-    )
-    program2 = Program(
-        residuals + ins2,
-        instructions2,
-        outs2,
-        0,
-        program.static_args,
-        f"{program.name}_partial2",
-    )
-    typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, program2)
-
-    return program1, program2, out_unknowns, num_res
-
-
-def typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, program2):
-    programty = typecheck_program(program)  # (a1,  a2) -> (b1, b2 )
-    program1ty = typecheck_program(program1)  #  a1       -> (b1, res)
-    program2ty = typecheck_program(program2)  # (res, a2) -> b2
-
-    a1, a2 = partition_list(in_unknowns, programty.in_types)
-    b1, b2 = partition_list(out_unknowns, programty.out_types)
-    b1_, res = split_list(program1ty.out_types, len(b1))
-    res_, a2_ = split_list(program2ty.in_types, len(res))
-    b2_ = program2ty.out_types
-
-    a1 = tuple(a1)
-    a2, a2_ = tuple(a2), tuple(a2_)
-    b1, b1_ = tuple(b1), tuple(b1_)
-    b2, b2_ = tuple(b2), tuple(b2_)
-    res, res_ = tuple(res), tuple(res_)
-
-    if program1ty.in_types != a1:
-        raise TypeError
-    if program2ty.out_types != b2:
-        raise TypeError
-    if b1 != b1_:
-        raise TypeError
-    if res != res_:
-        raise TypeError
-    if a2 != a2_:
-        raise TypeError
-    if b2 != b2_:
-        raise TypeError
-
-
-def linearize_flat(f, *primals_in, has_aux):
-    pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(Typecheckor.like(get_aval(x))) for x in primals_in
-    ]
-
-    def f_jvp(*primals_tangents_in):
-        jvp_ret = jvp(f, *split_half(primals_tangents_in), has_aux=has_aux)
-        if has_aux:
-            (primals_out, tangents_out), aux = jvp_ret
-            return ((*primals_out, *tangents_out), aux)
+    def full_lower(self, val: Any):
+        if isinstance(val, Tracor):
+            return val.full_lower()
+        elif type(val) in (list, tuple):
+            return tuple(self.full_lower(v) for v in val)
         else:
-            primals_out, tangents_out = jvp_ret
-            return (*primals_out, *tangents_out)
+            return val
 
-    partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux)
-    if has_aux:
-        program, pvals_out, consts, aux = partial_run_flat_ret
-    else:
-        program, pvals_out, consts = partial_run_flat_ret
-    primal_pvals, _ = split_half(pvals_out)
-    assert all(pval.is_known for pval in primal_pvals)
-    primals_out = [pval.const for pval in primal_pvals]
-    f_lin = lambda *tangents: run_program(program, [*consts, *tangents])
-    return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
+    def typecheck_program(self, program: Program) -> ProgramType:
+        backend: Set[Var] = set()
 
+        for v in program.in_binders:
+            if v in backend:
+                raise TypeError
+            backend.add(v)
 
-def linearize(f, *primals_in, has_aux=False):
-    primals_in_flat, in_tree = tree_flatten(primals_in)
-    f, out_tree_store = flatten_fn(f, in_tree, has_aux=has_aux)
-    linearize_flat_ret = linearize_flat(f, *primals_in_flat, has_aux=has_aux)
-    if has_aux:
-        primals_out_flat, f_lin_flat, aux = linearize_flat_ret
-    else:
-        primals_out_flat, f_lin_flat = linearize_flat_ret
+        for instruction in program.instructions:
+            in_types = [self.typecheck_atom(backend, x) for x in instruction.inputs]
+            out_types = instruction.op.typecheck(*in_types, **instruction.params)
+            for out_binder, out_type in list_zip(instruction.out_binders, out_types):
+                if not out_type == out_binder.aval:
+                    raise TypeError
+            for out_binder in instruction.out_binders:
+                if out_binder in backend:
+                    raise TypeError
+                backend.add(out_binder)
 
-    primals_out = tree_unflatten(out_tree_store(), primals_out_flat)
+        in_types = [v.aval for v in program.in_binders]
+        out_types = [self.typecheck_atom(backend, x) for x in program.outs]
+        return ProgramType(tuple(in_types), tuple(out_types))
 
-    def f_lin(*tangents_in):
-        tangents_in_flat, in_tree2 = tree_flatten(tangents_in)
+    def typecheck_atom(self, backend: Set[Var], x: Atom) -> Typecheckor:
+        if isinstance(x, Var):
+            if x not in backend:
+                raise TypeError("unbound variable")
+            return x.aval
+        elif isinstance(x, Lit):
+            return self.get_aval(x.val)
+        else:
+            assert False
+
+    def run_program(self, program: Program, args: List[Any]) -> List[Any]:
+        backend: Dict[Var, Any] = {}
+
+        def read(x: Atom) -> Any:
+            return backend[x] if type(x) is Var else x.val
+
+        def write(v: Var, val: Any) -> None:
+            assert v not in backend  # single-assignment
+            backend[v] = val
+
+        list_map(write, program.in_binders, args)
+        for instruction in program.instructions:
+            in_vals = list_map(read, instruction.inputs)
+            outs = self.bind(instruction.op, *in_vals, **instruction.params)
+            list_map(write, instruction.out_binders, outs)
+        return list_map(read, program.outs)
+
+    def program_as_fun(self, program: Program):
+        return lambda *args: self.run_program(program, args)
+
+    def vmap_flat(self, f, in_dim, *args):
+        axi_set = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
+        assert len(axi_set) == 1
+        (dim_size,) = axi_set
+        with self.new_main(BatchTrace, dim_size) as main:
+            trace = BatchTrace(main)
+            tracers_in = [BatchTracor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
+            outs = f(*tracers_in)
+            tracers_out = [self.full_raise(trace, out) for out in outs]
+            vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
+        outs_permuted = [
+            BatchTrace.move_batch_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
+        ]
+        return outs_permuted
+
+    def vmap(self, f, in_dim=0, out_dim=0):
+        def batched_f(*args):
+            args_flat, in_tree = self.tree_flatten(args)
+            in_dim_flat, in_tree2 = self.tree_flatten(in_dim)
+            if in_tree != in_tree2:
+                raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
+            f_flat, out_tree_store = self.flatten_fn(f, in_tree)
+            outs_flat = self.vmap_flat(f_flat, in_dim_flat, *args_flat)
+            return self.tree_unflatten(out_tree_store(), outs_flat)
+
+        return batched_f
+
+    def jvp_flat(self, f, primals, tangents, *, has_aux, global_data, **static_args):
+        with self.new_main(JVPTrace, global_data) as main:
+            trace = JVPTrace(main)
+            tracers_in = [JVPTracor(trace, x, t) for x, t in list_zip(primals, tangents)]
+            jvp_flat_ret = f(*tracers_in, **static_args)
+            if has_aux:
+                (outs, aux) = jvp_flat_ret
+                # aux_ = aux
+                aux = self.tree_map(lambda x: x.primal, aux)
+                # aux = self.tree_map(lambda x: x.full_lower(), aux)
+                # breakpoint()
+            else:
+                outs = jvp_flat_ret
+            tracers_out = [self.full_raise(trace, out) for out in outs]
+            primals_out, tangents_out = unzip2((t.primal, t.tangent) for t in tracers_out)
+        return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
+
+    def jvp(self, f, primals, tangents, *, has_aux=False, global_data=None, **static_args):
+        primals_flat, in_tree = self.tree_flatten(primals)
+        tangents_flat, in_tree2 = self.tree_flatten(tangents)
         if in_tree != in_tree2:
             raise TypeError
-        tangents_out_flat = f_lin_flat(*tangents_in_flat)
-        return tree_unflatten(out_tree_store(), tangents_out_flat)
-
-    return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
-
-
-def tracers_to_program(
-    self,
-    tracers_in: List["PartialRunTracor"],
-    tracers_out: List["PartialRunTracor"],
-):
-    def tracer_parents(t: PartialRunTracor) -> List[PartialRunTracor]:
-        return t.draft.tracers_in if isinstance(t.draft, InstructionDraft) else []
-
-    def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
-        inputs = [tracer_to_var[id(t)] for t in draft.tracers_in]
-        out_binders = [Var(aval) for aval in draft.avals_out]
-        for t_ref, var in list_zip(draft.tracer_refs_out, out_binders):
-            if t_ref() is not None:
-                tracer_to_var[id(t_ref())] = var
-        return Instruction(draft.prim, inputs, draft.params, out_binders)
-
-    tracer_to_var: Dict[int, Var] = {id(t): Var(Typecheckor.like(t.aval)) for t in tracers_in}
-    constvar_to_val: Dict[int, Any] = {}
-    constid_to_var: Dict[int, Var] = {}
-    processed_instructions: Set[int] = set()
-    instructions: List[Instruction] = []
-    for t in toposort(tracers_out, tracer_parents):
-        if isinstance(t.draft, LambdaBindingDraft):
-            assert id(t) in set(list_map(id, tracers_in))
-        elif isinstance(t.draft, ConstDraft):
-            val = t.draft.val
-            var = constid_to_var.get(id(val))
-            if var is None:
-                aval = Typecheckor.like(get_aval(val))
-                var = constid_to_var[id(val)] = Var(aval)
-                constvar_to_val[var] = val
-            tracer_to_var[id(t)] = var
-        elif isinstance(t.draft, InstructionDraft):
-            if id(t.draft) not in processed_instructions:
-                instructions.append(draft_to_instruction(tracer_to_var, t.draft))
-                processed_instructions.add(id(t.draft))
-        else:
-            raise TypeError(t.draft)
-
-    constvars, constvals = unzip2(constvar_to_val.items())
-    in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
-    out_vars = [tracer_to_var[id(t)] for t in tracers_out]
-    program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
-    typecheck_program(program)
-    return program, constvals
-
-
-def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
-    def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
-        seen = set()
-        for node in nodes:
-            assert all(id(parent) in seen for parent in parents(node))
-            seen.add(id(node))
-
-    def remove_duplicates(lst):
-        seen = set()
-        return [x for x in lst if id(x) not in seen and not seen.add(id(x))]
-
-    if not out_nodes:
-        return []
-    out_nodes = remove_duplicates(out_nodes)
-
-    child_counts = {}
-    stack = list(out_nodes)
-    while stack:
-        node = stack.pop()
-        if id(node) in child_counts:
-            child_counts[id(node)] += 1
-        else:
-            child_counts[id(node)] = 1
-            stack.extend(parents(node))
-    for node in out_nodes:
-        child_counts[id(node)] -= 1
-
-    sorted_nodes = []
-    childless_nodes = [node for node in out_nodes if not child_counts[id(node)]]
-    while childless_nodes:
-        node = childless_nodes.pop()
-        sorted_nodes.append(node)
-        for parent in parents(node):
-            if child_counts[id(parent)] == 1:
-                childless_nodes.append(parent)
-            else:
-                child_counts[id(parent)] -= 1
-
-    sorted_nodes = sorted_nodes[::-1]
-    check_toposort(sorted_nodes, parents)
-    return sorted_nodes
-
-
-def vjp_flat(f, *primals_in, has_aux=False, **static_args):
-    pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(Typecheckor.like(get_aval(x))) for x in primals_in
-    ]
-    _, tangent_pvals_in = split_half(pvals_in)
-
-    def f_jvp(*primals_tangents_in):
-        jvp_ret = jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, global_data="vjp", **static_args)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        jvp_ret = self.jvp_flat(f, primals_flat, tangents_flat, has_aux=has_aux, global_data=global_data, **static_args)
         if has_aux:
-            ((primals_out, tangents_out), aux) = jvp_ret
+            (primals_out_flat, tangents_out_flat), aux = jvp_ret
         else:
-            (primals_out, tangents_out) = jvp_ret
-        return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
+            (primals_out_flat, tangents_out_flat) = jvp_ret
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
+        tangents_out = self.tree_unflatten(out_tree_store(), tangents_out_flat)
+        return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
-    partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
-    if has_aux:
-        program, pvals_out, consts, aux = partial_run_flat_ret
-    else:
-        program, pvals_out, consts = partial_run_flat_ret
+    # def jacfwd(self, f, x):
+    #     pushfwd = lambda v: self.jvp(f, (x,), (v,))[1]
+    #     vecs_in = slope.eye(math.prod(x.shape)).reshape(x.shape * 2)
+    #     return self.vmap(pushfwd, (0,))(vecs_in)
 
-    primal_pvals, _ = split_half(pvals_out)
-    assert all(pval.is_known for pval in primal_pvals)
-    primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
-    f_vjp_flat = lambda *cotangents: run_program_transposed(program, transpose_inputs, cotangents)
-    return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
+    @lru_cache_verbose()
+    def make_program(
+        self, f: Callable, *avals_in: Typecheckor, static_args, name
+    ) -> Tuple[Program, List[Any], PyTreeDef]:
+        avals_in, in_tree = self.tree_flatten(avals_in)
+        f, out_tree_store = self.flatten_fn(f, in_tree)
+        builder = ProgramBuilder()
+        with self.new_main(ProgramTrace, builder) as main:
+            with self.new_dynamic(main):
+                trace = ProgramTrace(main)
+                tracers_in = [trace.new_arg(aval) for aval in avals_in]
+                outs = f(*tracers_in, **{k: v for k, v in static_args})
+                # tracers_out = [self.full_raise(trace, out) for out in outs]
+                # raise check because of aux is not ProgramTracor
+                tracers_out = [
+                    self.full_raise(trace, out) if isinstance(out, ProgramTracor) else out.val for out in outs
+                ]
+                program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
+        return program, consts, out_tree_store()
 
-def vjp(f, *primals_in, has_aux=False, **static_args):
-    primals_in_flat, in_tree = tree_flatten(primals_in)
-    f, out_tree_store = flatten_fn(f, in_tree, has_aux=has_aux)
-    vjp_ret = vjp_flat(f, *primals_in_flat, has_aux=has_aux, **static_args)
-    if has_aux:
-        primals_out_flat, f_vjp_flat, aux = vjp_ret
-    else:
-        primals_out_flat, f_vjp_flat = vjp_ret
-    primals_out = tree_unflatten(out_tree_store(), primals_out_flat)
+    @lru_cache_verbose()
+    def jvp_program(self, program: Program, static_args=()) -> Tuple[Program, List[Any]]:
+        def jvp_traceable(*primals_and_tangents):
+            n = len(primals_and_tangents) // 2
+            primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
+            return self.jvp(self.program_as_fun(program), primals, tangents)
 
-    def f_vjp(*cotangents_out):
-        cotangents_out_flat, _ = tree_flatten(cotangents_out)
-        cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
+        in_avals = self.tree_map(lambda v: v.aval, program.in_binders)
+        new_program, new_consts, _ = self.make_program(
+            jvp_traceable,
+            *in_avals,
+            *in_avals,
+            static_args=static_args,
+            name=f"{program.name}_jvp",
+        )
+        return new_program, new_consts
 
-        return tree_unflatten(in_tree, cotangents_in_flat)
+    def partial_run_flat(
+        self, f: Callable, pvals_in: List["PartialValue"], has_aux, global_data=None
+    ) -> Tuple[Program, List["PartialValue"], List[Any]]:
+        with self.new_main(PartialRunTrace, global_data) as main:
+            trace = PartialRunTrace(main)
+            tracers_in = [trace.new_arg(pval) for pval in pvals_in]
+            outs = f(*tracers_in)
+            if has_aux:
+                outs, aux = outs
+            tracers_out = [self.full_raise(trace, out) for out in outs]
+            pvals_out = [t.pval for t in tracers_out]
+            unk_tracers_in = [t for t in tracers_in if t.pval.is_unknown]
+            unk_tracers_out = [t for t in tracers_out if t.pval.is_unknown]
+            program, consts = self.tracers_to_program(unk_tracers_in, unk_tracers_out)
 
-    return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
+        return (program, pvals_out, consts, aux) if has_aux else (program, pvals_out, consts)
 
+    def partial_run_program(
+        self,
+        program: Program,
+        in_unknowns: List[bool],
+        instantiate: Optional[List[bool]] = None,
+    ) -> Tuple[Program, Program, List[bool], int]:
+        backend: Dict[Var, bool] = {}
+        residuals: Set[Var] = set()
 
-def run_program_transposed(program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
-    primal_env: Dict[Var, Any] = {}
-    ct_env: Dict[Var, Any] = {}
+        def read(x: Atom) -> bool:
+            return type(x) is Var and backend[x]
 
-    def read_primal(x: Atom) -> Any:
-        return primal_env.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
+        def write(unk: bool, v: Var) -> None:
+            backend[v] = unk
 
-    def write_primal(v: Var, val: Any) -> None:
-        if type(val) is not PrimalProxy:
-            primal_env[v] = val
+        instructions1, instructions2 = [], []
+        list_map(write, in_unknowns, program.in_binders)
 
-    def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, backend.zeros(v.aval.shape, v.aval.dtype))
+        for instruction in program.instructions:
+            unks_in = list_map(read, instruction.inputs)
+            (
+                instruction1,
+                instruction2,
+                unks_out,
+                res,
+            ) = instruction.op.partial_run_instruction(unks_in, instruction)
+            if instruction1 is not None:
+                instructions1.append(instruction1)
+            if instruction2 is not None:
+                instructions2.append(instruction2)
+            if res is not None:
+                residuals.update(res)
+            list_map(write, unks_out, instruction.out_binders)
 
-    def write_cotangent(x: Atom, val: Any):
-        if type(x) is Var and val is not None:
-            ct_env[x] = ct_env[x] + val if x in ct_env else val
+        out_unknowns = list_map(read, program.outs)
+        if instantiate is not None:
+            for v, uk, inst in zip(program.outs, out_unknowns, instantiate):
+                if inst and not uk:
+                    if type(v) is Var:
+                        residuals.add(v)
+            out_unknowns = list_map(operator_py.or_, out_unknowns, instantiate)
 
-    list_map(write_primal, program.in_binders, args)
-    list_map(write_cotangent, program.outs, cotangents)
-    for instruction in program.instructions[::-1]:
-        primals_in = list_map(read_primal, instruction.inputs)
-        cotangents_in = list_map(read_cotangent, instruction.out_binders)
-        inp, params = primals_in, instruction.params
-        inp, params = instruction.op.reorg_args(inp, params)
-        inp, params = instruction.op.args_fixer(*inp, **params)
-        cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
-        list_map(write_cotangent, instruction.inputs, cotangents_out)
+        residuals, num_res = list(residuals), len(residuals)
+        assert all(type(v) is Var for v in residuals), residuals
 
-    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is PrimalProxy]
+        ins1, ins2 = partition_list(in_unknowns, program.in_binders)
+        outs1, outs2 = partition_list(out_unknowns, program.outs)
 
-    return ret
+        program1 = Program(
+            ins1,
+            instructions1,
+            outs1 + residuals,
+            0,
+            program.static_args,
+            f"{program.name}_partial1",
+        )
+        program2 = Program(
+            residuals + ins2,
+            instructions2,
+            outs2,
+            0,
+            program.static_args,
+            f"{program.name}_partial2",
+        )
+        self.typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, program2)
 
+        return program1, program2, out_unknowns, num_res
 
-@lru_cache_verbose()
-def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
-    avals_in, avals_out = typecheck_program(program)
-    traceable = partial(run_program_transposed, program)
-    args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
-    trans_program, consts, _ = make_program(
-        traceable,
-        tuple(args),
-        tuple(avals_out),
-        static_args=program.static_args,
-        name=f"{program.name}_T",
-    )
-    typecheck_program(trans_program)
+    def typecheck_partial_run_program(self, program, in_unknowns, out_unknowns, program1, program2):
+        programty = self.typecheck_program(program)  # (a1,  a2) -> (b1, b2 )
+        program1ty = self.typecheck_program(program1)  #  a1       -> (b1, res)
+        program2ty = self.typecheck_program(program2)  # (res, a2) -> b2
 
-    return trans_program, consts
+        a1, a2 = partition_list(in_unknowns, programty.in_types)
+        b1, b2 = partition_list(out_unknowns, programty.out_types)
+        b1_, res = split_list(program1ty.out_types, len(b1))
+        res_, a2_ = split_list(program2ty.in_types, len(res))
+        b2_ = program2ty.out_types
 
+        a1 = tuple(a1)
+        a2, a2_ = tuple(a2), tuple(a2_)
+        b1, b1_ = tuple(b1), tuple(b1_)
+        b2, b2_ = tuple(b2), tuple(b2_)
+        res, res_ = tuple(res), tuple(res_)
 
-def grad(f, argnums=(0,), argnames="", has_aux=False, return_value=False):
-    if isinstance(f, jit):
-        f = f.f
-    if isinstance(argnums, int):
-        argnums = (argnums,)
+        if program1ty.in_types != a1:
+            raise TypeError
+        if program2ty.out_types != b2:
+            raise TypeError
+        if b1 != b1_:
+            raise TypeError
+        if res != res_:
+            raise TypeError
+        if a2 != a2_:
+            raise TypeError
+        if b2 != b2_:
+            raise TypeError
 
-    def grad_fn(x, *xs, **static_args):
-        vjp_ret = vjp(f, x, *xs, has_aux=has_aux, **static_args)
-        if has_aux:
-            y, f_vjp, aux = vjp_ret
-        else:
-            y, f_vjp = vjp_ret
-        if np.shape(y) != ():
-            raise TypeError("grad output must be 0-dim scalar with shape ()")
-        grad_L_xs = f_vjp(backend.ones(()))
-        grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
-        if return_value:
-            return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
-        else:
-            return (grad_L_xs, aux) if has_aux else grad_L_xs
+    def linearize_flat(self, f, *primals_in, has_aux):
+        pvals_in = [self.make_known_pval(x) for x in primals_in] + [
+            self.make_unknown_pval(Typecheckor.like(self.get_aval(x))) for x in primals_in
+        ]
 
-    if isinstance(f, jit):
-        return jit(grad_fn)
-    else:
-        return grad_fn
-
-
-def value_and_grad(f, argnums=(0,), argnames="", has_aux=False):
-    return grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
-
-
-def jit_partial_run(trace, tracers, *, program):
-    in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = partial_run_program(program, in_unknowns)
-    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
-    known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = jit_op(*known_vals, program=program)
-    outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-    res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
-    draft = InstructionDraft(
-        jit_op,
-        res_tracers + unknown_tracers,
-        dict(program=program2),
-        [v.aval for v in program2.outs],
-        map(weakref.ref, outs2),
-    )
-    for t in outs2:
-        t.draft = draft
-    return merge_lists(out_unknowns, outs1, outs2)
-
-
-class jit:
-    def __init__(self, f, static_argnames=(), name=None):
-        assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
-        self.f = f
-        self.name = name
-        self.static_argnames = static_argnames
-
-    @classmethod
-    def with_options(cls, static_argnames=(), name=None):
-        return partial(cls, static_argnames=static_argnames, name=name)
-
-    def get_program(self, *args, **static_args):
-        sig = inspect.signature(self.f)
-        if all("*" not in repr(v) for v in sig.parameters.values()):
-            args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in self.static_argnames]
-            static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in self.static_argnames]
-
-            if args:
-                if len(args) > len(args_strs):
-                    assert static_args_strs
-                    args, rest = args[: len(args_strs)], args[len(args_strs) :]
-                    new_static_args = {
-                        k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
-                    }
-                    static_args = {**new_static_args, **static_args}
+        def f_jvp(*primals_tangents_in):
+            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux)
+            if has_aux:
+                (primals_out, tangents_out), aux = jvp_ret
+                return ((*primals_out, *tangents_out), aux)
             else:
-                args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
+                primals_out, tangents_out = jvp_ret
+                return (*primals_out, *tangents_out)
 
-        static_args = tuple(static_args.items())
+        partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux)
+        if has_aux:
+            program, pvals_out, consts, aux = partial_run_flat_ret
+        else:
+            program, pvals_out, consts = partial_run_flat_ret
+        primal_pvals, _ = split_half(pvals_out)
+        assert all(pval.is_known for pval in primal_pvals)
+        primals_out = [pval.const for pval in primal_pvals]
+        f_lin = lambda *tangents: self.run_program(program, [*consts, *tangents])
+        return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
 
-        avals_in = tree_map(lambda x: Typecheckor.like(get_aval(x)), args)
-        if self.name is None:
-            self.name = f"jit_{str(hash((self.f, avals_in, static_args)))[1:5]}"
-        program, consts, out_tree = make_program(self.f, *avals_in, static_args=static_args, name=self.name)
-        return program, consts, out_tree
+    def linearize(self, f, *primals_in, has_aux=False):
+        primals_in_flat, in_tree = self.tree_flatten(primals_in)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        linearize_flat_ret = self.linearize_flat(f, *primals_in_flat, has_aux=has_aux)
+        if has_aux:
+            primals_out_flat, f_lin_flat, aux = linearize_flat_ret
+        else:
+            primals_out_flat, f_lin_flat = linearize_flat_ret
 
-    def __call__(self, *args, **static_args):
-        if NO_JIT:
-            return self.f(*args, **static_args)
-        program, consts, out_tree = self.get_program(*args, **static_args)
-        args, in_tree = tree_flatten(args)
-        outs = bind(jit_op, *consts, *args, program=program)
-        return tree_unflatten(out_tree, outs)
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
 
-    def get_jit_object(self, *args, **static_args):
-        program, consts, out_tree = self.get_program(*args, **static_args)
-        args, in_tree = tree_flatten(args)
-        hashed_program = Hashed(program)
-        num_consts = program.num_consts
-        consts, args = args[:num_consts], args[num_consts:]
-        hashed_consts = tuple(map(Hashed, consts))
-        jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
-        return jit_object
+        def f_lin(*tangents_in):
+            tangents_in_flat, in_tree2 = self.tree_flatten(tangents_in)
+            if in_tree != in_tree2:
+                raise TypeError
+            tangents_out_flat = f_lin_flat(*tangents_in_flat)
+            return self.tree_unflatten(out_tree_store(), tangents_out_flat)
+
+        return (primals_out, f_lin, aux) if has_aux else (primals_out, f_lin)
+
+    def tracers_to_program(
+        self,
+        tracers_in: List["PartialRunTracor"],
+        tracers_out: List["PartialRunTracor"],
+    ):
+        def tracer_parents(t: PartialRunTracor) -> List[PartialRunTracor]:
+            return t.draft.tracers_in if isinstance(t.draft, InstructionDraft) else []
+
+        def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
+            inputs = [tracer_to_var[id(t)] for t in draft.tracers_in]
+            out_binders = [Var(aval) for aval in draft.avals_out]
+            for t_ref, var in list_zip(draft.tracer_refs_out, out_binders):
+                if t_ref() is not None:
+                    tracer_to_var[id(t_ref())] = var
+            return Instruction(draft.prim, inputs, draft.params, out_binders)
+
+        tracer_to_var: Dict[int, Var] = {id(t): Var(Typecheckor.like(t.aval)) for t in tracers_in}
+        constvar_to_val: Dict[int, Any] = {}
+        constid_to_var: Dict[int, Var] = {}
+        processed_instructions: Set[int] = set()
+        instructions: List[Instruction] = []
+        for t in self.toposort(tracers_out, tracer_parents):
+            if isinstance(t.draft, LambdaBindingDraft):
+                assert id(t) in set(list_map(id, tracers_in))
+            elif isinstance(t.draft, ConstDraft):
+                val = t.draft.val
+                var = constid_to_var.get(id(val))
+                if var is None:
+                    aval = Typecheckor.like(self.get_aval(val))
+                    var = constid_to_var[id(val)] = Var(aval)
+                    constvar_to_val[var] = val
+                tracer_to_var[id(t)] = var
+            elif isinstance(t.draft, InstructionDraft):
+                if id(t.draft) not in processed_instructions:
+                    instructions.append(draft_to_instruction(tracer_to_var, t.draft))
+                    processed_instructions.add(id(t.draft))
+            else:
+                raise TypeError(t.draft)
+
+        constvars, constvals = unzip2(constvar_to_val.items())
+        in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
+        out_vars = [tracer_to_var[id(t)] for t in tracers_out]
+        program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
+        self.typecheck_program(program)
+        return program, constvals
+
+    def toposort(self, out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
+        def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
+            seen = set()
+            for node in nodes:
+                assert all(id(parent) in seen for parent in parents(node))
+                seen.add(id(node))
+
+        def remove_duplicates(lst):
+            seen = set()
+            return [x for x in lst if id(x) not in seen and not seen.add(id(x))]
+
+        if not out_nodes:
+            return []
+        out_nodes = remove_duplicates(out_nodes)
+
+        child_counts = {}
+        stack = list(out_nodes)
+        while stack:
+            node = stack.pop()
+            if id(node) in child_counts:
+                child_counts[id(node)] += 1
+            else:
+                child_counts[id(node)] = 1
+                stack.extend(parents(node))
+        for node in out_nodes:
+            child_counts[id(node)] -= 1
+
+        sorted_nodes = []
+        childless_nodes = [node for node in out_nodes if not child_counts[id(node)]]
+        while childless_nodes:
+            node = childless_nodes.pop()
+            sorted_nodes.append(node)
+            for parent in parents(node):
+                if child_counts[id(parent)] == 1:
+                    childless_nodes.append(parent)
+                else:
+                    child_counts[id(parent)] -= 1
+
+        sorted_nodes = sorted_nodes[::-1]
+        check_toposort(sorted_nodes, parents)
+        return sorted_nodes
+
+    def vjp_flat(self, f, *primals_in, has_aux=False, **static_args):
+        pvals_in = [self.make_known_pval(x) for x in primals_in] + [
+            self.make_unknown_pval(Typecheckor.like(self.get_aval(x))) for x in primals_in
+        ]
+        _, tangent_pvals_in = split_half(pvals_in)
+
+        def f_jvp(*primals_tangents_in):
+            jvp_ret = self.jvp(f, *split_half(primals_tangents_in), has_aux=has_aux, global_data="vjp", **static_args)
+            if has_aux:
+                ((primals_out, tangents_out), aux) = jvp_ret
+            else:
+                (primals_out, tangents_out) = jvp_ret
+            return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
+
+        partial_run_flat_ret = self.partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
+        if has_aux:
+            program, pvals_out, consts, aux = partial_run_flat_ret
+        else:
+            program, pvals_out, consts = partial_run_flat_ret
+
+        primal_pvals, _ = split_half(pvals_out)
+        assert all(pval.is_known for pval in primal_pvals)
+        primals_out_flat = [pval.const for pval in primal_pvals]
+        transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
+        f_vjp_flat = lambda *cotangents: self.run_program_transposed(program, transpose_inputs, cotangents)
+        return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
+
+    def vjp(self, f, *primals_in, has_aux=False, **static_args):
+        primals_in_flat, in_tree = self.tree_flatten(primals_in)
+        f, out_tree_store = self.flatten_fn(f, in_tree, has_aux=has_aux)
+        vjp_ret = self.vjp_flat(f, *primals_in_flat, has_aux=has_aux, **static_args)
+        if has_aux:
+            primals_out_flat, f_vjp_flat, aux = vjp_ret
+        else:
+            primals_out_flat, f_vjp_flat = vjp_ret
+        primals_out = self.tree_unflatten(out_tree_store(), primals_out_flat)
+
+        def f_vjp(*cotangents_out):
+            cotangents_out_flat, _ = self.tree_flatten(cotangents_out)
+            cotangents_in_flat = f_vjp_flat(*cotangents_out_flat)
+
+            return self.tree_unflatten(in_tree, cotangents_in_flat)
+
+        return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
+
+    def run_program_transposed(self, program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
+        primal_env: Dict[Var, Any] = {}
+        ct_env: Dict[Var, Any] = {}
+
+        def read_primal(x: Atom) -> Any:
+            return primal_env.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
+
+        def write_primal(v: Var, val: Any) -> None:
+            if type(val) is not PrimalProxy:
+                primal_env[v] = val
+
+        def read_cotangent(v: Var) -> Any:
+            return ct_env.pop(v, self.backend.zeros(v.aval.shape, v.aval.dtype))
+
+        def write_cotangent(x: Atom, val: Any):
+            if type(x) is Var and val is not None:
+                ct_env[x] = ct_env[x] + val if x in ct_env else val
+
+        list_map(write_primal, program.in_binders, args)
+        list_map(write_cotangent, program.outs, cotangents)
+        for instruction in program.instructions[::-1]:
+            primals_in = list_map(read_primal, instruction.inputs)
+            cotangents_in = list_map(read_cotangent, instruction.out_binders)
+            inp, params = primals_in, instruction.params
+            inp, params = instruction.op.reorg_args(inp, params)
+            inp, params = instruction.op.args_fixer(*inp, **params)
+            cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
+            list_map(write_cotangent, instruction.inputs, cotangents_out)
+
+        ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is PrimalProxy]
+
+        return ret
+
+    @lru_cache_verbose()
+    def transpose_program(self, program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
+        avals_in, avals_out = self.typecheck_program(program)
+        traceable = partial(self.run_program_transposed, program)
+        args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
+        trans_program, consts, _ = self.make_program(
+            traceable,
+            tuple(args),
+            tuple(avals_out),
+            static_args=program.static_args,
+            name=f"{program.name}_T",
+        )
+        self.typecheck_program(trans_program)
+
+        return trans_program, consts
+
+    def grad(self, f, argnums=(0,), argnames="", has_aux=False, return_value=False):
+        if isinstance(f, self.jit):
+            f = f.f
+        if isinstance(argnums, int):
+            argnums = (argnums,)
+
+        def grad_fn(x, *xs, **static_args):
+            vjp_ret = self.vjp(f, x, *xs, has_aux=has_aux, **static_args)
+            if has_aux:
+                y, f_vjp, aux = vjp_ret
+            else:
+                y, f_vjp = vjp_ret
+            if np.shape(y) != ():
+                raise TypeError("grad output must be 0-dim scalar with shape ()")
+            grad_L_xs = f_vjp(self.backend.ones(()))
+            grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
+            if return_value:
+                return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
+            else:
+                return (grad_L_xs, aux) if has_aux else grad_L_xs
+
+        if isinstance(f, self.jit):
+            return self.jit(grad_fn)
+        else:
+            return grad_fn
+
+    def value_and_grad(self, f, argnums=(0,), argnames="", has_aux=False):
+        return self.grad(f, argnums=argnums, argnames=argnames, has_aux=has_aux, return_value=True)
+
+    class jit:
+        def __init__(self, f, static_argnames=(), name=None):
+            assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
+            self.f = f
+            self.name = name
+            self.static_argnames = static_argnames
+
+        @classmethod
+        def with_options(cls, static_argnames=(), name=None):
+            return partial(cls, static_argnames=static_argnames, name=name)
+
+        def get_program(self, *args, **static_args):
+            sig = inspect.signature(self.f)
+            if all("*" not in repr(v) for v in sig.parameters.values()):
+                args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in self.static_argnames]
+                static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in self.static_argnames]
+
+                if args:
+                    if len(args) > len(args_strs):
+                        assert static_args_strs
+                        args, rest = args[: len(args_strs)], args[len(args_strs) :]
+                        new_static_args = {
+                            k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
+                        }
+                        static_args = {**new_static_args, **static_args}
+                else:
+                    args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
+
+            static_args = tuple(static_args.items())
+
+            avals_in = slope.M().tree_map(lambda x: Typecheckor.like(slope.M().get_aval(x)), args)
+            if self.name is None:
+                self.name = f"jit_{str(hash((self.f, avals_in, static_args)))[1:5]}"
+            program, consts, out_tree = slope.M().make_program(
+                self.f, *avals_in, static_args=static_args, name=self.name
+            )
+            return program, consts, out_tree
+
+        def __call__(self, *args, **static_args):
+            if slope.NO_JIT:
+                return self.f(*args, **static_args)
+            program, consts, out_tree = self.get_program(*args, **static_args)
+            args, in_tree = slope.M().tree_flatten(args)
+            outs = slope.M().bind(jit_op, *consts, *args, program=program)
+            return slope.M().tree_unflatten(out_tree, outs)
+
+        def get_jit_object(self, *args, **static_args):
+            program, consts, out_tree = self.get_program(*args, **static_args)
+            args, in_tree = slope.M().tree_flatten(args)
+            hashed_program = Hashed(program)
+            num_consts = program.num_consts
+            consts, args = args[:num_consts], args[num_consts:]
+            hashed_consts = tuple(map(Hashed, consts))
+            jit_object = slope.M().backend.compiler.gen_jit_object(hashed_program, hashed_consts)
+            return jit_object
+
+    def jit_partial_run(self, trace, tracers, *, program):
+        in_unknowns = [not t.pval.is_known for t in tracers]
+        program1, program2, out_unknowns, num_res = self.partial_run_program(program, in_unknowns)
+        known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+        known_vals = [t.pval.const for t in known_tracers]
+        outs1_res = jit_op(*known_vals, program=program)
+        outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
+        res_tracers = [trace.instantiate_const(self.full_raise(trace, x)) for x in res]
+        outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
+        draft = InstructionDraft(
+            jit_op,
+            res_tracers + unknown_tracers,
+            dict(program=program2),
+            [v.aval for v in program2.outs],
+            map(weakref.ref, outs2),
+        )
+        for t in outs2:
+            t.draft = draft
+        return merge_lists(out_unknowns, outs1, outs2)
 
 
 #

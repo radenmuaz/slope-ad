@@ -8,26 +8,18 @@ def relu(x):
 relu = slope.core.Operator.unary("relu")
 slope.M().backend.operator_set.register(relu)
 
-# @relu.set_method
-# def jvp(self, primals, tangents):
-#     def _balanced_eq(x, z, y):
-#         xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
-#         yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
-#         return xz / yz
-
-#     (x,), (x_dot,) = primals, tangents
-#     y = x.relu()
-#     w = slope.zeros_like(x)
-#     w_dot  = slope.ones_like(x)
-#     y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
-#     return [y], [y_dot]
-
-
 @relu.set_method
 def jvp(self, primals, tangents):
+    def _balanced_eq(x, z, y):
+        xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
+        yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+        return xz / yz
+
     (x,), (x_dot,) = primals, tangents
     y = x.relu()
-    y_dot = x_dot.relu()
+    w = slope.zeros_like(x)
+    w_dot  = slope.ones_like(x)
+    y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
     return [y], [y_dot]
 
 @relu.set_method

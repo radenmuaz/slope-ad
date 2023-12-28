@@ -627,8 +627,10 @@ class ConvNdTranspose(Module):
             pads = pads[::-1]
             x = x.pad(pads)
             x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
-            x = x.slice((0,0) + (0,)*len(x.shape[2:]),
-                        (x.shape[0], x.shape[1]) + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1])
+            x = x.slice(
+                (0, 0) + (0,) * len(x.shape[2:]),
+                (x.shape[0], x.shape[1]) + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1],
+            )
         padding_ = padding
         padding = flatten_seq(
             (

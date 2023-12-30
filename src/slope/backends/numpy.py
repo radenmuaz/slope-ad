@@ -373,7 +373,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(out.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.expand(x.aval.shape)
+    out = out.expand(x.typecheckor.shape)
 
 
 sum = Operator.reduce("sum")
@@ -396,7 +396,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(out.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.expand(x.aval.shape)
+    out = out.expand(x.typecheckor.shape)
 
     return [out]
 
@@ -447,17 +447,17 @@ def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor
 def T(self, cotangents, x, *, shape):
     (z,) = cotangents
     out = z
-    if x.aval.shape == out.shape:
+    if x.typecheckor.shape == out.shape:
         return [out]
     else:
         b_dim = []
-        assert len(x.aval.shape) == len(out.shape)
-        for i, (xd, od) in enumerate(zip(x.aval.shape, out.shape)):
+        assert len(x.typecheckor.shape) == len(out.shape)
+        for i, (xd, od) in enumerate(zip(x.typecheckor.shape, out.shape)):
             if xd != od:
                 b_dim += [i]
         out = out.sum(dim=tuple(b_dim), keepdim=True)
-    if out.shape != x.aval.shape:
-        raise ValueError(f"not same {out.shape=}, {x.aval.shape=}")
+    if out.shape != x.typecheckor.shape:
+        raise ValueError(f"not same {out.shape=}, {x.typecheckor.shape=}")
     return [out]
 
 
@@ -496,7 +496,7 @@ def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor
 @reshape.set_method
 def T(self, cotangents, x, *, shape):
     (z,) = cotangents
-    return [z.reshape(x.aval.shape)]
+    return [z.reshape(x.typecheckor.shape)]
 
 
 permute = Operator.other("permute")
@@ -671,10 +671,10 @@ def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typ
 def T(self, cotangents, x, *, starts, limits, strides):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
-    x_shape = x.aval.shape
+    x_shape = x.typecheckor.shape
     assert isinstance(x, PrimalProxy)
     if np.all(np.equal(strides, 1)):
-        lo, hi = (starts, tuple(np.subtract(x.aval.shape, limits)))
+        lo, hi = (starts, tuple(np.subtract(x.typecheckor.shape, limits)))
     else:
         real_limits = np.add(
             starts,
@@ -782,7 +782,7 @@ def typecheck(self, *xs: Typecheckor, dim=0) -> List[Typecheckor]:
 @cat.set_method
 def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
-    x_shapes = [o.aval.shape if type(o) is PrimalProxy else o.shape for o in xs]
+    x_shapes = [o.typecheckor.shape if type(o) is PrimalProxy else o.shape for o in xs]
     if type(z) is None:
         return [None if type(o) is PrimalProxy else None for o in xs]
     else:  # TODO: replace numpy with pure Python
@@ -1054,9 +1054,9 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     body_code_lines = []
 
     for inb in program.in_binders:
-        prefix = "x" if type(inb.aval) is Typecheckor else "c"
+        prefix = "x" if type(inb.typecheckor) is Typecheckor else "c"
         idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
+        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.typecheckor)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -1065,7 +1065,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
             idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
+            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.typecheckor)
 
         out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:

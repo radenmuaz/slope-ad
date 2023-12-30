@@ -365,7 +365,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             continue
 
         try:
-            abstract_i = Tracor.get_aval(i)
+            abstract_i = Tracor.get_typecheckor(i)
         except TypeError:
             abstract_i = None
         # Handle basic int indexes.
@@ -411,7 +411,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
                 x_dim += 1
             # Handle slice index (only static, otherwise an error is raised)
             else:
-                if not all((elt == None or Tracor.get_aval(elt) is Tensor) for elt in (start, stop, step)):
+                if not all((elt == None or Tracor.get_typecheckor(elt) is Tensor) for elt in (start, stop, step)):
                     msg = (
                         "Tensor slice indices must have static start/stop/step to be used "
                         "with NumPy indexing syntax. "
@@ -485,7 +485,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 
 # def _is_boolean_index(i):
 #   try:
-#     abstract_i = core.get_aval(i)
+#     abstract_i = core.get_typecheckor(i)
 #   except TypeError:
 #     abstract_i = None
 #   return (isinstance(abstract_i, ShapedTensor) and issubdtype(abstract_i.dtype, bool_)
@@ -506,7 +506,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
 #     ellipsis_offset = 0
 #     for dim_number, i in enumerate(idx):
 #         try:
-#             abstract_i = core.get_aval(i)
+#             abstract_i = core.get_typecheckor(i)
 #         except TypeError:
 #             abstract_i = None
 #         if _is_boolean_index(i):

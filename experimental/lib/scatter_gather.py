@@ -296,9 +296,9 @@ class Gather(ShapeOp):
         fill_value,
     ):
         assert ad.is_undefined_primal(operand)
-        operand_shape = operand.aval.shape
+        operand_shape = operand.typecheckor.shape
         if type(t) is ad_util.Zero:
-            out = ad_util.Zero(operand.aval)
+            out = ad_util.Zero(operand.typecheckor)
         else:
             zeros = lax.full(operand_shape, lax._zero(t))
             scatter_dnums = ScatterDimensionNumbers(
@@ -470,12 +470,12 @@ class Scatter(ShapeOp):
     ):
         assert not ad.is_undefined_primal(indices)
         if ad.is_undefined_primal(updates):
-            updates_shape = updates.aval.shape
+            updates_shape = updates.typecheckor.shape
         else:
             updates_shape = updates.shape
         if type(t) is ad_util.Zero:
-            operand_t = ad_util.Zero(operand.aval) if ad.is_undefined_primal(operand) else None
-            update_t = ad_util.Zero(updates.aval) if ad.is_undefined_primal(updates) else None
+            operand_t = ad_util.Zero(operand.typecheckor) if ad.is_undefined_primal(operand) else None
+            update_t = ad_util.Zero(updates.typecheckor) if ad.is_undefined_primal(updates) else None
         else:
             operand_t = update_t = None
             if ad.is_undefined_primal(operand):

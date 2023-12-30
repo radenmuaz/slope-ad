@@ -43,13 +43,12 @@ def type_mlir(typecheckor):
         return f"tensor<{xdtype}>"
 
 
-def type_mlir_sig(in_avals, out_aval):
-    typing_code = f" : ({','.join(type_mlir(t) for t in in_avals)}) -> {type_mlir(out_aval)}"
+def type_mlir_sig(in_typecheckors, out_typecheckor):
+    typing_code = f" : ({','.join(type_mlir(t) for t in in_typecheckors)}) -> {type_mlir(out_typecheckor)}"
     return typing_code
 
 
 class IREECompiler(Compiler):
-    name = "iree"
     dtype_map = {
         Tensor.float32: np.dtypes.Float32DType(),
         Tensor.uint8: np.dtypes.UInt8DType(),
@@ -60,7 +59,9 @@ class IREECompiler(Compiler):
         Tensor.float16: np.dtypes.Float16DType(),
     }
 
-    def from_numpy(self, val, dtype=Backend.DEFAULT_DTYPE, device=Backend.DEFAULT_DEVICE):
+    def from_numpy(self, val, dtype=None, device=None):
+        dtype = dtype or slope.core.backend.DEFAULT_DTYPE
+        device = device or slope.core.backend.DEFAULT_DEVICE
         # device_type, device_id = device.split(":") if ":" in device else (device, 0)
         np_val = np.array(val, dtype=dtype.numpy)
         iree_device = iree.runtime.get_device("local-task")
@@ -185,9 +186,9 @@ class IREECompiler(Compiler):
         body_code_lines = []
 
         for inb in program.in_binders:
-            prefix = "%x" if type(inb.aval) is Typecheckor else "%c"
+            prefix = "%x" if type(inb.typecheckor) is Typecheckor else "%c"
             idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-            env[inb] = dict(name=f"{prefix}{idx}", type=inb.aval)
+            env[inb] = dict(name=f"{prefix}{idx}", type=inb.typecheckor)
 
         for instruction in program.instructions:
             if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -196,23 +197,26 @@ class IREECompiler(Compiler):
             for outb in instruction.out_binders:
                 prefix = "%y" if outb in program.outs else "%z"
                 idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-                env[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
+                env[outb] = dict(name=f"{prefix}{idx}", type=outb.typecheckor)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
-                impl_code, fn_defs = self.impls[instruction.op.__class__](args, instruction, in_vals, fn_defs)
+                impl_code, fn_defs = self.impls[instruction.op](args, instruction, in_vals, fn_defs)
             else:
-                if instruction.op not in backend.compiler.impls.keys():
+                if instruction.op not in slope.core.backend.compiler.impls.keys():
+                    # No impl is defined, fallback to procedure
                     op = instruction.op
-                    avals_in = tuple(inp.aval for inp in instruction.inputs)
+                    op_name = {v: k for k, v in vars(slope.core.backend.operator_set.items())}[op]
+                    op_procedure = getattr(slope.core.backend.procedure_set, op_name)
+                    typecheckors_in = tuple(inp.typecheckor for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
-                        getattr(backend.procedure_set, op.name),
-                        *avals_in,
+                        op_procedure,
+                        *typecheckors_in,
                         static_args=tuple(params.items()),
                         name=op.name,
                     )
-                    name = op.get_jit_name(tuple(avals_in), params)
+                    name = op.get_jit_name(tuple(typecheckors_in), params)
                     if name not in fn_defs.keys():
                         op_codegen_out = self.codegen(
                             op_program,
@@ -518,7 +522,7 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 """
 
 
-@compiler.set_impl(slope.core.JitOp)
+@compiler.set_impl(operator_set.jit_op)
 def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
     jit_name = f"{jit_program.name}"

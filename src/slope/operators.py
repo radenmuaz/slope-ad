@@ -282,7 +282,7 @@ class Max(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.aval.shape)
+        grad_L_x = grad_L_x.expand(x.typecheckor.shape)
 
 
 @operator_set.register("sum")
@@ -300,7 +300,7 @@ class Sum(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.aval.shape)
+        grad_L_x = grad_L_x.expand(x.typecheckor.shape)
 
         return [grad_L_x]
 
@@ -339,17 +339,17 @@ class Expand(ShapeOperator):
     def T(self, cotangents, x, *, shape):
         (grad_L_y,) = cotangents
         grad_L_x = grad_L_y
-        if x.aval.shape == grad_L_x.shape:
+        if x.typecheckor.shape == grad_L_x.shape:
             return [grad_L_x]
         else:
             b_dim = []
-            assert len(x.aval.shape) == len(grad_L_x.shape)
-            for i, (xd, od) in enumerate(zip(x.aval.shape, grad_L_x.shape)):
+            assert len(x.typecheckor.shape) == len(grad_L_x.shape)
+            for i, (xd, od) in enumerate(zip(x.typecheckor.shape, grad_L_x.shape)):
                 if xd != od:
                     b_dim += [i]
             grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-        if grad_L_x.shape != x.aval.shape:
-            raise ValueError(f"not same {grad_L_x.shape=}, {x.aval.shape=}")
+        if grad_L_x.shape != x.typecheckor.shape:
+            raise ValueError(f"not same {grad_L_x.shape=}, {x.typecheckor.shape=}")
         return [grad_L_x]
 
 
@@ -378,7 +378,7 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (z,) = cotangents
-        return [z.reshape(x.aval.shape)]
+        return [z.reshape(x.typecheckor.shape)]
 
 
 @operator_set.register("permute")
@@ -526,12 +526,12 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
         (z,) = cotangents
-        x_shape = x.aval.shape
+        x_shape = x.typecheckor.shape
         assert isinstance(x, PrimalProxy)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
-                tuple(np.subtract(x.aval.shape, limits)),
+                tuple(np.subtract(x.typecheckor.shape, limits)),
                 (0,) * len(starts),
             )
         else:
@@ -618,7 +618,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (z,) = cotangents
-        x_shapes = [o.aval.shape if type(o) is PrimalProxy else o.shape for o in xs]
+        x_shapes = [o.typecheckor.shape if type(o) is PrimalProxy else o.shape for o in xs]
         if type(z) is None:
             return [None if type(o) is PrimalProxy else None for o in xs]
         else:  # TODO: replace numpy with pure Python
@@ -734,11 +734,9 @@ class Matmul(Operator):
 
         return [Typecheckor(shape, x.dtype)]
 
-
     def jvp(self, primals, tangents):
         (x, w), (x_dot, w_dot) = primals, tangents
         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
-
 
     def T(self, cotangents, x, w):
         (grad_L_y,) = cotangents
@@ -778,7 +776,6 @@ class Conv(Operator):
         ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
-
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
         assert x.dtype == w.dtype
         x_shape = x.shape
@@ -797,7 +794,6 @@ class Conv(Operator):
 
         return [Typecheckor(out_shape, x.dtype)]
 
-
     def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
         (x, w), (x_dot, w_dot) = primals, tangents
         y = x.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
@@ -806,7 +802,6 @@ class Conv(Operator):
 
         return [y], [y_dot1 + y_dot2]
 
-
     # https://deeplearning.cs.cmu.edu/F21/document/recitation/Recitation5/CNN_Backprop_Recitation_5_F21.pdf
     # x_grad = F.conv_transpose2d(y.grad, w, stride=stride, padding=padding, dilation=dilation, output_padding=stride-padding)
     # assert torch.allclose(x_grad, x.grad)
@@ -814,12 +809,16 @@ class Conv(Operator):
     # w_grad = w_grad[:,:,:w.size(2),:w.size(3)]
     # assert torch.allclose(w_grad, w.grad)
 
-
     def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
         (grad_L_y,) = cotangents
         if type(x) is PrimalProxy:
             grad_L_x = grad_L_y.conv_transpose(
-                w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0] - dilation[0]
+                w,
+                groups=groups,
+                stride=stride,
+                dilation=dilation,
+                padding=padding,
+                output_padding=stride[0] - dilation[0],
             )
             assert grad_L_x.shape == x.shape
             return [grad_L_x, None]

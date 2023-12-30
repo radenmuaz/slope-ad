@@ -1,9 +1,7 @@
 import unittest
 
 import slope
-from slope import ad
-from slope.base_tensor import Tensor
-from slope.tensor import Tensor
+from slope.core import (Tensor,)
 import numpy as np
 import os
 from typing import NamedTuple
@@ -25,7 +23,7 @@ class TestGrad(unittest.TestCase):
         args_dot = [Tensor.ones_like(x) for x in args]
         y, f_lin = slope.ad.linearize(f, *args)
         y_dot = f_lin(*args_dot)
-        loss_fn = ad.grad(lambda *args,: f(*args).sum())
+        loss_fn = slope.grad(lambda *args,: f(*args).sum())
         loss, grads = loss_fn(*args)
         if DEBUG:
             print(f"{args=}")

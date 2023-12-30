@@ -351,11 +351,9 @@ class Tensor:
 
 class Typecheckor(Tensor):
     def __init__(self, shape, dtype):
-        self._shape = None
-        self._dtype = None
-        self.shape = tuple(int(i) for i in shape)
-        self.dtype = dtype
         assert isinstance(dtype, DType)
+        self._shape = tuple(int(i) for i in shape)
+        self._dtype = dtype
 
     @property
     def shape(self):
@@ -365,23 +363,11 @@ class Typecheckor(Tensor):
     def dtype(self):
         return self._dtype
 
-    @shape.setter
-    def shape(self, shape):
-        self._shape = shape
-
-    @dtype.setter
-    def dtype(self, dtype):
-        self._dtype = dtype
-
     @classmethod
-    def like(cls, aval):
-        shape = aval.shape
-        dtype = aval.dtype
+    def like(cls, maybe_tensor):
+        shape = maybe_tensor.shape
+        dtype = maybe_tensor.dtype
         return cls(shape, dtype)
-
-    @property
-    def ndim(self):
-        return len(self.shape)
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -396,14 +382,6 @@ class Typecheckor(Tensor):
 
     def __repr__(self):
         return f"Typecheckor(shape={self.shape}, dtype={self.dtype})"
-
-    @staticmethod
-    def _bool(tracer):
-        raise Exception("Typecheckor can't be unambiguously converted to bool")
-
-    @staticmethod
-    def _nonzero(tracer):
-        raise Exception("Typecheckor can't be unambiguously converted to bool")
 
 
 # ================
@@ -489,10 +467,12 @@ class Operator:
 
     def partial_run(self, trace, tracers, **params):
         tracers_in = [trace.instantiate_const(t) for t in tracers]
-        avals_in = [t.aval for t in tracers_in]
-        avals_out = self.typecheck(*avals_in, **params)
-        tracers_out = [PartialRunTracor(trace, make_unknown_pval(aval), None) for aval in avals_out]
-        instruction = InstructionDraft(self, tracers_in, params, avals_out, list_map(weakref.ref, tracers_out))
+        typecheckors_in = [t.typecheckor for t in tracers_in]
+        typecheckors_out = self.typecheck(*typecheckors_in, **params)
+        tracers_out = [
+            PartialRunTracor(trace, make_unknown_pval(typecheckor), None) for typecheckor in typecheckors_out
+        ]
+        instruction = InstructionDraft(self, tracers_in, params, typecheckors_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
             t.draft = instruction
         return tracers_out
@@ -655,6 +635,9 @@ class ShapeOperator(Operator):
 
 
 class OperatorSet:
+    def __init__(self):
+        self.register("jit_op")(JitOp)
+
     def register(self, name, nary_inputs=False, nary_outputs=False, aliases=()):
         def wrap(op_cls):
             assert name not in vars(self)
@@ -685,8 +668,8 @@ class Backend:
     LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
     LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
-    DEFAULT_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
-    DEFAULT_DTYPE = Tensor.dtype_names[os.environ.get("SLOPE_DTYPE", "float32")]
+    DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
+    DEFAULT_DTYPE = Tensor.dtype_names[os.environ.get("DEFAULT_DTYPE", "float32")]
 
     def __init__(
         self,
@@ -697,7 +680,6 @@ class Backend:
         self.operator_set = operator_set
         self.procedure_set = procedure_set
         self.compiler = compiler
-        self.operator_set.register("jit_op")(JitOp)
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
         self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
@@ -709,8 +691,8 @@ class Backend:
         )
         self.register_node(
             PrimalProxy,
-            lambda u: (u.aval, ()),
-            lambda aval, _: PrimalProxy(aval),
+            lambda u: (u.typecheckor, ()),
+            lambda typecheckor, _: PrimalProxy(typecheckor),
             "PrimalProxy",
         )
 
@@ -766,18 +748,18 @@ class Backend:
 
 class Var:
     val = None
-    aval: Typecheckor
+    typecheckor: Typecheckor
 
-    def __init__(self, aval):
-        self.aval = aval
+    def __init__(self, typecheckor):
+        self.typecheckor = typecheckor
 
 
 class Lit:
     val: Any
-    aval: Typecheckor
+    typecheckor: Typecheckor
 
     def __init__(self, val):
-        self.aval = Typecheckor.like(get_aval(val))
+        self.typecheckor = Typecheckor.like(get_typecheckor_or_tensor(val))
         self.val = val
 
 
@@ -840,7 +822,7 @@ class Program(NamedTuple):
             return PPrint.pp(" ")
 
     def var_str(self, names: DefaultDict[Var, str], v) -> str:
-        return f"{names[v]}:{v.aval.str_short()}"
+        return f"{names[v]}:{v.typecheckor.str_short()}"
 
 
 class ProgramType(NamedTuple):
@@ -848,8 +830,8 @@ class ProgramType(NamedTuple):
     out_types: Tuple[Typecheckor]
 
     def __repr__(self):
-        in_types = ", ".join(aval.str_short() for aval in self.in_types)
-        out_types = ", ".join(aval.str_short() for aval in self.out_types)
+        in_types = ", ".join(typecheckor.str_short() for typecheckor in self.in_types)
+        out_types = ", ".join(typecheckor.str_short() for typecheckor in self.out_types)
         return f"({in_types}) -> ({out_types})"
 
 
@@ -923,19 +905,19 @@ class Leaf:
     def __init__(self, val):
         if hasattr(val, "shape"):
             val = Typecheckor.like(val)
-        self.aval = val
+        self.val = val
 
     def __repr__(self):
-        if isinstance(self.aval, Typecheckor):
-            return self.aval.str_short()
-        return repr(self.aval)
+        if isinstance(self.val, Typecheckor):
+            return self.val.str_short()
+        return repr(self.val)
 
     def __hash__(self):
-        return hash(self.aval)
+        return hash(self.val)
 
     def __eq__(self, other):
         if isinstance(other, Leaf):
-            return self.aval == other.aval
+            return self.val == other.val
 
 
 # ================
@@ -1026,12 +1008,12 @@ class JitOp(MetaOperator):
         outs1_res = bind(backend.jit_op, *known_vals, program=program1)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-        outs2 = [PartialRunTracor(trace, make_unknown_pval(v.aval), None) for v in program2.outs]
+        outs2 = [PartialRunTracor(trace, make_unknown_pval(v.typecheckor), None) for v in program2.outs]
         instruction = InstructionDraft(
             self,
             res_tracers + unknown_tracers,
             dict(program=program2),
-            [v.aval for v in program2.outs],
+            [v.typecheckor for v in program2.outs],
             list_map(weakref.ref, outs2),
         )
         for t in outs2:
@@ -1044,7 +1026,7 @@ class JitOp(MetaOperator):
         program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
         ins1, ins2 = partition_list(unks_in, instruction.inputs)
         out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
-        res = [Var(v.aval) for v in program2.in_binders[:num_res]]
+        res = [Var(v.typecheckor) for v in program2.in_binders[:num_res]]
         instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
         instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
         return instruction1, instruction2, out_unknowns, res
@@ -1056,7 +1038,6 @@ class JitOp(MetaOperator):
 
 
 class Compiler:
-    name: str
     dtype_map: dict
 
     def __init__(self):
@@ -1066,10 +1047,6 @@ class Compiler:
     @property
     def default_dtype_value(self):
         return self.dtype_map[backend.DEFAULT_DTYPE]
-
-    def __repr__(self):
-        return f"<Compiler: name={self.name}>"
-        # return f"<Compiler: name={self.name}, device={backend.default_device}>"
 
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
@@ -1098,8 +1075,8 @@ class Compiler:
         program: Program = hashed_program.val
         typecheck_program(program)
         consts = [x.val for x in hashed_consts]
-        in_avals = [v.aval for v in program.in_binders[len(consts) :]]
-        codegen_out = self.codegen(program, consts + in_avals, fn_name="main")
+        in_typecheckors = [v.typecheckor for v in program.in_binders[len(consts) :]]
+        codegen_out = self.codegen(program, consts + in_typecheckors, fn_name="main")
         fn, code = self.compile(codegen_out)
         compiled = JitObject(program, codegen_out, fn, code)
         return compiled
@@ -1114,11 +1091,11 @@ class Compiler:
 
         return set_impl_
 
-    def codegen(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
+    def codegen(self, program: Program, args: Tuple, in_typecheckors: Tuple, name: str):
         "Returns compiler IR from the Program"
         raise NotImplementedError
 
-    def compile(self, program: Program, args: Tuple, in_avals: Tuple, name: str):
+    def compile(self, program: Program, args: Tuple, in_typecheckors: Tuple, name: str):
         "Compiles compiler IR to a Python callable function"
         raise NotImplementedError
 
@@ -1227,9 +1204,9 @@ class Tracor(Tensor):
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
-    aval = property(lambda self: get_aval(self.val))
-    dtype = property(lambda self: self.aval.dtype)
-    shape = property(lambda self: self.aval.shape)
+    typecheckor = property(lambda self: get_typecheckor_or_tensor(self.val))
+    dtype = property(lambda self: self.typecheckor.dtype)
+    shape = property(lambda self: self.typecheckor.shape)
 
     @property
     def val(self):
@@ -1246,7 +1223,7 @@ class Tracor(Tensor):
         return len(self.shape)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({repr(self.aval)})"
+        return f"{self.__class__.__name__}({repr(self.typecheckor)})"
 
 
 Batchdim = Union[None, int]
@@ -1259,14 +1236,14 @@ class BatchTracor(Tracor):
         self.batch_dim = batch_dim
 
     @property
-    def aval(self):
-        aval = get_aval(self.val)
+    def typecheckor(self):
+        typecheckor = get_typecheckor_or_tensor(self.val)
         if self.batch_dim is None:
-            return aval
+            return typecheckor
         else:
-            shape = list(aval.shape)
+            shape = list(typecheckor.shape)
             del shape[self.batch_dim]
-            return Typecheckor(tuple(shape), aval.dtype)
+            return Typecheckor(tuple(shape), typecheckor.dtype)
 
     def full_lower(self):
         if self.batch_dim is None:
@@ -1314,8 +1291,8 @@ class JVPTracor(Tracor):
         self.tangent = tangent
 
     @property
-    def aval(self):
-        return get_aval(self.primal)
+    def typecheckor(self):
+        return get_typecheckor_or_tensor(self.primal)
 
     @property
     def val(self):
@@ -1339,19 +1316,19 @@ class JVPTrace(Trace):
 
 
 class ProgramTracor(Tracor):
-    __slots__ = ["aval"]
-    aval: Typecheckor
+    __slots__ = ["typecheckor"]
+    typecheckor: Typecheckor
 
-    def __init__(self, trace, aval):
+    def __init__(self, trace, typecheckor):
         self._trace = trace
-        self.aval = aval
+        self.typecheckor = typecheckor
 
 
 class ProgramTrace(Trace):
-    def new_arg(self, aval) -> ProgramTracor:
-        aval = Typecheckor.like(aval)
-        tracer = self.builder.new_tracer(self, aval)
-        self.builder.tracer_to_var[id(tracer)] = Var(aval)
+    def new_arg(self, typecheckor) -> ProgramTracor:
+        typecheckor = Typecheckor.like(typecheckor)
+        tracer = self.builder.new_tracer(self, typecheckor)
+        self.builder.tracer_to_var[id(tracer)] = Var(typecheckor)
 
         return tracer
 
@@ -1359,16 +1336,16 @@ class ProgramTrace(Trace):
         # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, get_aval(val))
+            tracer = self.builder.new_tracer(self, get_typecheckor_or_tensor(val))
             self.builder.add_const(tracer, val)
         return tracer
 
     def run_op(self, op, tracers, params):
-        avals_in = [t.aval for t in tracers]
-        avals_in = tree_map(lambda x: x.aval, tracers)
-        avals_out = op.typecheck(*avals_in, **params)
+        typecheckors_in = [t.typecheckor for t in tracers]
+        typecheckors_in = tree_map(lambda x: x.typecheckor, tracers)
+        typecheckors_out = op.typecheck(*typecheckors_in, **params)
 
-        out_tracers = [self.builder.new_tracer(self, a) for a in avals_out]
+        out_tracers = [self.builder.new_tracer(self, a) for a in typecheckors_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
 
@@ -1394,8 +1371,8 @@ class ProgramBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgramTrace, aval: Typecheckor) -> ProgramTracor:
-        tracer = ProgramTracor(trace, aval)
+    def new_tracer(self, trace: ProgramTrace, typecheckor: Typecheckor) -> ProgramTracor:
+        tracer = ProgramTracor(trace, typecheckor)
         self.tracers.append(tracer)
         return tracer
 
@@ -1404,7 +1381,7 @@ class ProgramBuilder:
 
     def add_var(self, tracer: ProgramTracor) -> Var:
         assert id(tracer) not in self.tracer_to_var
-        var = self.tracer_to_var[id(tracer)] = Var(tracer.aval)
+        var = self.tracer_to_var[id(tracer)] = Var(tracer.typecheckor)
         return var
 
     def getvar(self, tracer: ProgramTracor) -> Var:
@@ -1430,7 +1407,7 @@ class ProgramBuilder:
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in Tracor.PYTHON_TYPES and not get_aval(x).shape for x in consts]
+        scalars = [type(x) in Tracor.PYTHON_TYPES and not get_typecheckor_or_tensor(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1471,25 +1448,25 @@ class ProgramBuilder:
 
 
 class PrimalProxy(NamedTuple):
-    aval: Typecheckor
+    typecheckor: Typecheckor
 
     @property
     def shape(self):
-        return self.aval.shape
+        return self.typecheckor.shape
 
     @property
     def dtype(self):
-        return self.aval.dtype
+        return self.typecheckor.dtype
 
     def __repr__(self):
-        return f"PrimalProxy: {self.aval}"
+        return f"PrimalProxy: {self.typecheckor}"
 
     def str_short(self):
         return f"PrimalProxy: {self.dtype}, {self.shape}"
 
 
 class PartialValue(NamedTuple):
-    aval: Typecheckor
+    typecheckor: Typecheckor
     const: Optional[Any]
 
     is_known = property(lambda self: self.const is not None)
@@ -1508,7 +1485,7 @@ class InstructionDraft(NamedTuple):
     prim: Operator
     tracers_in: List["PartialRunTracor"]
     params: Dict[str, Any]
-    avals_out: List[Typecheckor]
+    typecheckors_out: List[Typecheckor]
     tracer_refs_out: List[weakref.ReferenceType["PartialRunTracor"]]
 
 
@@ -1521,7 +1498,7 @@ class PartialRunTracor(Tracor):
         self.pval = pval
         self.draft = draft
 
-    aval = property(lambda self: self.pval.aval)
+    typecheckor = property(lambda self: self.pval.typecheckor)
     val = property(lambda self: self.pval.const)
 
     def full_lower(self):
@@ -1541,7 +1518,7 @@ class PartialRunTrace(Trace):
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = make_unknown_pval(Typecheckor.like(tracer.aval))
+            pval = make_unknown_pval(Typecheckor.like(tracer.typecheckor))
             return PartialRunTracor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
@@ -1579,18 +1556,17 @@ def stack_str():
 
 
 def make_known_pval(val: Any):
-    return PartialValue(get_aval(val), val)
+    return PartialValue(get_typecheckor_or_tensor(val), val)
 
 
-def make_unknown_pval(aval: Typecheckor):
-    return PartialValue(aval, None)
+def make_unknown_pval(typecheckor: Typecheckor):
+    return PartialValue(typecheckor, None)
 
 
-def get_aval(x):
+def get_typecheckor_or_tensor(x):
     if isinstance(x, Tracor):
-        return x.aval
+        return x.typecheckor
     elif type(x) in Tracor.PYTHON_TYPES:
-        # return Typecheckor.like(backend.tensor(x))
         return backend.tensor(x)
     elif isinstance(x, Tensor):
         return x
@@ -1781,14 +1757,14 @@ def typecheck_program(program: Program) -> ProgramType:
         in_types = [typecheck_atom(backend, x) for x in instruction.inputs]
         out_types = instruction.op.typecheck(*in_types, **instruction.params)
         for out_binder, out_type in list_zip(instruction.out_binders, out_types):
-            if not out_type == out_binder.aval:
+            if not out_type == out_binder.typecheckor:
                 raise TypeError
         for out_binder in instruction.out_binders:
             if out_binder in backend:
                 raise TypeError
             backend.add(out_binder)
 
-    in_types = [v.aval for v in program.in_binders]
+    in_types = [v.typecheckor for v in program.in_binders]
     out_types = [typecheck_atom(backend, x) for x in program.outs]
     return ProgramType(tuple(in_types), tuple(out_types))
 
@@ -1797,9 +1773,9 @@ def typecheck_atom(backend: Set[Var], x: Atom) -> Typecheckor:
     if isinstance(x, Var):
         if x not in backend:
             raise TypeError("unbound variable")
-        return x.aval
+        return x.typecheckor
     elif isinstance(x, Lit):
-        return get_aval(x.val)
+        return get_typecheckor_or_tensor(x.val)
     else:
         assert False
 
@@ -1896,14 +1872,14 @@ def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args)
 
 
 @lru_cache_verbose()
-def make_program(f: Callable, *avals_in: Typecheckor, static_args, name) -> Tuple[Program, List[Any], PyTreeDef]:
-    avals_in, in_tree = tree_flatten(avals_in)
+def make_program(f: Callable, *typecheckors_in: Typecheckor, static_args, name) -> Tuple[Program, List[Any], PyTreeDef]:
+    typecheckors_in, in_tree = tree_flatten(typecheckors_in)
     f, out_tree_store = flatten_fn(f, in_tree)
     builder = ProgramBuilder()
     with new_main(ProgramTrace, builder) as main:
         with new_dynamic(main):
             trace = ProgramTrace(main)
-            tracers_in = [trace.new_arg(aval) for aval in avals_in]
+            tracers_in = [trace.new_arg(typecheckor) for typecheckor in typecheckors_in]
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             # tracers_out = [full_raise(trace, out) for out in outs]
             # raise check because of aux is not ProgramTracor
@@ -1920,11 +1896,11 @@ def jvp_program(program: Program, static_args=()) -> Tuple[Program, List[Any]]:
         primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
         return jvp(program_as_fun(program), primals, tangents)
 
-    in_avals = tree_map(lambda v: v.aval, program.in_binders)
+    in_typecheckors = tree_map(lambda v: v.typecheckor, program.in_binders)
     new_program, new_consts, _ = make_program(
         jvp_traceable,
-        *in_avals,
-        *in_avals,
+        *in_typecheckors,
+        *in_typecheckors,
         static_args=static_args,
         name=f"{program.name}_jvp",
     )
@@ -2051,7 +2027,7 @@ def typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, 
 
 def linearize_flat(f, *primals_in, has_aux):
     pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(Typecheckor.like(get_aval(x))) for x in primals_in
+        make_unknown_pval(Typecheckor.like(get_typecheckor_or_tensor(x))) for x in primals_in
     ]
 
     def f_jvp(*primals_tangents_in):
@@ -2105,13 +2081,13 @@ def tracers_to_program(
 
     def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
         inputs = [tracer_to_var[id(t)] for t in draft.tracers_in]
-        out_binders = [Var(aval) for aval in draft.avals_out]
+        out_binders = [Var(typecheckor) for typecheckor in draft.typecheckors_out]
         for t_ref, var in list_zip(draft.tracer_refs_out, out_binders):
             if t_ref() is not None:
                 tracer_to_var[id(t_ref())] = var
         return Instruction(draft.prim, inputs, draft.params, out_binders)
 
-    tracer_to_var: Dict[int, Var] = {id(t): Var(Typecheckor.like(t.aval)) for t in tracers_in}
+    tracer_to_var: Dict[int, Var] = {id(t): Var(Typecheckor.like(t.typecheckor)) for t in tracers_in}
     constvar_to_val: Dict[int, Any] = {}
     constid_to_var: Dict[int, Var] = {}
     processed_instructions: Set[int] = set()
@@ -2123,8 +2099,8 @@ def tracers_to_program(
             val = t.draft.val
             var = constid_to_var.get(id(val))
             if var is None:
-                aval = Typecheckor.like(get_aval(val))
-                var = constid_to_var[id(val)] = Var(aval)
+                typecheckor = Typecheckor.like(get_typecheckor_or_tensor(val))
+                var = constid_to_var[id(val)] = Var(typecheckor)
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
         elif isinstance(t.draft, InstructionDraft):
@@ -2187,7 +2163,7 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
 
 def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(Typecheckor.like(get_aval(x))) for x in primals_in
+        make_unknown_pval(Typecheckor.like(get_typecheckor_or_tensor(x))) for x in primals_in
     ]
     _, tangent_pvals_in = split_half(pvals_in)
 
@@ -2208,7 +2184,7 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     primal_pvals, _ = split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [PrimalProxy(p.aval) for p in tangent_pvals_in]
+    transpose_inputs = consts + [PrimalProxy(p.typecheckor) for p in tangent_pvals_in]
     f_vjp_flat = lambda *cotangents: run_program_transposed(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
@@ -2237,14 +2213,14 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
     ct_env: Dict[Var, Any] = {}
 
     def read_primal(x: Atom) -> Any:
-        return primal_env.get(x, PrimalProxy(x.aval)) if type(x) is Var else x.val
+        return primal_env.get(x, PrimalProxy(x.typecheckor)) if type(x) is Var else x.val
 
     def write_primal(v: Var, val: Any) -> None:
         if type(val) is not PrimalProxy:
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, backend.zeros(v.aval.shape, v.aval.dtype))
+        return ct_env.pop(v, backend.zeros(v.typecheckor.shape, v.typecheckor.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -2268,13 +2244,13 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
 
 @lru_cache_verbose()
 def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
-    avals_in, avals_out = typecheck_program(program)
+    typecheckors_in, typecheckors_out = typecheck_program(program)
     traceable = partial(run_program_transposed, program)
-    args = [PrimalProxy(a) if u else a for a, u in zip(avals_in, undef_primals)]
+    args = [PrimalProxy(a) if u else a for a, u in zip(typecheckors_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,
         tuple(args),
-        tuple(avals_out),
+        tuple(typecheckors_out),
         static_args=program.static_args,
         name=f"{program.name}_T",
     )
@@ -2322,12 +2298,12 @@ def jit_partial_run(trace, tracers, *, program):
     outs1_res = backend.jit_op(*known_vals, program=program)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
+    outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.typecheckor), None) for v in program2.outs]
     draft = InstructionDraft(
         backend.jit_op,
         res_tracers + unknown_tracers,
         dict(program=program2),
-        [v.aval for v in program2.outs],
+        [v.typecheckor for v in program2.outs],
         map(weakref.ref, outs2),
     )
     for t in outs2:
@@ -2365,10 +2341,10 @@ class jit:
 
         static_args = tuple(static_args.items())
 
-        avals_in = tree_map(lambda x: Typecheckor.like(get_aval(x)), args)
+        typecheckors_in = tree_map(lambda x: Typecheckor.like(get_typecheckor_or_tensor(x)), args)
         if self.name is None:
-            self.name = f"jit_{str(hash((self.f, avals_in, static_args)))[1:5]}"
-        program, consts, out_tree = make_program(self.f, *avals_in, static_args=static_args, name=self.name)
+            self.name = f"jit_{str(hash((self.f, typecheckors_in, static_args)))[1:5]}"
+        program, consts, out_tree = make_program(self.f, *typecheckors_in, static_args=static_args, name=self.name)
         return program, consts, out_tree
 
     def __call__(self, *args, **static_args):

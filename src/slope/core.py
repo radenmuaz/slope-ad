@@ -210,6 +210,7 @@ class DType(NamedTuple):
     def __repr__(self):
         return f"{self.name}"
 
+
 class TensorBuffer:
     def __init__(self, val):
         self.val = val
@@ -355,11 +356,11 @@ class Typecheckor(Tensor):
         self.shape = tuple(int(i) for i in shape)
         self.dtype = dtype
         assert isinstance(dtype, DType)
-    
+
     @property
     def shape(self):
         return self._shape
-    
+
     @property
     def dtype(self):
         return self._dtype
@@ -367,7 +368,7 @@ class Typecheckor(Tensor):
     @shape.setter
     def shape(self, shape):
         self._shape = shape
-    
+
     @dtype.setter
     def dtype(self, dtype):
         self._dtype = dtype
@@ -410,19 +411,9 @@ class Typecheckor(Tensor):
 # ================
 
 
-class OperatorType(Enum):
-    Unary = auto()
-    Binary = auto()
-    Reduce = auto()
-    Init = auto()
-    Other = auto()
-    Meta = auto()
-
-
 class Operator:
-    def __init__(self, name, op_type=OperatorType.Meta, nary_inputs=False, nary_outputs=False):
+    def __init__(self, name, nary_inputs=False, nary_outputs=False):
         self.name = name
-        self.op_type = op_type
         self.nary_inputs = nary_inputs
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
@@ -525,193 +516,167 @@ class Operator:
 
         return instruction1, instruction2, unks_out, res
 
-    def set_method(self, method):
-        setattr(self, method.__name__, types.MethodType(method, self))
 
-    @classmethod
-    def unary(cls, name, **kwargs):
-        op = cls(name, OperatorType.Unary, **kwargs)
+class MetaOperator(Operator):
+    def meta_impl(self, *args, **kwargs):
+        raise NotImplementedError
 
-        @op.set_method
-        def vmap(self, x, *, dim_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            return [self(x, **params)], [x_bdim]
 
-        @op.set_method
-        def typecheck(self, x, **params):
-            return [Typecheckor(x.shape, x.dtype)]
+class UnaryOperator(Operator):
+    def vmap(self, x, *, dim_size, vals_in, dims_in, **params):
+        (x,), (x_bdim,) = vals_in, dims_in
+        return [self(x, **params)], [x_bdim]
 
-        @op.set_method
-        def jvp(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
+    def typecheck(self, x, **params):
+        return [Typecheckor(x.shape, x.dtype)]
 
-        return op
+    def jvp(self, primals, tangents, **params):
+        (x,), (x_dot,) = primals, tangents
+        return [self(x, **params)], [self(x_dot, **params)]
 
-    @classmethod
-    def binary(cls, name, **kwargs):
-        op = cls(name, OperatorType.Binary, **kwargs)
 
-        @op.set_method
-        def args_fixer(self, x, w, **params):
-            if type(x) is PrimalProxy or type(w) is PrimalProxy:
-                assert x.shape == w.shape
-                return (x, w), params
-
-            if type(x) in Tracor.PYTHON_TYPES:
-                x = backend.full(shape=(), fill_value=x, dtype=w.dtype)
-            elif type(w) in Tracor.PYTHON_TYPES:
-                w = backend.full(shape=(), fill_value=w, dtype=x.dtype)
-
-            if type(x) is Tensor and isinstance(w, Tracor):
-                x = w._trace.pure(x)
-            elif type(w) is Tensor and isinstance(x, Tracor):
-                w = x._trace.pure(w)
-
-            if (xshape := x.shape) == (wshape := w.shape):
-                return (x, w), params
-            shape_delta = len(xshape) - len(wshape)
-            if shape_delta > 0:
-                w = w.reshape((1,) * shape_delta + wshape)
-            elif shape_delta < 0:
-                x = x.reshape((1,) * -shape_delta + xshape)
-            if (xshape := x.shape) == (wshape := w.shape):
-                return (x, w), params
-
-            shape_ret = tuple([max(x, w) for x, w in zip(xshape, wshape)])
-            if xshape != shape_ret:
-                x = x.expand(shape_ret)
-            if wshape != shape_ret:
-                w = w.expand(shape_ret)
+class BinaryOperator(Operator):
+    def args_fixer(self, x, w, **params):
+        if type(x) is PrimalProxy or type(w) is PrimalProxy:
+            assert x.shape == w.shape
             return (x, w), params
 
-        @op.set_method
-        def vmap(self, dim_size, vals_in, dims_in, **params):
-            (x, w), (x_bdim, y_bdim) = vals_in, dims_in
-            if x_bdim != y_bdim:
-                if x_bdim is None:
-                    x = BatchTrace.move_batch_dim(dim_size, x_bdim, y_bdim, x)
-                    x_bdim = y_bdim
-                else:
-                    y = BatchTrace.move_batch_dim(dim_size, y_bdim, x_bdim, y)
-            return [self(x, w, **params)], [x_bdim]
+        if type(x) in Tracor.PYTHON_TYPES:
+            x = backend.full(shape=(), fill_value=x, dtype=w.dtype)
+        elif type(w) in Tracor.PYTHON_TYPES:
+            w = backend.full(shape=(), fill_value=w, dtype=x.dtype)
 
-        @op.set_method
-        def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
-            if not type(x) in (Tensor, Typecheckor) or not type(x) in (
-                Tensor,
-                Typecheckor,
-            ):
-                raise TypeError
-            void_x = Typecheckor.like(x)
-            void_y = Typecheckor.like(y)
-            if x.dtype != y.dtype:
-                raise TypeError
-            if void_x == void_y:
-                return [void_x]
-            shape_delta = len(void_x.shape) - len(void_y.shape)
-            if shape_delta > 0:
-                void_y = Typecheckor((1,) * shape_delta + void_y.shape, void_y.dtype)
-            elif shape_delta < 0:
-                x = x.reshape((1,) * -shape_delta + void_x.shape)
-                void_x = Typecheckor((1,) * -shape_delta + void_x.shape, void_x.dtype)
-            if void_x == void_y:
-                return [void_x]
+        if type(x) is Tensor and isinstance(w, Tracor):
+            x = w._trace.pure(x)
+        elif type(w) is Tensor and isinstance(x, Tracor):
+            w = x._trace.pure(w)
+
+        if (xshape := x.shape) == (wshape := w.shape):
+            return (x, w), params
+        shape_delta = len(xshape) - len(wshape)
+        if shape_delta > 0:
+            w = w.reshape((1,) * shape_delta + wshape)
+        elif shape_delta < 0:
+            x = x.reshape((1,) * -shape_delta + xshape)
+        if (xshape := x.shape) == (wshape := w.shape):
+            return (x, w), params
+
+        shape_ret = tuple([max(x, w) for x, w in zip(xshape, wshape)])
+        if xshape != shape_ret:
+            x = x.expand(shape_ret)
+        if wshape != shape_ret:
+            w = w.expand(shape_ret)
+        return (x, w), params
+
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w), (x_bdim, y_bdim) = vals_in, dims_in
+        if x_bdim != y_bdim:
+            if x_bdim is None:
+                x = BatchTrace.move_batch_dim(dim_size, x_bdim, y_bdim, x)
+                x_bdim = y_bdim
             else:
-                shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
-                if void_x.shape != shape_ret:
-                    void_x = Typecheckor(shape_ret, void_x.dtype)
-                if void_y.shape != shape_ret:
-                    void_y = Typecheckor(shape_ret, void_y.dtype)
-                if void_x != void_y:
-                    raise TypeError
-                return [void_x]
+                y = BatchTrace.move_batch_dim(dim_size, y_bdim, x_bdim, y)
+        return [self(x, w, **params)], [x_bdim]
 
-        @op.set_method
-        def jvp(self, primals, tangents, **params):
-            (x,), (x_dot,) = primals, tangents
-            return [self(x, **params)], [self(x_dot, **params)]
+    def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
+        if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+            Tensor,
+            Typecheckor,
+        ):
+            raise TypeError
+        void_x = Typecheckor.like(x)
+        void_y = Typecheckor.like(y)
+        if x.dtype != y.dtype:
+            raise TypeError
+        if void_x == void_y:
+            return [void_x]
+        shape_delta = len(void_x.shape) - len(void_y.shape)
+        if shape_delta > 0:
+            void_y = Typecheckor((1,) * shape_delta + void_y.shape, void_y.dtype)
+        elif shape_delta < 0:
+            x = x.reshape((1,) * -shape_delta + void_x.shape)
+            void_x = Typecheckor((1,) * -shape_delta + void_x.shape, void_x.dtype)
+        if void_x == void_y:
+            return [void_x]
+        else:
+            shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
+            if void_x.shape != shape_ret:
+                void_x = Typecheckor(shape_ret, void_x.dtype)
+            if void_y.shape != shape_ret:
+                void_y = Typecheckor(shape_ret, void_y.dtype)
+            if void_x != void_y:
+                raise TypeError
+            return [void_x]
 
-        return op
+    def jvp(self, primals, tangents, **params):
+        (x,), (x_dot,) = primals, tangents
+        return [self(x, **params)], [self(x_dot, **params)]
 
-    @classmethod
-    def reduce(cls, name, **kwargs):
-        op = cls(name, OperatorType.Reduce, **kwargs)
 
-        @op.set_method
-        def args_fixer(self, x, *, dim=None, keepdim=False):
-            if dim is None:
-                dim = tuple(range(x.ndim))
-            elif isinstance(dim, int):
-                dim = (dim,)
-            dim = tuple(a if a >= 0 else a + len(x.shape) for a in dim)
-            return (x,), dict(dim=dim, keepdim=keepdim)
+class ReduceOperator(Operator):
+    def args_fixer(self, x, *, dim=None, keepdim=False):
+        if dim is None:
+            dim = tuple(range(x.ndim))
+        elif isinstance(dim, int):
+            dim = (dim,)
+        dim = tuple(a if a >= 0 else a + len(x.shape) for a in dim)
+        return (x,), dict(dim=dim, keepdim=keepdim)
 
-        @op.set_method
-        def vmap(self, dim_size, vals_in, dims_in, **params):
-            (x,), (x_bdim,) = vals_in, dims_in
-            dim = list(params["dim"])
-            dim = tuple(a + (x_bdim <= a) for a in dim)
-            out_bdim = x_bdim - sum(a < x_bdim for a in dim)
-            params["dim"] = tuple(dim)
-            return [cls.do(x, **params)], [out_bdim]
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x,), (x_bdim,) = vals_in, dims_in
+        dim = list(params["dim"])
+        dim = tuple(a + (x_bdim <= a) for a in dim)
+        out_bdim = x_bdim - sum(a < x_bdim for a in dim)
+        params["dim"] = tuple(dim)
+        return [cls.do(x, **params)], [out_bdim]
 
-        @op.set_method
-        def typecheck(self, x: Typecheckor, *, dim=None, keepdim=False) -> List[Typecheckor]:
-            dim = [a + len(x.shape) if a < 0 else a for a in dim]
-            dim_ = set(dim)
-            if keepdim:
-                new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
-            else:
-                new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
-            return [Typecheckor(tuple(new_shape), x.dtype)]
+    def typecheck(self, x: Typecheckor, *, dim=None, keepdim=False) -> List[Typecheckor]:
+        dim = [a + len(x.shape) if a < 0 else a for a in dim]
+        dim_ = set(dim)
+        if keepdim:
+            new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
+        else:
+            new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
+        return [Typecheckor(tuple(new_shape), x.dtype)]
 
-        return op
 
-    @classmethod
-    def init(cls, name, **kwargs):
-        op = cls(name, OperatorType.Init, **kwargs)
+class InitOperator(Operator):
+    def jvp(self, primals, tangents, **kwargs):
+        out = self(**kwargs)
+        out_jvp = backend.ones_like(out)
+        return [out], [out_jvp]
 
-        @op.set_method
-        def jvp(self, primals, tangents, **kwargs):
-            out = self(**kwargs)
-            out_jvp = ones_like(out)
-            return [out], [out_jvp]
+    def T(self, cotangents, **kwargs):
+        return [None]
 
-        @op.set_method
-        def T(self, cotangents, **kwargs):
-            return [None]
 
-        return op
-
-    @classmethod
-    def other(cls, name, **kwargs):
-        op = cls(name, OperatorType.Other, **kwargs)
-        return op
+class ShapeOperator(Operator):
+    pass
 
 
 class OperatorSet:
-    def register(self, op):
-        assert op.name not in vars(self)
-        setattr(self, op.name, op)
-
-    def alias(self, op, name):
-        assert op.name in vars(self)
-        setattr(self, name, getattr(self, op.name))
-
-
-class ProcedureSet:
-    def register(self):
-        def wrap(f):
-            assert f.__name__ not in vars(self)
-            setattr(self, f.__name__, f)
-            return f
+    def register(self, name, nary_inputs=False, nary_outputs=False, aliases=()):
+        def wrap(op_cls):
+            assert name not in vars(self)
+            op = op_cls(name, nary_inputs, nary_outputs)
+            setattr(self, name, op)
+            for a in aliases:
+                setattr(self, a, op)
+            return op_cls
 
         return wrap
 
-    def alias(self, fn, name):
-        assert fn in vars(self).values()
-        setattr(self, name, fn)
+
+class ProcedureSet:
+    def register(self, aliases=()):
+        def wrap(f):
+            assert f.__name__ not in vars(self)
+            setattr(self, f.__name__, f)
+            for a in aliases:
+                setattr(self, a, f)
+            return f
+
+        return wrap
 
 
 class Backend:
@@ -732,7 +697,7 @@ class Backend:
         self.operator_set = operator_set
         self.procedure_set = procedure_set
         self.compiler = compiler
-        self.operator_set.register(jit_op)
+        self.operator_set.register("jit_op")(JitOp)
         self.node_types = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
         self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
@@ -1002,102 +967,87 @@ class JitObject:
         return backend.compiler.export(self, output_path, *args, **params)
 
 
-jit_op = Operator("jit_op", op_type=OperatorType.Meta)
+class JitOp(MetaOperator):
+    def meta_impl(self, *args, program):
+        hashed_program = Hashed(program)
+        num_consts = program.num_consts
+        consts, args = args[:num_consts], args[num_consts:]
+        hashed_consts = tuple(map(Hashed, consts))
+        jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
+        ret = jit_object(*consts, *args)
+        return ret
 
+    def reorg_args(self, args, params):
+        return args, params
 
-@jit_op.set_method
-def run_impl(self, *args, program):
-    hashed_program = Hashed(program)
-    num_consts = program.num_consts
-    consts, args = args[:num_consts], args[num_consts:]
-    hashed_consts = tuple(map(Hashed, consts))
-    jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
-    ret = jit_object(*consts, *args)
-    return ret
+    def jvp(self, primals, tangents, *, program):
+        new_program, new_consts = jvp_program(program)
+        outs = bind(
+            self,
+            *new_consts,
+            *primals,
+            *tangents,
+            program=new_program,
+        )
+        n = len(outs) // 2
+        primals_out, tangents_out = outs[:n], outs[n:]
+        return primals_out, tangents_out
 
+    def typecheck(self, *in_types, program):
+        program_type = typecheck_program(program)
+        if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+            for i, j in zip(program_type.in_types, in_types):
+                print(i, j, i == j)
+            breakpoint()
+            raise TypeError
+        return program_type.out_types
 
-@jit_op.set_method
-def reorg_args(self, args, params):
-    return args, params
+    def T(self, cotangents, *invals, program):
+        undef_primals = [type(x) is PrimalProxy for x in invals]
+        transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
 
-
-@jit_op.set_method
-def jvp(self, primals, tangents, *, program):
-    new_program, new_consts = jvp_program(program)
-    outs = bind(
-        self,
-        *new_consts,
-        *primals,
-        *tangents,
-        program=new_program,
-    )
-    n = len(outs) // 2
-    primals_out, tangents_out = outs[:n], outs[n:]
-    return primals_out, tangents_out
-
-
-@jit_op.set_method
-def typecheck(self, *in_types, program):
-    program_type = typecheck_program(program)
-    if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-        for i, j in zip(program_type.in_types, in_types):
-            print(i, j, i == j)
+        residuals, _ = partition_list(undef_primals, invals)
+        outs = bind(
+            self,
+            *new_consts,
+            *residuals,
+            *cotangents,
+            program=transposed_program,
+        )
+        outs = iter(outs)
         breakpoint()
-        raise TypeError
-    return program_type.out_types
+        return [next(outs) if undef else None for undef in undef_primals]
 
+    def partial_run(self, trace, tracers, *, program):
+        in_unknowns = [not t.pval.is_known for t in tracers]
+        program1, program2, out_unknowns, num_res = partial_run_program(program, in_unknowns)
+        known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
+        known_vals = [t.pval.const for t in known_tracers]
+        outs1_res = bind(backend.jit_op, *known_vals, program=program1)
+        outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
+        res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
+        outs2 = [PartialRunTracor(trace, make_unknown_pval(v.aval), None) for v in program2.outs]
+        instruction = InstructionDraft(
+            self,
+            res_tracers + unknown_tracers,
+            dict(program=program2),
+            [v.aval for v in program2.outs],
+            list_map(weakref.ref, outs2),
+        )
+        for t in outs2:
+            t.draft = instruction
 
-@jit_op.set_method
-def T(self, cotangents, *invals, program):
-    undef_primals = [type(x) is PrimalProxy for x in invals]
-    transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
+        return merge_lists(out_unknowns, outs1, outs2)
 
-    residuals, _ = partition_list(undef_primals, invals)
-    outs = bind(
-        self,
-        *new_consts,
-        *residuals,
-        *cotangents,
-        program=transposed_program,
-    )
-    outs = iter(outs)
-    breakpoint()
-    return [next(outs) if undef else None for undef in undef_primals]
-
-
-@jit_op.set_method
-def partial_run(self, trace, tracers, *, program):
-    in_unknowns = [not t.pval.is_known for t in tracers]
-    program1, program2, out_unknowns, num_res = partial_run_program(program, in_unknowns)
-    known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
-    known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = bind(jit_op, *known_vals, program=program1)
-    outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
-    res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTracor(trace, make_unknown_pval(v.aval), None) for v in program2.outs]
-    instruction = InstructionDraft(
-        self,
-        res_tracers + unknown_tracers,
-        dict(program=program2),
-        [v.aval for v in program2.outs],
-        list_map(weakref.ref, outs2),
-    )
-    for t in outs2:
-        t.draft = instruction
-
-    return merge_lists(out_unknowns, outs1, outs2)
-
-
-@jit_op.set_method
-def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
-    program = instruction.params["program"]
-    program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
-    ins1, ins2 = partition_list(unks_in, instruction.inputs)
-    out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
-    res = [Var(v.aval) for v in program2.in_binders[:num_res]]
-    instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
-    instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
-    return instruction1, instruction2, out_unknowns, res
+    def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
+        program = instruction.params["program"]
+        program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
+        ins1, ins2 = partition_list(unks_in, instruction.inputs)
+        out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
+        res = [Var(v.aval) for v in program2.in_binders[:num_res]]
+        instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
+        instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
+        return instruction1, instruction2, out_unknowns, res
 
 
 # ================
@@ -1247,10 +1197,10 @@ class RunTrace(Trace):
     pure = lambda self, x: x
 
     def run_op(self, op: Operator, args, params):
-        if op.op_type is OperatorType.Meta:
+        if isinstance(op, MetaOperator):
             args, params = op.reorg_args(args, params)
             args, params = op.args_fixer(*args, **params)
-            ret = op.run_impl(*args, **params)
+            ret = op.meta_impl(*args, **params)
         else:
             fn = self.get_fn(op, *tuple(Typecheckor.like(a) for a in args), **params)
             ret = jit(fn, static_argnames=("params",), name=op.get_jit_name(args, params))(*args, **params)
@@ -2369,12 +2319,12 @@ def jit_partial_run(trace, tracers, *, program):
     program1, program2, out_unknowns, num_res = partial_run_program(program, in_unknowns)
     known_tracers, unknown_tracers = partition_list(in_unknowns, tracers)
     known_vals = [t.pval.const for t in known_tracers]
-    outs1_res = jit_op(*known_vals, program=program)
+    outs1_res = backend.jit_op(*known_vals, program=program)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
     outs2 = [PartialRunTracor(trace, PartialValue.unknown(v.aval), None) for v in program2.outs]
     draft = InstructionDraft(
-        jit_op,
+        backend.jit_op,
         res_tracers + unknown_tracers,
         dict(program=program2),
         [v.aval for v in program2.outs],
@@ -2424,7 +2374,7 @@ class jit:
     def __call__(self, *args, **static_args):
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
-        outs = bind(jit_op, *consts, *args, program=program)
+        outs = bind(backend.jit_op, *consts, *args, program=program)
         return tree_unflatten(out_tree, outs)
 
     def get_jit_object(self, *args, **static_args):

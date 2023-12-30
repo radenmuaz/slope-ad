@@ -4,6 +4,7 @@ from slope.core import (
     Compiler,
     Backend,
     Operator,
+    MetaOperator,
     OperatorSet,
     ProcedureSet,
     Tensor,
@@ -12,7 +13,6 @@ from slope.core import (
     PrimalProxy,
     list_zip,
     list_map,
-    jit_op,
 )
 
 import math
@@ -199,8 +199,8 @@ class IREECompiler(Compiler):
                 env[outb] = dict(name=f"{prefix}{idx}", type=outb.aval)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
-            if instruction.op.op_type is slope.core.OperatorType.Meta:
-                impl_code, fn_defs = self.impls[instruction.op](args, instruction, in_vals, fn_defs)
+            if isinstance(instruction.op, MetaOperator):
+                impl_code, fn_defs = self.impls[instruction.op.__class__](args, instruction, in_vals, fn_defs)
             else:
                 if instruction.op not in backend.compiler.impls.keys():
                     op = instruction.op
@@ -518,7 +518,7 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 """
 
 
-@compiler.set_impl(jit_op)
+@compiler.set_impl(slope.core.JitOp)
 def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
     jit_name = f"{jit_program.name}"

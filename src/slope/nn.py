@@ -325,7 +325,6 @@ def glorot_uniform(
     )
 
 
-
 # ====================
 # Layers
 # ====================
@@ -418,7 +417,6 @@ class AvgPool2d(Module):
 
     def __call__(self, x):
         return x.avgpool2d(self.kernel_size, self.stride)
-
 
 
 class MaxPool2d(Module):

@@ -571,6 +571,7 @@ def avgpool2d(x, kernel_size=(2, 2), stride=None):
         dim=tuple(range(0 - len(make_pair(kernel_size)), 0))
     )
 
+
 @procedure_set.register()
 def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:

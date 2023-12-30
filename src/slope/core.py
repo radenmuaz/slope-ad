@@ -210,7 +210,6 @@ class DType(NamedTuple):
     def __repr__(self):
         return f"{self.name}"
 
-
 class TensorBuffer:
     def __init__(self, val):
         self.val = val
@@ -349,20 +348,29 @@ class Tensor:
         return f"Tensor: {self.numpy()}, {self.shape}, {self.dtype}, {self.device}"
 
 
-class Typecheckor:
+class Typecheckor(Tensor):
     def __init__(self, shape, dtype):
+        self._shape = None
+        self._dtype = None
         self.shape = tuple(int(i) for i in shape)
         self.dtype = dtype
         assert isinstance(dtype, DType)
-        # assert all(isinstance(i, int) for i in self.shape)
+    
+    @property
+    def shape(self):
+        return self._shape
+    
+    @property
+    def dtype(self):
+        return self._dtype
 
-    # @property
-    # def dtype(self):
-    #     return backend.compiler.dtype_of(self)
-
-    # @property
-    # def device(self):
-    #     return backend.compiler.device_of(self)
+    @shape.setter
+    def shape(self, shape):
+        self._shape = shape
+    
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype
 
     @classmethod
     def like(cls, aval):
@@ -551,9 +559,9 @@ class Operator:
                 return (x, w), params
 
             if type(x) in Tracor.PYTHON_TYPES:
-                x = full(shape=(), fill_value=x, dtype=w.dtype)
+                x = backend.full(shape=(), fill_value=x, dtype=w.dtype)
             elif type(w) in Tracor.PYTHON_TYPES:
-                w = full(shape=(), fill_value=w, dtype=x.dtype)
+                w = backend.full(shape=(), fill_value=w, dtype=x.dtype)
 
             if type(x) is Tensor and isinstance(w, Tracor):
                 x = w._trace.pure(x)
@@ -740,6 +748,7 @@ class Backend:
             lambda aval, _: PrimalProxy(aval),
             "PrimalProxy",
         )
+
     def __repr__(self):
         return f"<Backend: compiler={self.compiler} >"
 
@@ -1099,21 +1108,21 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 class Compiler:
     name: str
     dtype_map: dict
+
     def __init__(self):
         self.impls = dict()
         self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
-    
+
     @property
     def default_dtype_value(self):
         return self.dtype_map[backend.DEFAULT_DTYPE]
-    
+
     def __repr__(self):
         return f"<Compiler: name={self.name}>"
         # return f"<Compiler: name={self.name}, device={backend.default_device}>"
 
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
-
 
     def from_numpy(self, val):
         raise NotImplementedError
@@ -1612,7 +1621,6 @@ def set_backend(init_backend):
     dblog(f"slope backend is {backend}", enable=backend.LOG_INIT)
 
 
-
 def stack_str():
     ret = ""
     for trace in trace_stack:
@@ -1682,12 +1690,11 @@ def tree_unflatten(treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
 
 
 def tree_transpose(
-    self,
     outer_treedef: PyTreeDef,
     inner_treedef: PyTreeDef,
-    pytree_to_permute: Any,
+    pytree_to_transpose: Any,
 ) -> Any:
-    flat, treedef = tree_flatten(pytree_to_permute)
+    flat, treedef = tree_flatten(pytree_to_transpose)
     inner_size = inner_treedef.num_leaves
     outer_size = outer_treedef.num_leaves
     if treedef.num_leaves != (inner_size * outer_size):
@@ -2140,7 +2147,6 @@ def linearize(f, *primals_in, has_aux=False):
 
 
 def tracers_to_program(
-    self,
     tracers_in: List["PartialRunTracor"],
     tracers_out: List["PartialRunTracor"],
 ):

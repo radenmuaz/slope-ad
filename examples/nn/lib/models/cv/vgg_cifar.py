@@ -1,7 +1,7 @@
 import math
 
 import slope
-from slope.system import nn
+from slope import nn
 
 __all__ = ["vgg"]
 

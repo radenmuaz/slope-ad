@@ -1,5 +1,5 @@
 import slope
-import slope.system.nn as nn
+import slope.nn as nn
 import math
 x = slope.ones((1, 2))
 y = slope.full((1,), 1)

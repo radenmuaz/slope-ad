@@ -201,7 +201,7 @@ class IREECompiler(Compiler):
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
-                impl_code, fn_defs = self.impls[instruction.op](args, instruction, in_vals, fn_defs)
+                impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
             else:
                 if instruction.op not in slope.core.backend.compiler.impls.keys():
                     # No impl is defined, fallback to procedure
@@ -294,7 +294,7 @@ def log_impl(self, x, y):
 
 @compiler.set_impl(operator_set.sin)
 def sin_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.sin"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
+    return f'{y["name"]} = "stablehlo.sine"({x["name"]}) {type_mlir_sig((x["type"],), y["type"])}'
 
 
 @compiler.set_impl(operator_set.invert)
@@ -535,8 +535,9 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     assert jit_name not in fn_defs.keys()
     fn_defs[jit_name] = jit_codegen_out["code_lines"]
     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-    args_str = ", ".join(in_vals)
-    ret = f"{out_vals} = slope.{jit_name}({args_str})"
+    args_str = ", ".join(i["name"] for i in in_vals)
+    sig = type_mlir_sig(tuple(i["type"] for i in in_vals), out_vals[0]["type"])
+    ret = f"{', '.join(o['name'] for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}" 
     return ret, fn_defs
 
 

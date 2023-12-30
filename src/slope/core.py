@@ -1585,17 +1585,13 @@ def tree_flatten(x: Any) -> Any:
 
         if node_type is not None:
             node_metadata, children = node_type.flatten(x_)
-
-            # print(f'flattened {x_}\n\n  children:\n{children}\n\n  metadata:\n{node_metadata}\n')
             children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
             children_iter = itertools.chain.from_iterable(children_flat)
             treedef = PyTreeDef(node_type, node_metadata, tuple(child_trees))
             return children_iter, treedef
         else:
-            # print(f'    leaf found: {x_}\n')
             return (x_,), Leaf(x_)
 
-    # print(f"flattening {x} of {type(x)}")
     children_iter, treedef = _tree_flatten(x)
     return tuple(children_iter), treedef
 
@@ -1691,10 +1687,8 @@ def new_dynamic(main: MainTrace):
 
 def bind(op, *args, **params):
     top_trace = find_top_trace(args)
-    # tracers = tree_map(partial(full_raise, top_trace), args)
     tracers = tuple([full_raise(top_trace, arg) for arg in args])
     outs = top_trace.run_op(op, tracers, params)
-    # lowered = tree_map(full_lower, outs)
     lowered = tuple([full_lower(out) for out in outs])
     return lowered
 
@@ -1732,7 +1726,7 @@ def full_raise(trace: Trace, val: Any) -> Tracor:
         return trace.pure(val)
     elif val._trace.main.level > level:
         raise Exception(f"Can't lift level {val._trace.main.level} to {level}.")
-    else:  # val._trace.level == level
+    else:
         raise Exception(f"Different traces at same level: {val._trace}, {trace}.")
 
 
@@ -2260,8 +2254,7 @@ def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tupl
 
 
 def grad(f, argnums=(0,), argnames="", has_aux=False, return_value=False):
-    if isinstance(f, jit):
-        f = f.f
+    f, rejit = (f, False) if not isinstance(f, jit) else (f.f, True)
     if isinstance(argnums, int):
         argnums = (argnums,)
 
@@ -2280,10 +2273,7 @@ def grad(f, argnums=(0,), argnames="", has_aux=False, return_value=False):
         else:
             return (grad_L_xs, aux) if has_aux else grad_L_xs
 
-    if isinstance(f, jit):
-        return jit(grad_fn)
-    else:
-        return grad_fn
+    return jit(grad_fn) if rejit else grad_fn
 
 
 def value_and_grad(f, argnums=(0,), argnames="", has_aux=False):

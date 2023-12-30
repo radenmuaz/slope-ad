@@ -15,8 +15,7 @@ import numpy as np
 
 class Module:
     def __hash__(self):
-        self_flat, tree = slope.tree_flatten(self)
-        # TODO: also use tree to compute hash
+        self_flat, treedef = slope.tree_flatten(self)
         return hash(self_flat)
 
     def __eq__(self, other):

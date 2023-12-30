@@ -1,5 +1,5 @@
 import slope
-import slope.nn as nn
+import slope.system.nn as nn
 x = slope.ones((1, 3, 16, 16))
 x_dot = slope.ones((1, 3, 16, 16))
 w = slope.ones((8, 3, 3, 3)) * 2

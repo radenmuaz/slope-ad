@@ -1,5 +1,5 @@
 import slope
-import slope.nn as nn
+import slope.system.nn as nn
 
 import time
 import itertools

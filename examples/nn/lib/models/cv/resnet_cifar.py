@@ -1,6 +1,6 @@
 import math
 import slope
-from slope import nn
+from slope.system import nn
 from functools import partial
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"

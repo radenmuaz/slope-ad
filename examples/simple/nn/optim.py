@@ -1,5 +1,5 @@
 import slope
-from slope import nn
+from slope.system import nn
 
 import math
 

@@ -107,13 +107,13 @@ def lru_cache_verbose(maxsize: int = 100, typed: bool = False, tb_start: int = -
             result = wrapper(*args, **kwargs)
             cache_info = wrapper.cache_info()
 
-            dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=LOG_LRU)
+            dblog(f"{fn.__name__}.{cache_info} {args.__hash__()}", enable=backend.LOG_LRU)
             tb = (
                 "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace("\n    ", ":\t")
                 + "-" * 20
                 + "\n"
             )
-            dblog(f"{tb}", enable=LOG_LRU)
+            dblog(f"{tb}", enable=backend.LOG_LRU)
 
             return result
 
@@ -707,6 +707,14 @@ class ProcedureSet:
 
 
 class Backend:
+    LOG_LRU = int(os.environ.get("LOG_LRU", 0))
+    LOG_JIT = int(os.environ.get("LOG_JIT", 0))
+    LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
+    LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
+    LOG_INIT = int(os.environ.get("LOG_INIT", 1))
+    DEFAULT_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
+    DEFAULT_DTYPE = Tensor.dtype_names[os.environ.get("SLOPE_DTYPE", "float32")]
+
     def __init__(
         self,
         operator_set: OperatorSet,
@@ -732,6 +740,8 @@ class Backend:
             lambda aval, _: PrimalProxy(aval),
             "PrimalProxy",
         )
+    def __repr__(self):
+        return f"<Backend: compiler={self.compiler} >"
 
     def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable, name=None) -> None:
         if name is None:
@@ -740,16 +750,16 @@ class Backend:
 
     def __getattr__(self, attr):
         try:
-            dblog(f"Looking {self}.{attr} in operator_set", enable=LOG_BACKEND)
+            dblog(f"Looking {self}.{attr} in operator_set", enable=backend.LOG_BACKEND)
             return getattr(self.operator_set, attr)
         except:
             pass
         try:
-            dblog(f"Looking {self}.{attr} in procedure_set", enable=LOG_BACKEND)
+            dblog(f"Looking {self}.{attr} in procedure_set", enable=backend.LOG_BACKEND)
             return getattr(self.procedure_set, attr)
         except:
             pass
-        dblog(f"Fallback to default {self} getattribute", enable=LOG_BACKEND)
+        dblog(f"Fallback to default {self} getattribute", enable=backend.LOG_BACKEND)
         super().__getattribute__(attr)
 
     def tensor(
@@ -975,7 +985,7 @@ class JitObject:
             if not isinstance(outs, tuple):  # TODO: IREE FunctionInvoker destructure 1-tuple, need to undo
                 outs = (outs,)
         except Exception as e:
-            dblog(self.code, enable=LOG_JIT)
+            dblog(self.code, enable=backend.LOG_JIT)
             raise
         return [backend.tensor(TensorBuffer(o)) for o in outs]
 
@@ -1087,20 +1097,23 @@ def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, In
 
 
 class Compiler:
-    def __init__(self, name, default_dtype=Tensor.float32, default_device="cpu"):
-        self.name = name
-        self.default_dtype = default_dtype
-        self.default_device = default_device
+    name: str
+    dtype_map: dict
+    def __init__(self):
         self.impls = dict()
-        self.dtype_map = dict()
-        self.dtype_map_inv = dict()
+        self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
+    
+    @property
+    def default_dtype_value(self):
+        return self.dtype_map[backend.DEFAULT_DTYPE]
+    
+    def __repr__(self):
+        return f"<Compiler: name={self.name}>"
+        # return f"<Compiler: name={self.name}, device={backend.default_device}>"
 
     def set_method(self, method):
         setattr(self, method.__name__, types.MethodType(method, self))
 
-    @property
-    def default_dtype_value(self):
-        return self.dtype_map[self.default_dtype]
 
     def from_numpy(self, val):
         raise NotImplementedError
@@ -1580,42 +1593,24 @@ class PartialRunTrace(Trace):
         return op.partial_run(self, tracers, **params)
 
 
-# global vars
-
-
-LOG_LRU = int(os.environ.get("LOG_LRU", 0))
-LOG_JIT = int(os.environ.get("LOG_JIT", 0))
-LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
-LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
-LOG_INIT = int(os.environ.get("LOG_INIT", 1))
-INLINE_PROCEDURE = int(os.environ.get("INLINE_PROCEDURE", 0))
-SLOPE_DEVICE = os.environ.get("SLOPE_DEVICE", "cpu")
-SLOPE_DTYPE = Tensor.dtype_names[os.environ.get("SLOPE_DTYPE", "float32")]
-SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
-NO_JIT = int(os.environ.get("NO_JIT", 0))
-backend_registry = dict(
-    numpy="backends.numpy_backend", onnxruntime="backends.numpy_backend", iree="backends.iree_backend.iree_backend"
-)
-
 trace_stack: List[MainTrace] = []
 dynamic_trace: Optional[MainTrace] = None
 trace_stack += [MainTrace(0, RunTrace, None)]
 
 
-class LazyInitBackend:
+class BackendPlaceholder:
     def __getattr__(self, attr):
-        return getattr(get_backend(), attr)
+        raise NotImplementedError("Backend not init yet with slope.core.set_backend(backend)")
 
 
-backend = LazyInitBackend()
+backend = BackendPlaceholder()
 
 
-def get_backend():
+def set_backend(init_backend):
     global backend
-    if type(backend) is LazyInitBackend:
-        backend = importlib.import_module("slope", backend_registry[SLOPE_BACKEND])
-        dblog(f"Auto init with {backend}", enable=LOG_INIT)
-    return backend
+    backend = init_backend
+    dblog(f"slope backend is {backend}", enable=backend.LOG_INIT)
+
 
 
 def stack_str():
@@ -1674,15 +1669,15 @@ def tree_flatten(x: Any) -> Any:
 def tree_unflatten(treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
     def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
         if isinstance(treedef_, Leaf):
-            dblog(f"    tree leaf found: {xs_}\n", enable=LOG_PYTREE)
+            dblog(f"    tree leaf found: {xs_}\n", enable=backend.LOG_PYTREE)
             return next(xs_)
         else:
-            dblog(f"    now\n  {treedef_}", enable=LOG_PYTREE)
+            dblog(f"    now\n  {treedef_}", enable=backend.LOG_PYTREE)
             children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-            dblog(f"{children=}\n", enable=LOG_PYTREE)
+            dblog(f"{children=}\n", enable=backend.LOG_PYTREE)
             return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-    dblog(f"unflattening {treedef}", enable=LOG_PYTREE)
+    dblog(f"unflattening {treedef}", enable=backend.LOG_PYTREE)
     return _tree_unflatten(treedef, iter(xs))
 
 
@@ -1753,6 +1748,7 @@ def new_main(trace_type: Type["Trace"], global_data=None):
 
 @contextmanager
 def new_dynamic(main: MainTrace):
+    global dynamic_trace
     prev_dynamic_trace, dynamic_trace = dynamic_trace, main
     try:
         yield
@@ -2420,8 +2416,6 @@ class jit:
         return program, consts, out_tree
 
     def __call__(self, *args, **static_args):
-        if NO_JIT:
-            return self.f(*args, **static_args)
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
         outs = bind(jit_op, *consts, *args, program=program)

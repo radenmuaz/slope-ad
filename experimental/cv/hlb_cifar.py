@@ -1,7 +1,7 @@
 import slope
 from slope.core import Tensor
 
-import slope.nn as nn
+import slope.system.nn as nn
 
 import time
 import itertools

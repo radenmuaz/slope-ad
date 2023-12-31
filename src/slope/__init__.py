@@ -3,10 +3,7 @@ from slope import core
 import importlib
 
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
-from slope.backends.iree import backend
-
-core.set_backend(backend)
-# core.set_backend(importlib.import_module(f"slope.backends.{SLOPE_BACKEND}").backend)
+core.set_backend(importlib.import_module(f"slope.backends.{SLOPE_BACKEND}").backend)
 
 
 def __getattr__(attr):

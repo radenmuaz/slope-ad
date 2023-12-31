@@ -9,7 +9,6 @@ from slope.core import (
     Tensor,
     TensorBuffer,
     VoidTensor,
-    PrimalProxy,
     list_zip,
     list_map,
 )
@@ -48,8 +47,8 @@ def type_mlir_sig(in_void_tensors, out_void_tensor):
 
 
 class IREEBackend(Backend):
-    operator_set = operator_set
-    procedure_set = procedure_set
+    operator_set: OperatorSet = operator_set
+    procedure_set: ProcedureSet = procedure_set
     dtype_map = {
         Tensor.float32: np.dtypes.Float32DType(),
         Tensor.uint8: np.dtypes.UInt8DType(),
@@ -204,7 +203,9 @@ class IREEBackend(Backend):
             if isinstance(instruction.op, MetaOperator):
                 impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
             else:
-                if instruction.op not in slope.core.backend.impls.keys():
+                if instruction.op in slope.core.backend.impls.keys():
+                    impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
+                else:
                     # No impl is defined, fallback to procedure
                     op = instruction.op
                     op_name = {v: k for k, v in vars(slope.core.backend.operator_set.items())}[op]
@@ -231,8 +232,6 @@ class IREEBackend(Backend):
                     out_names = ", ".join(o["name"] for o in out_vals)
                     sig = type_mlir_sig(tuple(i["type"] for i in in_vals), out_vals[0]["type"])
                     impl_code = f"{out_names} = func.call @{name}({in_names}) {sig}"
-                else:
-                    impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
             for impl_code_line in impl_code.split("\n"):  # handle multi-line code
                 body_code_lines += [indent(impl_code_line, il1)]
 

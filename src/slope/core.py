@@ -634,9 +634,6 @@ class ShapeOperator(Operator):
     pass
 
 
-class ShapeOperator(Operator):
-    pass
-
 
 class OperatorSet:
     def __init__(self):

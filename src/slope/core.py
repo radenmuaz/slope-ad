@@ -634,6 +634,9 @@ class ShapeOperator(Operator):
     pass
 
 
+class BinaryReduceOperator(Operator):
+    pass
+
 
 class OperatorSet:
     def __init__(self):

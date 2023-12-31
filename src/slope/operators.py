@@ -7,6 +7,7 @@ from slope.core import (
     ReduceOperator,
     ShapeOperator,
     InitOperator,
+    BinaryReduceOperator,
     OperatorSet,
     Tensor,
     VoidTensor,
@@ -710,7 +711,7 @@ class Arange(InitOperator):
 
 
 @operator_set.register("matmul")
-class Matmul(Operator):
+class Matmul(BinaryReduceOperator):
     def typecheck(self, x, w):
         assert x.dtype == w.dtype
         if x.ndim == w.ndim == 2:
@@ -748,7 +749,7 @@ class Matmul(Operator):
 
 
 @operator_set.register("conv")
-class Conv(Operator):
+class Conv(BinaryReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
         def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
             return (x,) * cnt if isinstance(x, int) else x

@@ -413,7 +413,7 @@ class Pad(ShapeOperator):
             padding = (padding, padding) * x.ndim
         else:
             padding = tuple(padding)
-        if isinstance(padding, (tuple, list)):
+        if (x.ndim * 2) != len(padding):
             assert len(padding) % 2 == 0
             padding += (0, 0) * (x.ndim - len(padding))
         assert (x.ndim * 2) % len(padding) == 0

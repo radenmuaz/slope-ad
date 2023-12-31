@@ -634,6 +634,10 @@ class ShapeOperator(Operator):
     pass
 
 
+class ShapeOperator(Operator):
+    pass
+
+
 class OperatorSet:
     def __init__(self):
         self.register("jit_op")(JitOp)

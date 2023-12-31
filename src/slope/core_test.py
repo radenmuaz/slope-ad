@@ -1,7 +1,9 @@
 import unittest
 
 import slope
-from slope.core import (Tensor,)
+from slope.core import (
+    Tensor,
+)
 import numpy as np
 import os
 from typing import NamedTuple

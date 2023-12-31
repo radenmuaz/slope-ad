@@ -237,7 +237,7 @@ class Tensor:
 
     @property
     def default_dtype(self):
-        return backend.compiler.default_dtype
+        return backend.default_dtype
 
     def is_int(self) -> bool:
         return self.dtype in (self.int8, self.uint8, self.int32, self.int64)
@@ -319,18 +319,18 @@ class Tensor:
 
     @property
     def dtype(self):
-        return backend.compiler.dtype_of(self)
+        return backend.dtype_of(self)
 
     @property
     def device(self):
-        return backend.compiler.device_of(self)
+        return backend.device_of(self)
 
     def numpy(self):
-        return backend.compiler.numpy_of(self)
+        return backend.numpy_of(self)
 
     @property
     def shape(self):
-        return backend.compiler.shape_of(self)
+        return backend.shape_of(self)
 
     @property
     def ndim(self):
@@ -670,17 +670,14 @@ class Backend:
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
     DEFAULT_DTYPE = Tensor.dtype_names[os.environ.get("DEFAULT_DTYPE", "float32")]
+    dtype_map: dict
+    operator_set: OperatorSet
+    procedure_set: ProcedureSet
 
-    def __init__(
-        self,
-        operator_set: OperatorSet,
-        procedure_set: ProcedureSet,
-        compiler: "Compiler",
-    ):
-        self.operator_set = operator_set
-        self.procedure_set = procedure_set
-        self.compiler = compiler
+    def __init__(self):
+        self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
         self.node_types = dict()
+        self.impls = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
         self.register_node(list, lambda l: (None, l), lambda _, xs: list(xs), "list")
         self.register_node(
@@ -696,8 +693,14 @@ class Backend:
             "PrimalProxy",
         )
 
+    def set_impl(self, op: Union[types.LambdaType, types.FunctionType]):
+        def set_impl_(fn):
+            self.impls[op] = types.MethodType(fn, self)
+
+        return set_impl_
+
     def __repr__(self):
-        return f"<Backend: compiler={self.compiler} >"
+        return f"<Backend >"
 
     def register_node(self, ty: Type, to_iter: Callable, from_iter: Callable, name=None) -> None:
         if name is None:
@@ -729,16 +732,106 @@ class Backend:
             return val
         if type(val) is bytes:
             val = np.frombuffer(val, dtype=dtype)
-        return self.compiler.from_numpy(val, dtype)
-
-    def save(self, tensor: Tensor, path: str) -> str:
-        return self.compiler.save(tensor, path)
-
-    def load(self, path: str) -> Tensor:
-        return self.compiler.load(path)
+        return self.from_numpy(val, dtype)
 
     def seed(self, seed):
         raise NotImplementedError
+
+    @property
+    def default_dtype_value(self):
+        return self.dtype_map[backend.DEFAULT_DTYPE]
+
+    def set_method(self, method):
+        setattr(self, method.__name__, types.MethodType(method, self))
+
+    def from_numpy(self, val):
+        raise NotImplementedError
+
+    def numpy_of(self, tensor):
+        raise NotImplementedError
+
+    def device_of(self, tensor):
+        raise NotImplementedError
+
+    def shape_of(self, tensor):
+        raise NotImplementedError
+
+    def dtype_of(self, tensor):
+        raise NotImplementedError
+
+    @lru_cache_verbose()
+    def gen_jit_object(
+        self,
+        hashed_program: Hashed,
+        hashed_consts: Tuple[Hashed, ...],
+    ):
+        program: Program = hashed_program.val
+        typecheck_program(program)
+        consts = [x.val for x in hashed_consts]
+        in_typecheckors = [v.typecheckor for v in program.in_binders[len(consts) :]]
+        codegen_out = self.codegen(program, consts + in_typecheckors, fn_name="main")
+        fn, code = self.compile(codegen_out)
+        compiled = JitObject(program, codegen_out, fn, code)
+        return compiled
+
+    def codegen(self, program: "Program", args: Tuple, in_typecheckors: Tuple, name: str):
+        "Returns compiler IR from the Program"
+        raise NotImplementedError
+
+    def compile(self, program: "Program", args: Tuple, in_typecheckors: Tuple, name: str):
+        "Compiles compiler IR to a Python callable function"
+        raise NotImplementedError
+
+    def export(self, jit_object, output_path, *args, **params):
+        raise NotImplementedError
+
+    def load(self, path, single_key="_tensor"):
+        with open(path, mode="rb") as f:
+            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as m:
+                json_len = np.int64(m[0])
+                start = 8 + json_len
+                metadata = json.loads(m[8:start])
+                ret = {}
+                for k, v in metadata.items():
+                    if k != "__metadata__":
+                        dtype = Tensor.dtype_short_names[(v["dtype"])]
+                        data_start = start + v["data_offsets"][0]
+                        data_end = start + v["data_offsets"][1]
+                        t_np = np.frombuffer(m[data_start:data_end], dtype=dtype.numpy())
+                        t = backend.tensor(t_np, dtype=dtype)
+                        t = t.reshape(tuple(v["shape"]))
+                        ret[k] = t
+                if len(ret) == 1 and single_key in ret.keys():
+                    return ret[single_key]
+                return ret
+
+    def save(self, tensors: Dict[str, Tensor], path: str, single_key="_tensor"):
+        if isinstance(tensors, Tensor):
+            tensors = {single_key: tensors}
+        else:
+            assert all((isinstance(k, str) and isinstance(v, Tensor)) for k, v in tensors.items())
+
+        metadata, offset = {}, 0
+        for k, v in tensors.items():
+            metadata[k] = {
+                "dtype": v.dtype.short_name,
+                "shape": list(v.shape),
+                "data_offsets": [offset, offset + v.nbytes()],
+            }
+            offset += v.nbytes()
+        j = json.dumps(metadata, separators=(",", ":"))
+        Path(path).unlink(missing_ok=True)
+        jbytes = j.encode("utf-8")
+        start = 8 + len(jbytes)
+        with open(path, mode="wb") as f:  # make empty file, fill with enough space
+            f.write(b"\x00" * (start + offset))
+        with open(path, mode="r+b") as f:
+            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE) as m:
+                m[0:8] = np.int64(len(j)).tobytes()
+                m[8:start] = jbytes
+                for t, tm in zip(tensors.values(), metadata.values()):
+                    data_start, data_end = tm["data_offsets"]
+                    m[start + data_start : start + data_end] = t.numpy().tobytes()
 
 
 # ================
@@ -946,7 +1039,7 @@ class JitObject:
         return [backend.tensor(TensorBuffer(o)) for o in outs]
 
     def export(self, output_path, *args, **params):
-        return backend.compiler.export(self, output_path, *args, **params)
+        return backend.export(self, output_path, *args, **params)
 
 
 class JitOp(MetaOperator):
@@ -955,7 +1048,7 @@ class JitOp(MetaOperator):
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
         hashed_consts = tuple(map(Hashed, consts))
-        jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
+        jit_object = backend.gen_jit_object(hashed_program, hashed_consts)
         ret = jit_object(*consts, *args)
         return ret
 
@@ -1035,120 +1128,6 @@ class JitOp(MetaOperator):
 # ================
 #   Compiler
 # ================
-
-
-class Compiler:
-    dtype_map: dict
-
-    def __init__(self):
-        self.impls = dict()
-        self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
-
-    @property
-    def default_dtype_value(self):
-        return self.dtype_map[backend.DEFAULT_DTYPE]
-
-    def set_method(self, method):
-        setattr(self, method.__name__, types.MethodType(method, self))
-
-    def from_numpy(self, val):
-        raise NotImplementedError
-
-    def numpy_of(self, tensor):
-        raise NotImplementedError
-
-    def device_of(self, tensor):
-        raise NotImplementedError
-
-    def shape_of(self, tensor):
-        raise NotImplementedError
-
-    def dtype_of(self, tensor):
-        raise NotImplementedError
-
-    @lru_cache_verbose()
-    def gen_jit_object(
-        self,
-        hashed_program: Hashed,
-        hashed_consts: Tuple[Hashed, ...],
-    ):
-        program: Program = hashed_program.val
-        typecheck_program(program)
-        consts = [x.val for x in hashed_consts]
-        in_typecheckors = [v.typecheckor for v in program.in_binders[len(consts) :]]
-        codegen_out = self.codegen(program, consts + in_typecheckors, fn_name="main")
-        fn, code = self.compile(codegen_out)
-        compiled = JitObject(program, codegen_out, fn, code)
-        return compiled
-
-    def set_dtype_map(self, dtype_map: Dict):
-        self.dtype_map = dtype_map
-        self.dtype_map_inv = {v: k for k, v in dtype_map.items()}
-
-    def set_impl(self, op: Union[types.LambdaType, types.FunctionType]):
-        def set_impl_(fn):
-            self.impls[op] = types.MethodType(fn, self)
-
-        return set_impl_
-
-    def codegen(self, program: Program, args: Tuple, in_typecheckors: Tuple, name: str):
-        "Returns compiler IR from the Program"
-        raise NotImplementedError
-
-    def compile(self, program: Program, args: Tuple, in_typecheckors: Tuple, name: str):
-        "Compiles compiler IR to a Python callable function"
-        raise NotImplementedError
-
-    def export(self, jit_object, output_path, *args, **params):
-        raise NotImplementedError
-
-    def load(self, path, single_key="_tensor"):
-        with open(path, mode="rb") as f:
-            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_READ) as m:
-                json_len = np.int64(m[0])
-                start = 8 + json_len
-                metadata = json.loads(m[8:start])
-                ret = {}
-                for k, v in metadata.items():
-                    if k != "__metadata__":
-                        dtype = Tensor.dtype_short_names[(v["dtype"])]
-                        data_start = start + v["data_offsets"][0]
-                        data_end = start + v["data_offsets"][1]
-                        t_np = np.frombuffer(m[data_start:data_end], dtype=dtype.numpy())
-                        t = backend.tensor(t_np, dtype=dtype)
-                        t = t.reshape(tuple(v["shape"]))
-                        ret[k] = t
-                if len(ret) == 1 and single_key in ret.keys():
-                    return ret[single_key]
-                return ret
-
-    def save(self, tensors: Dict[str, Tensor], path: str, single_key="_tensor"):
-        if isinstance(tensors, Tensor):
-            tensors = {single_key: tensors}
-        else:
-            assert all((isinstance(k, str) and isinstance(v, Tensor)) for k, v in tensors.items())
-
-        metadata, offset = {}, 0
-        for k, v in tensors.items():
-            metadata[k] = {
-                "dtype": v.dtype.short_name,
-                "shape": list(v.shape),
-                "data_offsets": [offset, offset + v.nbytes()],
-            }
-            offset += v.nbytes()
-        j = json.dumps(metadata, separators=(",", ":"))
-        Path(path).unlink(missing_ok=True)
-        jbytes = j.encode("utf-8")
-        start = 8 + len(jbytes)
-        with open(path, mode="wb") as f:  # make empty file, fill with enough space
-            f.write(b"\x00" * (start + offset))
-        with open(path, mode="r+b") as f:
-            with mmap.mmap(f.fileno(), length=0, access=mmap.ACCESS_WRITE) as m:
-                m[0:8] = np.int64(len(j)).tobytes()
-                m[8:start] = jbytes
-                for t, tm in zip(tensors.values(), metadata.values()):
-                    data_start, data_end = tm["data_offsets"]
-                    m[start + data_start : start + data_end] = t.numpy().tobytes()
 
 
 class MainTrace(NamedTuple):
@@ -1524,7 +1503,7 @@ class PartialRunTrace(Trace):
     def run_op(self, op, tracers, params):
         is_knowns = tuple(t.pval.is_known for t in tracers)
 
-        if all(is_knowns):  # and op in backend.compiler.impls.keys():
+        if all(is_knowns):  # and op in backend.impls.keys():
             return bind(op, *list_map(full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
 
@@ -2350,7 +2329,7 @@ class jit:
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
         hashed_consts = tuple(map(Hashed, consts))
-        jit_object = backend.compiler.gen_jit_object(hashed_program, hashed_consts)
+        jit_object = backend.gen_jit_object(hashed_program, hashed_consts)
         return jit_object
 
 

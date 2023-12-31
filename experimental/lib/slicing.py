@@ -1,5 +1,5 @@
 from slope.tensor import Tensor
-from slope.tracer_tensor import TracerTensor
+from slope.tracer_tensor import TraceTensor
 import slope
 from typing import (
     Sequence,
@@ -365,7 +365,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             continue
 
         try:
-            abstract_i = TracerTensor.get_void_tensor(i)
+            abstract_i = TraceTensor.get_void_tensor(i)
         except TypeError:
             abstract_i = None
         # Handle basic int indexes.
@@ -394,7 +394,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
             if step is None:
                 if start is None or start == 0:
                     start = None
-                if stop is None or (not isinstance(stop, TracerTensor) and (stop >= x_shape[x_dim])):
+                if stop is None or (not isinstance(stop, TraceTensor) and (stop >= x_shape[x_dim])):
                     stop = None
             elif step == -1:
                 step = -1
@@ -411,7 +411,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
                 x_dim += 1
             # Handle slice index (only static, otherwise an error is raised)
             else:
-                if not all((elt == None or TracerTensor.get_void_tensor(elt) is Tensor) for elt in (start, stop, step)):
+                if not all((elt == None or TraceTensor.get_void_tensor(elt) is Tensor) for elt in (start, stop, step)):
                     msg = (
                         "Tensor slice indices must have static start/stop/step to be used "
                         "with NumPy indexing syntax. "
@@ -467,7 +467,7 @@ def _index_to_gather(x_shape: Sequence[int], idx: Sequence[Any], normalize_indic
         gather_indices_list = [
             g.broadcast(gather_indices_shape, tuple(range(i, i + g.ndim))) for g, i in gather_indices
         ]
-        gather_indices_tensor = TracerTensor.cat(gather_indices_list, last_dim)
+        gather_indices_tensor = TraceTensor.cat(gather_indices_list, last_dim)
 
     return _Indexer(
         slice_shape=slice_shape,

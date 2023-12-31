@@ -470,7 +470,7 @@ class Operator:
         void_tensors_in = [t.void_tensor for t in tracers_in]
         void_tensors_out = self.typecheck(*void_tensors_in, **params)
         tracers_out = [
-            PartialRunTracerTensor(trace, make_unknown_pval(void_tensor), None) for void_tensor in void_tensors_out
+            PartialRunTraceTensor(trace, make_unknown_pval(void_tensor), None) for void_tensor in void_tensors_out
         ]
         instruction = InstructionDraft(self, tracers_in, params, void_tensors_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
@@ -521,14 +521,14 @@ class BinaryOperator(Operator):
             assert x.shape == w.shape
             return (x, w), params
 
-        if type(x) in TracerTensor.PYTHON_TYPES:
+        if type(x) in TraceTensor.PYTHON_TYPES:
             x = backend.full(shape=(), fill_value=x, dtype=w.dtype)
-        elif type(w) in TracerTensor.PYTHON_TYPES:
+        elif type(w) in TraceTensor.PYTHON_TYPES:
             w = backend.full(shape=(), fill_value=w, dtype=x.dtype)
 
-        if type(x) is Tensor and isinstance(w, TracerTensor):
+        if type(x) is Tensor and isinstance(w, TraceTensor):
             x = w._trace.pure(x)
-        elif type(w) is Tensor and isinstance(x, TracerTensor):
+        elif type(w) is Tensor and isinstance(x, TraceTensor):
             w = x._trace.pure(w)
 
         if (xshape := x.shape) == (wshape := w.shape):
@@ -1098,7 +1098,7 @@ class JitOp(MetaOperator):
         outs1_res = bind(backend.jit_op, *known_vals, program=program1)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-        outs2 = [PartialRunTracerTensor(trace, make_unknown_pval(v.void_tensor), None) for v in program2.outs]
+        outs2 = [PartialRunTraceTensor(trace, make_unknown_pval(v.void_tensor), None) for v in program2.outs]
         instruction = InstructionDraft(
             self,
             res_tracers + unknown_tracers,
@@ -1169,7 +1169,7 @@ class RunTrace(Trace):
         return fn
 
 
-class TracerTensor(Tensor):
+class TraceTensor(Tensor):
     PYTHON_TYPES = {
         bool,
         int,
@@ -1205,7 +1205,7 @@ class TracerTensor(Tensor):
 Batchdim = Union[None, int]
 
 
-class BatchTracerTensor(TracerTensor):
+class BatchTraceTensor(TraceTensor):
     def __init__(self, trace, val, batch_dim: Batchdim):
         self._trace = trace
         self.val = val
@@ -1229,12 +1229,12 @@ class BatchTracerTensor(TracerTensor):
 
 
 class BatchTrace(Trace):
-    pure = lambda self, val: BatchTracerTensor(self, val, None)
+    pure = lambda self, val: BatchTraceTensor(self, val, None)
 
     def run_op(self, op, tracers, params):
         vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
         val_outs, bdim_outs = op.vmap(self.dim_size, vals_in, bdims_in, **params)
-        return [BatchTracerTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
+        return [BatchTraceTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @property
     def dim_size(self):
@@ -1260,7 +1260,7 @@ class BatchTrace(Trace):
             return x.permute(perm)
 
 
-class JVPTracerTensor(TracerTensor):
+class JVPTraceTensor(TraceTensor):
     def __init__(self, trace, primal, tangent):
         self._trace = trace
         self.primal = primal
@@ -1283,15 +1283,15 @@ class JVPTrace(Trace):
     def pure(self, val):
         if isinstance(val, PartialRunTrace):
             val = val.pval.const
-        return JVPTracerTensor(self, val, backend.zeros_like(val))
+        return JVPTraceTensor(self, val, backend.zeros_like(val))
 
     def run_op(self, op, tracers, params):
         primals_in, tangents_in = unzip2((t.primal, t.tangent) for t in tracers)
         primals_out, tangents_out = op.jvp(primals_in, tangents_in, **params)
-        return [JVPTracerTensor(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
+        return [JVPTraceTensor(self, x, t) for x, t in list_zip(primals_out, tangents_out)]
 
 
-class ProgramTracerTensor(TracerTensor):
+class ProgramTraceTensor(TraceTensor):
     __slots__ = ["void_tensor"]
     void_tensor: VoidTensor
 
@@ -1301,14 +1301,14 @@ class ProgramTracerTensor(TracerTensor):
 
 
 class ProgramTrace(Trace):
-    def new_arg(self, void_tensor) -> ProgramTracerTensor:
+    def new_arg(self, void_tensor) -> ProgramTraceTensor:
         void_tensor = VoidTensor.like(void_tensor)
         tracer = self.builder.new_tracer(self, void_tensor)
         self.builder.tracer_to_var[id(tracer)] = Var(void_tensor)
 
         return tracer
 
-    def pure(self, val: Any) -> ProgramTracerTensor:
+    def pure(self, val: Any) -> ProgramTraceTensor:
         # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
@@ -1336,9 +1336,9 @@ class ProgramTrace(Trace):
 class ProgramBuilder:
     instructions: List[Instruction]
     tracer_to_var: Dict[int, Var]
-    const_tracers: Dict[int, TracerTensor]
+    const_tracers: Dict[int, TraceTensor]
     constvals: Dict[Var, Any]
-    tracers: List[ProgramTracerTensor]
+    tracers: List[ProgramTraceTensor]
 
     def __init__(self):
         self.instructions = []
@@ -1347,25 +1347,25 @@ class ProgramBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgramTrace, void_tensor: VoidTensor) -> ProgramTracerTensor:
-        tracer = ProgramTracerTensor(trace, void_tensor)
+    def new_tracer(self, trace: ProgramTrace, void_tensor: VoidTensor) -> ProgramTraceTensor:
+        tracer = ProgramTraceTensor(trace, void_tensor)
         self.tracers.append(tracer)
         return tracer
 
     def add_instruction(self, instruction: Instruction) -> None:
         self.instructions.append(instruction)
 
-    def add_var(self, tracer: ProgramTracerTensor) -> Var:
+    def add_var(self, tracer: ProgramTraceTensor) -> Var:
         assert id(tracer) not in self.tracer_to_var
         var = self.tracer_to_var[id(tracer)] = Var(tracer.void_tensor)
         return var
 
-    def getvar(self, tracer: ProgramTracerTensor) -> Var:
+    def getvar(self, tracer: ProgramTraceTensor) -> Var:
         var = self.tracer_to_var.get(id(tracer))
         assert var is not None
         return var
 
-    def add_const(self, tracer: ProgramTracerTensor, val: Any) -> Var:
+    def add_const(self, tracer: ProgramTraceTensor, val: Any) -> Var:
         var = self.add_var(tracer)
         self.const_tracers[id(val)] = tracer
         self.constvals[var] = val
@@ -1383,7 +1383,7 @@ class ProgramBuilder:
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in TracerTensor.PYTHON_TYPES and not get_void_tensor_or_tensor(x).shape for x in consts]
+        scalars = [type(x) in TraceTensor.PYTHON_TYPES and not get_void_tensor_or_tensor(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1459,16 +1459,16 @@ class ConstDraft(NamedTuple):
 
 class InstructionDraft(NamedTuple):
     prim: Operator
-    tracers_in: List["PartialRunTracerTensor"]
+    tracers_in: List["PartialRunTraceTensor"]
     params: Dict[str, Any]
     void_tensors_out: List[VoidTensor]
-    tracer_refs_out: List[weakref.ReferenceType["PartialRunTracerTensor"]]
+    tracer_refs_out: List[weakref.ReferenceType["PartialRunTraceTensor"]]
 
 
 ProgramDraft = Union[LambdaBindingDraft, ConstDraft, InstructionDraft]
 
 
-class PartialRunTracerTensor(TracerTensor):
+class PartialRunTraceTensor(TraceTensor):
     def __init__(self, trace, pval, draft):
         self._trace = trace
         self.pval = pval
@@ -1485,17 +1485,17 @@ class PartialRunTracerTensor(TracerTensor):
 
 class PartialRunTrace(Trace):
     def new_arg(self, pval: PartialValue) -> Any:
-        return PartialRunTracerTensor(self, pval, LambdaBindingDraft())
+        return PartialRunTraceTensor(self, pval, LambdaBindingDraft())
 
-    def pure(self, val: Any) -> PartialRunTracerTensor:
-        return PartialRunTracerTensor(self, make_known_pval(val), None)
+    def pure(self, val: Any) -> PartialRunTraceTensor:
+        return PartialRunTraceTensor(self, make_known_pval(val), None)
 
-    def instantiate_const(self, tracer: PartialRunTracerTensor) -> PartialRunTracerTensor:
+    def instantiate_const(self, tracer: PartialRunTraceTensor) -> PartialRunTraceTensor:
         if tracer.pval.is_unknown:
             return tracer
         else:
             pval = make_unknown_pval(VoidTensor.like(tracer.void_tensor))
-            return PartialRunTracerTensor(self, pval, ConstDraft(tracer.pval.const))
+            return PartialRunTraceTensor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
         is_knowns = tuple(t.pval.is_known for t in tracers)
@@ -1540,9 +1540,9 @@ def make_unknown_pval(void_tensor: VoidTensor):
 
 
 def get_void_tensor_or_tensor(x):
-    if isinstance(x, TracerTensor):
+    if isinstance(x, TraceTensor):
         return x.void_tensor
-    elif type(x) in TracerTensor.PYTHON_TYPES:
+    elif type(x) in TraceTensor.PYTHON_TYPES:
         return backend.tensor(x)
     elif isinstance(x, Tensor):
         return x
@@ -1677,7 +1677,7 @@ def find_top_trace(xs) -> Trace:
         for x in seq:
             if type(x) in (tuple, list):
                 get_arr_from_seq(x)
-            elif isinstance(x, TracerTensor):
+            elif isinstance(x, TraceTensor):
                 arrs += [x]
 
     get_arr_from_seq(xs)
@@ -1692,8 +1692,8 @@ def find_top_trace(xs) -> Trace:
     return top_main.trace_type(top_main)
 
 
-def full_raise(trace: Trace, val: Any) -> TracerTensor:
-    if not isinstance(val, TracerTensor):
+def full_raise(trace: Trace, val: Any) -> TraceTensor:
+    if not isinstance(val, TraceTensor):
         return trace.pure(val)
     level = trace.main.level
     if val._trace.main is trace.main:
@@ -1707,7 +1707,7 @@ def full_raise(trace: Trace, val: Any) -> TracerTensor:
 
 
 def full_lower(val: Any):
-    if isinstance(val, TracerTensor):
+    if isinstance(val, TraceTensor):
         return val.full_lower()
     elif type(val) in (list, tuple):
         return tuple(full_lower(v) for v in val)
@@ -1778,7 +1778,7 @@ def vmap_flat(f, in_dim, *args):
     (dim_size,) = axi_set
     with new_main(BatchTrace, dim_size) as main:
         trace = BatchTrace(main)
-        tracers_in = [BatchTracerTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
+        tracers_in = [BatchTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
@@ -1804,7 +1804,7 @@ def vmap(f, in_dim=0, out_dim=0):
 def jvp_flat(f, primals, tangents, *, has_aux, global_data, **static_args):
     with new_main(JVPTrace, global_data) as main:
         trace = JVPTrace(main)
-        tracers_in = [JVPTracerTensor(trace, x, t) for x, t in list_zip(primals, tangents)]
+        tracers_in = [JVPTraceTensor(trace, x, t) for x, t in list_zip(primals, tangents)]
         jvp_flat_ret = f(*tracers_in, **static_args)
         if has_aux:
             (outs, aux) = jvp_flat_ret
@@ -1852,8 +1852,8 @@ def make_program(f: Callable, *void_tensors_in: VoidTensor, static_args, name) -
             tracers_in = [trace.new_arg(void_tensor) for void_tensor in void_tensors_in]
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             # tracers_out = [full_raise(trace, out) for out in outs]
-            # raise check because of aux is not ProgramTracerTensor
-            tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTracerTensor) else out.val for out in outs]
+            # raise check because of aux is not ProgramTraceTensor
+            tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val for out in outs]
             program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
     return program, consts, out_tree_store()
@@ -2043,10 +2043,10 @@ def linearize(f, *primals_in, has_aux=False):
 
 
 def tracers_to_program(
-    tracers_in: List["PartialRunTracerTensor"],
-    tracers_out: List["PartialRunTracerTensor"],
+    tracers_in: List["PartialRunTraceTensor"],
+    tracers_out: List["PartialRunTraceTensor"],
 ):
-    def tracer_parents(t: PartialRunTracerTensor) -> List[PartialRunTracerTensor]:
+    def tracer_parents(t: PartialRunTraceTensor) -> List[PartialRunTraceTensor]:
         return t.draft.tracers_in if isinstance(t.draft, InstructionDraft) else []
 
     def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
@@ -2264,7 +2264,7 @@ def jit_partial_run(trace, tracers, *, program):
     outs1_res = backend.jit_op(*known_vals, program=program)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTracerTensor(trace, PartialValue.unknown(v.void_tensor), None) for v in program2.outs]
+    outs2 = [PartialRunTraceTensor(trace, PartialValue.unknown(v.void_tensor), None) for v in program2.outs]
     draft = InstructionDraft(
         backend.jit_op,
         res_tracers + unknown_tracers,

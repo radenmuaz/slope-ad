@@ -47,21 +47,9 @@ def type_mlir_sig(in_void_tensors, out_void_tensor):
 
 
 class IREEBackend(Backend):
-    operator_set: OperatorSet = operator_set
-    procedure_set: ProcedureSet = procedure_set
-    dtype_map: dict = {
-        Tensor.float32: np.dtypes.Float32DType(),
-        Tensor.uint8: np.dtypes.UInt8DType(),
-        Tensor.int8: np.dtypes.Int8DType(),
-        Tensor.bool: np.dtypes.BoolDType(),
-        Tensor.int32: np.dtypes.Int32DType(),
-        Tensor.int64: np.dtypes.Float64DType(),
-        Tensor.float16: np.dtypes.Float16DType(),
-    }
-
     def from_numpy(self, val, dtype=None, device=None):
-        dtype = dtype or slope.core.backend.DEFAULT_DTYPE
-        device = device or slope.core.backend.DEFAULT_DEVICE
+        dtype = dtype or self.DEFAULT_DTYPE
+        device = device or self.DEFAULT_DEVICE
         # device_type, device_id = device.split(":") if ":" in device else (device, 0)
         np_val = np.array(val, dtype=dtype.numpy)
         iree_device = iree.runtime.get_device("local-task")
@@ -203,13 +191,13 @@ class IREEBackend(Backend):
             if isinstance(instruction.op, MetaOperator):
                 impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
             else:
-                if instruction.op in slope.core.backend.impls.keys():
+                if instruction.op in self.impls.keys():
                     impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
                 else:
                     # No impl is defined, fallback to procedure
                     op = instruction.op
-                    op_name = {v: k for k, v in vars(slope.core.backend.operator_set.items())}[op]
-                    op_procedure = getattr(slope.core.backend.procedure_set, op_name)
+                    op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
+                    op_procedure = getattr(self.procedure_set, op_name)
                     void_tensors_in = tuple(inp.void_tensor for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
@@ -264,7 +252,38 @@ class IREEBackend(Backend):
         return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
 
 
-backend = IREEBackend()
+backend = IREEBackend(
+    operator_set,
+    procedure_set,
+    {
+        Tensor.float32: np.dtypes.Float32DType(),
+        Tensor.uint8: np.dtypes.UInt8DType(),
+        Tensor.int8: np.dtypes.Int8DType(),
+        Tensor.bool: np.dtypes.BoolDType(),
+        Tensor.int32: np.dtypes.Int32DType(),
+        Tensor.int64: np.dtypes.Float64DType(),
+        Tensor.float16: np.dtypes.Float16DType(),
+    },
+)
+
+
+@backend.set_impl(backend.operator_set.jit_op)
+def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
+    jit_program = instruction.params["program"]
+    jit_name = f"{jit_program.name}"
+    jit_codegen_out = self.codegen(
+        jit_program,
+        args,
+        fn_name=jit_name,
+        fn_defs=fn_defs,
+    )
+    assert jit_name not in fn_defs.keys()
+    fn_defs[jit_name] = jit_codegen_out["code_lines"]
+    fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
+    args_str = ", ".join(i["name"] for i in in_vals)
+    sig = type_mlir_sig(tuple(i["type"] for i in in_vals), out_vals[0]["type"])
+    ret = f"{', '.join(o['name'] for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"
+    return ret, fn_defs
 
 
 @backend.set_impl(backend.operator_set.cast)
@@ -520,22 +539,3 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
 }}  {type_mlir_sig((x["type"], w["type"]), y["type"])}
 """
-
-
-@backend.set_impl(backend.operator_set.jit_op)
-def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
-    jit_program = instruction.params["program"]
-    jit_name = f"{jit_program.name}"
-    jit_codegen_out = self.codegen(
-        jit_program,
-        args,
-        fn_name=jit_name,
-        fn_defs=fn_defs,
-    )
-    assert jit_name not in fn_defs.keys()
-    fn_defs[jit_name] = jit_codegen_out["code_lines"]
-    fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-    args_str = ", ".join(i["name"] for i in in_vals)
-    sig = type_mlir_sig(tuple(i["type"] for i in in_vals), out_vals[0]["type"])
-    ret = f"{', '.join(o['name'] for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"
-    return ret, fn_defs

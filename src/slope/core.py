@@ -552,10 +552,10 @@ class BinaryOperator(Operator):
         (x, w), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
-                x = VMapTrace.move_vmap_dim(dim_size, x_bdim, y_bdim, x)
+                x = VMapTrace.move_vmap_dim(x, dim_size, x_bdim, y_bdim)
                 x_bdim = y_bdim
             else:
-                y = VMapTrace.move_vmap_dim(dim_size, y_bdim, x_bdim, y)
+                y = VMapTrace.move_vmap_dim(y, dim_size, y_bdim, x_bdim)
         return [self(x, w, **params)], [x_bdim]
 
     def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
@@ -621,12 +621,18 @@ class ReduceOperator(Operator):
 
 
 class InitOperator(Operator):
-    def jvp(self, primals, tangents, **kwargs):
-        out = self(**kwargs)
-        out_jvp = backend.ones_like(out)
-        return [out], [out_jvp]
+    def vmap(self, *, dim_size, vals_in, dims_in, **params):
+        (x_bdim,) = dims_in
+        y = self(**params)
+        y = y.unsqueeze(x_bdim)
+        return [y], [x_bdim]
 
-    def T(self, cotangents, **kwargs):
+    def jvp(self, primals, tangents, **params):
+        y = self(**params)
+        y_dot = y.ones_like()
+        return [y], [y_dot]
+
+    def T(self, cotangents, **params):
         return [None]
 
 
@@ -674,11 +680,11 @@ class Backend:
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
     DEFAULT_DTYPE = Tensor.dtype_names[os.environ.get("DEFAULT_DTYPE", "float32")]
-    dtype_map: dict
-    operator_set: OperatorSet
-    procedure_set: ProcedureSet
 
-    def __init__(self):
+    def __init__(self, operator_set: OperatorSet, procedure_set: ProcedureSet, dtype_map: dict):
+        self.operator_set = operator_set
+        self.procedure_set = procedure_set
+        self.dtype_map = dtype_map
         self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
         self.node_types = dict()
         self.impls = dict()
@@ -1247,7 +1253,7 @@ class VMapTrace(Trace):
         return [VMapTraceTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @staticmethod
-    def move_vmap_dim(dim_size, src, dst, x):
+    def move_vmap_dim(x, dim_size, src, dst):
         if src is None:
             target_shape = list(x.shape)
             target_shape.insert(dst, dim_size)
@@ -1255,15 +1261,15 @@ class VMapTrace(Trace):
             if type(dst) in (tuple, list):
                 out_ndim += 1
             reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
-            x = x.reshape(reshape_shape)
-            x = x.expand(target_shape)
+            x = x.reshape(tuple(reshape_shape))
+            x = x.expand(tuple(target_shape))
             return x
         elif src == dst:
             return x
         else:
             perm = [i for i in range(len(x.shape)) if i != src]
             perm.insert(dst, src)
-            return x.permute(perm)
+            return x.permute(tuple(perm))
 
 
 class JVPTraceTensor(TraceTensor):
@@ -1779,9 +1785,9 @@ def program_as_fun(program: Program):
 
 
 def vmap_flat(f, in_dim, *args):
-    axi_set = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
-    assert len(axi_set) == 1
-    (dim_size,) = axi_set
+    dims = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
+    assert len(dims) == 1
+    (dim_size,) = dims
     with new_main(VMapTrace, dim_size) as main:
         trace = VMapTrace(main)
         tracers_in = [VMapTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
@@ -1789,7 +1795,7 @@ def vmap_flat(f, in_dim, *args):
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.vmap_dim) for t in tracers_out)
     outs_permuted = [
-        VMapTrace.move_vmap_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
+        VMapTrace.move_vmap_dim(val_out, dim_size, bdim, 0) for val_out, bdim in list_zip(vals_out, bdims_out)
     ]
     return outs_permuted
 

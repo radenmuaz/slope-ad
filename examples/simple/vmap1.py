@@ -5,3 +5,5 @@ def f(x):
 
 x = slope.ones(3,1)
 y = slope.vmap(f)(x)
+
+print(x.shape, y.shape)

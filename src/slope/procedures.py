@@ -8,10 +8,7 @@ import numpy as np
 from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
 from collections import defaultdict
 
-sum_py = sum
-max_py = max
 abs_py = abs
-slice_py = slice
 
 
 procedure_set = ProcedureSet()
@@ -154,63 +151,59 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
-        0
-    ).expand(r, c)
-
-
-@procedure_set.register()
-def triu(self, k: int = 0) -> Tensor:
-    return _tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(
-        self, slope.zeros_like(self)
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= slope.arange(-k, c - k, **kwargs).unsqueeze(0).expand(
+        r, c
     )
 
 
 @procedure_set.register()
-def tril(self, k: int = 0) -> Tensor:
-    return _tri(self.shape[-2], self.shape[-1], k=k + 1, dtype=self.dtype, device=self.device).where(
-        slope.zeros_like(self), self
-    )
+def triu(x, k: int = 0) -> Tensor:
+    return _tri(x.shape[-2], x.shape[-1], k=k, dtype=x.dtype, device=x.device).where(x, slope.zeros_like(x))
 
 
 @procedure_set.register()
-def trunc(self: Tensor) -> Tensor:
-    return self.cast(slope.int32).cast(self.dtype)
+def tril(x, k: int = 0) -> Tensor:
+    return _tri(x.shape[-2], x.shape[-1], k=k + 1, dtype=x.dtype, device=x.device).where(slope.zeros_like(x), x)
 
 
 @procedure_set.register()
-def ceil(self: Tensor) -> Tensor:
-    return (self > (b := self.trunc())).where(b + 1, b)
+def trunc(x: Tensor) -> Tensor:
+    return x.cast(slope.int32).cast(x.dtype)
 
 
 @procedure_set.register()
-def floor(self: Tensor) -> Tensor:
-    return (self < (b := self.trunc())).where(b - 1, b)
+def ceil(x: Tensor) -> Tensor:
+    return (x > (b := x.trunc())).where(b + 1, b)
 
 
 @procedure_set.register()
-def square(self):
-    return self * self
+def floor(x: Tensor) -> Tensor:
+    return (x < (b := x.trunc())).where(b - 1, b)
 
 
 @procedure_set.register()
-def clip(self, min_, max_):
-    return self.maximum(min_).minimum(max_)
+def square(x):
+    return x * x
 
 
 @procedure_set.register()
-def abs(self):
-    return self.relu() + (-self).relu()
+def clip(x, min_, max_):
+    return x.maximum(min_).minimum(max_)
 
 
 @procedure_set.register()
-def sign(self):
-    return self / (self.abs() + 1e-10)
+def abs(x):
+    return x.relu() + (-x).relu()
 
 
 @procedure_set.register()
-def reciprocal(self):
-    return 1.0 / self
+def sign(x):
+    return x / (x.abs() + 1e-10)
+
+
+@procedure_set.register()
+def reciprocal(x):
+    return x.ones_like() / x
 
 
 @procedure_set.register()
@@ -228,41 +221,41 @@ def T(x):
 
 
 @procedure_set.register()
-def getitem(self, val):
+def getitem(x, val):
     # Union[int, slice, Tensor, None, Ellipsis, Tuple[Union[int, slice, Tensor, None, Ellipsis], ...]]
     def normalize_int(e, i, dim_sz):
         if -dim_sz <= e < dim_sz:
             return e if e != -1 else dim_sz - 1
-        raise IndexError(f"index {e} is out of bounds for dimension {i} with size {self.shape[i]}")
+        raise IndexError(f"index {e} is out of bounds for dimension {i} with size {x.shape[i]}")
 
     orig_slices = list(val) if isinstance(val, tuple) else [val]
     count = defaultdict(list)
     for i, v in enumerate(orig_slices):
         count[type(v) if not isinstance(v, slope.core.Tensor) else "tensor"] += [i]
 
-    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(self.shape):
-        raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
+    if (num_slices := len(count[int]) + len(count[slice]) + len(count["tensor"])) > len(x.shape):
+        raise IndexError(f"too many indices for tensor of dimension {len(x.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
 
     ellipsis_idx = ellipsis_found[0] if ellipsis_found else len(orig_slices)
-    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice_py(None)] * (len(self.shape) - num_slices)
+    orig_slices[ellipsis_idx : ellipsis_idx + 1] = [slice(None)] * (len(x.shape) - num_slices)
 
     valid_slices = [v for v in orig_slices if v is not None]
     valid_slices = [
         v
-        if isinstance(v, slice_py)
-        else slice_py(y_ := normalize_int(v, i, dim_sz), y_ + 1)
+        if isinstance(v, slice)
+        else slice(y_ := normalize_int(v, i, dim_sz), y_ + 1)
         if isinstance(v, int)
-        else slice_py(None)
-        for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))
+        else slice(None)
+        for i, (v, dim_sz) in enumerate(zip(valid_slices, x.shape))
     ]
 
     start, stop, strides = (
-        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
+        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)]) else ((), (), ())
     )
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = self.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
+    sliced_tensor = x.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs_py(s) != 1 for s in strides):
         strides = tuple(abs_py(s) for s in strides)
@@ -300,7 +293,7 @@ def getitem(self, val):
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
         slice_arange = [
-            slope.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=self.device).reshape(
+            slope.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=x.device).reshape(
                 *[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1)
             )
             for n, (sd, d) in enumerate(zip(sum_dim, dim))
@@ -341,7 +334,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
 
     # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
-    padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(flatten_seq(padding)[::-1], value=value)  # flatten
     starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
@@ -423,6 +416,13 @@ def squeeze(x, dim=None):
     if dim < 0:
         dim += x.ndim
     return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
+
+
+@procedure_set.register()
+def unsqueeze(x, dim) -> Tensor:
+    if dim < 0:
+        dim = len(x.shape) + dim + 1
+    return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
 
 
 @procedure_set.register()
@@ -680,16 +680,16 @@ def batchnorm(x, weight, bias, mean, invstd):
 
 
 @procedure_set.register()
-def layernorm(self, dim=-1, eps: float = 1e-5) -> Tensor:
-    y = self - self.mean(dim, keepdim=True)
+def layernorm(x, dim=-1, eps: float = 1e-5) -> Tensor:
+    y = x - x.mean(dim, keepdim=True)
     return y.mul((y * y).mean(dim, keepdim=True).add(eps).rsqrt())
 
 
 @procedure_set.register()
 def dropout(x, p, training=False) -> Tensor:
-    if not Tensor.training or p == 0:
+    if not training or p == 0:
         return x
-    mask = (Tensor.rand(*x.shape, requires_grad=False, device=x.device) >= p).cast(slope.bool)
+    mask = (slope.rand(*x.shape, requires_grad=False, device=x.device) >= p).cast(slope.bool)
     return x * mask * (1 / (1.0 - p))
 
 
@@ -704,7 +704,7 @@ def scaled_dot_product_attention(
 ) -> Tensor:
     if is_causal:
         attn_mask = (
-            Tensor.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
+            slope.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
         )
     if attn_mask is not None and attn_mask.dtype == slope.bool:
         attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)

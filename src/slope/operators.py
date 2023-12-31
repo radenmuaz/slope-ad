@@ -23,11 +23,6 @@ import iree.compiler
 import iree.runtime
 import os
 
-sum_py = sum
-max_py = max
-abs_py = abs
-slice_py = slice
-
 
 # --------------
 # Operator
@@ -370,6 +365,11 @@ class Reshape(ShapeOperator):
             shape = tuple(d if d != -1 else (numel // others) for d in shape)
         return (x,), dict(shape=shape)
 
+    def vmap(self, dim_size, vals_in, dims_in, *, shape):
+        (x,), (x_bdim,) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        return [self(x, tuple(x.shape[:1] + shape))], [x_bdim]
+
     def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
         return [VoidTensor(tuple(shape), x.dtype)]
 
@@ -390,13 +390,11 @@ class Permute(ShapeOperator):
 
     def vmap(self, dim_size, vals_in, dims_in, *, perm):
         (x,), (x_bdim,) = vals_in, dims_in
-        perm_ = list(perm)
-        x_bdim_ = int(x_bdim)
         assert x_bdim >= 0
         perm = perm[:x_bdim] + [x_bdim] + perm[x_bdim:]
         perm = tuple(d + int(d >= x_bdim) if i != x_bdim else d for i, d in enumerate(perm))
         assert len(set(perm)) == len(perm)
-        return [x.tranpose(perm)], [x_bdim]
+        return [x.permute(perm)], [x_bdim]
 
     def jvp(self, primals, tangents, *, perm):
         (x,), (x_dot,) = primals, tangents
@@ -413,10 +411,12 @@ class Pad(ShapeOperator):
     def args_fixer(self, x, *, padding, mode="constant", value=0.0):
         if isinstance(padding, int):
             padding = (padding, padding) * x.ndim
-        # elif all(isinstance(pw, int) for pw in padding):
-        #     assert (len(x.shape) * 2) % len(padding) == 0
-        #     padding = (0, 0) * (len(x.shape) - len(padding) // 2) + tuple(padding)
-        assert (len(x.shape) * 2) % len(padding) == 0
+        else:
+            padding = tuple(padding)
+        if isinstance(padding, (tuple, list)):
+            assert len(padding) % 2 == 0
+            padding += (0, 0) * (x.ndim - len(padding))
+        assert (x.ndim * 2) % len(padding) == 0
         return (x,), dict(padding=padding, mode=mode, value=value)
 
     def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
@@ -427,7 +427,7 @@ class Pad(ShapeOperator):
         def _dilate_dim(d, dilation):
             return 0 if d == 0 else 1 + dilation * (d - 1)
 
-        shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
+        shape = tuple(sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
         if not all(d >= 0 for d in shape):
             raise ValueError(
                 f"Dimension size after padding is not at least 0, "
@@ -438,24 +438,11 @@ class Pad(ShapeOperator):
         return [res]
 
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
-        raise NotImplementedError
-        Operand, padding_value = batched_args
-        Operand_bdim, padding_value_bdim = batch_dims
-        if Operand_bdim is None:
-            Operand_bdim = 0
-            Operand = broadcast_in_dim(operand, (padding_value.shape[padding_value_bdim],))
-
-        padding_config = list(padding_config)
-        padding_config.insert(operand_bdim, (0, 0, 0))
-        if padding_value_bdim is None:
-            return pad(operand, padding_value, padding_config), Operand_bdim
-
-        assert padding_value_bdim == 0, padding_value_bdim
-
-        x = pad(operand, _zero(operand), padding_config)
-        mask = pad(full_like(operand, True, np.bool_), False, padding_config)
-        broadcast_in_dimed_padding = broadcast_in_dim_in_dim(padding_value, x.shape, (operand_bdim,))
-        return select(mask, x, broadcast_in_dimed_padding), Operand_bdim
+        (x,), (x_bdim,) = vals_in, dims_in
+        # x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        padding = list(padding)
+        return [self(x, padding, mode, value)], [0]
+        x = x.pad(x.zeros_like(), padding, mode, value)
 
     def jvp(self, primals, tangents, *, padding, mode, value):
         (x,), (x_dot,) = primals, tangents
@@ -497,7 +484,7 @@ class Slice(ShapeOperator):
         else:
             # TODO: compute strided shape without numpy
             x = np.zeros(x.shape)
-            x = x[tuple(slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
+            x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
             return [VoidTensor(x.shape, x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides=None):
@@ -607,7 +594,7 @@ class Cat(ShapeOperator):
             shapes = [x.shape for x in xs]
             raise TypeError(msg.format(dim, ", ".join(map(str, shapes))))
 
-        concat_size = sum_py(x.shape[dim] for x in xs)
+        concat_size = sum(x.shape[dim] for x in xs)
         ex_shape = xs[0].shape
         return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 

@@ -517,7 +517,7 @@ class UnaryOperator(Operator):
 
 class BinaryOperator(Operator):
     def args_fixer(self, x, w, **params):
-        if type(x) is PrimalProxy or type(w) is PrimalProxy:
+        if type(x) is UndefPrimal or type(w) is UndefPrimal:
             assert x.shape == w.shape
             return (x, w), params
 
@@ -552,10 +552,10 @@ class BinaryOperator(Operator):
         (x, w), (x_bdim, y_bdim) = vals_in, dims_in
         if x_bdim != y_bdim:
             if x_bdim is None:
-                x = BatchTrace.move_batch_dim(dim_size, x_bdim, y_bdim, x)
+                x = VMapTrace.move_vmap_dim(dim_size, x_bdim, y_bdim, x)
                 x_bdim = y_bdim
             else:
-                y = BatchTrace.move_batch_dim(dim_size, y_bdim, x_bdim, y)
+                y = VMapTrace.move_vmap_dim(dim_size, y_bdim, x_bdim, y)
         return [self(x, w, **params)], [x_bdim]
 
     def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
@@ -669,7 +669,7 @@ class ProcedureSet:
 class Backend:
     LOG_LRU = int(os.environ.get("LOG_LRU", 0))
     LOG_JIT = int(os.environ.get("LOG_JIT", 0))
-    LOG_PYTREE = int(os.environ.get("LOG_PYTREE", 0))
+    LOG_TREE = int(os.environ.get("LOG_TREE", 0))
     LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "cpu")
@@ -691,10 +691,10 @@ class Backend:
             "dict",
         )
         self.register_node(
-            PrimalProxy,
+            UndefPrimal,
             lambda u: (u.void_tensor, ()),
-            lambda void_tensor, _: PrimalProxy(void_tensor),
-            "PrimalProxy",
+            lambda void_tensor, _: UndefPrimal(void_tensor),
+            "UndefPrimal",
         )
 
     def set_impl(self, op: Union[types.LambdaType, types.FunctionType]):
@@ -958,41 +958,41 @@ class NodeType(NamedTuple):
     unflatten: Callable
 
 
-class PyTreeDef(NamedTuple):
+class TreeDef(NamedTuple):
     node_type: NodeType
     node_metadata: Hashable
-    child_treedefs: Tuple["PyTreeDef", ...]
+    child_treedefs: Tuple["TreeDef", ...]
 
     def __repr__(self):
         ret = self.tree_repr(self)
         return ret
 
-    def tree_repr(self, pytree, indent="  ", prefix="", last=True):
+    def tree_repr(self, tree, indent="  ", prefix="", last=True):
         ret = ""
 
-        def _tree_repr(pytree, indent, prefix, last):
+        def _tree_repr(tree, indent, prefix, last):
             nonlocal ret
-            if isinstance(pytree, PyTreeDef):
-                ret += f'{prefix} {("└─" if last else "├─")} {pytree.node_type.name}\n'
-                for i, item in enumerate(pytree.child_treedefs):
+            if isinstance(tree, TreeDef):
+                ret += f'{prefix} {("└─" if last else "├─")} {tree.node_type.name}\n'
+                for i, item in enumerate(tree.child_treedefs):
                     new_prefix = prefix + (indent if not last else "   ")
-                    new_last = i == len(pytree.child_treedefs) - 1
+                    new_last = i == len(tree.child_treedefs) - 1
                     _tree_repr(item, indent, new_prefix, new_last)
             else:
-                ret += f'{prefix} {("└─" if last else "├─")} {pytree}\n'
+                ret += f'{prefix} {("└─" if last else "├─")} {tree}\n'
 
-        _tree_repr(pytree, indent="  ", prefix="", last=True)
+        _tree_repr(tree, indent="  ", prefix="", last=True)
         return ret
 
     @property
     def num_leaves(self):
-        def _get_num_leaves(x_):
-            if isinstance(x_, Leaf):
+        def get_num_leaves(x):
+            if isinstance(x, Leaf):
                 return 1
             else:
-                return sum(_get_num_leaves(x__) for x__ in x_.child_treedefs)
+                return sum(get_num_leaves(sub_x) for sub_x in x.child_treedefs)
 
-        return sum(_get_num_leaves(x) for x in self.child_treedefs)
+        return sum(get_num_leaves(x) for x in self.child_treedefs)
 
 
 class Leaf:
@@ -1010,8 +1010,9 @@ class Leaf:
         return hash(self.val)
 
     def __eq__(self, other):
-        if isinstance(other, Leaf):
-            return self.val == other.val
+        return True  # make TreeDef __eq__ don't care Leaf
+        # if isinstance(other, Leaf):
+        #     return self.val == other.val
 
 
 # ================
@@ -1079,7 +1080,7 @@ class JitOp(MetaOperator):
         return program_type.out_types
 
     def T(self, cotangents, *invals, program):
-        undef_primals = [type(x) is PrimalProxy for x in invals]
+        undef_primals = [type(x) is UndefPrimal for x in invals]
         transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
 
         residuals, _ = partition_list(undef_primals, invals)
@@ -1206,46 +1207,47 @@ class TraceTensor(Tensor):
         return f"{self.__class__.__name__}({repr(self.void_tensor)})"
 
 
-Batchdim = Union[None, int]
-
-
-class BatchTraceTensor(TraceTensor):
-    def __init__(self, trace, val, batch_dim: Batchdim):
+class VMapTraceTensor(TraceTensor):
+    def __init__(self, trace, val, vmap_dim):
         self._trace = trace
-        self.val = val
-        self.batch_dim = batch_dim
+        self._val = val
+        self.vmap_dim = vmap_dim
+
+    @property
+    def val(self):
+        return self._val
 
     @property
     def void_tensor(self):
         void_tensor = get_void_tensor_or_tensor(self.val)
-        if self.batch_dim is None:
+        if self.vmap_dim is None:
             return void_tensor
         else:
             shape = list(void_tensor.shape)
-            del shape[self.batch_dim]
+            del shape[self.vmap_dim]
             return VoidTensor(tuple(shape), void_tensor.dtype)
 
     def full_lower(self):
-        if self.batch_dim is None:
+        if self.vmap_dim is None:
             return full_lower(self.val)
         else:
             return self
 
 
-class BatchTrace(Trace):
-    pure = lambda self, val: BatchTraceTensor(self, val, None)
-
-    def run_op(self, op, tracers, params):
-        vals_in, bdims_in = unzip2((t.val, t.batch_dim) for t in tracers)
-        val_outs, bdim_outs = op.vmap(self.dim_size, vals_in, bdims_in, **params)
-        return [BatchTraceTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
+class VMapTrace(Trace):
+    pure = lambda self, val: VMapTraceTensor(self, val, None)
 
     @property
     def dim_size(self):
         return self.main.global_data
 
+    def run_op(self, op, tracers, params):
+        vals_in, bdims_in = unzip2((t.val, t.vmap_dim) for t in tracers)
+        val_outs, bdim_outs = op.vmap(self.dim_size, vals_in, bdims_in, **params)
+        return [VMapTraceTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
+
     @staticmethod
-    def move_batch_dim(dim_size, src, dst, x):
+    def move_vmap_dim(dim_size, src, dst, x):
         if src is None:
             target_shape = list(x.shape)
             target_shape.insert(dst, dim_size)
@@ -1427,7 +1429,7 @@ class ProgramBuilder:
         return {"Function": current_function_name, "Module": current_module_name, "Class": current_class_name}
 
 
-class PrimalProxy(NamedTuple):
+class UndefPrimal(NamedTuple):
     void_tensor: VoidTensor
 
     @property
@@ -1439,10 +1441,10 @@ class PrimalProxy(NamedTuple):
         return self.void_tensor.dtype
 
     def __repr__(self):
-        return f"PrimalProxy: {self.void_tensor}"
+        return f"UndefPrimal: {self.void_tensor}"
 
     def str_short(self):
-        return f"PrimalProxy: {self.dtype}, {self.shape}"
+        return f"UndefPrimal: {self.dtype}, {self.shape}"
 
 
 class PartialValue(NamedTuple):
@@ -1514,12 +1516,12 @@ dynamic_trace: Optional[MainTrace] = None
 trace_stack += [MainTrace(0, RunTrace, None)]
 
 
-class BackendPlaceholder:
+class UndefBackend:
     def __getattr__(self, attr):
         raise NotImplementedError("Backend not init yet with slope.core.set_backend(backend)")
 
 
-backend = BackendPlaceholder()
+backend = UndefBackend()
 
 
 def set_backend(init_backend):
@@ -1557,7 +1559,7 @@ def get_void_tensor_or_tensor(x):
 
 
 def tree_flatten(x: Any) -> Any:
-    def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[PyTreeDef, Leaf]]:
+    def _tree_flatten(x_: Any) -> Tuple[Iterable, Union[TreeDef, Leaf]]:
         node_type = None
         for k in backend.node_types.keys():
             if isinstance(x_, k):
@@ -1567,7 +1569,7 @@ def tree_flatten(x: Any) -> Any:
             node_metadata, children = node_type.flatten(x_)
             children_flat, child_trees = unzip2(list_map(_tree_flatten, children))
             children_iter = itertools.chain.from_iterable(children_flat)
-            treedef = PyTreeDef(node_type, node_metadata, tuple(child_trees))
+            treedef = TreeDef(node_type, node_metadata, tuple(child_trees))
             return children_iter, treedef
         else:
             return (x_,), Leaf(x_)
@@ -1576,27 +1578,27 @@ def tree_flatten(x: Any) -> Any:
     return tuple(children_iter), treedef
 
 
-def tree_unflatten(treedef: PyTreeDef, xs: Tuple[Any]) -> Any:
-    def _tree_unflatten(treedef_: PyTreeDef, xs_: Iterator) -> Any:
+def tree_unflatten(treedef: TreeDef, xs: Tuple[Any]) -> Any:
+    def _tree_unflatten(treedef_: TreeDef, xs_: Iterator) -> Any:
         if isinstance(treedef_, Leaf):
-            dblog(f"    tree leaf found: {xs_}\n", enable=backend.LOG_PYTREE)
+            dblog(f"    tree leaf found: {xs_}\n", enable=backend.LOG_TREE)
             return next(xs_)
         else:
-            dblog(f"    now\n  {treedef_}", enable=backend.LOG_PYTREE)
+            dblog(f"    now\n  {treedef_}", enable=backend.LOG_TREE)
             children = (_tree_unflatten(t, xs_) for t in treedef_.child_treedefs)
-            dblog(f"{children=}\n", enable=backend.LOG_PYTREE)
+            dblog(f"{children=}\n", enable=backend.LOG_TREE)
             return treedef_.node_type.unflatten(treedef_.node_metadata, children)
 
-    dblog(f"unflattening {treedef}", enable=backend.LOG_PYTREE)
+    dblog(f"unflattening {treedef}", enable=backend.LOG_TREE)
     return _tree_unflatten(treedef, iter(xs))
 
 
 def tree_transpose(
-    outer_treedef: PyTreeDef,
-    inner_treedef: PyTreeDef,
-    pytree_to_transpose: Any,
+    outer_treedef: TreeDef,
+    inner_treedef: TreeDef,
+    tree_to_transpose: Any,
 ) -> Any:
-    flat, treedef = tree_flatten(pytree_to_transpose)
+    flat, treedef = tree_flatten(tree_to_transpose)
     inner_size = inner_treedef.num_leaves
     outer_size = outer_treedef.num_leaves
     if treedef.num_leaves != (inner_size * outer_size):
@@ -1612,8 +1614,8 @@ def flatten_fn(f, in_tree, *, has_aux=False):
     store = Store()
 
     def flat_fn(*args_flat, **params):
-        pytree_args = tree_unflatten(in_tree, args_flat)
-        out = f(*pytree_args, **params)
+        tree_args = tree_unflatten(in_tree, args_flat)
+        out = f(*tree_args, **params)
         if has_aux:
             out, aux = out
         out_flat, out_tree = tree_flatten(out)
@@ -1720,32 +1722,32 @@ def full_lower(val: Any):
 
 
 def typecheck_program(program: Program) -> ProgramType:
-    backend: Set[Var] = set()
+    env: Set[Var] = set()
 
     for v in program.in_binders:
-        if v in backend:
+        if v in env:
             raise TypeError
-        backend.add(v)
+        env.add(v)
 
     for instruction in program.instructions:
-        in_types = [typecheck_atom(backend, x) for x in instruction.inputs]
+        in_types = [typecheck_atom(env, x) for x in instruction.inputs]
         out_types = instruction.op.typecheck(*in_types, **instruction.params)
         for out_binder, out_type in list_zip(instruction.out_binders, out_types):
             if not out_type == out_binder.void_tensor:
                 raise TypeError
         for out_binder in instruction.out_binders:
-            if out_binder in backend:
+            if out_binder in env:
                 raise TypeError
-            backend.add(out_binder)
+            env.add(out_binder)
 
     in_types = [v.void_tensor for v in program.in_binders]
-    out_types = [typecheck_atom(backend, x) for x in program.outs]
+    out_types = [typecheck_atom(env, x) for x in program.outs]
     return ProgramType(tuple(in_types), tuple(out_types))
 
 
-def typecheck_atom(backend: Set[Var], x: Atom) -> VoidTensor:
+def typecheck_atom(env: Set[Var], x: Atom) -> VoidTensor:
     if isinstance(x, Var):
-        if x not in backend:
+        if x not in env:
             raise TypeError("unbound variable")
         return x.void_tensor
     elif isinstance(x, Lit):
@@ -1755,14 +1757,14 @@ def typecheck_atom(backend: Set[Var], x: Atom) -> VoidTensor:
 
 
 def run_program(program: Program, args: List[Any]) -> List[Any]:
-    backend: Dict[Var, Any] = {}
+    env: Dict[Var, Any] = {}
 
     def read(x: Atom) -> Any:
-        return backend[x] if type(x) is Var else x.val
+        return env[x] if type(x) is Var else x.val
 
     def write(v: Var, val: Any) -> None:
-        assert v not in backend  # single-assignment
-        backend[v] = val
+        assert v not in env  # single-assignment
+        env[v] = val
 
     list_map(write, program.in_binders, args)
     for instruction in program.instructions:
@@ -1780,24 +1782,29 @@ def vmap_flat(f, in_dim, *args):
     axi_set = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
     assert len(axi_set) == 1
     (dim_size,) = axi_set
-    with new_main(BatchTrace, dim_size) as main:
-        trace = BatchTrace(main)
-        tracers_in = [BatchTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
+    with new_main(VMapTrace, dim_size) as main:
+        trace = VMapTrace(main)
+        tracers_in = [VMapTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
-        vals_out, bdims_out = unzip2((t.val, t.batch_dim) for t in tracers_out)
+        vals_out, bdims_out = unzip2((t.val, t.vmap_dim) for t in tracers_out)
     outs_permuted = [
-        BatchTrace.move_batch_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
+        VMapTrace.move_vmap_dim(dim_size, bdim, 0, val_out) for val_out, bdim in list_zip(vals_out, bdims_out)
     ]
     return outs_permuted
 
 
 def vmap(f, in_dim=0, out_dim=0):
+    if isinstance(in_dim, int):
+        in_dim = (in_dim,)
+    if isinstance(out_dim, int):
+        out_dim = (out_dim,)
+
     def batched_f(*args):
         args_flat, in_tree = tree_flatten(args)
         in_dim_flat, in_tree2 = tree_flatten(in_dim)
         if in_tree != in_tree2:
-            raise TypeError(f"{in_tree}\n!=\n{in_tree2}")
+            raise TypeError(f"\n{in_tree}\n!=\n{in_tree2}")
         f_flat, out_tree_store = flatten_fn(f, in_tree)
         outs_flat = vmap_flat(f_flat, in_dim_flat, *args_flat)
         return tree_unflatten(out_tree_store(), outs_flat)
@@ -1846,7 +1853,7 @@ def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args)
 
 
 @lru_cache_verbose()
-def make_program(f: Callable, *void_tensors_in: VoidTensor, static_args, name) -> Tuple[Program, List[Any], PyTreeDef]:
+def make_program(f: Callable, *void_tensors_in: VoidTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:
     void_tensors_in, in_tree = tree_flatten(void_tensors_in)
     f, out_tree_store = flatten_fn(f, in_tree)
     builder = ProgramBuilder()
@@ -1905,14 +1912,14 @@ def partial_run_program(
     in_unknowns: List[bool],
     instantiate: Optional[List[bool]] = None,
 ) -> Tuple[Program, Program, List[bool], int]:
-    backend: Dict[Var, bool] = {}
+    env: Dict[Var, bool] = {}
     residuals: Set[Var] = set()
 
     def read(x: Atom) -> bool:
-        return type(x) is Var and backend[x]
+        return type(x) is Var and env[x]
 
     def write(unk: bool, v: Var) -> None:
-        backend[v] = unk
+        env[v] = unk
 
     instructions1, instructions2 = [], []
     list_map(write, in_unknowns, program.in_binders)
@@ -2158,7 +2165,7 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     primal_pvals, _ = split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [PrimalProxy(p.void_tensor) for p in tangent_pvals_in]
+    transpose_inputs = consts + [UndefPrimal(p.void_tensor) for p in tangent_pvals_in]
     f_vjp_flat = lambda *cotangents: run_program_transposed(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
@@ -2187,10 +2194,10 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
     ct_env: Dict[Var, Any] = {}
 
     def read_primal(x: Atom) -> Any:
-        return primal_env.get(x, PrimalProxy(x.void_tensor)) if type(x) is Var else x.val
+        return primal_env.get(x, UndefPrimal(x.void_tensor)) if type(x) is Var else x.val
 
     def write_primal(v: Var, val: Any) -> None:
-        if type(val) is not PrimalProxy:
+        if type(val) is not UndefPrimal:
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
@@ -2211,7 +2218,7 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
-    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is PrimalProxy]
+    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
 
     return ret
 
@@ -2220,7 +2227,7 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
 def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
     void_tensors_in, void_tensors_out = typecheck_program(program)
     traceable = partial(run_program_transposed, program)
-    args = [PrimalProxy(a) if u else a for a, u in zip(void_tensors_in, undef_primals)]
+    args = [UndefPrimal(a) if u else a for a, u in zip(void_tensors_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,
         tuple(args),
@@ -2313,6 +2320,7 @@ class jit:
 
         void_tensors_in = tree_map(lambda x: VoidTensor.like(get_void_tensor_or_tensor(x)), args)
         if self.name is None:
+            # TODO: better unique jit name
             self.name = f"jit_{str(hash((self.f, void_tensors_in, static_args)))[1:5]}"
         program, consts, out_tree = make_program(self.f, *void_tensors_in, static_args=static_args, name=self.name)
         return program, consts, out_tree
@@ -2332,6 +2340,3 @@ class jit:
         hashed_consts = tuple(map(Hashed, consts))
         jit_object = backend.gen_jit_object(hashed_program, hashed_consts)
         return jit_object
-
-
-#

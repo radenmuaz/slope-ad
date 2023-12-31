@@ -49,7 +49,7 @@ def type_mlir_sig(in_void_tensors, out_void_tensor):
 class IREEBackend(Backend):
     operator_set: OperatorSet = operator_set
     procedure_set: ProcedureSet = procedure_set
-    dtype_map = {
+    dtype_map: dict = {
         Tensor.float32: np.dtypes.Float32DType(),
         Tensor.uint8: np.dtypes.UInt8DType(),
         Tensor.int8: np.dtypes.Int8DType(),

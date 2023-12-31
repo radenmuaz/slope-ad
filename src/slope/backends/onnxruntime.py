@@ -8,7 +8,7 @@ from slope.core import (
     Tensor,
     TensorBuffer,
     VoidTensor,
-    PrimalProxy,
+    UndefPrimal,
     list_zip,
     list_map,
 )
@@ -227,10 +227,10 @@ def jvp(self, primals, tangents):
 @mul.set_method
 def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
+    assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+    if type(x) is UndefPrimal:
         return [grad_L_y * w, None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         return [None, x * grad_L_y]
 
 
@@ -266,10 +266,10 @@ def jvp(self, primals, tangents):
 @pow.set_method
 def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
+    assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+    if type(x) is UndefPrimal:
         return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
@@ -614,7 +614,7 @@ def T(self, cotangents, x, *, padding, mode, value):
         )
         return unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
-    res = t_op() if isinstance(x, PrimalProxy) else None
+    res = t_op() if isinstance(x, UndefPrimal) else None
     return [res]
 
 
@@ -676,7 +676,7 @@ def T(self, cotangents, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
     x_shape = x.void_tensor.shape
-    assert isinstance(x, PrimalProxy)
+    assert isinstance(x, UndefPrimal)
     if strides is None or np.all(np.equal(strides, 1)):
         lo, hi, interior = (
             starts,
@@ -790,9 +790,9 @@ def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
 @cat.set_method
 def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
-    x_shapes = [o.void_tensor.shape if type(o) is PrimalProxy else o.shape for o in xs]
+    x_shapes = [o.void_tensor.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:
-        return [None if type(o) is PrimalProxy else None for o in xs]
+        return [None if type(o) is UndefPrimal else None for o in xs]
     else:  # TODO: replace numpy with pure Python
         limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
@@ -804,7 +804,7 @@ def T(self, cotangents, *xs, dim=0):
         l[dim] = limit_points[i]
 
     return [
-        z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None
+        z.slice(tuple(start), tuple(limit)) if type(o) is UndefPrimal else None
         for o, start, limit in zip(xs, starts, limits)
     ]
 
@@ -985,10 +985,10 @@ def jvp(self, primals, tangents):
 @matmul.set_method
 def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
+    assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+    if type(x) is UndefPrimal:
         return [grad_L_y @ w.transpose(-1, -2), None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         return [None, x.transpose(-1, -2) @ grad_L_y]
 
 
@@ -1064,13 +1064,13 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 @conv.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
     (grad_L_y,) = cotangents
-    if type(x) is PrimalProxy:
+    if type(x) is UndefPrimal:
         grad_L_x = grad_L_y.conv_transpose(
             w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0] - dilation[0]
         )
         assert grad_L_x.shape == x.shape
         return [grad_L_x, None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         grad_L_w = (
             x.transpose(0, 1)
             .conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
@@ -1193,10 +1193,10 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding, output_pa
 @conv_transpose.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_padding):
     (grad_L_y,) = cotangents
-    if type(x) is PrimalProxy:
+    if type(x) is UndefPrimal:
         grad_L_x = grad_L_y.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
         return [grad_L_x, None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         x_T = x.transpose(0, 1)
         grad_L_y_T = grad_L_y.transpose(0, 1)
         grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)

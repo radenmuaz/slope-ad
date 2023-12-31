@@ -186,7 +186,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     """An tensor of PRNG keys backed by an RNG implementation.
 
     This class lifts the definition of a PRNG, provided in the form of a
-    ``PRNGImpl``, into an tensor-like pytree class. Instances of this
+    ``PRNGImpl``, into an tensor-like tree class. Instances of this
     class behave like an tensor whose base elements are keys, hiding the
     fact that keys are typically tensors (of ``uint32`` dtype) themselves.
 

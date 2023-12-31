@@ -8,7 +8,7 @@ from slope.core import (
     Tensor,
     TensorBuffer,
     VoidTensor,
-    PrimalProxy,
+    UndefPrimal,
     list_zip,
     list_map,
 )
@@ -227,10 +227,10 @@ def jvp(self, primals, tangents):
 @mul.set_method
 def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
+    assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+    if type(x) is UndefPrimal:
         return [grad_L_y * w, None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         return [None, x * grad_L_y]
 
 
@@ -266,10 +266,10 @@ def jvp(self, primals, tangents):
 @pow.set_method
 def T(self, cotangents, x, w):
     (grad_L_y,) = cotangents
-    assert (type(x) is PrimalProxy) ^ (type(w) is PrimalProxy)
-    if type(x) is PrimalProxy:
+    assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+    if type(x) is UndefPrimal:
         return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
-    elif type(w) is PrimalProxy:
+    elif type(w) is UndefPrimal:
         return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
@@ -610,7 +610,7 @@ def T(self, cotangents, x, *, padding, mode, value):
         )
         return unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
 
-    res = t_op() if isinstance(x, PrimalProxy) else None
+    res = t_op() if isinstance(x, UndefPrimal) else None
     return [res]
 
 
@@ -672,7 +672,7 @@ def T(self, cotangents, x, *, starts, limits, strides):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
     x_shape = x.void_tensor.shape
-    assert isinstance(x, PrimalProxy)
+    assert isinstance(x, UndefPrimal)
     if np.all(np.equal(strides, 1)):
         lo, hi = (starts, tuple(np.subtract(x.void_tensor.shape, limits)))
     else:
@@ -782,9 +782,9 @@ def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
 @cat.set_method
 def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
-    x_shapes = [o.void_tensor.shape if type(o) is PrimalProxy else o.shape for o in xs]
+    x_shapes = [o.void_tensor.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:
-        return [None if type(o) is PrimalProxy else None for o in xs]
+        return [None if type(o) is UndefPrimal else None for o in xs]
     else:  # TODO: replace numpy with pure Python
         limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
@@ -796,7 +796,7 @@ def T(self, cotangents, *xs, dim=0):
         l[dim] = limit_points[i]
 
     return [
-        z.slice(tuple(start), tuple(limit)) if type(o) is PrimalProxy else None
+        z.slice(tuple(start), tuple(limit)) if type(o) is UndefPrimal else None
         for o, start, limit in zip(xs, starts, limits)
     ]
 

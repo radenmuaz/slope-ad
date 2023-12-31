@@ -1,5 +1,5 @@
 import slope
-from slope.core import Tensor, VoidTensor, PyTreeDef
+from slope.core import Tensor, VoidTensor, TreeDef
 from typing import Tuple, List, Optional
 
 import operator as operator_py
@@ -30,7 +30,7 @@ class Module:
         for k, v in self.__dict__.items():
             if isinstance(v, (Tensor, VoidTensor)):
                 tensor_attrs[k] = None
-            elif isinstance(v, (list, tuple)) and not isinstance(v, PyTreeDef):
+            elif isinstance(v, (list, tuple)) and not isinstance(v, TreeDef):
                 v_flat, v_treedef = slope.tree_flatten(v)
                 if all(isinstance(vi, (Tensor, VoidTensor)) for vi in v_flat):
                     tensor_attrs[k] = None

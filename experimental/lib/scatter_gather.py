@@ -156,7 +156,7 @@ class Gather(ShapeOp):
 
     @staticmethod
     def typecheck(
-        x: Typecheckor,
+        x: VoidTensor,
         idx,
         *,
         dimension_numbers,
@@ -165,7 +165,7 @@ class Gather(ShapeOp):
         indices_are_sorted,
         mode,
         fill_value,
-    ) -> List[Typecheckor]:
+    ) -> List[VoidTensor]:
         offset_dims = dimension_numbers.offset_dims
         collapsed_slice_dims = dimension_numbers.collapsed_slice_dims
         start_index_map = dimension_numbers.start_index_map
@@ -296,9 +296,9 @@ class Gather(ShapeOp):
         fill_value,
     ):
         assert ad.is_undefined_primal(operand)
-        operand_shape = operand.typecheckor.shape
+        operand_shape = operand.void_tensor.shape
         if type(t) is ad_util.Zero:
-            out = ad_util.Zero(operand.typecheckor)
+            out = ad_util.Zero(operand.void_tensor)
         else:
             zeros = lax.full(operand_shape, lax._zero(t))
             scatter_dnums = ScatterDimensionNumbers(
@@ -450,9 +450,9 @@ class Scatter(ShapeOp):
         return val_out, tangent_out
 
     @staticmethod
-    def typecheck(x: Typecheckor, idx, *, dim: Sequence[int]) -> List[Typecheckor]:
+    def typecheck(x: VoidTensor, idx, *, dim: Sequence[int]) -> List[VoidTensor]:
         shape = [x.shape[i] for i in dim]
-        return [Typecheckor(shape, x.dtype)]
+        return [VoidTensor(shape, x.dtype)]
 
     @staticmethod
     def T(
@@ -470,12 +470,12 @@ class Scatter(ShapeOp):
     ):
         assert not ad.is_undefined_primal(indices)
         if ad.is_undefined_primal(updates):
-            updates_shape = updates.typecheckor.shape
+            updates_shape = updates.void_tensor.shape
         else:
             updates_shape = updates.shape
         if type(t) is ad_util.Zero:
-            operand_t = ad_util.Zero(operand.typecheckor) if ad.is_undefined_primal(operand) else None
-            update_t = ad_util.Zero(updates.typecheckor) if ad.is_undefined_primal(updates) else None
+            operand_t = ad_util.Zero(operand.void_tensor) if ad.is_undefined_primal(operand) else None
+            update_t = ad_util.Zero(updates.void_tensor) if ad.is_undefined_primal(updates) else None
         else:
             operand_t = update_t = None
             if ad.is_undefined_primal(operand):

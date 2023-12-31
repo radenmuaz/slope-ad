@@ -1,5 +1,5 @@
 import slope
-from slope.core import Tensor, Typecheckor, PyTreeDef
+from slope.core import Tensor, VoidTensor, PyTreeDef
 from typing import Tuple, List, Optional
 
 import operator as operator_py
@@ -28,11 +28,11 @@ class Module:
         module_attrs = dict()
 
         for k, v in self.__dict__.items():
-            if isinstance(v, (Tensor, Typecheckor)):
+            if isinstance(v, (Tensor, VoidTensor)):
                 tensor_attrs[k] = None
             elif isinstance(v, (list, tuple)) and not isinstance(v, PyTreeDef):
                 v_flat, v_treedef = slope.tree_flatten(v)
-                if all(isinstance(vi, (Tensor, Typecheckor)) for vi in v_flat):
+                if all(isinstance(vi, (Tensor, VoidTensor)) for vi in v_flat):
                     tensor_attrs[k] = None
             elif isinstance(v, Module):
                 module_attrs[k] = None
@@ -53,7 +53,7 @@ class Module:
         return attrs if with_name else tuple(attrs.values())
 
     def get_tensors(self, with_name=False):
-        return self.get_attrs((Tensor, Typecheckor), with_name)
+        return self.get_attrs((Tensor, VoidTensor), with_name)
 
     def get_modules(self, with_name=False):
         return self.get_attrs(Module, with_name)
@@ -81,7 +81,7 @@ class Module:
 
         def find(obj, prefix):
             nonlocal tensor_attrs, module_attrs
-            if isinstance(obj, (Tensor, Typecheckor)):
+            if isinstance(obj, (Tensor, VoidTensor)):
                 tensor_attrs.add(prefix.strip("."))
                 return
             if isinstance(obj, Module):

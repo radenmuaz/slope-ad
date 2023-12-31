@@ -1,6 +1,6 @@
 import slope
 from slope import base_ops
-from slope.tensor_shape import Typecheckor
+from slope.tensor_shape import VoidTensor
 import numpy as np
 
 from typing import Union, List, Tuple, Sequence, Any, Callable, NamedTuple
@@ -200,7 +200,7 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
     _base_tensor: typing.Tensor
 
     def __init__(self, impl, key_data: Any):
-        assert not isinstance(key_data, core.Tracor)
+        assert not isinstance(key_data, core.TracerTensor)
         _check_prng_key_data(impl, key_data)
         self.impl = impl
         self._base_tensor = key_data
@@ -235,9 +235,9 @@ class PRNGKeyTensorImpl(PRNGKeyTensor):
 
     @property
     def sharding(self):
-        typecheckor = keys_shaped_tensor(self.impl, self.shape)
+        void_tensor = keys_shaped_tensor(self.impl, self.shape)
         phys_sharding = self._base_tensor.sharding
-        return KeyTyRules.logical_op_sharding(typecheckor, phys_sharding)
+        return KeyTyRules.logical_op_sharding(void_tensor, phys_sharding)
 
     def _is_scalar(self):
         base_ndim = len(self.impl.key_shape)
@@ -353,8 +353,8 @@ def keys_shaped_tensor(impl, shape):
     return core.ShapedTensor(shape, KeyTy(impl))
 
 
-def keys_typecheckor_to_base_arr_typecheckor(keys_typecheckor):
-    shape = (*keys_typecheckor.shape, *keys_typecheckor.dtype.impl.key_shape)
+def keys_void_tensor_to_base_arr_void_tensor(keys_void_tensor):
+    shape = (*keys_void_tensor.shape, *keys_void_tensor.dtype.impl.key_shape)
     return core.ShapedTensor(shape, np.dtype("uint32"))
 
 
@@ -363,11 +363,11 @@ def base_arr_shape_to_keys_shape(impl, base_arr_shape):
     return base_arr_shape[:-base_ndim]
 
 
-def make_key_tensor_phys_sharding(typecheckor, sharding, is_sharding_from_xla):
+def make_key_tensor_phys_sharding(void_tensor, sharding, is_sharding_from_xla):
     if dispatch.is_single_device_sharding(sharding):
         return sharding
     elif isinstance(sharding, PmapSharding):
-        key_shape = typecheckor.dtype.impl.key_shape
+        key_shape = void_tensor.dtype.impl.key_shape
         trailing_sharding = [sharding_specs.NoSharding()] * len(key_shape)
         phys_sharding_spec = sharding_specs.ShardingSpec(
             sharding=(*sharding.sharding_spec.sharding, *trailing_sharding),
@@ -375,16 +375,16 @@ def make_key_tensor_phys_sharding(typecheckor, sharding, is_sharding_from_xla):
         )
         return PmapSharding(devices=sharding.devices, sharding_spec=phys_sharding_spec)
     elif isinstance(sharding, NamedSharding):
-        key_shape = typecheckor.dtype.impl.key_shape
+        key_shape = void_tensor.dtype.impl.key_shape
         trailing_spec = [None] * len(key_shape)
         return NamedSharding(sharding.mesh, PartitionSpec(*sharding.spec, *trailing_spec))
     elif is_sharding_from_xla:
         return sharding
     else:
-        sharding_proto = sharding._to_xla_op_sharding(typecheckor.ndim)
+        sharding_proto = sharding._to_xla_op_sharding(void_tensor.ndim)
         return GSPMDSharding(
             sharding._device_assignment,
-            KeyTyRules.physical_op_sharding(typecheckor, sharding_proto),
+            KeyTyRules.physical_op_sharding(void_tensor, sharding_proto),
         )
 
 

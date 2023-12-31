@@ -9,7 +9,7 @@ from slope.core import (
     InitOperator,
     OperatorSet,
     Tensor,
-    Typecheckor,
+    VoidTensor,
     PrimalProxy,
     list_zip,
 )
@@ -51,8 +51,8 @@ class StopGradient(UnaryOperator):
 
 @operator_set.register("cast", aliases=["astype"])
 class Cast(UnaryOperator):
-    def typecheck(self, x: Typecheckor, *, dtype) -> List[Typecheckor]:
-        return [Typecheckor(x.shape, dtype)]
+    def typecheck(self, x: VoidTensor, *, dtype) -> List[VoidTensor]:
+        return [VoidTensor(x.shape, dtype)]
 
     def jvp(self, primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
@@ -112,7 +112,7 @@ class Log(UnaryOperator):
 @operator_set.register("invert")
 class Invert(UnaryOperator):
     def typecheck(self, x, **params):
-        return [Typecheckor(x.shape, slope.bool)]
+        return [VoidTensor(x.shape, slope.bool)]
 
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -214,33 +214,33 @@ class Maximuum(BinaryOperator):
 
 @operator_set.register("equal")
 class Equal(BinaryOperator):
-    def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
+    def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
         # difference with default binary typecheck: force dtype bool
-        if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+        if not type(x) in (Tensor, VoidTensor) or not type(x) in (
             Tensor,
-            Typecheckor,
+            VoidTensor,
         ):
             raise TypeError
         if x.dtype != y.dtype:
             raise TypeError
-        void_x = Typecheckor.like(x)
-        void_y = Typecheckor.like(y)
+        void_x = VoidTensor.like(x)
+        void_y = VoidTensor.like(y)
         if void_x == void_y:
-            return [Typecheckor(void_x.shape, Tensor.bool)]
+            return [VoidTensor(void_x.shape, Tensor.bool)]
         shape_delta = len(void_x.shape) - len(void_y.shape)
         if shape_delta > 0:
-            void_y = Typecheckor((1,) * shape_delta + void_y.shape, Tensor.bool)
+            void_y = VoidTensor((1,) * shape_delta + void_y.shape, Tensor.bool)
         elif shape_delta < 0:
             x = x.reshape((1,) * -shape_delta + void_x.shape)
-            void_x = Typecheckor((1,) * -shape_delta + void_x.shape, Tensor.bool)
+            void_x = VoidTensor((1,) * -shape_delta + void_x.shape, Tensor.bool)
         if void_x == void_y:
             return [void_x]
         else:
             shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
             if void_x.shape != shape_ret:
-                void_x = Typecheckor(shape_ret, Tensor.bool)
+                void_x = VoidTensor(shape_ret, Tensor.bool)
             if void_y.shape != shape_ret:
-                void_y = Typecheckor(shape_ret, Tensor.bool)
+                void_y = VoidTensor(shape_ret, Tensor.bool)
             if void_x != void_y:
                 raise TypeError
             return [void_x]
@@ -282,7 +282,7 @@ class Max(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.typecheckor.shape)
+        grad_L_x = grad_L_x.expand(x.void_tensor.shape)
 
 
 @operator_set.register("sum")
@@ -300,7 +300,7 @@ class Sum(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.typecheckor.shape)
+        grad_L_x = grad_L_x.expand(x.void_tensor.shape)
 
         return [grad_L_x]
 
@@ -315,11 +315,11 @@ class Expand(ShapeOperator):
     def args_fixer(self, x, *, shape):
         return (x,), dict(shape=shape)
 
-    def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
+    def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
         e_shape = list(x.shape)
         assert len(e_shape) == len(shape)
         assert all(a <= b for a, b in zip(e_shape, shape))
-        return [Typecheckor(tuple(shape), x.dtype)]
+        return [VoidTensor(tuple(shape), x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, shape):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -339,17 +339,17 @@ class Expand(ShapeOperator):
     def T(self, cotangents, x, *, shape):
         (grad_L_y,) = cotangents
         grad_L_x = grad_L_y
-        if x.typecheckor.shape == grad_L_x.shape:
+        if x.void_tensor.shape == grad_L_x.shape:
             return [grad_L_x]
         else:
             b_dim = []
-            assert len(x.typecheckor.shape) == len(grad_L_x.shape)
-            for i, (xd, od) in enumerate(zip(x.typecheckor.shape, grad_L_x.shape)):
+            assert len(x.void_tensor.shape) == len(grad_L_x.shape)
+            for i, (xd, od) in enumerate(zip(x.void_tensor.shape, grad_L_x.shape)):
                 if xd != od:
                     b_dim += [i]
             grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-        if grad_L_x.shape != x.typecheckor.shape:
-            raise ValueError(f"not same {grad_L_x.shape=}, {x.typecheckor.shape=}")
+        if grad_L_x.shape != x.void_tensor.shape:
+            raise ValueError(f"not same {grad_L_x.shape=}, {x.void_tensor.shape=}")
         return [grad_L_x]
 
 
@@ -369,8 +369,8 @@ class Reshape(ShapeOperator):
             shape = tuple(d if d != -1 else (numel // others) for d in shape)
         return (x,), dict(shape=shape)
 
-    def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
-        return [Typecheckor(tuple(shape), x.dtype)]
+    def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
+        return [VoidTensor(tuple(shape), x.dtype)]
 
     def jvp(self, primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
@@ -378,14 +378,14 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (z,) = cotangents
-        return [z.reshape(x.typecheckor.shape)]
+        return [z.reshape(x.void_tensor.shape)]
 
 
 @operator_set.register("permute")
 class Permute(ShapeOperator):
-    def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]:
+    def typecheck(self, x: VoidTensor, *, perm: Sequence[int]) -> List[VoidTensor]:
         shape = [x.shape[i] for i in perm]
-        return [Typecheckor(shape, x.dtype)]
+        return [VoidTensor(shape, x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, perm):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -418,7 +418,7 @@ class Pad(ShapeOperator):
         assert (len(x.shape) * 2) % len(padding) == 0
         return (x,), dict(padding=padding, mode=mode, value=value)
 
-    def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor]:
+    def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
         padding = padding[::-1]
         lo, hi = padding[0::2], padding[1::2]
         interior = [0] * (len(padding) // 2)
@@ -433,7 +433,7 @@ class Pad(ShapeOperator):
                 f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
                 f"{shape=}"
             )
-        res = Typecheckor(shape, x.dtype)
+        res = VoidTensor(shape, x.dtype)
         return [res]
 
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
@@ -484,7 +484,7 @@ class Slice(ShapeOperator):
             strides = (1,) * len(starts)
         return (x,), dict(starts=starts, limits=limits, strides=strides)
 
-    def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typecheckor]:
+    def typecheck(self, x: VoidTensor, *, starts, limits, strides=None) -> List[VoidTensor]:
         if strides is None or tuple(strides) == (1,) * len(x.shape):
             shape = tuple(
                 [
@@ -492,12 +492,12 @@ class Slice(ShapeOperator):
                     for start, limit in list_zip(starts, limits)
                 ]
             )
-            return [Typecheckor(shape, x.dtype)]
+            return [VoidTensor(shape, x.dtype)]
         else:
             # TODO: compute strided shape without numpy
             x = np.zeros(x.shape)
             x = x[tuple(slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-            return [Typecheckor(x.shape, x.dtype)]
+            return [VoidTensor(x.shape, x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides=None):
         raise NotImplementedError
@@ -526,12 +526,12 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
         (z,) = cotangents
-        x_shape = x.typecheckor.shape
+        x_shape = x.void_tensor.shape
         assert isinstance(x, PrimalProxy)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
-                tuple(np.subtract(x.typecheckor.shape, limits)),
+                tuple(np.subtract(x.void_tensor.shape, limits)),
                 (0,) * len(starts),
             )
         else:
@@ -566,8 +566,8 @@ class Flip(ShapeOperator):
             dim = tuple(dim)
         return (x,), dict(dim=dim)
 
-    def typecheck(self, x: Typecheckor, *, dim):
-        return [Typecheckor(tuple(x.shape), x.dtype)]
+    def typecheck(self, x: VoidTensor, *, dim):
+        return [VoidTensor(tuple(x.shape), x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
         raise NotImplementedError
@@ -589,7 +589,7 @@ class Cat(ShapeOperator):
         xs = tuple(xs)
         return xs, dict(dim=dim)
 
-    def typecheck(self, *xs: Typecheckor, dim=0) -> List[Typecheckor]:
+    def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
         if len(set(x.ndim for x in xs)) != 1:
             msg = "Cannot cat tensors with different numbers of dimensions: got {}."
             raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -608,7 +608,7 @@ class Cat(ShapeOperator):
 
         concat_size = sum_py(x.shape[dim] for x in xs)
         ex_shape = xs[0].shape
-        return [Typecheckor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
+        return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim=0):
         raise NotImplementedError
@@ -618,7 +618,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (z,) = cotangents
-        x_shapes = [o.typecheckor.shape if type(o) is PrimalProxy else o.shape for o in xs]
+        x_shapes = [o.void_tensor.shape if type(o) is PrimalProxy else o.shape for o in xs]
         if type(z) is None:
             return [None if type(o) is PrimalProxy else None for o in xs]
         else:  # TODO: replace numpy with pure Python
@@ -655,8 +655,8 @@ class Full(InitOperator):
             fill_value = int(fill_value)
         return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
-    def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
-        return [Typecheckor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
+        return [VoidTensor(tuple(shape), dtype)]
 
     # def jvp(self, primals, tangents, *, shape, fill_value, dtype):
     #     out = self(shape=shape, fill_value=fill_value, dtype=dtype)
@@ -673,8 +673,8 @@ class RandomUniform(InitOperator):
             shape = ()
         return (), dict(shape=shape, dtype=dtype)
 
-    def typecheck(self, *, shape, dtype) -> List[Typecheckor]:
-        return [Typecheckor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
+        return [VoidTensor(tuple(shape), dtype)]
 
 
 @operator_set.register("random_normal", aliases=["randn"])
@@ -686,8 +686,8 @@ class RandomNormal(InitOperator):
             shape = ()
         return (), dict(shape=shape, dtype=dtype)
 
-    def typecheck(self, *, shape, dtype) -> List[Typecheckor]:
-        return [Typecheckor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
+        return [VoidTensor(tuple(shape), dtype)]
 
 
 @operator_set.register("arange", aliases=["iota"])
@@ -700,8 +700,8 @@ class Arange(InitOperator):
             stride = 1
         return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
 
-    def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
-        return [Typecheckor((((stop - start) * stride),), dtype)]
+    def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
+        return [VoidTensor((((stop - start) * stride),), dtype)]
 
 
 # -------------------
@@ -732,7 +732,7 @@ class Matmul(Operator):
         else:
             raise ValueError("Invalid dimensions for matmul")
 
-        return [Typecheckor(shape, x.dtype)]
+        return [VoidTensor(shape, x.dtype)]
 
     def jvp(self, primals, tangents):
         (x, w), (x_dot, w_dot) = primals, tangents
@@ -792,7 +792,7 @@ class Conv(Operator):
         if out_shape[-2] != out_shape[-1]:
             breakpoint()
 
-        return [Typecheckor(out_shape, x.dtype)]
+        return [VoidTensor(out_shape, x.dtype)]
 
     def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
         (x, w), (x_dot, w_dot) = primals, tangents

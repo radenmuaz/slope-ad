@@ -7,7 +7,7 @@ from slope.core import (
     ProcedureSet,
     Tensor,
     TensorBuffer,
-    Typecheckor,
+    VoidTensor,
     PrimalProxy,
     list_zip,
     list_map,
@@ -58,8 +58,8 @@ operator_set.alias(cast, "astype")
 
 
 @cast.set_method
-def typecheck(self, x: Typecheckor, *, dtype) -> List[Typecheckor]:
-    return [Typecheckor(x.shape, dtype)]
+def typecheck(self, x: VoidTensor, *, dtype) -> List[VoidTensor]:
+    return [VoidTensor(x.shape, dtype)]
 
 
 @cast.set_method
@@ -174,7 +174,7 @@ def T(self, cotangents, x):
 
 @invert.set_method
 def typecheck(self, x, **params):
-    return [Typecheckor(x.shape, slope.bool)]
+    return [VoidTensor(x.shape, slope.bool)]
 
 
 # -----------------------
@@ -315,33 +315,33 @@ def T(self, cotangents, x, w):
 
 
 @equal.set_method
-def typecheck(self, x: Typecheckor, y: Typecheckor, **params) -> List[Typecheckor]:
+def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
     # difference with default binary typecheck: force dtype bool
-    if not type(x) in (Tensor, Typecheckor) or not type(x) in (
+    if not type(x) in (Tensor, VoidTensor) or not type(x) in (
         Tensor,
-        Typecheckor,
+        VoidTensor,
     ):
         raise TypeError
     if x.dtype != y.dtype:
         raise TypeError
-    void_x = Typecheckor.like(x)
-    void_y = Typecheckor.like(y)
+    void_x = VoidTensor.like(x)
+    void_y = VoidTensor.like(y)
     if void_x == void_y:
-        return [Typecheckor(void_x.shape, Tensor.bool)]
+        return [VoidTensor(void_x.shape, Tensor.bool)]
     shape_delta = len(void_x.shape) - len(void_y.shape)
     if shape_delta > 0:
-        void_y = Typecheckor((1,) * shape_delta + void_y.shape, Tensor.bool)
+        void_y = VoidTensor((1,) * shape_delta + void_y.shape, Tensor.bool)
     elif shape_delta < 0:
         x = x.reshape((1,) * -shape_delta + void_x.shape)
-        void_x = Typecheckor((1,) * -shape_delta + void_x.shape, Tensor.bool)
+        void_x = VoidTensor((1,) * -shape_delta + void_x.shape, Tensor.bool)
     if void_x == void_y:
         return [void_x]
     else:
         shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
         if void_x.shape != shape_ret:
-            void_x = Typecheckor(shape_ret, Tensor.bool)
+            void_x = VoidTensor(shape_ret, Tensor.bool)
         if void_y.shape != shape_ret:
-            void_y = Typecheckor(shape_ret, Tensor.bool)
+            void_y = VoidTensor(shape_ret, Tensor.bool)
         if void_x != void_y:
             raise TypeError
         return [void_x]
@@ -378,7 +378,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-    grad_L_x = grad_L_x.expand(x.typecheckor.shape)
+    grad_L_x = grad_L_x.expand(x.void_tensor.shape)
 
 
 sum = Operator.reduce("sum")
@@ -401,7 +401,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-    grad_L_x = grad_L_x.expand(x.typecheckor.shape)
+    grad_L_x = grad_L_x.expand(x.void_tensor.shape)
 
     return [grad_L_x]
 
@@ -440,28 +440,28 @@ def jvp(self, primals, tangents, *, shape, dim=None):
 
 
 @expand.set_method
-def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
+def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
     e_shape = list(x.shape)
     assert len(e_shape) == len(shape)
     assert all(a <= b for a, b in zip(e_shape, shape))
-    return [Typecheckor(tuple(shape), x.dtype)]
+    return [VoidTensor(tuple(shape), x.dtype)]
 
 
 @expand.set_method
 def T(self, cotangents, x, *, shape):
     (grad_L_y,) = cotangents
     grad_L_x = grad_L_y
-    if x.typecheckor.shape == grad_L_x.shape:
+    if x.void_tensor.shape == grad_L_x.shape:
         return [grad_L_x]
     else:
         b_dim = []
-        assert len(x.typecheckor.shape) == len(grad_L_x.shape)
-        for i, (xd, od) in enumerate(zip(x.typecheckor.shape, grad_L_x.shape)):
+        assert len(x.void_tensor.shape) == len(grad_L_x.shape)
+        for i, (xd, od) in enumerate(zip(x.void_tensor.shape, grad_L_x.shape)):
             if xd != od:
                 b_dim += [i]
         grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-    if grad_L_x.shape != x.typecheckor.shape:
-        raise ValueError(f"not same {grad_L_x.shape=}, {x.typecheckor.shape=}")
+    if grad_L_x.shape != x.void_tensor.shape:
+        raise ValueError(f"not same {grad_L_x.shape=}, {x.void_tensor.shape=}")
     return [grad_L_x]
 
 
@@ -493,14 +493,14 @@ def jvp(self, primals, tangents, *, shape):
 
 
 @reshape.set_method
-def typecheck(self, x: Typecheckor, *, shape: Sequence[int]) -> List[Typecheckor]:
-    return [Typecheckor(tuple(shape), x.dtype)]
+def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
+    return [VoidTensor(tuple(shape), x.dtype)]
 
 
 @reshape.set_method
 def T(self, cotangents, x, *, shape):
     (z,) = cotangents
-    return [z.reshape(x.typecheckor.shape)]
+    return [z.reshape(x.void_tensor.shape)]
 
 
 permute = Operator.other("permute")
@@ -526,9 +526,9 @@ def jvp(self, primals, tangents, *, perm):
 
 
 @permute.set_method
-def typecheck(self, x: Typecheckor, *, perm: Sequence[int]) -> List[Typecheckor]:
+def typecheck(self, x: VoidTensor, *, perm: Sequence[int]) -> List[VoidTensor]:
     shape = [x.shape[i] for i in perm]
-    return [Typecheckor(shape, x.dtype)]
+    return [VoidTensor(shape, x.dtype)]
 
 
 @permute.set_method
@@ -581,7 +581,7 @@ def jvp(self, primals, tangents, *, padding, mode, value):
 
 
 @pad.set_method
-def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor]:
+def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
     padding = padding[::-1]
     lo, hi = padding[0::2], padding[1::2]
     interior = [0] * (len(padding) // 2)
@@ -596,7 +596,7 @@ def typecheck(self, x: Typecheckor, *, padding, mode, value) -> List[Typecheckor
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
-    res = Typecheckor(shape, x.dtype)
+    res = VoidTensor(shape, x.dtype)
     return [res]
 
 
@@ -658,29 +658,29 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 
 
 @slice.set_method
-def typecheck(self, x: Typecheckor, *, starts, limits, strides=None) -> List[Typecheckor]:
+def typecheck(self, x: VoidTensor, *, starts, limits, strides=None) -> List[VoidTensor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
             [limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)]
         )
-        return [Typecheckor(shape, x.dtype)]
+        return [VoidTensor(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros_like(x.shape)
         x = x[tuple(slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-        return [Typecheckor(x.shape, x.dtype)]
+        return [VoidTensor(x.shape, x.dtype)]
 
 
 @slice.set_method
 def T(self, cotangents, x, *, starts, limits, strides=None):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
-    x_shape = x.typecheckor.shape
+    x_shape = x.void_tensor.shape
     assert isinstance(x, PrimalProxy)
     if strides is None or np.all(np.equal(strides, 1)):
         lo, hi, interior = (
             starts,
-            tuple(np.subtract(x.typecheckor.shape, limits)),
+            tuple(np.subtract(x.void_tensor.shape, limits)),
             (0,) * len(starts),
         )
     else:
@@ -731,8 +731,8 @@ def jvp(self, primals, tangents, *, dim):
 
 
 @flip.set_method
-def typecheck(self, x: Typecheckor, *, dim):
-    return [Typecheckor(tuple(x.shape), x.dtype)]
+def typecheck(self, x: VoidTensor, *, dim):
+    return [VoidTensor(tuple(x.shape), x.dtype)]
 
 
 @flip.set_method
@@ -765,7 +765,7 @@ def jvp(self, primals, tangents, *, dim=0):
 
 
 @cat.set_method
-def typecheck(self, *xs: Typecheckor, dim=0) -> List[Typecheckor]:
+def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot cat tensors with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -784,13 +784,13 @@ def typecheck(self, *xs: Typecheckor, dim=0) -> List[Typecheckor]:
 
     concat_size = sum_py(x.shape[dim] for x in xs)
     ex_shape = xs[0].shape
-    return [Typecheckor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
+    return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 
 
 @cat.set_method
 def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
-    x_shapes = [o.typecheckor.shape if type(o) is PrimalProxy else o.shape for o in xs]
+    x_shapes = [o.void_tensor.shape if type(o) is PrimalProxy else o.shape for o in xs]
     if type(z) is None:
         return [None if type(o) is PrimalProxy else None for o in xs]
     else:  # TODO: replace numpy with pure Python
@@ -843,8 +843,8 @@ def T(self, cotangents, *, shape, fill_value, dtype):
 
 
 @full.set_method
-def typecheck(self, *, shape, fill_value, dtype) -> List[Typecheckor]:
-    return [Typecheckor(tuple(shape), dtype)]
+def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
+    return [VoidTensor(tuple(shape), dtype)]
 
 
 random_uniform = Operator.init("random_uniform")
@@ -875,8 +875,8 @@ def T(self, cotangents, *, shape, dtype):
 
 
 @random_uniform.set_method
-def typecheck(self, *, shape, dtype) -> List[Typecheckor]:
-    return [Typecheckor(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
+    return [VoidTensor(tuple(shape), dtype)]
 
 
 random_normal = Operator.init("random_normal")
@@ -907,8 +907,8 @@ def T(self, cotangents, *, shape, dtype=Tensor.float32):
 
 
 @random_normal.set_method
-def typecheck(self, *, shape, dtype=Tensor.float32) -> List[Typecheckor]:
-    return [Typecheckor(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype=Tensor.float32) -> List[VoidTensor]:
+    return [VoidTensor(tuple(shape), dtype)]
 
 
 arange = Operator.init("arange")
@@ -938,8 +938,8 @@ def T(self, cotangents, *, start, stop, stride, dtype):
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride, dtype) -> List[Typecheckor]:
-    return [Typecheckor((((stop - start) * stride),), dtype)]
+def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
+    return [VoidTensor((((stop - start) * stride),), dtype)]
 
 
 # -------------------
@@ -973,7 +973,7 @@ def typecheck(self, x, w):
     else:
         raise ValueError("Invalid dimensions for matmul")
 
-    return [Typecheckor(shape, x.dtype)]
+    return [VoidTensor(shape, x.dtype)]
 
 
 @matmul.set_method
@@ -1040,7 +1040,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding):
     out_channels = w_shape[0]
     out_shape = (x_shape[0], out_channels, out_h, out_w)
 
-    return [Typecheckor(out_shape, x.dtype)]
+    return [VoidTensor(out_shape, x.dtype)]
 
 
 @conv.set_method
@@ -1172,7 +1172,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
             for i, s in enumerate(x_shape[2:])
         ]
     )
-    return [Typecheckor(result_shape, x.dtype)]
+    return [VoidTensor(result_shape, x.dtype)]
 
 
 @conv_transpose.set_method
@@ -1392,9 +1392,9 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     body_code_lines = []
 
     for inb in program.in_binders:
-        prefix = "x" if type(inb.typecheckor) is Typecheckor else "c"
+        prefix = "x" if type(inb.void_tensor) is VoidTensor else "c"
         idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.typecheckor)
+        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.void_tensor)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -1403,7 +1403,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
             idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.typecheckor)
+            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.void_tensor)
 
         out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:

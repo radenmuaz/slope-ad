@@ -8,7 +8,7 @@ from slope.core import (
     ProcedureSet,
     Tensor,
     TensorBuffer,
-    Typecheckor,
+    VoidTensor,
     PrimalProxy,
     list_zip,
     list_map,
@@ -33,17 +33,17 @@ slice_py = slice
 compile_py = compile
 
 
-def type_mlir(typecheckor):
-    xdtype = typecheckor.dtype.short_name
-    if len(typecheckor.shape) > 0:
-        xshape = f"{'x'.join((repr(i) for i in typecheckor.shape))}"
+def type_mlir(void_tensor):
+    xdtype = void_tensor.dtype.short_name
+    if len(void_tensor.shape) > 0:
+        xshape = f"{'x'.join((repr(i) for i in void_tensor.shape))}"
         return f"tensor<{xshape}x{xdtype}>"
     else:
         return f"tensor<{xdtype}>"
 
 
-def type_mlir_sig(in_typecheckors, out_typecheckor):
-    typing_code = f" : ({','.join(type_mlir(t) for t in in_typecheckors)}) -> {type_mlir(out_typecheckor)}"
+def type_mlir_sig(in_void_tensors, out_void_tensor):
+    typing_code = f" : ({','.join(type_mlir(t) for t in in_void_tensors)}) -> {type_mlir(out_void_tensor)}"
     return typing_code
 
 
@@ -187,9 +187,9 @@ class IREEBackend(Backend):
         body_code_lines = []
 
         for inb in program.in_binders:
-            prefix = "%x" if type(inb.typecheckor) is Typecheckor else "%c"
+            prefix = "%x" if type(inb.void_tensor) is VoidTensor else "%c"
             idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-            env[inb] = dict(name=f"{prefix}{idx}", type=inb.typecheckor)
+            env[inb] = dict(name=f"{prefix}{idx}", type=inb.void_tensor)
 
         for instruction in program.instructions:
             if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -198,7 +198,7 @@ class IREEBackend(Backend):
             for outb in instruction.out_binders:
                 prefix = "%y" if outb in program.outs else "%z"
                 idx = sum_py([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-                env[outb] = dict(name=f"{prefix}{idx}", type=outb.typecheckor)
+                env[outb] = dict(name=f"{prefix}{idx}", type=outb.void_tensor)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
@@ -209,15 +209,15 @@ class IREEBackend(Backend):
                     op = instruction.op
                     op_name = {v: k for k, v in vars(slope.core.backend.operator_set.items())}[op]
                     op_procedure = getattr(slope.core.backend.procedure_set, op_name)
-                    typecheckors_in = tuple(inp.typecheckor for inp in instruction.inputs)
+                    void_tensors_in = tuple(inp.void_tensor for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
                         op_procedure,
-                        *typecheckors_in,
+                        *void_tensors_in,
                         static_args=tuple(params.items()),
                         name=op.name,
                     )
-                    name = op.get_jit_name(tuple(typecheckors_in), params)
+                    name = op.get_jit_name(tuple(void_tensors_in), params)
                     if name not in fn_defs.keys():
                         op_codegen_out = self.codegen(
                             op_program,
@@ -354,12 +354,12 @@ def matmul_impl(self, x, w, y):
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
     zero = "0." if "f" in y["type"].dtype.short_name else "0"
-    y_init_type = Typecheckor((), y["type"].dtype)
+    y_init_type = VoidTensor((), y["type"].dtype)
     y_mlir_type = type_mlir(y_init_type)
     y_out_type = (
         y["type"]
         if not keepdim
-        else Typecheckor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
+        else VoidTensor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
     )
     return f"""
 {y["name"]}_init = stablehlo.constant dense<{zero}> : {type_mlir(y_init_type)}
@@ -376,12 +376,12 @@ def sum_impl(self, x, y, *, dim, keepdim):
 @backend.set_impl(backend.operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
     min_val = {Tensor.float32: "1.E-38", Tensor.int8: "-128", Tensor.int32: "-65536"}[x["type"].dtype]
-    y_init_type = Typecheckor((), y["type"].dtype)
+    y_init_type = VoidTensor((), y["type"].dtype)
     y_mlir_type = type_mlir(y_init_type)
     y_out_type = (
         y["type"]
         if not keepdim
-        else Typecheckor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
+        else VoidTensor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
     )
     return f"""
 {y["name"]}_init = stablehlo.constant dense<{min_val}> : {type_mlir(y_init_type)}
@@ -413,11 +413,11 @@ def full_impl(self, y, *, shape, fill_value, dtype):
 def random_uniform_impl(self, y, *, shape, dtype):
     zero = "0." if "f" in y["type"].dtype.short_name else "0"
     one = "1." if "f" in y["type"].dtype.short_name else "1"
-    a_type = b_type = Typecheckor((), dtype)
+    a_type = b_type = VoidTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = Typecheckor((1,) if is_scalar else (len(shape),), Tensor.int64)
-    y_out_type = y["type"] if not is_scalar else Typecheckor((1,), y["type"].dtype)
+    shape_type = VoidTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
+    y_out_type = y["type"] if not is_scalar else VoidTensor((1,), y["type"].dtype)
     return f"""{y["name"]}_a = stablehlo.constant dense<{zero}> : {type_mlir(a_type)}
 {y["name"]}_b = stablehlo.constant dense<{one}> : {type_mlir(b_type)}
 {y["name"]}_shape = stablehlo.constant {shape_val}> : {type_mlir(shape_type)}
@@ -430,11 +430,11 @@ def random_uniform_impl(self, y, *, shape, dtype):
 def random_normal_impl(self, y, *, shape, dtype):
     zero = "0." if "f" in y["type"].dtype.short_name else "0"
     one = "1." if "f" in y["type"].dtype.short_name else "1"
-    a_type = b_type = Typecheckor((), dtype)
+    a_type = b_type = VoidTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = Typecheckor((1,) if is_scalar else (len(shape),), Tensor.int64)
-    y_out_type = y["type"] if not is_scalar else Typecheckor((1,), y["type"].dtype)
+    shape_type = VoidTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
+    y_out_type = y["type"] if not is_scalar else VoidTensor((1,), y["type"].dtype)
     return f"""{y["name"]}_a = stablehlo.constant dense<{zero}> : {type_mlir(a_type)}
 {y["name"]}_b = stablehlo.constant dense<{one}> : {type_mlir(b_type)}
 {y["name"]}_shape = stablehlo.constant {shape_val}> : {type_mlir(shape_type)}
@@ -459,7 +459,7 @@ def reshape_impl(self, x, y, *, shape):
 @backend.set_impl(backend.operator_set.pad)
 def pad_impl(self, x, y, *, padding, mode, value):
     value = float(value) if "f" in x["type"].dtype.short_name else int(value)
-    value_type = Typecheckor((), x["type"].dtype)
+    value_type = VoidTensor((), x["type"].dtype)
     lo = padding[0::2][::-1]
     hi = padding[1::2][::-1]
     return f"""{y["name"]}_value = stablehlo.constant dense<{value}> : {type_mlir(value_type)}

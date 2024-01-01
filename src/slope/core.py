@@ -904,11 +904,11 @@ class Program:
                         program_as_str(param)
                         params[param_name] = f'"{param.name}"'
                     elif isinstance(param, DType):
-                        params[param_name] = param.mlir_name
+                        params[param_name] = f"<{param.mlir_name}>"
                     elif isinstance(param, tuple):
                         params[param_name] = self.as_mlir_shape(
                             VoidTensor(param, Tensor.int64), scalar_as_empty_array=True
-                        )
+                        ) if param_name == "shape" else list(param)
                 param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
                 in_vals = ", ".join(f"%{program.env[x].name}" for x in instruction.inputs)
                 out_vals = ", ".join(f"%{program.env[z].name}" for z in instruction.out_binders)
@@ -923,7 +923,8 @@ class Program:
             outs = list_map(lambda x: program.env[x], program.outs)
             out_str = ", ".join([f"%{o.name}" for o in outs])
             out_type_str = ", ".join([f"{program.as_mlir_shape(o.void_tensor)}" for o in outs])
-            head_code_line = [f"func.func @{program.name} ({fn_args_str}) -> ({out_type_str})"]
+            out_type_str = f"({out_type_str})" if len(outs) > 1 else out_type_str
+            head_code_line = [f"func.func @{program.name} ({fn_args_str}) -> {out_type_str}"]
             tail_code_line = [self.indent(f"func.return({out_str}): ({out_type_str}) -> ()")]
             code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
             fn_defs[program.name] = code_lines

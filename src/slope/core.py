@@ -137,43 +137,6 @@ def cuda_is_available():
         return False
 
 
-class PPrint:
-    lines: List[Tuple[int, str]]
-
-    def __init__(self, lines):
-        self.lines = lines
-
-    def indent(self, indent: int) -> "PPrint":
-        return PPrint([(indent + orig_indent, s) for orig_indent, s in self.lines])
-
-    def __add__(self, rhs: "PPrint") -> "PPrint":
-        return PPrint(self.lines + rhs.lines)
-
-    def __rshift__(self, rhs: "PPrint") -> "PPrint":
-        if not rhs.lines:
-            return self
-        if not self.lines:
-            return rhs
-        indent, s = self.lines[-1]
-        indented_block = rhs.indent(indent + len(s))
-        common_line = s + " " * rhs.lines[0][0] + rhs.lines[0][1]
-        return PPrint(self.lines[:-1] + [(indent, common_line)] + indented_block.lines[1:])
-
-    def __str__(self) -> str:
-        return "\n".join(" " * indent + s for indent, s in self.lines)
-
-    def __repr__(self):
-        return str(self)
-
-    @classmethod
-    def pp(cls, s: Any):
-        return cls([(0, line) for line in str(s).splitlines()])
-
-    @classmethod
-    def vcat(cls, ps: List["PPrint"]):
-        return sum(ps, cls.pp(""))
-
-
 class Hashed:
     val: Any
 
@@ -204,7 +167,7 @@ class DType(NamedTuple):
     priority: int
     itemsize: int
     name: str
-    short_name: str
+    mlir_name: str
     numpy: type
 
     def __repr__(self):
@@ -228,8 +191,8 @@ class Tensor:
     dtypes = (bool, float16, float32, int8, int32, int64, uint8)
     dtype_names = {k.name: k for k in dtypes}
     dtype_names_inv = {v: k for k, v in dtype_names.items()}
-    dtype_short_names = {k.short_name: k for k in dtypes}
-    dtype_short_names_inv = {v: k for k, v in dtype_short_names.items()}
+    das_mlir_shape_names = {k.mlir_name: k for k in dtypes}
+    das_mlir_shape_names_inv = {v: k for k, v in das_mlir_shape_names.items()}
 
     def __init__(self, val: TensorBuffer):
         assert isinstance(val, TensorBuffer)
@@ -801,7 +764,7 @@ class Backend:
                 ret = {}
                 for k, v in metadata.items():
                     if k != "__metadata__":
-                        dtype = Tensor.dtype_short_names[(v["dtype"])]
+                        dtype = Tensor.das_mlir_shape_names[(v["dtype"])]
                         data_start = start + v["data_offsets"][0]
                         data_end = start + v["data_offsets"][1]
                         t_np = np.frombuffer(m[data_start:data_end], dtype=dtype.numpy())
@@ -821,7 +784,7 @@ class Backend:
         metadata, offset = {}, 0
         for k, v in tensors.items():
             metadata[k] = {
-                "dtype": v.dtype.short_name,
+                "dtype": v.dtype.mlir_name,
                 "shape": list(v.shape),
                 "data_offsets": [offset, offset + v.nbytes()],
             }
@@ -847,17 +810,12 @@ class Backend:
 
 
 class Var:
-    val = None
-    void_tensor: VoidTensor
-
     def __init__(self, void_tensor):
         self.void_tensor = void_tensor
+        self.val = None
 
 
 class Lit:
-    val: Any
-    void_tensor: VoidTensor
-
     def __init__(self, val):
         self.void_tensor = VoidTensor.like(get_void_tensor_or_tensor(val))
         self.val = val
@@ -873,56 +831,111 @@ class Instruction(NamedTuple):
     out_binders: List[Atom]
 
 
-class Program(NamedTuple):
-    in_binders: Any
-    instructions: Tuple[Instruction]
-    outs: Any
-    num_consts: int = 0
-    static_args: Any = ()
-    name: str = "my_program"
+class ProgramEnvVar(NamedTuple):
+    name: str
+    void_tensor: VoidTensor
+
+
+class Program:
+    def __init__(
+        self,
+        in_binders: Any,
+        instructions: Tuple[Instruction],
+        outs: Any,
+        num_consts: int = 0,
+        static_args: Any = (),
+        name: str = "my_program",
+        indent_amount=4,
+    ):
+        self.in_binders: Any = in_binders
+        self.instructions: Tuple[Instruction] = instructions
+        self.outs: Any = outs
+        self.num_consts: int = num_consts
+        self.static_args = static_args
+        self.name: str = name
+        self.indent_amount: int = indent_amount
+
+        self.env: Dict[ProgramEnvVar, Any] = dict()
+        for inb in self.in_binders:
+            prefix = "x" if type(inb.void_tensor) is VoidTensor else "c"
+            idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
+            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.void_tensor)
+        for instruction in self.instructions:
+            if len(instruction.out_binders) == 0:
+                continue
+            for outb in instruction.out_binders:
+                prefix = "y" if outb in self.outs else "z"
+                idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
+                self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.void_tensor)
+
+    def as_mlir_shape(self, void_tensor, scalar_as_empty_array=False):
+        xdtype = void_tensor.dtype.mlir_name
+        if len(void_tensor.shape) > 0:
+            xshape = f"{'x'.join((repr(i) for i in void_tensor.shape))}"
+            return f"tensor<{xshape}x{xdtype}>"
+        else:
+            return f"tensor<{'0x'if scalar_as_empty_array else ''}{xdtype}>"
+
+    def as_mlir_sig(self, in_void_tensors, out_void_tensors, unpack_unary_output=False):
+        in_code = ", ".join(self.as_mlir_shape(t) for t in in_void_tensors)
+        out_code = ", ".join(self.as_mlir_shape(t) for t in out_void_tensors)
+        out_code = f"({out_code})" if len(out_void_tensors) > 1 or unpack_unary_output else out_code
+        typing_code = f" : ({in_code}) -> {out_code}"
+        return typing_code
+
+    def indent(self, code):
+        spaces = " " * (len(code) - len(code.lstrip()))
+        spaces += " " * self.indent_amount
+        return "\n".join([spaces + line for line in code.strip().split("\n")])
+
+    def __repr__(self):
+        fn_defs = dict()
+
+        def program_as_str(program):
+            nonlocal fn_defs
+            in_binders_vars = list_map(lambda x: program.env[x], program.in_binders)
+            body_code_lines = []
+            for instruction in program.instructions:
+                if len(instruction.out_binders) == 0:
+                    continue
+                params = instruction.params.copy()
+                for param_name, param in params.items():
+                    if isinstance(param, Program):
+                        program_as_str(param)
+                        params[param_name] = f'"{param.name}"'
+                    elif isinstance(param, DType):
+                        params[param_name] = param.mlir_name
+                    elif isinstance(param, tuple):
+                        params[param_name] = self.as_mlir_shape(
+                            VoidTensor(param, Tensor.int64), scalar_as_empty_array=True
+                        )
+                param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
+                in_vals = ", ".join(f"%{program.env[x].name}" for x in instruction.inputs)
+                out_vals = ", ".join(f"%{program.env[z].name}" for z in instruction.out_binders)
+                sig = self.as_mlir_sig(
+                    [program.env[x].void_tensor for x in instruction.inputs],
+                    [program.env[y].void_tensor for y in instruction.out_binders],
+                )
+                line = f'{out_vals} = "slope.{instruction.op.name}"({in_vals}) {{{param_vals}) }} {sig}'
+                body_code_lines += [self.indent(line)]
+
+            fn_args_str = ", ".join([f"{i.name}: {program.as_mlir_shape(i.void_tensor)}" for i in in_binders_vars])
+            outs = list_map(lambda x: program.env[x], program.outs)
+            out_str = ", ".join([f"%{o.name}" for o in outs])
+            out_type_str = ", ".join([f"{program.as_mlir_shape(o.void_tensor)}" for o in outs])
+            head_code_line = [f"func.func @{program.name} ({fn_args_str}) -> ({out_type_str})"]
+            tail_code_line = [self.indent(f"func.return({out_str}): ({out_type_str}) -> ()")]
+            code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
+            fn_defs[program.name] = code_lines
+
+        program_as_str(self)
+        return "\n".join(line for code_lines in reversed(fn_defs.values()) for line in code_lines)
 
     def __hash__(self):
         return hash(repr(self))
 
     def __eq__(self, other):
         return self is other
-
-    def __repr__(self):
-        namegen = (
-            # "z" + repr(r) for r in itertools.count()
-            "".join(s)
-            for r in itertools.count(1)
-            for s in itertools.permutations(string.ascii_lowercase, r)
-        )
-        names = defaultdict(lambda: next(namegen))
-        in_binders = ", ".join(self.var_str(names, x) for x in self.in_binders)
-        instructions = PPrint.vcat([self.pp_instruction(names, e) for e in self.instructions])
-        outs = [names[v] if isinstance(v, Var) else str(v.val) for v in self.outs]
-        outs = ", ".join(outs)
-        ret = str(
-            PPrint.pp(f"{{ {self.name} {in_binders} .")
-            + ((PPrint.pp("let ") >> instructions) + PPrint.pp(f"in ( {outs} ) }}")).indent(2)
-        )
-        return ret
-
-    def pp_instruction(self, names: DefaultDict[Var, str], instruction: Instruction) -> PPrint:
-        lhs = PPrint.pp(" ".join(self.var_str(names, v) for v in instruction.out_binders))
-        rhs = (
-            PPrint.pp(repr(instruction.op.name))
-            >> self.pp_params(instruction.params)
-            >> PPrint.pp(" ".join(names[x] if isinstance(x, Var) else str(x.val) for x in instruction.inputs))
-        )
-        return lhs >> PPrint.pp(" = ") >> rhs
-
-    def pp_params(self, params: Dict[str, Any]) -> PPrint:
-        items = sorted(params.items())
-        if items:
-            return PPrint.pp(" [ ") >> PPrint.vcat([PPrint.pp(f"{k}={v}") for k, v in items]) >> PPrint.pp(" ] ")
-        else:
-            return PPrint.pp(" ")
-
-    def var_str(self, names: DefaultDict[Var, str], v) -> str:
-        return f"{names[v]}:{v.void_tensor.str_short()}"
 
 
 class ProgramType(NamedTuple):
@@ -1313,6 +1326,13 @@ class ProgramTraceTensor(TraceTensor):
 
 
 class ProgramTrace(Trace):
+    @property
+    def builder(self):
+        return self.main.global_data
+
+    def __init__(self, main: MainTrace) -> None:
+        self.main = main
+
     def new_arg(self, void_tensor) -> ProgramTraceTensor:
         void_tensor = VoidTensor.like(void_tensor)
         tracer = self.builder.new_tracer(self, void_tensor)
@@ -1339,10 +1359,6 @@ class ProgramTrace(Trace):
 
         self.builder.add_instruction(Instruction(op, inputs, params, outvars))
         return out_tracers
-
-    @property
-    def builder(self):
-        return self.main.global_data
 
 
 class ProgramBuilder:

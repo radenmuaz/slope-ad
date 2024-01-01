@@ -24,7 +24,7 @@ def __getattr__(attr):
         return getattr(core.backend, attr)
     elif attr in core.Tensor.dtype_names.keys():
         return core.Tensor.dtype_names[attr]
-    elif attr in core.Tensor.dtype_short_names.keys():
-        return core.Tensor.dtype_short_names[attr]
+    elif attr in core.Tensor.das_mlir_shape_names.keys():
+        return core.Tensor.das_mlir_shape_names[attr]
 
     raise NameError(attr)

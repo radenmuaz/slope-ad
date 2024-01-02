@@ -1,9 +1,9 @@
 import slope
 
 def f(x):
-    return x + 1
+    return x + x.ones_like()
 
 x = slope.ones(3,1)
+# y = (f)(x)
 y = slope.vmap(f)(x)
-
-print(x.shape, y.shape)
+print(y, x.shape, y.shape)

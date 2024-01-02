@@ -308,21 +308,27 @@ class Sum(ReduceOperator):
 
 @operator_set.register("expand")
 class Expand(ShapeOperator):
-    def args_fixer(self, x, *, shape):
+    def args_fixer(self, x, *args, **kwargs):
+        if "shape" in kwargs.keys():
+            shape = kwargs["shape"]
+        elif isinstance(args[0], (tuple, list)):
+            shape = args[0]
+        else:
+            shape = args
+        shape = tuple(shape)
+        if x.shape in ((), (1,)):
+            x = x.reshape((1,) * len(shape))
         return (x,), dict(shape=shape)
 
     def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
-        e_shape = list(x.shape)
-        assert len(e_shape) == len(shape)
-        assert all(a <= b for a, b in zip(e_shape, shape))
+        shape = tuple(shape)
+        assert len(x.shape) == len(shape)
+        assert all(a <= b for a, b in zip(x.shape, shape))
         return [VoidTensor(tuple(shape), x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, shape):
         (x,), (x_bdim,) = vals_in, dims_in
-        shape = list(shape)
-
-        shape = shape[:x_bdim] + [dim_size] + shape[x_bdim:]
-
+        shape = shape[:x_bdim] + (dim_size,) + shape[x_bdim:]
         return [self(x, shape)], [x_bdim]
 
     def jvp(self, primals, tangents, *, shape, dim=None):
@@ -439,10 +445,9 @@ class Pad(ShapeOperator):
 
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
         (x,), (x_bdim,) = vals_in, dims_in
-        # x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         padding = list(padding)
-        return [self(x, padding, mode, value)], [0]
-        x = x.pad(x.zeros_like(), padding, mode, value)
+        return [self(x, padding, mode, value)], [x_bdim]
 
     def jvp(self, primals, tangents, *, padding, mode, value):
         (x,), (x_dot,) = primals, tangents

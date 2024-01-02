@@ -512,13 +512,13 @@ class BinaryOperator(Operator):
         return (x, w), params
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
-        (x, w), (x_bdim, y_bdim) = vals_in, dims_in
-        if x_bdim != y_bdim:
+        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+        if x_bdim != w_bdim:
             if x_bdim is None:
-                x = VMapTrace.move_vmap_dim(x, dim_size, x_bdim, y_bdim)
-                x_bdim = y_bdim
+                x = VMapTrace.move_vmap_dim(x, dim_size, x_bdim, w_bdim)
+                x_bdim = w_bdim
             else:
-                y = VMapTrace.move_vmap_dim(y, dim_size, y_bdim, x_bdim)
+                w = VMapTrace.move_vmap_dim(w, dim_size, w_bdim, x_bdim)
         return [self(x, w, **params)], [x_bdim]
 
     def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
@@ -571,7 +571,7 @@ class ReduceOperator(Operator):
         dim = tuple(a + (x_bdim <= a) for a in dim)
         out_bdim = x_bdim - sum(a < x_bdim for a in dim)
         params["dim"] = tuple(dim)
-        return [cls.do(x, **params)], [out_bdim]
+        return [self.do(x, **params)], [out_bdim]
 
     def typecheck(self, x: VoidTensor, *, dim=None, keepdim=False) -> List[VoidTensor]:
         dim = [a + len(x.shape) if a < 0 else a for a in dim]
@@ -906,9 +906,11 @@ class Program:
                     elif isinstance(param, DType):
                         params[param_name] = f"<{param.mlir_name}>"
                     elif isinstance(param, tuple):
-                        params[param_name] = self.as_mlir_shape(
-                            VoidTensor(param, Tensor.int64), scalar_as_empty_array=True
-                        ) if param_name == "shape" else list(param)
+                        params[param_name] = (
+                            self.as_mlir_shape(VoidTensor(param, Tensor.int64), scalar_as_empty_array=True)
+                            if param_name == "shape"
+                            else list(param)
+                        )
                 param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
                 in_vals = ", ".join(f"%{program.env[x].name}" for x in instruction.inputs)
                 out_vals = ", ".join(f"%{program.env[z].name}" for z in instruction.out_binders)
@@ -1267,15 +1269,12 @@ class VMapTrace(Trace):
         return [VMapTraceTensor(self, x, bd) for x, bd in list_zip(val_outs, bdim_outs)]
 
     @staticmethod
-    def move_vmap_dim(x, dim_size, src, dst):
-        if src is None:
+    def move_vmap_dim(x, dim_size, src: int, dst: int):
+        if src is None:  # unsqueeze and expand
             target_shape = list(x.shape)
             target_shape.insert(dst, dim_size)
-            out_ndim = len(target_shape)
-            if type(dst) in (tuple, list):
-                out_ndim += 1
-            reshape_shape = [1 if ax == dst else target_shape for ax in range(out_ndim)]
-            x = x.reshape(tuple(reshape_shape))
+            unsqueeze_shape = [1 if d == dst else target_shape[d] for d in range(len(target_shape))]
+            x = x.reshape(tuple(unsqueeze_shape))
             x = x.expand(tuple(target_shape))
             return x
         elif src == dst:
@@ -1801,35 +1800,33 @@ def program_as_fun(program: Program):
     return lambda *args: run_program(program, args)
 
 
-def vmap_flat(f, in_dim, *args):
-    dims = {x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None}
-    assert len(dims) == 1
-    (dim_size,) = dims
+def vmap_flat(f, in_dim, out_dim, dim_size, *args):
+    if dim_size is None:
+        dims = set([x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None])
+        assert len(dims) == 1
+        (dim_size,) = dims
     with new_main(VMapTrace, dim_size) as main:
         trace = VMapTrace(main)
         tracers_in = [VMapTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, bdims_out = unzip2((t.val, t.vmap_dim) for t in tracers_out)
-    outs_permuted = [
-        VMapTrace.move_vmap_dim(val_out, dim_size, bdim, 0) for val_out, bdim in list_zip(vals_out, bdims_out)
-    ]
-    return outs_permuted
+    ret = [VMapTrace.move_vmap_dim(val_out, dim_size, bdim, 0) for val_out, bdim in zip(vals_out, bdims_out)]
+    return ret
 
 
-def vmap(f, in_dim=0, out_dim=0):
-    if isinstance(in_dim, int):
-        in_dim = (in_dim,)
-    if isinstance(out_dim, int):
-        out_dim = (out_dim,)
+def vmap(f, in_dim=0, out_dim=0, dim_size=None):
+    in_dim = (in_dim,) if isinstance(in_dim, int) else in_dim
+    out_dim = (out_dim,) if isinstance(out_dim, int) else out_dim
 
     def batched_f(*args):
         args_flat, in_tree = tree_flatten(args)
-        in_dim_flat, in_tree2 = tree_flatten(in_dim)
-        if in_tree != in_tree2:
-            raise TypeError(f"\n{in_tree}\n!=\n{in_tree2}")
+        in_dim_flat, in_dim_tree = tree_flatten(in_dim)
+        out_dim_flat, out_dim_tree = tree_flatten(out_dim)
+        if not (in_tree == in_dim_tree == out_dim_tree):
+            raise TypeError(f"\n{in_tree}\n!=\n{in_dim_tree}!=\n{out_dim_tree}")
         f_flat, out_tree_store = flatten_fn(f, in_tree)
-        outs_flat = vmap_flat(f_flat, in_dim_flat, *args_flat)
+        outs_flat = vmap_flat(f_flat, in_dim_flat, out_dim_flat, dim_size, *args_flat)
         return tree_unflatten(out_tree_store(), outs_flat)
 
     return batched_f

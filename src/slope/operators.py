@@ -446,8 +446,9 @@ class Pad(ShapeOperator):
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-        padding = list(padding)
-        return [self(x, padding, mode, value)], [x_bdim]
+        y = self(x, padding, mode, value)
+        y = slope.core.VMapTrace.move_vmap_dim(x, dim_size, 0, x_bdim)
+        return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, padding, mode, value):
         (x,), (x_dot,) = primals, tangents

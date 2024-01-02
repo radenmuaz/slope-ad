@@ -1,9 +1,20 @@
 import slope
 
-def f(x):
-    return x + x.ones_like()
+# binaryop
+# def f(x):
+#     # return x + 1
+#     return x + x.ones_like()
+# x = slope.ones(3,1)
+# # y = (f)(x)
+# y = slope.vmap(f)(x)
+# print(y)
+# print(x.shape, y.shape)
 
-x = slope.ones(3,1)
-# y = (f)(x)
+
+# binaryop
+def f(x):
+    return x.pad((1,2))
+x = slope.ones(1,3)
 y = slope.vmap(f)(x)
-print(y, x.shape, y.shape)
+print(y)
+print(x.shape, y.shape)

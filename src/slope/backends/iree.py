@@ -32,7 +32,7 @@ compile_py = compile
 
 
 def as_mlir_shape(void_tensor):
-    xdtype = void_tensor.dtype.mlir_name
+    xdtype = void_tensor.dtype.mlir
     if len(void_tensor.shape) > 0:
         xshape = f"{'x'.join((repr(i) for i in void_tensor.shape))}"
         return f"tensor<{xshape}x{xdtype}>"
@@ -374,7 +374,7 @@ def matmul_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
-    zero = "0." if "f" in y["type"].dtype.mlir_name else "0"
+    zero = "0." if "f" in y["type"].dtype.mlir else "0"
     y_init_type = VoidTensor((), y["type"].dtype)
     y_mlir_type = as_mlir_shape(y_init_type)
     y_out_type = (
@@ -424,7 +424,7 @@ def arange_impl(self, y, *, start, stop, stride, dtype):
 
 @backend.set_impl(backend.operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype):
-    fill_value = float(fill_value) if "f" in dtype.mlir_name else int(fill_value)
+    fill_value = float(fill_value) if "f" in dtype.mlir else int(fill_value)
     fill_value = repr(fill_value)
     fill_value = fill_value.replace("e", "E") if "." in fill_value else fill_value.replace("e", ".E")
     return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {as_mlir_shape(y["type"])} }} {as_mlir_sig((), y["type"])}'
@@ -432,8 +432,8 @@ def full_impl(self, y, *, shape, fill_value, dtype):
 
 @backend.set_impl(backend.operator_set.random_uniform)
 def random_uniform_impl(self, y, *, shape, dtype):
-    zero = "0." if "f" in y["type"].dtype.mlir_name else "0"
-    one = "1." if "f" in y["type"].dtype.mlir_name else "1"
+    zero = "0." if "f" in y["type"].dtype.mlir else "0"
+    one = "1." if "f" in y["type"].dtype.mlir else "1"
     a_type = b_type = VoidTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
@@ -449,8 +449,8 @@ def random_uniform_impl(self, y, *, shape, dtype):
 
 @backend.set_impl(backend.operator_set.random_normal)
 def random_normal_impl(self, y, *, shape, dtype):
-    zero = "0." if "f" in y["type"].dtype.mlir_name else "0"
-    one = "1." if "f" in y["type"].dtype.mlir_name else "1"
+    zero = "0." if "f" in y["type"].dtype.mlir else "0"
+    one = "1." if "f" in y["type"].dtype.mlir else "1"
     a_type = b_type = VoidTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
@@ -479,7 +479,7 @@ def reshape_impl(self, x, y, *, shape):
 
 @backend.set_impl(backend.operator_set.pad)
 def pad_impl(self, x, y, *, padding, mode, value):
-    value = float(value) if "f" in x["type"].dtype.mlir_name else int(value)
+    value = float(value) if "f" in x["type"].dtype.mlir else int(value)
     value_type = VoidTensor((), x["type"].dtype)
     lo = padding[0::2][::-1]
     hi = padding[1::2][::-1]

@@ -167,7 +167,7 @@ class DType(NamedTuple):
     priority: int
     itemsize: int
     name: str
-    mlir_name: str
+    mlir: str
     numpy: type
 
     def __repr__(self):
@@ -191,7 +191,7 @@ class Tensor:
     dtypes = (bool, float16, float32, int8, int32, int64, uint8)
     dtype_names = {k.name: k for k in dtypes}
     dtype_names_inv = {v: k for k, v in dtype_names.items()}
-    das_mlir_shape_names = {k.mlir_name: k for k in dtypes}
+    das_mlir_shape_names = {k.mlir: k for k in dtypes}
     das_mlir_shape_names_inv = {v: k for k, v in das_mlir_shape_names.items()}
 
     def __init__(self, val: TensorBuffer):
@@ -489,26 +489,22 @@ class BinaryOperator(Operator):
         elif type(w) in TraceTensor.PYTHON_TYPES:
             w = backend.full(shape=(), fill_value=w, dtype=x.dtype)
 
+        shape_delta = x.ndim - w.ndim
+        if shape_delta > 0:
+            w = w.reshape((1,) * shape_delta + w.shape)
+        elif shape_delta < 0:
+            x = x.reshape((1,) * -shape_delta + x.shape)
+
+        shape_ret = tuple([max(x, w) for x, w in zip(x.shape, w.shape)])
+        if x.shape != shape_ret:
+            x = x.expand(shape_ret)
+        if w.shape != shape_ret:
+            w = w.expand(shape_ret)
+
         if type(x) is Tensor and isinstance(w, TraceTensor):
             x = w._trace.pure(x)
         elif type(w) is Tensor and isinstance(x, TraceTensor):
             w = x._trace.pure(w)
-
-        if (xshape := x.shape) == (wshape := w.shape):
-            return (x, w), params
-        shape_delta = len(xshape) - len(wshape)
-        if shape_delta > 0:
-            w = w.reshape((1,) * shape_delta + wshape)
-        elif shape_delta < 0:
-            x = x.reshape((1,) * -shape_delta + xshape)
-        if (xshape := x.shape) == (wshape := w.shape):
-            return (x, w), params
-
-        shape_ret = tuple([max(x, w) for x, w in zip(xshape, wshape)])
-        if xshape != shape_ret:
-            x = x.expand(shape_ret)
-        if wshape != shape_ret:
-            w = w.expand(shape_ret)
         return (x, w), params
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
@@ -784,7 +780,7 @@ class Backend:
         metadata, offset = {}, 0
         for k, v in tensors.items():
             metadata[k] = {
-                "dtype": v.dtype.mlir_name,
+                "dtype": v.dtype.mlir,
                 "shape": list(v.shape),
                 "data_offsets": [offset, offset + v.nbytes()],
             }
@@ -869,7 +865,7 @@ class Program:
                 self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.void_tensor)
 
     def as_mlir_shape(self, void_tensor, scalar_as_empty_array=False):
-        xdtype = void_tensor.dtype.mlir_name
+        xdtype = void_tensor.dtype.mlir
         if len(void_tensor.shape) > 0:
             xshape = f"{'x'.join((repr(i) for i in void_tensor.shape))}"
             return f"tensor<{xshape}x{xdtype}>"
@@ -904,7 +900,7 @@ class Program:
                         program_as_str(param)
                         params[param_name] = f'"{param.name}"'
                     elif isinstance(param, DType):
-                        params[param_name] = f"<{param.mlir_name}>"
+                        params[param_name] = f"<{param.mlir}>"
                     elif isinstance(param, tuple):
                         params[param_name] = (
                             self.as_mlir_shape(VoidTensor(param, Tensor.int64), scalar_as_empty_array=True)

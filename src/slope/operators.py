@@ -375,7 +375,6 @@ class Reshape(ShapeOperator):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         y = self(x, tuple(x.shape[:1] + shape))
-        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
     def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
@@ -449,7 +448,6 @@ class Pad(ShapeOperator):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         y = self(x, padding + (0, 0), mode, value)
-        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, padding, mode, value):
@@ -499,7 +497,6 @@ class Slice(ShapeOperator):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         y = self((0,) + starts, (x.shape[0],) + limits, (1,) + strides)
-        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, starts, limits, strides=None):
@@ -556,7 +553,6 @@ class Flip(ShapeOperator):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         y = self(tuple(d + (x_bdim + 1) for d in dim))
-        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, dim):
@@ -604,12 +600,9 @@ class Cat(ShapeOperator):
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
         (*xs,), (*xs_bdim,) = vals_in, dims_in
-        x_bdim = xs_bdim[0]
-        assert all(x_bdim == d for d in xs_bdim)
-        xs = tuple(slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0) for x in xs)
-        y = self(xs, dim=dim + (x_bdim + 1))
-        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
-        return [y], [x_bdim]
+        xs = tuple(slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0) for x, x_bdim in zip(xs, xs_bdim))
+        y = self(xs, dim=dim + 1)
+        return [y], [0]
 
     def jvp(self, primals, tangents, *, dim=0):
         return [self(*primals, dim=dim)], [self(*tangents, dim=dim)]

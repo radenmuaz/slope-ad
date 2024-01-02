@@ -649,12 +649,6 @@ class Full(InitOperator):
     def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
         return [VoidTensor(tuple(shape), dtype)]
 
-    # def jvp(self, primals, tangents, *, shape, fill_value, dtype):
-    #     out = self(shape=shape, fill_value=fill_value, dtype=dtype)
-    #     out_jvp = slope.ones_like(out)
-    #     return [out], [out_jvp]
-
-
 @operator_set.register("random_uniform", aliases=["rand"])
 class RandomUniform(InitOperator):
     def args_fixer(self, *, shape=None, dtype=Tensor.float32):

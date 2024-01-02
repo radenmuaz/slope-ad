@@ -30,10 +30,11 @@ import slope
 
 
 # cat
-def f(x, w):
-    return slope.cat((x, w), 0)
-x = slope.ones(1,5)
-w = slope.ones(1,3)
-y = slope.vmap(f)(x, w)
+def f(x1, x2, x3):
+    return slope.cat((x1, x2, x3), 0)
+x1 = slope.ones(1,2)
+x2 = slope.ones(1,3)
+x3 = slope.ones(1,4)
+y = slope.vmap(f)(x1, x2, x3)
 # print(y)
-print(x.shape, y.shape)
+print(y.shape)

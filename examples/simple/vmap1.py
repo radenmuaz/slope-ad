@@ -15,6 +15,7 @@ import slope
 def f(x):
     return x.pad((1,2))
 x = slope.ones(1,3)
+# y = f(x)
 y = slope.vmap(f)(x)
 print(y)
 print(x.shape, y.shape)

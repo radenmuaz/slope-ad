@@ -419,10 +419,11 @@ class Pad(ShapeOperator):
             padding = (padding, padding) * x.ndim
         else:
             padding = tuple(padding)
-        if (x.ndim * 2) != len(padding):
+        x_ = x.val if isinstance(x, slope.core.VMapTraceTensor) else x
+        if (x_.ndim * 2) != len(padding):
             assert len(padding) % 2 == 0
-            padding += (0, 0) * (x.ndim - len(padding))
-        assert (x.ndim * 2) % len(padding) == 0
+            padding += (0, 0) * (x_.ndim - len(padding)//2)
+        assert (x_.ndim * 2) % len(padding) == 0
         return (x,), dict(padding=padding, mode=mode, value=value)
 
     def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
@@ -447,7 +448,7 @@ class Pad(ShapeOperator):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         y = self(x, padding, mode, value)
-        y = slope.core.VMapTrace.move_vmap_dim(x, dim_size, 0, x_bdim)
+        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, padding, mode, value):

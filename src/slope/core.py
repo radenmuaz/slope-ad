@@ -385,6 +385,7 @@ class Operator:
         return args, params
 
     def __call__(self, *args, **params):
+        args_, params_ = args, params
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
         ret = bind(self, *args, **params)
@@ -1020,9 +1021,8 @@ class Leaf:
         self.val = val
 
     def __repr__(self):
-        if isinstance(self.val, VoidTensor):
-            return self.val.str_short()
-        return repr(self.val)
+        ret = self.val.str_short() if isinstance(self.val, VoidTensor) else repr(self.val)
+        return f"Leaf: {ret}"
 
     def __hash__(self):
         return hash(self.val)
@@ -1458,6 +1458,10 @@ class UndefPrimal(NamedTuple):
     def dtype(self):
         return self.void_tensor.dtype
 
+    @property
+    def ndim(self):
+        return self.void_tensor.ndim
+
     def __repr__(self):
         return f"UndefPrimal: {self.void_tensor}"
 
@@ -1798,7 +1802,7 @@ def program_as_fun(program: Program):
 
 def vmap_flat(f, in_dim, out_dim, dim_size, *args):
     if dim_size is None:
-        dims = set([x.shape[ax] for x, ax in list_zip(args, in_dim) if ax is not None])
+        dims = set([x.shape[d] for x, d in list_zip(args, in_dim) if d is not None])
         assert len(dims) == 1
         (dim_size,) = dims
     with new_main(VMapTrace, dim_size) as main:
@@ -1812,16 +1816,18 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
 
 
 def vmap(f, in_dim=0, out_dim=0, dim_size=None):
-    in_dim = (in_dim,) if isinstance(in_dim, int) else in_dim
-    out_dim = (out_dim,) if isinstance(out_dim, int) else out_dim
-
     def batched_f(*args):
+        nonlocal in_dim, out_dim, dim_size
         args_flat, in_tree = tree_flatten(args)
+        in_dim = (in_dim,) * len(args) if isinstance(in_dim, int) else in_dim
+        out_dim = (out_dim,) * len(args) if isinstance(out_dim, int) else out_dim
         in_dim_flat, in_dim_tree = tree_flatten(in_dim)
         out_dim_flat, out_dim_tree = tree_flatten(out_dim)
         if not (in_tree == in_dim_tree == out_dim_tree):
             raise TypeError(f"\n{in_tree}\n!=\n{in_dim_tree}!=\n{out_dim_tree}")
         f_flat, out_tree_store = flatten_fn(f, in_tree)
+        # if len(args_flat) > len(in_dim_flat):
+        #     in_dim_flat = (in_dim[0],) * len(args_flat)
         outs_flat = vmap_flat(f_flat, in_dim_flat, out_dim_flat, dim_size, *args_flat)
         return tree_unflatten(out_tree_store(), outs_flat)
 

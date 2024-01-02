@@ -374,7 +374,9 @@ class Reshape(ShapeOperator):
     def vmap(self, dim_size, vals_in, dims_in, *, shape):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-        return [self(x, tuple(x.shape[:1] + shape))], [x_bdim]
+        y = self(x, tuple(x.shape[:1] + shape))
+        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
+        return [y], [x_bdim]
 
     def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
         return [VoidTensor(tuple(shape), x.dtype)]
@@ -419,11 +421,10 @@ class Pad(ShapeOperator):
             padding = (padding, padding) * x.ndim
         else:
             padding = tuple(padding)
-        x_ = x.val if isinstance(x, slope.core.VMapTraceTensor) else x
-        if (x_.ndim * 2) != len(padding):
+        if (x.ndim * 2) != len(padding):
             assert len(padding) % 2 == 0
-            padding += (0, 0) * (x_.ndim - len(padding)//2)
-        assert (x_.ndim * 2) % len(padding) == 0
+            padding += (0, 0) * (x.ndim - len(padding) // 2)
+        assert (x.ndim * 2) % len(padding) == 0
         return (x,), dict(padding=padding, mode=mode, value=value)
 
     def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
@@ -447,7 +448,7 @@ class Pad(ShapeOperator):
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
         (x,), (x_bdim,) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-        y = self(x, padding, mode, value)
+        y = self(x, padding + (0, 0), mode, value)
         y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
         return [y], [x_bdim]
 
@@ -460,15 +461,15 @@ class Pad(ShapeOperator):
         lo, hi = padding[0::2], padding[1::2]
         interior = [0] * (len(padding) // 2)
 
-        def t_op():
+        if isinstance(x, UndefPrimal):
             unpadded = z.slice(
                 lo,
                 tuple(s - h for s, h in list_zip(z.shape, hi)),
                 tuple([1] * len(interior)),
             )
-            return unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
-
-        res = t_op() if isinstance(x, UndefPrimal) else None
+            res = unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
+        else:
+            res = None
         return [res]
 
 
@@ -494,25 +495,12 @@ class Slice(ShapeOperator):
             x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
             return [VoidTensor(x.shape, x.dtype)]
 
-    def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides=None):
-        raise NotImplementedError
-        (x,) = vals_in
-        (x_bdim,) = dims_in
-
-        new_start_indices = list(starts)
-        new_start_indices.insert(x_bdim, 0)
-
-        new_limit_indices = list(limits)
-        new_limit_indices.insert(x_bdim, x.shape[x_bdim])
-
-        if strides is None:
-            new_strides = None
-        else:
-            new_strides = list(strides)
-            new_strides.insert(x_bdim, 1)
-
-        out = x.slice(new_start_indices, new_limit_indices, new_strides)
-        return out, x_bdim
+    def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides):
+        (x,), (x_bdim,) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        y = self((0,) + starts, (x.shape[0],) + limits, (1,) + strides)
+        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
+        return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, starts, limits, strides=None):
         (x,), (x_dot,) = primals, tangents
@@ -565,7 +553,11 @@ class Flip(ShapeOperator):
         return [VoidTensor(tuple(x.shape), x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
-        raise NotImplementedError
+        (x,), (x_bdim,) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        y = self(tuple(d + (x_bdim + 1) for d in dim))
+        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
+        return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, dim):
         (x,), (x_dot,) = primals, tangents
@@ -578,10 +570,15 @@ class Flip(ShapeOperator):
 
 @operator_set.register("cat", nary_inputs=True, aliases=["concatenate"])
 class Cat(ShapeOperator):
-    def args_fixer(self, *xs, dim=0):
+    def args_fixer(self, *xs, dim=None):
         if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
+            if len(xs) > 1:
+                assert len(xs) == 2 and isinstance(xs[1], int) and dim is None
+                dim = xs[1]
             xs = xs[0]
         xs = tuple(xs)
+        if dim is None:
+            dim = 0
         return xs, dict(dim=dim)
 
     def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
@@ -605,8 +602,14 @@ class Cat(ShapeOperator):
         ex_shape = xs[0].shape
         return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 
-    def vmap(self, dim_size, vals_in, dims_in, *, dim=0):
-        raise NotImplementedError
+    def vmap(self, dim_size, vals_in, dims_in, *, dim):
+        (*xs,), (*xs_bdim,) = vals_in, dims_in
+        x_bdim = xs_bdim[0]
+        assert all(x_bdim == d for d in xs_bdim)
+        xs = tuple(slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0) for x in xs)
+        y = self(xs, dim=dim + (x_bdim + 1))
+        y = slope.core.VMapTrace.move_vmap_dim(y, dim_size, 0, x_bdim)
+        return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, dim=0):
         return [self(*primals, dim=dim)], [self(*tangents, dim=dim)]

@@ -377,22 +377,6 @@ def matmul_impl(self, x, w, y):
         y_name, y_type = y["name"], y["type"]
         x_bdims = list(range(x_type.ndim-(2 if x_type.ndim>2 else 1)))
         w_bdims =  list(range(w_type.ndim-2))
-#         x_cdim, w_cdim = x_type.ndim-1, w_type.ndim-2
-#         if x_type.ndim == w_type.ndim:
-#             if x_type.shape[:-2] == w_type.shape[:-2]:
-#                 x_bdims, w_bdims = list(range(x_type.ndim-1)), list(range(w_type.ndim-1))
-#                 x_cdim, w_cdim = x_type.ndim-1, w_type.ndim-1
-
-#         return f'''{y_name} = "stablehlo.dot_general"({x_name}, {w_name}) {{
-#   dot_dimension_numbers = #stablehlo.dot<
-#     lhs_batching_dimensions = {x_bdims},
-#     rhs_batching_dimensions = {w_bdims},
-#     lhs_contracting_dimensions = [{x_cdim}],
-#     rhs_contracting_dimensions = [{w_cdim}]
-#   >,
-#   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-#     }}  {as_mlir_sig((x_type, w_type), y_type)}
-# '''
         if x_type.ndim == 1:
             x_name_ = f"{x_name}_"
             x_type_ = VoidTensor( ( (1,)*len(w_type.shape[:-2])) +  x_type.shape, x_type.dtype)

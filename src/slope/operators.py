@@ -640,12 +640,14 @@ class Full(InitOperator):
             shape = (shape,)
         elif shape is None:
             shape = ()
+        if dtype is None:
+            dtype = slope.backend.DEFAULT_DTYPE
         if "float" in dtype.name:
             fill_value = float(fill_value)
         elif "int" in dtype.name:
             fill_value = int(fill_value)
         if dtype is None:
-            dtype = slope.backend.default_dtype
+            dtype = slope.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
     def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
@@ -660,7 +662,7 @@ class RandomUniform(InitOperator):
         elif shape is None:
             shape = ()
         if dtype is None:
-            dtype = slope.backend.default_dtype
+            dtype = slope.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -675,7 +677,7 @@ class RandomNormal(InitOperator):
         elif shape is None:
             shape = ()
         if dtype is None:
-            dtype = slope.backend.default_dtype
+            dtype = slope.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -737,7 +739,6 @@ class Matmul(BinaryReduceOperator):
                 # shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
             raise ValueError("Invalid dimensions for matmul")
-        print(x.shape, w.shape, shape)
         return [VoidTensor(shape, x.dtype)]
 
     def jvp(self, primals, tangents):

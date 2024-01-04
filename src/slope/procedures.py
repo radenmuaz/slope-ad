@@ -220,16 +220,8 @@ def reciprocal(x):
 @procedure_set.register()
 def matmul(x, w):
     x = x.reshape((*x.shape[0:-1], 1, x.shape[-1]))
-    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).T()
+    w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).transpose(-1,-2)
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
-
-
-@procedure_set.register()
-def T(x):
-    perm = list(range(x.ndim))
-    perm[-2], perm[-1] = perm[-1], perm[-2]
-    return x.permute(tuple(perm))
-
 
 @procedure_set.register()
 def getitem(x, val):

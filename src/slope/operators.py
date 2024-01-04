@@ -722,16 +722,19 @@ class Matmul(BinaryReduceOperator):
         elif x.ndim > 2 or w.ndim > 2:  # batched mat@mat
             if x.ndim == 1:
                 assert x.shape[0] == w.shape[-2]
-                shape = x.shape[:-1] +  (w.shape[-1],)
+                shape = (*w.shape[:-2], w.shape[-1])
             elif w.ndim == 1:
-                assert x.shape[-2] == w.shape[0]
-                shape = (x.shape[:-1],)
+                assert x.shape[-1] == w.shape[0]
+                shape = x.shape[:-1]
             else:
                 assert x.shape[-1] == w.shape[-2]
                 assert len(x.shape) == len(w.shape), "Different ndim broadcasting not supported"
-                assert all(a <= b for a, b in zip(x.shape[:2], w.shape[:2]))
-                bdim_shape = tuple([xd if xd >= wd else wd for (xd, wd) in zip(x.shape[:2],w.shape[:2])])
-                shape = (*bdim_shape, x.shape[-2], w.shape[-1])
+                shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
+                # TODO: broadcasting support
+                # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
+                # assert all((a == b) or (a==1) or (b==1) for a, b in zip(x_bdims, w_bdims))
+                # bdim_shape = tuple([xd if xd >= wd else wd for (xd, wd) in zip(x_bdims, w_bdims)])
+                # shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
             raise ValueError("Invalid dimensions for matmul")
         print(x.shape, w.shape, shape)

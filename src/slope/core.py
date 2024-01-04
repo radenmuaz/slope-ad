@@ -396,7 +396,6 @@ class Operator:
         return args, params
 
     def __call__(self, *args, **params):
-        args_, params_ = args, params
         args, params = self.reorg_args(args, params)
         args, params = self.args_fixer(*args, **params)
         ret = bind(self, *args, **params)

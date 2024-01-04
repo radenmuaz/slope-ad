@@ -705,36 +705,6 @@ class Arange(InitOperator):
 
 @operator_set.register("matmul")
 class Matmul(BinaryReduceOperator):
-    # TODO: verify compliant with https://pytorch.org/docs/stable/generated/torch.matmul.html
-    def args_fixer(self, x, w, **params):
-        if x.ndim > 2 or w.ndim > 2:  # batched mat@mat
-            if x.ndim < w.ndim:
-                x = x.reshape( *((1,)*(w.ndim-x.ndim-1)), *x.shape)
-                x = x.expand((*w.shape[:-2], x.shape[-1]))
-            elif x.ndim > w.ndim:
-                w = w.reshape( *((1,)*(x.ndim-w.ndim)), *w.shape[:-2], w.shape[-1])
-                w = w.expand((*x.shape[:-1], *w.shape[-1:]))
-            elif x.shape != w.shape:
-                x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
-                x_expand_shape, w_expand_shape = [], []
-                for (xd, wd) in zip(x_bdims, w_bdims):
-                    if xd == 1 and xd < wd:
-                        x_expand_shape += [wd]
-                        w_expand_shape += [wd]
-                    elif wd == 1 and wd < xd:
-                        x_expand_shape += [xd]
-                        w_expand_shape += [xd]
-                    else:
-                        x_expand_shape += [xd]
-                        w_expand_shape += [wd]
-                x_expand_shape = tuple(x_expand_shape) + x.shape[-2:]
-                w_expand_shape = tuple(w_expand_shape) + w.shape[-2:]
-                if x.shape != x_expand_shape:
-                    x = x.expand(x_expand_shape)
-                if w.shape != x_expand_shape:
-                    w = w.expand(w_expand_shape)
-        return (x, w), params
-    
     def typecheck(self, x, w):
         assert x.dtype == w.dtype
         if x.ndim == w.ndim == 1:  # dot
@@ -743,29 +713,28 @@ class Matmul(BinaryReduceOperator):
         elif x.ndim == w.ndim == 2:  # mat@mat
             assert x.shape[1] == w.shape[0]
             shape = (x.shape[0], w.shape[1])
-        elif x.ndim == 1 and w.ndim == 2:  # vec@mat
+        elif x.ndim == 1 and w.ndim == 1:  # vec@mat
             assert x.shape[0] == w.shape[0]
             shape = (w.shape[1],)
         elif x.ndim == 2 and w.ndim == 1:  # mat@vec
             assert x.shape[1] == w.shape[0]
             shape = (x.shape[0],)
-        elif x.ndim > 2 or w.ndim > 2:  # batch
-            if x.ndim == w.ndim:
-                if x.shape[-1] == w.shape[-2] and x.shape[:-2] != w.shape[:-2]:
-                    shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
-                elif x.shape[:-2] == w.shape[:-2]:
-                    shape = x.shape[:-1]
-                else:
-                    raise NotImplementedError
-            elif x.ndim < w.ndim:
-                assert x.shape[-1] == w.shape[-2]
-                shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
-            elif x.ndim > w.ndim:
-                assert x.shape[-1] == w.shape[-1]
+        elif x.ndim > 2 or w.ndim > 2:  # batched mat@mat
+            if x.ndim == 1:
+                assert x.shape[0] == w.shape[-2]
+                shape = (*w.shape[:-2], w.shape[-1])
+            elif w.ndim == 1:
+                assert x.shape[-1] == w.shape[0]
                 shape = x.shape[:-1]
             else:
-                raise NotImplementedError
+                assert x.shape[-1] == w.shape[-2]
+                assert len(x.shape) == len(w.shape), "Different ndim broadcasting not supported"
+                shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
+                # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
+                # assert all((a == b) or (a==1) or (b==1) for a, b in zip(x_bdims, w_bdims))
+                # bdim_shape = tuple([xd if xd >= wd else wd for (xd, wd) in zip(x_bdims, w_bdims)])
+                # shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
             raise ValueError("Invalid dimensions for matmul")
         print(x.shape, w.shape, shape)

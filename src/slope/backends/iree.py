@@ -371,31 +371,54 @@ def maximum_impl(self, x, w, y):
 def matmul_impl(self, x, w, y):
     if x["type"].ndim <= 2 and w["type"].ndim <= 2:
         return f'{y["name"]} = "stablehlo.dot"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-    elif x["type"].ndim == w["type"].ndim:
-        return f'''{y["name"]} = "stablehlo.dot_general"({x["name"]}, {w["name"]}) {{
-  dot_dimension_numbers = #stablehlo.dot<
-    lhs_batching_dimensions = {list(range(x["type"].ndim-2))},
-    rhs_batching_dimensions = {list(range(x["type"].ndim-2))},
-    lhs_contracting_dimensions = [{x["type"].ndim-1}],
-    rhs_contracting_dimensions = [{w["type"].ndim-2}]
-  >,
-  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-    }}  {as_mlir_sig((x["type"], w["type"]), y["type"])}
-'''
     else:
-        raise NotImplementedError
-        return f'''{y["name"]} = "stablehlo.broadcast_in_dim"({x["name"]}) {{
-broadcast_dimensions = dense<{repr(list(range(len(shape))))}>: tensor<{len(shape)}xi64>
-}} {as_mlir_sig(( x["type"],), y["type"])}
-{y["name"]} = "stablehlo.dot_general"({x["name"]}, {w["name"]}) {{
+        x_name, x_type = x["name"], x["type"]
+        w_name, w_type = w["name"], w["type"]
+        y_name, y_type = y["name"], y["type"]
+        if x_type.ndim == 1:
+            x_name_ = f"{x_name}_"
+            x_type_ = (VoidTensor((1,) + x_type.shape), x_type.dtype)
+            y_name_ = f"{y_name}_"
+            y_type_ = (VoidTensor((1,) + y_type.shape), y_type.dtype)
+            return f'''f'{x_name_} = "stablehlo.reshape"({x_name}) {as_mlir_sig((x_type,), x_type_)}
+{y_name_} = "stablehlo.dot_general"({x_name}, {w_name}) {{
   dot_dimension_numbers = #stablehlo.dot<
-    lhs_batching_dimensions = [0],
-    rhs_batching_dimensions = [0],
-    lhs_contracting_dimensions = [{x["type"].ndim-1}],
-    rhs_contracting_dimensions = [{w["type"].ndim-2}]
+    lhs_batching_dimensions = {list(range(1,x_type_.ndim-2))},
+    rhs_batching_dimensions = {list(range(w_type.ndim-2))},
+    lhs_contracting_dimensions = [{x_type.ndim-1}],
+    rhs_contracting_dimensions = [{w_type_.ndim-2}]
   >,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-    }}  {as_mlir_sig((x["type"], w["type"]), y["type"])}
+    }}  {as_mlir_sig((x_type_, w_type), y_type_)}
+{y_name} = "stablehlo.reshape"({y_name_}) {as_mlir_sig((y_type_,), y_type)}
+    '''
+        elif w_type.ndim == 1:
+            w_name_ = f"{w_name}_"
+            w_type_ = (VoidTensor((1,) + w_type.shape), w_type.dtype)
+            y_name_ = f"{y_name}_"
+            y_type_ = (VoidTensor((1,) + y_type.shape), y_type.dtype)
+            return f'''f'{w_name_} = "stablehlo.reshape"({w_name}) {as_mlir_sig((w_type,), w_type_)}
+{y_name_} = "stablehlo.dot_general"({x_name}, {w_name_}) {{
+  dot_dimension_numbers = #stablehlo.dot<
+    lhs_batching_dimensions = {list(range(x_type.ndim-2))},
+    rhs_batching_dimensions = {list(range(1,w_type_.ndim-2))},
+    lhs_contracting_dimensions = [{x_type.ndim-1}],
+    rhs_contracting_dimensions = [{w_type_.ndim-2}]
+  >,
+  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+    }}  {as_mlir_sig((x_type, w_type_), y_type_)}
+{y_name} = "stablehlo.reshape"({y_name_}) {as_mlir_sig((y_type_,), y_type)}
+    '''
+        else:
+            return f'''{y_name} = "stablehlo.dot_general"({x_name}, {w_name}) {{
+  dot_dimension_numbers = #stablehlo.dot<
+    lhs_batching_dimensions = {list(range(x_type.ndim-2))},
+    rhs_batching_dimensions = {list(range(w_type.ndim-2))},
+    lhs_contracting_dimensions = [{x_type.ndim-1}],
+    rhs_contracting_dimensions = [{w_type.ndim-2}]
+  >,
+  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+    }}  {as_mlir_sig((x_type, w_type), y_type)}
 '''
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):

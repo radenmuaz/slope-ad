@@ -707,18 +707,31 @@ class Arange(InitOperator):
 class Matmul(BinaryReduceOperator):
     def typecheck(self, x, w):
         assert x.dtype == w.dtype
-        if x.ndim == w.ndim == 2:  # mat#mat
+        if x.ndim == w.ndim == 1:  # dot
+            assert x.shape[0] == w.shape[0]
+            shape = ()
+        elif x.ndim == w.ndim == 2:  # mat@mat
             assert x.shape[1] == w.shape[0]
-            shape = (x.shape[-2], w.shape[-1])
-        elif x.ndim >= 2 and w.ndim >= 2:  # batched mat@mat
-            assert x.shape[-1] == w.shape[-2]
-            shape = x.shape[:-1] +  (w.shape[-1],)
-        elif x.ndim == 1 and w.ndim > 1:  # vec@mat
-            assert x.shape[0] == w.shape[-2]
-            shape = (1,) + (w.shape[-2], w.shape[-1])
-        elif x.ndim > 1 and w.ndim == 1:  # mat@vec
-            assert x.shape[-1] == w.shape[0]
-            shape = x.shape[:-1] + (w.shape[0],)
+            shape = (x.shape[0], w.shape[1])
+        elif x.ndim == 1 and w.ndim == 1:  # vec@mat
+            assert x.shape[0] == w.shape[0]
+            shape = (w.shape[1],)
+        elif x.ndim == 2 and w.ndim == 1:  # mat@vec
+            assert x.shape[1] == w.shape[0]
+            shape = (x.shape[0],)
+        elif x.ndim > 2 or w.ndim > 2:  # batched mat@mat
+            if x.ndim == 1:
+                assert x.shape[0] == w.shape[-2]
+                shape = x.shape[:-1] +  (w.shape[-1],)
+            elif w.ndim == 1:
+                assert x.shape[-2] == w.shape[0]
+                shape = (x.shape[:-1],)
+            else:
+                assert x.shape[-1] == w.shape[-2]
+                assert len(x.shape) == len(w.shape), "Different ndim broadcasting not supported"
+                assert all(a <= b for a, b in zip(x.shape[:2], w.shape[:2]))
+                bdim_shape = tuple([xd if xd >= wd else wd for (xd, wd) in zip(x.shape[:2],w.shape[:2])])
+                shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
             raise ValueError("Invalid dimensions for matmul")
         print(x.shape, w.shape, shape)

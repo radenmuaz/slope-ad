@@ -42,7 +42,6 @@ class BasicBlock(nn.Module):
 
 def downsample_basic_block(x, planes):
     x = slope.avgpool2d(x, (2, 2))
-    # out = x.pad(0,0,0,planes - x.size(1),0,0,0,0)
     zero_pads = slope.zeros(x.size(0), planes - x.size(1), x.size(2), x.size(3))
     out = slope.cat([x, zero_pads], dim=1)
     return out

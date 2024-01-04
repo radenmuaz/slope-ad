@@ -31,17 +31,17 @@ slice_py = slice
 compile_py = compile
 
 
-def as_mlir_shape(void_tensor):
-    xdtype = void_tensor.dtype.mlir
-    if len(void_tensor.shape) > 0:
-        xshape = f"{'x'.join((repr(i) for i in void_tensor.shape))}"
+def as_mlir_shape(symval):
+    xdtype = symval.dtype.mlir
+    if len(symval.shape) > 0:
+        xshape = f"{'x'.join((repr(i) for i in symval.shape))}"
         return f"tensor<{xshape}x{xdtype}>"
     else:
         return f"tensor<{xdtype}>"
 
 
-def as_mlir_sig(in_void_tensors, out_void_tensor):
-    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_void_tensors)}) -> {as_mlir_shape(out_void_tensor)}"
+def as_mlir_sig(in_symvals, out_symval):
+    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
     return typing_code
 
 
@@ -173,9 +173,9 @@ class IREEBackend(Backend):
         body_code_lines = []
 
         for inb in program.in_binders:
-            prefix = "%x" if type(inb.void_tensor) is VoidTensor else "%c"
+            prefix = "%x" if type(inb.symval) is VoidTensor else "%c"
             idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-            env[inb] = dict(name=f"{prefix}{idx}", type=inb.void_tensor)
+            env[inb] = dict(name=f"{prefix}{idx}", type=inb.symval)
 
         for instruction in program.instructions:
             if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -184,7 +184,7 @@ class IREEBackend(Backend):
             for outb in instruction.out_binders:
                 prefix = "%y" if outb in program.outs else "%z"
                 idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-                env[outb] = dict(name=f"{prefix}{idx}", type=outb.void_tensor)
+                env[outb] = dict(name=f"{prefix}{idx}", type=outb.symval)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
@@ -197,15 +197,15 @@ class IREEBackend(Backend):
                     op = instruction.op
                     op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
                     op_procedure = getattr(self.procedure_set, op_name)
-                    void_tensors_in = tuple(inp.void_tensor for inp in instruction.inputs)
+                    symvals_in = tuple(inp.symval for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
                         op_procedure,
-                        *void_tensors_in,
+                        *symvals_in,
                         static_args=tuple(params.items()),
                         name=op.name,
                     )
-                    name = op.get_jit_name(tuple(void_tensors_in), params)
+                    name = op.get_jit_name(tuple(symvals_in), params)
                     if name not in fn_defs.keys():
                         op_codegen_out = self.codegen(
                             op_program,
@@ -369,9 +369,34 @@ def maximum_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    return f'{y["name"]} = "stablehlo.dot"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-
-
+    if x["type"].ndim <= 2 and w["type"].ndim <= 2:
+        return f'{y["name"]} = "stablehlo.dot"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
+    elif x["type"].ndim == w["type"].ndim:
+        return f'''{y["name"]} = "stablehlo.dot_general"({x["name"]}, {w["name"]}) {{
+  dot_dimension_numbers = #stablehlo.dot<
+    lhs_batching_dimensions = {list(range(x["type"].ndim-2))},
+    rhs_batching_dimensions = {list(range(x["type"].ndim-2))},
+    lhs_contracting_dimensions = [{x["type"].ndim-1}],
+    rhs_contracting_dimensions = [{w["type"].ndim-2}]
+  >,
+  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+    }}  {as_mlir_sig((x["type"], w["type"]), y["type"])}
+'''
+    else:
+        raise NotImplementedError
+        return f'''{y["name"]} = "stablehlo.broadcast_in_dim"({x["name"]}) {{
+broadcast_dimensions = dense<{repr(list(range(len(shape))))}>: tensor<{len(shape)}xi64>
+}} {as_mlir_sig(( x["type"],), y["type"])}
+{y["name"]} = "stablehlo.dot_general"({x["name"]}, {w["name"]}) {{
+  dot_dimension_numbers = #stablehlo.dot<
+    lhs_batching_dimensions = [0],
+    rhs_batching_dimensions = [0],
+    lhs_contracting_dimensions = [{x["type"].ndim-1}],
+    rhs_contracting_dimensions = [{w["type"].ndim-2}]
+  >,
+  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+    }}  {as_mlir_sig((x["type"], w["type"]), y["type"])}
+'''
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
     zero = "0." if "f" in y["type"].dtype.mlir else "0"

@@ -48,6 +48,17 @@ def ones_like(y):
 
 
 @procedure_set.register()
+def eye(dim: int, **kwargs):
+    return (
+        slope.full((dim, 1), 1, **kwargs)
+        .pad(((0, 0), (0, dim)))
+        .reshape(dim * (dim + 1))
+        .shrink(((0, dim * dim),))
+        .reshape(dim, dim)
+    )
+
+
+@procedure_set.register()
 def where(x, trueval, falseval):
     cond = x != 0.0
     if not isinstance(trueval, Tensor):

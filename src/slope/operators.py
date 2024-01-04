@@ -278,7 +278,7 @@ class Max(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.void_tensor.shape)
+        grad_L_x = grad_L_x.expand(x.symval.shape)
 
 
 @operator_set.register("sum")
@@ -296,7 +296,7 @@ class Sum(ReduceOperator):
             dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.void_tensor.shape)
+        grad_L_x = grad_L_x.expand(x.symval.shape)
 
         return [grad_L_x]
 
@@ -341,17 +341,17 @@ class Expand(ShapeOperator):
     def T(self, cotangents, x, *, shape):
         (grad_L_y,) = cotangents
         grad_L_x = grad_L_y
-        if x.void_tensor.shape == grad_L_x.shape:
+        if x.symval.shape == grad_L_x.shape:
             return [grad_L_x]
         else:
             b_dim = []
-            assert len(x.void_tensor.shape) == len(grad_L_x.shape)
-            for i, (xd, od) in enumerate(zip(x.void_tensor.shape, grad_L_x.shape)):
+            assert len(x.symval.shape) == len(grad_L_x.shape)
+            for i, (xd, od) in enumerate(zip(x.symval.shape, grad_L_x.shape)):
                 if xd != od:
                     b_dim += [i]
             grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-        if grad_L_x.shape != x.void_tensor.shape:
-            raise ValueError(f"not same {grad_L_x.shape=}, {x.void_tensor.shape=}")
+        if grad_L_x.shape != x.symval.shape:
+            raise ValueError(f"not same {grad_L_x.shape=}, {x.symval.shape=}")
         return [grad_L_x]
 
 
@@ -386,7 +386,7 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (z,) = cotangents
-        return [z.reshape(x.void_tensor.shape)]
+        return [z.reshape(x.symval.shape)]
 
 
 @operator_set.register("permute")
@@ -506,12 +506,12 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
         (z,) = cotangents
-        x_shape = x.void_tensor.shape
+        x_shape = x.symval.shape
         assert isinstance(x, UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
-                tuple(np.subtract(x.void_tensor.shape, limits)),
+                tuple(np.subtract(x.symval.shape, limits)),
                 (0,) * len(starts),
             )
         else:
@@ -609,7 +609,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (z,) = cotangents
-        x_shapes = [o.void_tensor.shape if type(o) is UndefPrimal else o.shape for o in xs]
+        x_shapes = [o.symval.shape if type(o) is UndefPrimal else o.shape for o in xs]
         if type(z) is None:
             return [None if type(o) is UndefPrimal else None for o in xs]
         else:  # TODO: replace numpy with pure Python
@@ -635,7 +635,7 @@ class Cat(ShapeOperator):
 
 @operator_set.register("full")
 class Full(InitOperator):
-    def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
+    def args_fixer(self, *, shape, fill_value, dtype=None):
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
@@ -644,18 +644,23 @@ class Full(InitOperator):
             fill_value = float(fill_value)
         elif "int" in dtype.name:
             fill_value = int(fill_value)
+        if dtype is None:
+            dtype = slope.backend.default_dtype
         return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
     def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
         return [VoidTensor(tuple(shape), dtype)]
 
+
 @operator_set.register("random_uniform", aliases=["rand"])
 class RandomUniform(InitOperator):
-    def args_fixer(self, *, shape=None, dtype=Tensor.float32):
+    def args_fixer(self, *, shape, dtype=None):
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
             shape = ()
+        if dtype is None:
+            dtype = slope.backend.default_dtype
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -664,11 +669,13 @@ class RandomUniform(InitOperator):
 
 @operator_set.register("random_normal", aliases=["randn"])
 class RandomNormal(InitOperator):
-    def args_fixer(self, *, shape=None, dtype=Tensor.float32):
+    def args_fixer(self, *, shape=None, dtype=None):
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
             shape = ()
+        if dtype is None:
+            dtype = slope.backend.default_dtype
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -677,12 +684,14 @@ class RandomNormal(InitOperator):
 
 @operator_set.register("arange", aliases=["iota"])
 class Arange(InitOperator):
-    def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int64):
+    def args_fixer(self, *, start, stop=None, stride=None, dtype=None):
         if stop is None:
             stop = start
             start = 0
         if stride is None:
             stride = 1
+        if dtype is None:
+            dtype = Tensor.int64
         return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
 
     def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
@@ -698,25 +707,21 @@ class Arange(InitOperator):
 class Matmul(BinaryReduceOperator):
     def typecheck(self, x, w):
         assert x.dtype == w.dtype
-        if x.ndim == w.ndim == 2:
-            # Both arguments are 2-D, multiply like conventional matrices
+        if x.ndim == w.ndim == 2:  # mat#mat
+            assert x.shape[1] == w.shape[0]
+            shape = (x.shape[-2], w.shape[-1])
+        elif x.ndim >= 2 and w.ndim >= 2:  # batched mat@mat
             assert x.shape[-1] == w.shape[-2]
-            shape = x.shape[:-1] + (w.shape[-1],)
-        elif x.ndim > 2 and w.ndim > 2:
-            # Treat as a stack of matrices and broadcast accordingly
-            assert x.shape[-1] == w.shape[-2]
-            shape = x.shape[:-2] + (x.shape[-2], y.shape[-1])
-        elif x.ndim == 1 and w.ndim > 1:
-            # Promote the 1-D argument to a matrix by prepending a 1
+            shape = x.shape[:-1] +  (w.shape[-1],)
+        elif x.ndim == 1 and w.ndim > 1:  # vec@mat
             assert x.shape[0] == w.shape[-2]
             shape = (1,) + (w.shape[-2], w.shape[-1])
-        elif x.ndim > 1 and w.ndim == 1:
-            # Promote the 1-D argument to a matrix by appending a 1
+        elif x.ndim > 1 and w.ndim == 1:  # mat@vec
             assert x.shape[-1] == w.shape[0]
             shape = x.shape[:-1] + (w.shape[0],)
         else:
             raise ValueError("Invalid dimensions for matmul")
-
+        print(x.shape, w.shape, shape)
         return [VoidTensor(shape, x.dtype)]
 
     def jvp(self, primals, tangents):

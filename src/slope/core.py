@@ -357,7 +357,6 @@ class VoidTensor(Tensor):
     #         return self.__getattribute__(attr)
 
 
-
 # ================
 #   Operator
 # ================
@@ -1079,7 +1078,7 @@ class JitObject:
 
 
 class JitOp(MetaOperator):
-    def meta_impl(self, *args, program):
+    def meta_impl(self, *args, program, **_):
         hashed_program = Hashed(program)
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
@@ -1090,6 +1089,22 @@ class JitOp(MetaOperator):
 
     def reorg_args(self, args, params):
         return args, params
+
+    def typecheck(self, *in_types, program):
+        program_type = typecheck_program(program)
+        if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
+            ret = "Type mismatch program.in_types vs in_types:\n"
+            for i, j in zip(program_type.in_types, in_types):
+                ret += f"{i}, {j}, {i == j}"
+            raise TypeError(ret)
+        return program_type.out_types
+
+    def vmap(self, dim_size, vals_in, dims_in, program):
+        program, consts = vmap_program(program, dim_size, tuple(dims_in))
+        outs = self(*consts, *vals_in, program=program)
+        if not isinstance(outs, tuple):
+            outs = (outs,)
+        return outs, [0] * len(outs)
 
     def jvp(self, primals, tangents, *, program):
         new_program, new_consts = jvp_program(program)
@@ -1104,15 +1119,6 @@ class JitOp(MetaOperator):
         primals_out, tangents_out = outs[:n], outs[n:]
         return primals_out, tangents_out
 
-    def typecheck(self, *in_types, program):
-        program_type = typecheck_program(program)
-        if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
-            for i, j in zip(program_type.in_types, in_types):
-                print(i, j, i == j)
-            breakpoint()
-            raise TypeError
-        return program_type.out_types
-
     def T(self, cotangents, *invals, program):
         undef_primals = [type(x) is UndefPrimal for x in invals]
         transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
@@ -1126,7 +1132,7 @@ class JitOp(MetaOperator):
             program=transposed_program,
         )
         outs = iter(outs)
-        breakpoint()
+
         return [next(outs) if undef else None for undef in undef_primals]
 
     def partial_run(self, trace, tracers, *, program):
@@ -1860,7 +1866,7 @@ def jvp_flat(f, primals, tangents, *, has_aux, global_data, **static_args):
             # aux_ = aux
             aux = tree_map(lambda x: x.primal, aux)
             # aux = tree_map(lambda x: x.full_lower(), aux)
-            # breakpoint()
+            #
         else:
             outs = jvp_flat_ret
         tracers_out = [full_raise(trace, out) for out in outs]
@@ -1909,7 +1915,25 @@ def make_program(f: Callable, *symvals_in: VoidTensor, static_args, name) -> Tup
 
 
 @lru_cache_verbose()
-def jvp_program(program: Program, static_args=()) -> Tuple[Program, List[Any]]:
+def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any]]:
+    def unmapped_symval(axis_size: int, batch_dim, symval: VoidTensor) -> VoidTensor:
+        if batch_dim is None:
+            return symval
+        else:
+            shape = list(symval.shape)
+            shape.insert(batch_dim, axis_size)
+            return VoidTensor(tuple(shape), symval.dtype)
+
+    vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
+    in_symvals = [unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)]
+    program, consts, _ = make_program(
+        vmap_traceable, *in_symvals, static_args=program.static_args, name=f"vmap_{program.name}"
+    )
+    return program, consts
+
+
+@lru_cache_verbose()
+def jvp_program(program: Program) -> Tuple[Program, List[Any]]:
     def jvp_traceable(*primals_and_tangents):
         n = len(primals_and_tangents) // 2
         primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
@@ -1920,7 +1944,7 @@ def jvp_program(program: Program, static_args=()) -> Tuple[Program, List[Any]]:
         jvp_traceable,
         *in_symvals,
         *in_symvals,
-        static_args=static_args,
+        static_args=program.static_args,
         name=f"{program.name}_jvp",
     )
     return new_program, new_consts
@@ -1945,7 +1969,6 @@ def partial_run_flat(
 
 
 def partial_run_program(
-    self,
     program: Program,
     in_unknowns: List[bool],
     instantiate: Optional[List[bool]] = None,
@@ -1971,9 +1994,9 @@ def partial_run_program(
             res,
         ) = instruction.op.partial_run_instruction(unks_in, instruction)
         if instruction1 is not None:
-            instructions1.append(instruction1)
+            instructions1 += [instruction1]
         if instruction2 is not None:
-            instructions2.append(instruction2)
+            instructions2 += [instruction2]
         if res is not None:
             residuals.update(res)
         list_map(write, unks_out, instruction.out_binders)

@@ -641,13 +641,11 @@ class Full(InitOperator):
         elif shape is None:
             shape = ()
         if dtype is None:
-            dtype = slope.backend.DEFAULT_DTYPE
+            dtype = slope.core.backend.DEFAULT_DTYPE
         if "float" in dtype.name:
             fill_value = float(fill_value)
         elif "int" in dtype.name:
             fill_value = int(fill_value)
-        if dtype is None:
-            dtype = slope.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
 
     def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
@@ -662,7 +660,7 @@ class RandomUniform(InitOperator):
         elif shape is None:
             shape = ()
         if dtype is None:
-            dtype = slope.backend.DEFAULT_DTYPE
+            dtype = slope.core.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -677,7 +675,7 @@ class RandomNormal(InitOperator):
         elif shape is None:
             shape = ()
         if dtype is None:
-            dtype = slope.backend.DEFAULT_DTYPE
+            dtype = slope.core.backend.DEFAULT_DTYPE
         return (), dict(shape=shape, dtype=dtype)
 
     def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
@@ -708,29 +706,33 @@ class Arange(InitOperator):
 @operator_set.register("matmul")
 class Matmul(BinaryReduceOperator):
     def typecheck(self, x, w):
+        shapes_str = f"{x.shape=}, {w.shape=}"
         assert x.dtype == w.dtype
         if x.ndim == w.ndim == 1:  # dot
-            assert x.shape[0] == w.shape[0]
+            assert x.shape[0] == w.shape[0], f"{shapes_str}"
             shape = ()
         elif x.ndim == w.ndim == 2:  # mat@mat
-            assert x.shape[1] == w.shape[0]
+            assert x.shape[1] == w.shape[0], f"{shapes_str}"
             shape = (x.shape[0], w.shape[1])
         elif x.ndim == 1 and w.ndim == 1:  # vec@mat
-            assert x.shape[0] == w.shape[0]
+            assert x.shape[0] == w.shape[0], f"{shapes_str}"
             shape = (w.shape[1],)
         elif x.ndim == 2 and w.ndim == 1:  # mat@vec
-            assert x.shape[1] == w.shape[0]
+            assert x.shape[1] == w.shape[0], f"{shapes_str}"
             shape = (x.shape[0],)
         elif x.ndim > 2 or w.ndim > 2:  # batched mat@mat
             if x.ndim == 1:
-                assert x.shape[0] == w.shape[-2]
+                assert x.shape[0] == w.shape[-2], f"{shapes_str}"
                 shape = (*w.shape[:-2], w.shape[-1])
             elif w.ndim == 1:
-                assert x.shape[-1] == w.shape[0]
+                assert x.shape[-1] == w.shape[0], f"{shapes_str}"
                 shape = x.shape[:-1]
             else:
-                assert x.shape[-1] == w.shape[-2]
-                assert len(x.shape) == len(w.shape), "Different ndim broadcasting not supported"
+                assert x.shape[-1] == w.shape[-2], f"{shapes_str}"
+                assert len(x.shape) == len(
+                    w.shape
+                ), f"Different ndim broadcasting not supported, {x.shape=}, {w.shape=}"
+                assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {x.shape=}, {w.shape=}"
                 shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
                 # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
@@ -738,7 +740,7 @@ class Matmul(BinaryReduceOperator):
                 # bdim_shape = tuple([xd if xd >= wd else wd for (xd, wd) in zip(x_bdims, w_bdims)])
                 # shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
-            raise ValueError("Invalid dimensions for matmul")
+            raise ValueError(f"Invalid dimensions for matmul, {shapes_str}")
         return [VoidTensor(shape, x.dtype)]
 
     def jvp(self, primals, tangents):

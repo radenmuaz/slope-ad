@@ -24,8 +24,8 @@ def jvp(self, primals, tangents):
 
 @relu.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [grad_L_y, None]
+    (gL_y,) = cotangents
+    return [gL_y, None]
 
 @slope.jit
 def f(x):
@@ -44,5 +44,5 @@ x1_dot = slope.ones_like(x1)
 y1, y1_dot = slope.jvp(f, (x1,), (x1_dot,))
 print(f"{y1=}, {y1_dot=}")
 
-grad_f_x1 = slope.grad(f)(x1)
-print(grad_f_x1)
+gf_x1 = slope.grad(f)(x1)
+print(gf_x1)

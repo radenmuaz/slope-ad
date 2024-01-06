@@ -33,7 +33,7 @@ def loss_fn(model, batch):
 g_loss_fn = slope.value_and_grad(loss_fn, has_aux=True)
 
 @slope.jit
-def grad_step(model, batch):
+def gstep(model, batch):
     (loss, model_), g_model = g_loss_fn(model, batch)
     return loss, g_model, model_
 
@@ -44,7 +44,7 @@ print(treedef)
 x = slope.rand((1,3,32,32))
 # x = slope.arange(math.prod((1,3,32,32)), dtype=slope.float32).reshape((1,3,32,32)) * 0.001
 y = slope.ones((1,)).one_hot(10, dtype=slope.float32)
-loss, g_model, model_ = grad_step(model, (x,y)) 
+loss, g_model, model_ = gstep(model, (x,y)) 
 
 
 # def loss_fn(model, batch):
@@ -55,12 +55,12 @@ loss, g_model, model_ = grad_step(model, (x,y))
 # g_loss_fn = slope.value_and_grad(loss_fn)
 
 # @slope.jit
-# def grad_step(model, batch):
+# def gstep(model, batch):
 #     loss, g_model = g_loss_fn(model, batch)
 #     return loss, g_model
 
 # model = Net()
 # x = slope.ones((1,3,32,32))
 # y = slope.ones((1,)).one_hot(10, dtype=slope.float32)
-# loss, g_model = grad_step(model, (x,y)) 
+# loss, g_model = gstep(model, (x,y)) 
 # breakpoint()

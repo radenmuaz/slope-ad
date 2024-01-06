@@ -2306,7 +2306,7 @@ def grad(f, argnums=(0,), argnames="", has_aux=False, return_value=False):
     if isinstance(argnums, int):
         argnums = (argnums,)
 
-    def grad_fn(x, *xs, **static_args):
+    def gfn(x, *xs, **static_args):
         vjp_ret = vjp(f, x, *xs, has_aux=has_aux, **static_args)
         if has_aux:
             y, f_vjp, aux = vjp_ret
@@ -2314,14 +2314,14 @@ def grad(f, argnums=(0,), argnames="", has_aux=False, return_value=False):
             y, f_vjp = vjp_ret
         if np.shape(y) != ():
             raise TypeError("grad output must be 0-dim scalar with shape ()")
-        grad_L_xs = f_vjp(backend.ones(()))
-        grad_L_xs = tuple(grad_L_xs[i] for i in argnums) if len(argnums) > 1 else grad_L_xs[argnums[0]]
+        gL_xs = f_vjp(backend.ones(()))
+        gL_xs = tuple(gL_xs[i] for i in argnums) if len(argnums) > 1 else gL_xs[argnums[0]]
         if return_value:
-            return ((y, aux), grad_L_xs) if has_aux else (y, grad_L_xs)
+            return ((y, aux), gL_xs) if has_aux else (y, gL_xs)
         else:
-            return (grad_L_xs, aux) if has_aux else grad_L_xs
+            return (gL_xs, aux) if has_aux else gL_xs
 
-    return jit(grad_fn) if rejit else grad_fn
+    return jit(gfn) if rejit else gfn
 
 
 def value_and_grad(f, argnums=(0,), argnames="", has_aux=False):

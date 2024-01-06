@@ -17,8 +17,8 @@ def loss_fn(model, batch):
     return loss
 
 print(loss_fn(model, (x, y)))
-grad_loss_fn = slope.grad(loss_fn)
-print(grad_loss_fn(model, (x, y)).flatten())
+gloss_fn = slope.grad(loss_fn)
+print(gloss_fn(model, (x, y)).flatten())
 
 
 

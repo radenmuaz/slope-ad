@@ -18,13 +18,13 @@ def loss_fn(model, batch):
     return -(preds.log_softmax(-1) * y_onehot).sum()
 
 
-value_and_grad_loss_fn = slope.value_and_grad(loss_fn)
+value_and_gloss_fn = slope.value_and_grad(loss_fn)
 
 
 @slope.jit
 def train_step(model, batch, optimizer):
-    loss, grad_loss_model = value_and_grad_loss_fn(model, batch)
-    new_model, new_optimizer = optimizer(model, grad_loss_model)
+    loss, gloss_model = value_and_gloss_fn(model, batch)
+    new_model, new_optimizer = optimizer(model, gloss_model)
     return loss, new_model, new_optimizer
 
 

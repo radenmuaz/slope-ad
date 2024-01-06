@@ -70,8 +70,8 @@ def jvp(self, primals, tangents, *, dtype):
 
 @cast.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [grad_L_y.cast(x.dtype)]
+    (gL_y,) = cotangents
+    return [gL_y.cast(x.dtype)]
 
 
 sqrt = Operator.unary("sqrt")
@@ -87,8 +87,8 @@ def jvp(self, primals, tangents, **params):
 
 @sqrt.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [grad_L_y / (x.sqrt() * 2)]
+    (gL_y,) = cotangents
+    return [gL_y / (x.sqrt() * 2)]
 
 
 sin = Operator.unary("sin")
@@ -103,8 +103,8 @@ def jvp(self, primals, tangents, **params):
 
 @sin.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [(grad_L_y * ((math.pi / 2) - x).sin())]
+    (gL_y,) = cotangents
+    return [(gL_y * ((math.pi / 2) - x).sin())]
 
 
 exp = Operator.unary("exp")
@@ -120,8 +120,8 @@ def jvp(self, primals, tangents, **params):
 
 @exp.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [1 / grad_L_y]
+    (gL_y,) = cotangents
+    return [1 / gL_y]
 
 
 log = Operator.unary("log")
@@ -136,8 +136,8 @@ def jvp(self, primals, tangents, **params):
 
 @log.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [1 / grad_L_y]
+    (gL_y,) = cotangents
+    return [1 / gL_y]
 
 
 neg = Operator.unary("neg")
@@ -152,8 +152,8 @@ def jvp(self, primals, tangents, **params):
 
 @neg.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [-grad_L_y]
+    (gL_y,) = cotangents
+    return [-gL_y]
 
 
 invert = Operator.unary("invert")
@@ -168,8 +168,8 @@ def jvp(self, primals, tangents, **params):
 
 @invert.set_method
 def T(self, cotangents, x):
-    (grad_L_y,) = cotangents
-    return [~grad_L_y]
+    (gL_y,) = cotangents
+    return [~gL_y]
 
 
 @invert.set_method
@@ -194,8 +194,8 @@ def jvp(self, primals, tangents):
 
 @add.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    return [grad_L_y, grad_L_y]
+    (gL_y,) = cotangents
+    return [gL_y, gL_y]
 
 
 sub = Operator.binary("sub")
@@ -210,8 +210,8 @@ def jvp(self, primals, tangents):
 
 @sub.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    return [grad_L_y, -grad_L_y]
+    (gL_y,) = cotangents
+    return [gL_y, -gL_y]
 
 
 mul = Operator.binary("mul")
@@ -226,12 +226,12 @@ def jvp(self, primals, tangents):
 
 @mul.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
+    (gL_y,) = cotangents
     assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
     if type(x) is UndefPrimal:
-        return [grad_L_y * w, None]
+        return [gL_y * w, None]
     elif type(w) is UndefPrimal:
-        return [None, x * grad_L_y]
+        return [None, x * gL_y]
 
 
 div = Operator.binary("div")
@@ -246,8 +246,8 @@ def jvp(self, primals, tangents):
 
 @div.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    return [grad_L_y / w, None]
+    (gL_y,) = cotangents
+    return [gL_y / w, None]
 
 
 pow = Operator.binary("pow")
@@ -265,12 +265,12 @@ def jvp(self, primals, tangents):
 
 @pow.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
+    (gL_y,) = cotangents
     assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
     if type(x) is UndefPrimal:
-        return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
+        return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), None]
     elif type(w) is UndefPrimal:
-        return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
+        return [None, gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
 maximum = Operator.binary("maximum")
@@ -292,8 +292,8 @@ def jvp(self, primals, tangents):
 
 @maximum.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    return [grad_L_y, None]
+    (gL_y,) = cotangents
+    return [gL_y, None]
 
 
 equal = Operator.binary("equal")
@@ -309,9 +309,9 @@ def jvp(self, primals, tangents):
 
 @equal.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
-    grad_L_y = grad_L_y.cast(x.dtype)
-    return [grad_L_y, None]
+    (gL_y,) = cotangents
+    gL_y = gL_y.cast(x.dtype)
+    return [gL_y, None]
 
 
 @equal.set_method
@@ -372,13 +372,13 @@ def jvp(self, primals, tangents, *, dim, keepdim):
 @max.set_method
 def T(self, cotangents, x, *, dim, keepdim):
     # TODO: this is sum gradient, define max gradient
-    (grad_L_y,) = cotangents
-    grad_L_x = grad_L_y
+    (gL_y,) = cotangents
+    gL_x = gL_y
     if not keepdim:
-        dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+        dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
-            grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-    grad_L_x = grad_L_x.expand(x.void_tensor.shape)
+            gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
+    gL_x = gL_x.expand(x.void_tensor.shape)
 
 
 sum = Operator.reduce("sum")
@@ -395,15 +395,15 @@ def jvp(self, primals, tangents, *, dim, keepdim):
 
 @sum.set_method
 def T(self, cotangents, x, *, dim, keepdim):
-    (grad_L_y,) = cotangents
-    grad_L_x = grad_L_y
+    (gL_y,) = cotangents
+    gL_x = gL_y
     if not keepdim:
-        dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+        dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
-            grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-    grad_L_x = grad_L_x.expand(x.void_tensor.shape)
+            gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
+    gL_x = gL_x.expand(x.void_tensor.shape)
 
-    return [grad_L_x]
+    return [gL_x]
 
 
 # -----------------------
@@ -449,20 +449,20 @@ def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
 
 @expand.set_method
 def T(self, cotangents, x, *, shape):
-    (grad_L_y,) = cotangents
-    grad_L_x = grad_L_y
-    if x.void_tensor.shape == grad_L_x.shape:
-        return [grad_L_x]
+    (gL_y,) = cotangents
+    gL_x = gL_y
+    if x.void_tensor.shape == gL_x.shape:
+        return [gL_x]
     else:
         b_dim = []
-        assert len(x.void_tensor.shape) == len(grad_L_x.shape)
-        for i, (xd, od) in enumerate(zip(x.void_tensor.shape, grad_L_x.shape)):
+        assert len(x.void_tensor.shape) == len(gL_x.shape)
+        for i, (xd, od) in enumerate(zip(x.void_tensor.shape, gL_x.shape)):
             if xd != od:
                 b_dim += [i]
-        grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-    if grad_L_x.shape != x.void_tensor.shape:
-        raise ValueError(f"not same {grad_L_x.shape=}, {x.void_tensor.shape=}")
-    return [grad_L_x]
+        gL_x = gL_x.sum(dim=tuple(b_dim), keepdim=True)
+    if gL_x.shape != x.void_tensor.shape:
+        raise ValueError(f"not same {gL_x.shape=}, {x.void_tensor.shape=}")
+    return [gL_x]
 
 
 reshape = Operator.other("reshape", nary_inputs=True)
@@ -984,12 +984,12 @@ def jvp(self, primals, tangents):
 
 @matmul.set_method
 def T(self, cotangents, x, w):
-    (grad_L_y,) = cotangents
+    (gL_y,) = cotangents
     assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
     if type(x) is UndefPrimal:
-        return [grad_L_y @ w.transpose(-1, -2), None]
+        return [gL_y @ w.transpose(-1, -2), None]
     elif type(w) is UndefPrimal:
-        return [None, x.transpose(-1, -2) @ grad_L_y]
+        return [None, x.transpose(-1, -2) @ gL_y]
 
 
 conv = Operator.other("conv")
@@ -1063,25 +1063,25 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
 
 @conv.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
-    (grad_L_y,) = cotangents
+    (gL_y,) = cotangents
     if type(x) is UndefPrimal:
-        grad_L_x = grad_L_y.conv_transpose(
+        gL_x = gL_y.conv_transpose(
             w, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=stride[0] - dilation[0]
         )
-        assert grad_L_x.shape == x.shape
-        return [grad_L_x, None]
+        assert gL_x.shape == x.shape
+        return [gL_x, None]
     elif type(w) is UndefPrimal:
-        grad_L_w = (
+        gL_w = (
             x.transpose(0, 1)
-            .conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
+            .conv(gL_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
             .transpose(0, 1)
         )
-        if grad_L_w.shape != w.shape:
-            starts = (0,) * len(grad_L_w.shape)
-            ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
-            grad_L_w = grad_L_w.slice(starts, ends)
-        assert grad_L_w.shape == w.shape
-        return [None, grad_L_w]
+        if gL_w.shape != w.shape:
+            starts = (0,) * len(gL_w.shape)
+            ends = (gL_w.shape[0], gL_w.shape[1]) + w.shape[2:]
+            gL_w = gL_w.slice(starts, ends)
+        assert gL_w.shape == w.shape
+        return [None, gL_w]
 
 
 conv_transpose = Operator.other("conv_transpose")
@@ -1192,15 +1192,15 @@ def jvp(self, primals, tangents, *, groups, stride, dilation, padding, output_pa
 
 @conv_transpose.set_method
 def T(self, cotangents, x, w, *, groups, stride, dilation, padding, output_padding):
-    (grad_L_y,) = cotangents
+    (gL_y,) = cotangents
     if type(x) is UndefPrimal:
-        grad_L_x = grad_L_y.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [grad_L_x, None]
+        gL_x = gL_y.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        return [gL_x, None]
     elif type(w) is UndefPrimal:
         x_T = x.transpose(0, 1)
-        grad_L_y_T = grad_L_y.transpose(0, 1)
-        grad_L_w = grad_L_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        return [None, grad_L_w]
+        gL_y_T = gL_y.transpose(0, 1)
+        gL_w = gL_y_T.conv(x_T, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        return [None, gL_w]
 
 
 # --------------

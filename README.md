@@ -91,13 +91,13 @@ def model_foward(x, w):
 
 def loss_fn(y_hat, y):
     return ((y_hat - y)**2).sum()
-grad_loss_fn = slope.grad(loss_fn, argnums=(0, 1))
+gloss_fn = slope.grad(loss_fn, argnums=(0, 1))
 
 @slope.jit
 def train_step(x, w, y, lr):
     y_hat = model_forward(x, w, b)
-    loss, (grad_w,) = grad_loss_fn(y_hat, y)
-    w = w - lr * grad_w
+    loss, (gw,) = gloss_fn(y_hat, y)
+    w = w - lr * gw
     return w
 
 N = 50

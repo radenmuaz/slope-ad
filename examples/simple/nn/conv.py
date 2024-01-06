@@ -11,9 +11,9 @@ import slope.nn as nn
 # y = f(x, w)
 
 # y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
-# y, (grad_L_x, grad_L_w) = slope.value_and_grad(lambda *args: f(*args).sum(), argnums=(0,1))(x, w)
+# y, (gL_x, gL_w) = slope.value_and_grad(lambda *args: f(*args).sum(), argnums=(0,1))(x, w)
 # print(f"{x.shape=}, {w.shape=}")
-# print(f"{y.shape=},  {grad_L_x.shape=}, {grad_L_w.shape=}")
+# print(f"{y.shape=},  {gL_x.shape=}, {gL_w.shape=}")
 
 x = slope.ones((10, 1, 3, 16, 16))
 x_dot = slope.ones((1, 3, 16, 16))
@@ -28,7 +28,7 @@ print(f"{x.shape=}, {w.shape=}")
 print(f"{y.shape=}")
 
 # y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
-# y, (grad_L_x, grad_L_w) = slope.value_and_grad(lambda *args: f(*args).sum(), argnums=(0,1))(x, w)
+# y, (gL_x, gL_w) = slope.value_and_grad(lambda *args: f(*args).sum(), argnums=(0,1))(x, w)
 # print(f"{x.shape=}, {w.shape=}")
-# print(f"{y.shape=},  {grad_L_x.shape=}, {grad_L_w.shape=}")
+# print(f"{y.shape=},  {gL_x.shape=}, {gL_w.shape=}")
 

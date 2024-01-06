@@ -17,9 +17,9 @@ def train_step(model, batch, optimizer):
         loss = logits.cross_entropy(y) / x.size(0)
         
         return loss, (model, logits)
-    (loss, (model, logits)), grad_model = slope.value_and_grad(train_loss_fn, has_aux=True)(model, batch)
-    model, optimizer = optimizer(model, grad_model)
-    return loss, logits, model, optimizer, grad_model
+    (loss, (model, logits)), gmodel = slope.value_and_grad(train_loss_fn, has_aux=True)(model, batch)
+    model, optimizer = optimizer(model, gmodel)
+    return loss, logits, model, optimizer, gmodel
 
 @slope.jit
 def test_step(model, batch):
@@ -68,7 +68,7 @@ if __name__ == "__main__":
         print(f"{model.bn1.running_var=}\n")
         
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()),total=ntrain_batches, leave=False)):
-            loss, logits, model, optimizer, grad_model = train_step(model, batch, optimizer)
+            loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             loss_numpy =  float(loss.numpy())
             total_loss += loss_numpy
             y_hat, y =  np.argmax(logits.numpy(),-1), batch[1].numpy()

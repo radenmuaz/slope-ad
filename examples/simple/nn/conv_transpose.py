@@ -14,5 +14,5 @@ def f(x, w):
 y = f(x, w)
 y, w_dot = slope.jvp(f, (x, w), (x_dot, w_dot))
 print(f"{y.shape=}, {w.shape=}")
-y, (grad_L_x, grad_L_w) = slope.value_and_grad(lambda *args: f(*args).sum())(x, w)
-print(f"{y.shape=},  {grad_L_x.shape=}, {grad_L_w.shape=}")
+y, (gL_x, gL_w) = slope.value_and_grad(lambda *args: f(*args).sum())(x, w)
+print(f"{y.shape=},  {gL_x.shape=}, {gL_w.shape=}")

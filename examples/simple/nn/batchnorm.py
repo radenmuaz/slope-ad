@@ -34,12 +34,12 @@ def loss_fn(model, batch):
     # return loss
     return loss, model
 
-value_and_grad_loss_fn = slope.value_and_grad(loss_fn, has_aux=True)
+value_and_gloss_fn = slope.value_and_grad(loss_fn, has_aux=True)
 
 @slope.jit
 def train_step(model, batch, optimizer):
-    ((loss, model), grad_loss_model) = value_and_grad_loss_fn(model, batch)
-    model, optimizer = optimizer(model, grad_loss_model)
+    ((loss, model), gloss_model) = value_and_gloss_fn(model, batch)
+    model, optimizer = optimizer(model, gloss_model)
     return loss, model, optimizer
 
 x = slope.ones((1, 3, 16, 16))

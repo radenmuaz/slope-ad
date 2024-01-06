@@ -55,8 +55,8 @@ class Cast(UnaryOperator):
         return [x.cast(dtype)], [x_dot.cast(dtype)]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [grad_L_y.cast(x.dtype)]
+        (gL_y,) = cotangents
+        return [gL_y.cast(x.dtype)]
 
 
 @operator_set.register("sqrt")
@@ -67,8 +67,8 @@ class Sqrt(UnaryOperator):
         return [y], [x_dot / (y * 2)]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [grad_L_y / (x.sqrt() * 2)]
+        (gL_y,) = cotangents
+        return [gL_y / (x.sqrt() * 2)]
 
 
 @operator_set.register("sin")
@@ -78,8 +78,8 @@ class Sin(UnaryOperator):
         return [x.sin()], [(x_dot * ((math.pi / 2) - x).sin())]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [(grad_L_y * ((math.pi / 2) - x).sin())]
+        (gL_y,) = cotangents
+        return [(gL_y * ((math.pi / 2) - x).sin())]
 
 
 @operator_set.register("exp")
@@ -90,8 +90,8 @@ class Exp(UnaryOperator):
         return [y], [x_dot * y]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [1 / grad_L_y]
+        (gL_y,) = cotangents
+        return [1 / gL_y]
 
 
 @operator_set.register("log")
@@ -101,8 +101,8 @@ class Log(UnaryOperator):
         return [x.log()], [x_dot / x]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [1 / grad_L_y]
+        (gL_y,) = cotangents
+        return [1 / gL_y]
 
 
 @operator_set.register("invert")
@@ -115,8 +115,8 @@ class Invert(UnaryOperator):
         return [~x], [~x_dot]
 
     def T(self, cotangents, x):
-        (grad_L_y,) = cotangents
-        return [~grad_L_y]
+        (gL_y,) = cotangents
+        return [~gL_y]
 
 
 # -----------------------
@@ -131,8 +131,8 @@ class Add(BinaryOperator):
         return [x + w], [x_dot + w_dot]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
-        return [grad_L_y, grad_L_y]
+        (gL_y,) = cotangents
+        return [gL_y, gL_y]
 
 
 @operator_set.register("sub")
@@ -142,8 +142,8 @@ class Sub(BinaryOperator):
         return [x - w], [x_dot - w_dot]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
-        return [grad_L_y, -grad_L_y]
+        (gL_y,) = cotangents
+        return [gL_y, -gL_y]
 
 
 @operator_set.register("mul")
@@ -153,12 +153,12 @@ class Mul(BinaryOperator):
         return [x * w], [(x_dot * w) + (w_dot * x)]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
+        (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [grad_L_y * w, None]
+            return [gL_y * w, None]
         elif type(w) is UndefPrimal:
-            return [None, x * grad_L_y]
+            return [None, x * gL_y]
 
 
 @operator_set.register("div")
@@ -168,8 +168,8 @@ class Div(BinaryOperator):
         return [x / w], [(x_dot / w) + (-w_dot * x * 1 / (w * w))]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
-        return [grad_L_y / w, None]
+        (gL_y,) = cotangents
+        return [gL_y / w, None]
 
 
 @operator_set.register("pow")
@@ -182,12 +182,12 @@ class Pow(BinaryOperator):
         return [y], [y_dot1 + y_dot2]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
+        (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [(grad_L_y * (w * (x ** (w - slope.ones_like(w))))), None]
+            return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), None]
         elif type(w) is UndefPrimal:
-            return [None, grad_L_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
+            return [None, gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
 
 
 @operator_set.register("maximum")
@@ -204,8 +204,8 @@ class Maximuum(BinaryOperator):
         return [y], [y_dot]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
-        return [grad_L_y, None]
+        (gL_y,) = cotangents
+        return [gL_y, None]
 
 
 @operator_set.register("equal")
@@ -247,9 +247,9 @@ class Equal(BinaryOperator):
         return [out_primal], [slope.full(out_primal.shape, True, Tensor.bool)]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
-        grad_L_y = grad_L_y.cast(x.dtype)
-        return [grad_L_y, None]
+        (gL_y,) = cotangents
+        gL_y = gL_y.cast(x.dtype)
+        return [gL_y, None]
 
 
 @operator_set.register("max")
@@ -272,13 +272,13 @@ class Max(ReduceOperator):
 
     def T(self, cotangents, x, *, dim, keepdim):
         # TODO: this is sum gradient, define max gradient
-        (grad_L_y,) = cotangents
-        grad_L_x = grad_L_y
+        (gL_y,) = cotangents
+        gL_x = gL_y
         if not keepdim:
-            dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+            dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
-                grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.symval.shape)
+                gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
+        gL_x = gL_x.expand(x.symval.shape)
 
 
 @operator_set.register("sum")
@@ -290,15 +290,15 @@ class Sum(ReduceOperator):
         return [y], [y_dot]
 
     def T(self, cotangents, x, *, dim, keepdim):
-        (grad_L_y,) = cotangents
-        grad_L_x = grad_L_y
+        (gL_y,) = cotangents
+        gL_x = gL_y
         if not keepdim:
-            dim = [a if a >= 0 else len(grad_L_x.shape) + a + 1 for a in dim]
+            dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
-                grad_L_x = grad_L_x.reshape(grad_L_x.shape[:a] + (1,) + grad_L_x.shape[a:])
-        grad_L_x = grad_L_x.expand(x.symval.shape)
+                gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
+        gL_x = gL_x.expand(x.symval.shape)
 
-        return [grad_L_x]
+        return [gL_x]
 
 
 # -----------------------
@@ -339,20 +339,20 @@ class Expand(ShapeOperator):
         )
 
     def T(self, cotangents, x, *, shape):
-        (grad_L_y,) = cotangents
-        grad_L_x = grad_L_y
-        if x.symval.shape == grad_L_x.shape:
-            return [grad_L_x]
+        (gL_y,) = cotangents
+        gL_x = gL_y
+        if x.symval.shape == gL_x.shape:
+            return [gL_x]
         else:
             b_dim = []
-            assert len(x.symval.shape) == len(grad_L_x.shape)
-            for i, (xd, od) in enumerate(zip(x.symval.shape, grad_L_x.shape)):
+            assert len(x.symval.shape) == len(gL_x.shape)
+            for i, (xd, od) in enumerate(zip(x.symval.shape, gL_x.shape)):
                 if xd != od:
                     b_dim += [i]
-            grad_L_x = grad_L_x.sum(dim=tuple(b_dim), keepdim=True)
-        if grad_L_x.shape != x.symval.shape:
-            raise ValueError(f"not same {grad_L_x.shape=}, {x.symval.shape=}")
-        return [grad_L_x]
+            gL_x = gL_x.sum(dim=tuple(b_dim), keepdim=True)
+        if gL_x.shape != x.symval.shape:
+            raise ValueError(f"not same {gL_x.shape=}, {x.symval.shape=}")
+        return [gL_x]
 
 
 @operator_set.register("reshape", nary_inputs=True, aliases=["view"])
@@ -731,8 +731,8 @@ class Matmul(BinaryReduceOperator):
                 assert x.shape[-1] == w.shape[-2], f"{shapes_str}"
                 assert len(x.shape) == len(
                     w.shape
-                ), f"Different ndim broadcasting not supported, {x.shape=}, {w.shape=}"
-                assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {x.shape=}, {w.shape=}"
+                ), f"Different ndim broadcasting not supported, {shapes_str}"
+                assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {shapes_str}"
                 shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
                 # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
@@ -748,12 +748,12 @@ class Matmul(BinaryReduceOperator):
         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
 
     def T(self, cotangents, x, w):
-        (grad_L_y,) = cotangents
+        (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [grad_L_y @ w.transpose(-1, -2), None]
+            return [gL_y @ w.transpose(-1, -2), None]
         elif type(w) is UndefPrimal:
-            return [None, x.transpose(-1, -2) @ grad_L_y]
+            return [None, x.transpose(-1, -2) @ gL_y]
 
 
 @operator_set.register("conv")
@@ -819,9 +819,9 @@ class Conv(BinaryReduceOperator):
     # assert torch.allclose(w_grad, w.grad)
 
     def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
-        (grad_L_y,) = cotangents
+        (gL_y,) = cotangents
         if type(x) is UndefPrimal:
-            grad_L_x = grad_L_y.conv_transpose(
+            gL_x = gL_y.conv_transpose(
                 w,
                 groups=groups,
                 stride=stride,
@@ -829,17 +829,17 @@ class Conv(BinaryReduceOperator):
                 padding=padding,
                 output_padding=stride[0] - dilation[0],
             )
-            assert grad_L_x.shape == x.shape
-            return [grad_L_x, None]
+            assert gL_x.shape == x.shape
+            return [gL_x, None]
         elif type(w) is UndefPrimal:
-            grad_L_w = (
+            gL_w = (
                 x.transpose(0, 1)
-                .conv(grad_L_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
+                .conv(gL_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
                 .transpose(0, 1)
             )
-            if grad_L_w.shape != w.shape:
-                starts = (0,) * len(grad_L_w.shape)
-                ends = (grad_L_w.shape[0], grad_L_w.shape[1]) + w.shape[2:]
-                grad_L_w = grad_L_w.slice(starts, ends)
-            assert grad_L_w.shape == w.shape
-            return [None, grad_L_w]
+            if gL_w.shape != w.shape:
+                starts = (0,) * len(gL_w.shape)
+                ends = (gL_w.shape[0], gL_w.shape[1]) + w.shape[2:]
+                gL_w = gL_w.slice(starts, ends)
+            assert gL_w.shape == w.shape
+            return [None, gL_w]

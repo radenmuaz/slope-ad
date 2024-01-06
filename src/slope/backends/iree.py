@@ -369,69 +369,23 @@ def maximum_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    if x["type"].ndim <= 2 and w["type"].ndim <= 2:
-        return (
-            f'{y["name"]} = "stablehlo.dot"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-        )
-    else:
-        x_name, x_type = x["name"], x["type"]
-        w_name, w_type = w["name"], w["type"]
-        y_name, y_type = y["name"], y["type"]
-        x_bdims = list(range(x_type.ndim - (2 if x_type.ndim > 2 else 1)))
-        w_bdims = list(range(w_type.ndim - 2))
-        if x_type.ndim == 1:
-            x_name_ = f"{x_name}_"
-            x_type_ = VoidTensor(((1,) * len(w_type.shape[:-2])) + x_type.shape, x_type.dtype)
-            x_name__ = f"{x_name}__"
-            x_type__ = VoidTensor((*w_type.shape[:-2], *x_type.shape), x_type.dtype)
-            bdims = list(range(w_type.ndim - 2))
-            return f"""{x_name_} = "stablehlo.reshape"({x_name}) {as_mlir_sig((x_type,), x_type_)}
-{x_name__} = "stablehlo.broadcast_in_dim"({x_name_}) {{
-    broadcast_dimensions = dense<{list(range(w_type.ndim-1))}>: tensor<{w_type.ndim-1}xi64> 
-    }} {as_mlir_sig(( x_type_,), x_type__)}
-{y_name} = "stablehlo.dot_general"({x_name__}, {w_name}) {{
-  dot_dimension_numbers = #stablehlo.dot<
-    lhs_batching_dimensions = {bdims},
-    rhs_batching_dimensions = {bdims},
-    lhs_contracting_dimensions = [{x_type__.ndim-1}],
-    rhs_contracting_dimensions = [{w_type.ndim-2}]
-  >,
-  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-    }}  {as_mlir_sig((x_type__, w_type), y_type)}
-    """
-        elif w_type.ndim == 1:
-            w_name_ = f"{w_name}_"
-            w_type_ = VoidTensor(((1,) * (len(x_type.shape[:-1]))) + w_type.shape, w_type.dtype)
-            w_name__ = f"{w_name}__"
-            w_type__ = VoidTensor((*x_type.shape[:-1], *w_type.shape), w_type.dtype)
-            bdims = list(range(x_type.ndim - 1))
-            return f"""{w_name_} = "stablehlo.reshape"({w_name}) {as_mlir_sig((w_type,), w_type_)}
-{w_name__} = "stablehlo.broadcast_in_dim"({w_name_}) {{
-    broadcast_dimensions = dense<{list(range(x_type.ndim))}>: tensor<{x_type.ndim}xi64> 
-    }} {as_mlir_sig(( w_type_,), w_type__)}
-{y_name} = "stablehlo.dot_general"({x_name}, {w_name__}) {{
-  dot_dimension_numbers = #stablehlo.dot<
-    lhs_batching_dimensions = {bdims},
-    rhs_batching_dimensions = {bdims},
-    lhs_contracting_dimensions = [{x_type.ndim-1}],
-    rhs_contracting_dimensions = [{w_type__.ndim-1}]
-  >,
-  precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-    }}  {as_mlir_sig((x_type, w_type__), y_type)}
-    """
-        else:
-            x_bdims, w_bdims = list(range(x_type.ndim - 2)), list(range(w_type.ndim - 2))
-            return f"""{y_name} = "stablehlo.dot_general"({x_name}, {w_name}) {{
+    x_name, x_type = x["name"], x["type"]
+    w_name, w_type = w["name"], w["type"]
+    y_name, y_type = y["name"], y["type"]
+    x_bdims = [] if (w_type.ndim <= 2 or x_type.ndim == 1) else list(range(x_type.ndim - (2 if x_type.ndim > 2 else 1)))
+    w_bdims = [] if (w_type.ndim == 1 or x_type.ndim <= 2) else list(range(w_type.ndim - 2))
+    x_cdim = 0 if x_type.ndim == 1 else x_type.ndim-1
+    w_cdim = 0 if w_type.ndim == 1 else w_type.ndim-2
+    return f"""{y_name} = "stablehlo.dot_general"({x_name}, {w_name}) {{
   dot_dimension_numbers = #stablehlo.dot<
     lhs_batching_dimensions = {x_bdims},
     rhs_batching_dimensions = {w_bdims},
-    lhs_contracting_dimensions = [{x_type.ndim-1}],
-    rhs_contracting_dimensions = [{w_type.ndim-2}]
+    lhs_contracting_dimensions = [{x_cdim}],
+    rhs_contracting_dimensions = [{w_cdim}]
   >,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
     }}  {as_mlir_sig((x_type, w_type), y_type)}
 """
-
 
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):

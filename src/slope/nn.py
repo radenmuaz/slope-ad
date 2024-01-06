@@ -251,7 +251,7 @@ def compute_fans(shape: Sequence, in_dim=-2, out_dim=-1, batch_dim=()):
     return fan_in, fan_out
 
 
-def normal(dtype=slope.float32) -> Callable:
+def normal(dtype=slope.core.backend.DEFAULT_DTYPE) -> Callable:
     def init(shape, dtype=dtype):
         return slope.randn(shape)
 
@@ -265,7 +265,7 @@ def variance_scaling(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.float32,
+    dtype=slope.core.backend.DEFAULT_DTYPE,
 ) -> Callable:
     def init(shape, dtype=dtype):
         fan_in, fan_out = compute_fans(shape, in_dim, out_dim, batch_dim)
@@ -293,7 +293,7 @@ def glorot_normal(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.float32,
+    dtype=slope.core.backend.DEFAULT_DTYPE,
 ) -> Callable:
     return variance_scaling(
         1.0,
@@ -310,7 +310,7 @@ def glorot_uniform(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.float32,
+    dtype=slope.core.backend.DEFAULT_DTYPE,
 ) -> Callable:
     return variance_scaling(
         1.0,
@@ -556,7 +556,7 @@ class BatchNorm(Module):
             invstd = (var + self.eps).rsqrt()
             if track_running_stats:
                 z_numel = math.prod(z.shape)
-                z_ratio = z_numel / (z_numel - z.shape[1])
+                z_ratio = z_numel / (z_numel - z.shape[1]) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
                 self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1

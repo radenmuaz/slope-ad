@@ -5,6 +5,7 @@ import importlib
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
 core.set_backend(importlib.import_module(f"slope.backends.{SLOPE_BACKEND}").backend)
 
+from slope import nn
 
 def __getattr__(attr):
     if attr in (globals_dict := globals()):

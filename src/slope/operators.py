@@ -714,7 +714,7 @@ class Matmul(BinaryReduceOperator):
         elif x.ndim == w.ndim == 2:  # mat@mat
             assert x.shape[1] == w.shape[0], f"{shapes_str}"
             shape = (x.shape[0], w.shape[1])
-        elif x.ndim == 1 and w.ndim == 1:  # vec@mat
+        elif x.ndim == 1 and w.ndim == 2:  # vec@mat
             assert x.shape[0] == w.shape[0], f"{shapes_str}"
             shape = (w.shape[1],)
         elif x.ndim == 2 and w.ndim == 1:  # mat@vec

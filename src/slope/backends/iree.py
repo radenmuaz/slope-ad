@@ -31,17 +31,17 @@ slice_py = slice
 compile_py = compile
 
 
-def as_mlir_shape(symval):
-    xdtype = symval.dtype.mlir
-    if len(symval.shape) > 0:
-        xshape = f"{'x'.join((repr(i) for i in symval.shape))}"
+def as_mlir_shape(voidval):
+    xdtype = voidval.dtype.mlir
+    if len(voidval.shape) > 0:
+        xshape = f"{'x'.join((repr(i) for i in voidval.shape))}"
         return f"tensor<{xshape}x{xdtype}>"
     else:
         return f"tensor<{xdtype}>"
 
 
-def as_mlir_sig(in_symvals, out_symval):
-    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
+def as_mlir_sig(in_voidvals, out_voidval):
+    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_voidvals)}) -> {as_mlir_shape(out_voidval)}"
     return typing_code
 
 
@@ -173,9 +173,9 @@ class IREEBackend(Backend):
         body_code_lines = []
 
         for inb in program.in_binders:
-            prefix = "%x" if type(inb.symval) is VoidTensor else "%c"
+            prefix = "%x" if type(inb.voidval) is VoidTensor else "%c"
             idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-            env[inb] = dict(name=f"{prefix}{idx}", type=inb.symval)
+            env[inb] = dict(name=f"{prefix}{idx}", type=inb.voidval)
 
         for instruction in program.instructions:
             if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -184,7 +184,7 @@ class IREEBackend(Backend):
             for outb in instruction.out_binders:
                 prefix = "%y" if outb in program.outs else "%z"
                 idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-                env[outb] = dict(name=f"{prefix}{idx}", type=outb.symval)
+                env[outb] = dict(name=f"{prefix}{idx}", type=outb.voidval)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
@@ -197,15 +197,15 @@ class IREEBackend(Backend):
                     op = instruction.op
                     op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
                     op_procedure = getattr(self.procedure_set, op_name)
-                    symvals_in = tuple(inp.symval for inp in instruction.inputs)
+                    voidvals_in = tuple(inp.voidval for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
                         op_procedure,
-                        *symvals_in,
+                        *voidvals_in,
                         static_args=tuple(params.items()),
                         name=op.name,
                     )
-                    name = op.get_jit_name(tuple(symvals_in), params)
+                    name = op.get_jit_name(tuple(voidvals_in), params)
                     if name not in fn_defs.keys():
                         op_codegen_out = self.codegen(
                             op_program,
@@ -374,8 +374,8 @@ def matmul_impl(self, x, w, y):
     y_name, y_type = y["name"], y["type"]
     x_bdims = [] if (w_type.ndim <= 2 or x_type.ndim == 1) else list(range(x_type.ndim - (2 if x_type.ndim > 2 else 1)))
     w_bdims = [] if (w_type.ndim == 1 or x_type.ndim <= 2) else list(range(w_type.ndim - 2))
-    x_cdim = 0 if x_type.ndim == 1 else x_type.ndim-1
-    w_cdim = 0 if w_type.ndim == 1 else w_type.ndim-2
+    x_cdim = 0 if x_type.ndim == 1 else x_type.ndim - 1
+    w_cdim = 0 if w_type.ndim == 1 else w_type.ndim - 2
     return f"""{y_name} = "stablehlo.dot_general"({x_name}, {w_name}) {{
   dot_dimension_numbers = #stablehlo.dot<
     lhs_batching_dimensions = {x_bdims},
@@ -386,6 +386,7 @@ def matmul_impl(self, x, w, y):
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
     }}  {as_mlir_sig((x_type, w_type), y_type)}
 """
+
 
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):

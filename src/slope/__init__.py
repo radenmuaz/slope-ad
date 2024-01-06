@@ -7,6 +7,7 @@ core.set_backend(importlib.import_module(f"slope.backends.{SLOPE_BACKEND}").back
 
 from slope import nn
 
+
 def __getattr__(attr):
     if attr in (globals_dict := globals()):
         core.dblog(f"Looking slope.{attr} in globals()", enable=core.backend.LOG_BACKEND)

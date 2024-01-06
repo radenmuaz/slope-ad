@@ -440,10 +440,10 @@ class Operator:
 
     def partial_run(self, trace, tracers, **params):
         tracers_in = [trace.instantiate_const(t) for t in tracers]
-        symvals_in = [t.symval for t in tracers_in]
-        symvals_out = self.typecheck(*symvals_in, **params)
-        tracers_out = [PartialRunTraceTensor(trace, make_unknown_pval(symval), None) for symval in symvals_out]
-        instruction = InstructionDraft(self, tracers_in, params, symvals_out, list_map(weakref.ref, tracers_out))
+        voidvals_in = [t.voidval for t in tracers_in]
+        voidvals_out = self.typecheck(*voidvals_in, **params)
+        tracers_out = [PartialRunTraceTensor(trace, make_unknown_pval(voidval), None) for voidval in voidvals_out]
+        instruction = InstructionDraft(self, tracers_in, params, voidvals_out, list_map(weakref.ref, tracers_out))
         for t in tracers_out:
             t.draft = instruction
         return tracers_out
@@ -673,8 +673,8 @@ class Backend:
         )
         self.register_node(
             UndefPrimal,
-            lambda u: (u.symval, ()),
-            lambda symval, _: UndefPrimal(symval),
+            lambda u: (u.voidval, ()),
+            lambda voidval, _: UndefPrimal(voidval),
             "UndefPrimal",
         )
 
@@ -750,17 +750,17 @@ class Backend:
         program: Program = hashed_program.val
         typecheck_program(program)
         consts = [x.val for x in hashed_consts]
-        in_symvals = [v.symval for v in program.in_binders[len(consts) :]]
-        codegen_out = self.codegen(program, consts + in_symvals, fn_name="main")
+        in_voidvals = [v.voidval for v in program.in_binders[len(consts) :]]
+        codegen_out = self.codegen(program, consts + in_voidvals, fn_name="main")
         fn, code = self.compile(codegen_out)
         compiled = JitObject(program, codegen_out, fn, code)
         return compiled
 
-    def codegen(self, program: "Program", args: Tuple, in_symvals: Tuple, name: str):
+    def codegen(self, program: "Program", args: Tuple, in_voidvals: Tuple, name: str):
         "Returns compiler IR from the Program"
         raise NotImplementedError
 
-    def compile(self, program: "Program", args: Tuple, in_symvals: Tuple, name: str):
+    def compile(self, program: "Program", args: Tuple, in_voidvals: Tuple, name: str):
         "Compiles compiler IR to a Python callable function"
         raise NotImplementedError
 
@@ -822,14 +822,14 @@ class Backend:
 
 
 class Var:
-    def __init__(self, symval):
-        self.symval = symval
+    def __init__(self, voidval):
+        self.voidval = voidval
         self.val = None
 
 
 class Lit:
     def __init__(self, val):
-        self.symval = VoidTensor.like(get_symval(val))
+        self.voidval = VoidTensor.like(get_voidval(val))
         self.val = val
 
 
@@ -845,7 +845,7 @@ class Instruction(NamedTuple):
 
 class ProgramEnvVar(NamedTuple):
     name: str
-    symval: VoidTensor
+    voidval: VoidTensor
 
 
 class Program:
@@ -869,29 +869,29 @@ class Program:
 
         self.env: Dict[ProgramEnvVar, Any] = dict()
         for inb in self.in_binders:
-            prefix = "x" if type(inb.symval) is VoidTensor else "c"
+            prefix = "x" if type(inb.voidval) is VoidTensor else "c"
             idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
-            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.symval)
+            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.voidval)
         for instruction in self.instructions:
             if len(instruction.out_binders) == 0:
                 continue
             for outb in instruction.out_binders:
                 prefix = "y" if outb in self.outs else "z"
                 idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
-                self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.symval)
+                self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.voidval)
 
-    def as_mlir_shape(self, symval, scalar_as_empty_array=False):
-        xdtype = symval.dtype.mlir
-        if len(symval.shape) > 0:
-            xshape = f"{'x'.join((repr(i) for i in symval.shape))}"
+    def as_mlir_shape(self, voidval, scalar_as_empty_array=False):
+        xdtype = voidval.dtype.mlir
+        if len(voidval.shape) > 0:
+            xshape = f"{'x'.join((repr(i) for i in voidval.shape))}"
             return f"tensor<{xshape}x{xdtype}>"
         else:
             return f"tensor<{'0x'if scalar_as_empty_array else ''}{xdtype}>"
 
-    def as_mlir_sig(self, in_symvals, out_symvals, unpack_unary_output=False):
-        in_code = ", ".join(self.as_mlir_shape(t) for t in in_symvals)
-        out_code = ", ".join(self.as_mlir_shape(t) for t in out_symvals)
-        out_code = f"({out_code})" if len(out_symvals) > 1 or unpack_unary_output else out_code
+    def as_mlir_sig(self, in_voidvals, out_voidvals, unpack_unary_output=False):
+        in_code = ", ".join(self.as_mlir_shape(t) for t in in_voidvals)
+        out_code = ", ".join(self.as_mlir_shape(t) for t in out_voidvals)
+        out_code = f"({out_code})" if len(out_voidvals) > 1 or unpack_unary_output else out_code
         typing_code = f" : ({in_code}) -> {out_code}"
         return typing_code
 
@@ -927,16 +927,16 @@ class Program:
                 in_vals = ", ".join(f"%{program.env[x].name}" for x in instruction.inputs)
                 out_vals = ", ".join(f"%{program.env[z].name}" for z in instruction.out_binders)
                 sig = self.as_mlir_sig(
-                    [program.env[x].symval for x in instruction.inputs],
-                    [program.env[y].symval for y in instruction.out_binders],
+                    [program.env[x].voidval for x in instruction.inputs],
+                    [program.env[y].voidval for y in instruction.out_binders],
                 )
                 line = f'{out_vals} = "slope.{instruction.op.name}"({in_vals}) {{{param_vals}) }} {sig}'
                 body_code_lines += [self.indent(line)]
 
-            fn_args_str = ", ".join([f"{i.name}: {program.as_mlir_shape(i.symval)}" for i in in_binders_vars])
+            fn_args_str = ", ".join([f"{i.name}: {program.as_mlir_shape(i.voidval)}" for i in in_binders_vars])
             outs = list_map(lambda x: program.env[x], program.outs)
             out_str = ", ".join([f"%{o.name}" for o in outs])
-            out_type_str = ", ".join([f"{program.as_mlir_shape(o.symval)}" for o in outs])
+            out_type_str = ", ".join([f"{program.as_mlir_shape(o.voidval)}" for o in outs])
             out_type_str = f"({out_type_str})" if len(outs) > 1 else out_type_str
             head_code_line = [f"func.func @{program.name} ({fn_args_str}) -> {out_type_str}"]
             tail_code_line = [self.indent(f"func.return({out_str}): ({out_type_str}) -> ()")]
@@ -958,8 +958,8 @@ class ProgramType(NamedTuple):
     out_types: Tuple[VoidTensor]
 
     def __repr__(self):
-        in_types = ", ".join(symval.str_short() for symval in self.in_types)
-        out_types = ", ".join(symval.str_short() for symval in self.out_types)
+        in_types = ", ".join(voidval.str_short() for voidval in self.in_types)
+        out_types = ", ".join(voidval.str_short() for voidval in self.out_types)
         return f"({in_types}) -> ({out_types})"
 
 
@@ -1143,12 +1143,12 @@ class JitOp(MetaOperator):
         outs1_res = bind(backend.jit_op, *known_vals, program=program1)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-        outs2 = [PartialRunTraceTensor(trace, make_unknown_pval(v.symval), None) for v in program2.outs]
+        outs2 = [PartialRunTraceTensor(trace, make_unknown_pval(v.voidval), None) for v in program2.outs]
         instruction = InstructionDraft(
             self,
             res_tracers + unknown_tracers,
             dict(program=program2),
-            [v.symval for v in program2.outs],
+            [v.voidval for v in program2.outs],
             list_map(weakref.ref, outs2),
         )
         for t in outs2:
@@ -1161,7 +1161,7 @@ class JitOp(MetaOperator):
         program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
         ins1, ins2 = partition_list(unks_in, instruction.inputs)
         out_binders1, out_binders2 = partition_list(out_unknowns, instruction.out_binders)
-        res = [Var(v.symval) for v in program2.in_binders[:num_res]]
+        res = [Var(v.voidval) for v in program2.in_binders[:num_res]]
         instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
         instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
         return instruction1, instruction2, out_unknowns, res
@@ -1207,7 +1207,7 @@ class RunTrace(Trace):
 
     @staticmethod
     @lru_cache_verbose()
-    def get_fn(op, *symval_args, **params):
+    def get_fn(op, *voidval_args, **params):
         def fn(*args, **params):
             return [op(*args, **params)]
 
@@ -1225,9 +1225,9 @@ class TraceTensor(Tensor):
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
-    symval = property(lambda self: get_symval(self.val))
-    dtype = property(lambda self: self.symval.dtype)
-    shape = property(lambda self: self.symval.shape)
+    voidval = property(lambda self: get_voidval(self.val))
+    dtype = property(lambda self: self.voidval.dtype)
+    shape = property(lambda self: self.voidval.shape)
 
     @property
     def val(self):
@@ -1244,7 +1244,7 @@ class TraceTensor(Tensor):
         return len(self.shape)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({repr(self.symval)})"
+        return f"{self.__class__.__name__}({repr(self.voidval)})"
 
 
 class VMapTraceTensor(TraceTensor):
@@ -1258,14 +1258,14 @@ class VMapTraceTensor(TraceTensor):
         return self._val
 
     @property
-    def symval(self):
-        symval = get_symval(self.val)
+    def voidval(self):
+        voidval = get_voidval(self.val)
         if self.vmap_dim is None:
-            return symval
+            return voidval
         else:
-            shape = list(symval.shape)
+            shape = list(voidval.shape)
             del shape[self.vmap_dim]
-            return VoidTensor(tuple(shape), symval.dtype)
+            return VoidTensor(tuple(shape), voidval.dtype)
 
     def full_lower(self):
         if self.vmap_dim is None:
@@ -1310,8 +1310,8 @@ class JVPTraceTensor(TraceTensor):
         self.tangent = tangent
 
     @property
-    def symval(self):
-        return get_symval(self.primal)
+    def voidval(self):
+        return get_voidval(self.primal)
 
     @property
     def val(self):
@@ -1335,12 +1335,12 @@ class JVPTrace(Trace):
 
 
 class ProgramTraceTensor(TraceTensor):
-    __slots__ = ["symval"]
-    symval: VoidTensor
+    __slots__ = ["voidval"]
+    voidval: VoidTensor
 
-    def __init__(self, trace, symval):
+    def __init__(self, trace, voidval):
         self._trace = trace
-        self.symval = symval
+        self.voidval = voidval
 
 
 class ProgramTrace(Trace):
@@ -1351,10 +1351,10 @@ class ProgramTrace(Trace):
     def __init__(self, main: MainTrace) -> None:
         self.main = main
 
-    def new_arg(self, symval) -> ProgramTraceTensor:
-        symval = VoidTensor.like(symval)
-        tracer = self.builder.new_tracer(self, symval)
-        self.builder.tracer_to_var[id(tracer)] = Var(symval)
+    def new_arg(self, voidval) -> ProgramTraceTensor:
+        voidval = VoidTensor.like(voidval)
+        tracer = self.builder.new_tracer(self, voidval)
+        self.builder.tracer_to_var[id(tracer)] = Var(voidval)
 
         return tracer
 
@@ -1362,16 +1362,16 @@ class ProgramTrace(Trace):
         # get_or_make_const_tracer
         tracer = self.builder.const_tracers.get(id(val))
         if tracer is None:
-            tracer = self.builder.new_tracer(self, get_symval(val))
+            tracer = self.builder.new_tracer(self, get_voidval(val))
             self.builder.add_const(tracer, val)
         return tracer
 
     def run_op(self, op, tracers, params):
-        symvals_in = [t.symval for t in tracers]
-        symvals_in = tree_map(lambda x: x.symval, tracers)
-        symvals_out = op.typecheck(*symvals_in, **params)
+        voidvals_in = [t.voidval for t in tracers]
+        voidvals_in = tree_map(lambda x: x.voidval, tracers)
+        voidvals_out = op.typecheck(*voidvals_in, **params)
 
-        out_tracers = [self.builder.new_tracer(self, a) for a in symvals_out]
+        out_tracers = [self.builder.new_tracer(self, a) for a in voidvals_out]
         inputs = [self.builder.getvar(t) for t in tracers]
         outvars = [self.builder.add_var(t) for t in out_tracers]
 
@@ -1393,8 +1393,8 @@ class ProgramBuilder:
         self.constvals = {}
         self.tracers = []
 
-    def new_tracer(self, trace: ProgramTrace, symval: VoidTensor) -> ProgramTraceTensor:
-        tracer = ProgramTraceTensor(trace, symval)
+    def new_tracer(self, trace: ProgramTrace, voidval: VoidTensor) -> ProgramTraceTensor:
+        tracer = ProgramTraceTensor(trace, voidval)
         self.tracers.append(tracer)
         return tracer
 
@@ -1403,7 +1403,7 @@ class ProgramBuilder:
 
     def add_var(self, tracer: ProgramTraceTensor) -> Var:
         assert id(tracer) not in self.tracer_to_var
-        var = self.tracer_to_var[id(tracer)] = Var(tracer.symval)
+        var = self.tracer_to_var[id(tracer)] = Var(tracer.voidval)
         return var
 
     def getvar(self, tracer: ProgramTraceTensor) -> Var:
@@ -1429,7 +1429,7 @@ class ProgramBuilder:
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
         const_binders, other_binders = split_list(program.in_binders, len(consts))
-        scalars = [type(x) in TraceTensor.PYTHON_TYPES and not get_symval(x).shape for x in consts]
+        scalars = [type(x) in TraceTensor.PYTHON_TYPES and not get_voidval(x).shape for x in consts]
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
@@ -1470,29 +1470,29 @@ class ProgramBuilder:
 
 
 class UndefPrimal(NamedTuple):
-    symval: VoidTensor
+    voidval: VoidTensor
 
     @property
     def shape(self):
-        return self.symval.shape
+        return self.voidval.shape
 
     @property
     def dtype(self):
-        return self.symval.dtype
+        return self.voidval.dtype
 
     @property
     def ndim(self):
-        return self.symval.ndim
+        return self.voidval.ndim
 
     def __repr__(self):
-        return f"UndefPrimal: {self.symval}"
+        return f"UndefPrimal: {self.voidval}"
 
     def str_short(self):
         return f"UndefPrimal: {self.dtype}, {self.shape}"
 
 
 class PartialValue(NamedTuple):
-    symval: VoidTensor
+    voidval: VoidTensor
     const: Optional[Any]
 
     is_known = property(lambda self: self.const is not None)
@@ -1511,7 +1511,7 @@ class InstructionDraft(NamedTuple):
     prim: Operator
     tracers_in: List["PartialRunTraceTensor"]
     params: Dict[str, Any]
-    symvals_out: List[VoidTensor]
+    voidvals_out: List[VoidTensor]
     tracer_refs_out: List[weakref.ReferenceType["PartialRunTraceTensor"]]
 
 
@@ -1524,7 +1524,7 @@ class PartialRunTraceTensor(TraceTensor):
         self.pval = pval
         self.draft = draft
 
-    symval = property(lambda self: self.pval.symval)
+    voidval = property(lambda self: self.pval.voidval)
     val = property(lambda self: self.pval.const)
 
     def full_lower(self):
@@ -1544,7 +1544,7 @@ class PartialRunTrace(Trace):
         if tracer.pval.is_unknown:
             return tracer
         else:
-            pval = make_unknown_pval(VoidTensor.like(tracer.symval))
+            pval = make_unknown_pval(VoidTensor.like(tracer.voidval))
             return PartialRunTraceTensor(self, pval, ConstDraft(tracer.pval.const))
 
     def run_op(self, op, tracers, params):
@@ -1582,16 +1582,16 @@ def stack_str():
 
 
 def make_known_pval(val: Any):
-    return PartialValue(get_symval(val), val)
+    return PartialValue(get_voidval(val), val)
 
 
-def make_unknown_pval(symval: VoidTensor):
-    return PartialValue(symval, None)
+def make_unknown_pval(voidval: VoidTensor):
+    return PartialValue(voidval, None)
 
 
-def get_symval(x):
+def get_voidval(x):
     if isinstance(x, TraceTensor):
-        return x.symval
+        return x.voidval
     elif type(x) in TraceTensor.PYTHON_TYPES:
         return backend.tensor(x)
     elif isinstance(x, Tensor):
@@ -1777,14 +1777,14 @@ def typecheck_program(program: Program) -> ProgramType:
         in_types = [typecheck_atom(env, x) for x in instruction.inputs]
         out_types = instruction.op.typecheck(*in_types, **instruction.params)
         for out_binder, out_type in list_zip(instruction.out_binders, out_types):
-            if not out_type == out_binder.symval:
+            if not out_type == out_binder.voidval:
                 raise TypeError
         for out_binder in instruction.out_binders:
             if out_binder in env:
                 raise TypeError
             env.add(out_binder)
 
-    in_types = [v.symval for v in program.in_binders]
+    in_types = [v.voidval for v in program.in_binders]
     out_types = [typecheck_atom(env, x) for x in program.outs]
     return ProgramType(tuple(in_types), tuple(out_types))
 
@@ -1793,9 +1793,9 @@ def typecheck_atom(env: Set[Var], x: Atom) -> VoidTensor:
     if isinstance(x, Var):
         if x not in env:
             raise TypeError("unbound variable")
-        return x.symval
+        return x.voidval
     elif isinstance(x, Lit):
-        return get_symval(x.val)
+        return get_voidval(x.val)
     else:
         assert False
 
@@ -1897,14 +1897,14 @@ def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args)
 
 
 @lru_cache_verbose()
-def make_program(f: Callable, *symvals_in: VoidTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:
-    symvals_in, in_tree = tree_flatten(symvals_in)
+def make_program(f: Callable, *voidvals_in: VoidTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:
+    voidvals_in, in_tree = tree_flatten(voidvals_in)
     f, out_tree_store = flatten_fn(f, in_tree)
     builder = ProgramBuilder()
     with new_main(ProgramTrace, builder) as main:
         with new_dynamic(main):
             trace = ProgramTrace(main)
-            tracers_in = [trace.new_arg(symval) for symval in symvals_in]
+            tracers_in = [trace.new_arg(voidval) for voidval in voidvals_in]
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             # tracers_out = [full_raise(trace, out) for out in outs]
             # raise check because of aux is not ProgramTraceTensor
@@ -1916,18 +1916,18 @@ def make_program(f: Callable, *symvals_in: VoidTensor, static_args, name) -> Tup
 
 @lru_cache_verbose()
 def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any]]:
-    def unmapped_symval(axis_size: int, batch_dim, symval: VoidTensor) -> VoidTensor:
+    def unmapped_voidval(axis_size: int, batch_dim, voidval: VoidTensor) -> VoidTensor:
         if batch_dim is None:
-            return symval
+            return voidval
         else:
-            shape = list(symval.shape)
+            shape = list(voidval.shape)
             shape.insert(batch_dim, axis_size)
-            return VoidTensor(tuple(shape), symval.dtype)
+            return VoidTensor(tuple(shape), voidval.dtype)
 
     vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
-    in_symvals = [unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)]
+    in_voidvals = [unmapped_voidval(dim_size, d, v.voidval) for v, d in zip(program.in_binders, dims_in)]
     program, consts, _ = make_program(
-        vmap_traceable, *in_symvals, static_args=program.static_args, name=f"vmap_{program.name}"
+        vmap_traceable, *in_voidvals, static_args=program.static_args, name=f"vmap_{program.name}"
     )
     return program, consts
 
@@ -1939,11 +1939,11 @@ def jvp_program(program: Program) -> Tuple[Program, List[Any]]:
         primals, tangents = primals_and_tangents[:n], primals_and_tangents[n:]
         return jvp(program_as_fun(program), primals, tangents)
 
-    in_symvals = tree_map(lambda v: v.symval, program.in_binders)
+    in_voidvals = tree_map(lambda v: v.voidval, program.in_binders)
     new_program, new_consts, _ = make_program(
         jvp_traceable,
-        *in_symvals,
-        *in_symvals,
+        *in_voidvals,
+        *in_voidvals,
         static_args=program.static_args,
         name=f"{program.name}_jvp",
     )
@@ -2069,7 +2069,7 @@ def typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, 
 
 def linearize_flat(f, *primals_in, has_aux):
     pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(VoidTensor.like(get_symval(x))) for x in primals_in
+        make_unknown_pval(VoidTensor.like(get_voidval(x))) for x in primals_in
     ]
 
     def f_jvp(*primals_tangents_in):
@@ -2123,13 +2123,13 @@ def tracers_to_program(
 
     def draft_to_instruction(tracer_to_var: Dict[int, Var], draft: InstructionDraft) -> Instruction:
         inputs = [tracer_to_var[id(t)] for t in draft.tracers_in]
-        out_binders = [Var(symval) for symval in draft.symvals_out]
+        out_binders = [Var(voidval) for voidval in draft.voidvals_out]
         for t_ref, var in list_zip(draft.tracer_refs_out, out_binders):
             if t_ref() is not None:
                 tracer_to_var[id(t_ref())] = var
         return Instruction(draft.prim, inputs, draft.params, out_binders)
 
-    tracer_to_var: Dict[int, Var] = {id(t): Var(VoidTensor.like(t.symval)) for t in tracers_in}
+    tracer_to_var: Dict[int, Var] = {id(t): Var(VoidTensor.like(t.voidval)) for t in tracers_in}
     constvar_to_val: Dict[int, Any] = {}
     constid_to_var: Dict[int, Var] = {}
     processed_instructions: Set[int] = set()
@@ -2141,8 +2141,8 @@ def tracers_to_program(
             val = t.draft.val
             var = constid_to_var.get(id(val))
             if var is None:
-                symval = VoidTensor.like(get_symval(val))
-                var = constid_to_var[id(val)] = Var(symval)
+                voidval = VoidTensor.like(get_voidval(val))
+                var = constid_to_var[id(val)] = Var(voidval)
                 constvar_to_val[var] = val
             tracer_to_var[id(t)] = var
         elif isinstance(t.draft, InstructionDraft):
@@ -2205,7 +2205,7 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
 
 def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(VoidTensor.like(get_symval(x))) for x in primals_in
+        make_unknown_pval(VoidTensor.like(get_voidval(x))) for x in primals_in
     ]
     _, tangent_pvals_in = split_half(pvals_in)
 
@@ -2226,7 +2226,7 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     primal_pvals, _ = split_half(pvals_out)
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [UndefPrimal(p.symval) for p in tangent_pvals_in]
+    transpose_inputs = consts + [UndefPrimal(p.voidval) for p in tangent_pvals_in]
     f_vjp_flat = lambda *cotangents: run_program_transposed(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
@@ -2255,14 +2255,14 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
     ct_env: Dict[Var, Any] = {}
 
     def read_primal(x: Atom) -> Any:
-        return primal_env.get(x, UndefPrimal(x.symval)) if type(x) is Var else x.val
+        return primal_env.get(x, UndefPrimal(x.voidval)) if type(x) is Var else x.val
 
     def write_primal(v: Var, val: Any) -> None:
         if type(val) is not UndefPrimal:
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
+        return ct_env.pop(v, backend.zeros(v.voidval.shape, v.voidval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -2286,13 +2286,13 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
 
 @lru_cache_verbose()
 def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
-    symvals_in, symvals_out = typecheck_program(program)
+    voidvals_in, voidvals_out = typecheck_program(program)
     traceable = partial(run_program_transposed, program)
-    args = [UndefPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
+    args = [UndefPrimal(a) if u else a for a, u in zip(voidvals_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,
         tuple(args),
-        tuple(symvals_out),
+        tuple(voidvals_out),
         static_args=program.static_args,
         name=f"{program.name}_T",
     )
@@ -2336,12 +2336,12 @@ def jit_partial_run(trace, tracers, *, program):
     outs1_res = backend.jit_op(*known_vals, program=program)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [PartialRunTraceTensor(trace, PartialValue.unknown(v.symval), None) for v in program2.outs]
+    outs2 = [PartialRunTraceTensor(trace, PartialValue.unknown(v.voidval), None) for v in program2.outs]
     draft = InstructionDraft(
         backend.jit_op,
         res_tracers + unknown_tracers,
         dict(program=program2),
-        [v.symval for v in program2.outs],
+        [v.voidval for v in program2.outs],
         map(weakref.ref, outs2),
     )
     for t in outs2:
@@ -2379,11 +2379,11 @@ class jit:
 
         static_args = tuple(static_args.items())
 
-        symvals_in = tree_map(lambda x: VoidTensor.like(get_symval(x)), args)
+        voidvals_in = tree_map(lambda x: VoidTensor.like(get_voidval(x)), args)
         if self.name is None:
             # TODO: better unique jit name
-            self.name = f"jit_{str(hash((self.f, symvals_in, static_args)))[1:5]}"
-        program, consts, out_tree = make_program(self.f, *symvals_in, static_args=static_args, name=self.name)
+            self.name = f"jit_{str(hash((self.f, voidvals_in, static_args)))[1:5]}"
+        program, consts, out_tree = make_program(self.f, *voidvals_in, static_args=static_args, name=self.name)
         return program, consts, out_tree
 
     def __call__(self, *args, **static_args):

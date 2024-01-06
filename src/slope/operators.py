@@ -278,7 +278,7 @@ class Max(ReduceOperator):
             dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
-        gL_x = gL_x.expand(x.symval.shape)
+        gL_x = gL_x.expand(x.voidval.shape)
 
 
 @operator_set.register("sum")
@@ -296,7 +296,7 @@ class Sum(ReduceOperator):
             dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
-        gL_x = gL_x.expand(x.symval.shape)
+        gL_x = gL_x.expand(x.voidval.shape)
 
         return [gL_x]
 
@@ -341,17 +341,17 @@ class Expand(ShapeOperator):
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
         gL_x = gL_y
-        if x.symval.shape == gL_x.shape:
+        if x.voidval.shape == gL_x.shape:
             return [gL_x]
         else:
             b_dim = []
-            assert len(x.symval.shape) == len(gL_x.shape)
-            for i, (xd, od) in enumerate(zip(x.symval.shape, gL_x.shape)):
+            assert len(x.voidval.shape) == len(gL_x.shape)
+            for i, (xd, od) in enumerate(zip(x.voidval.shape, gL_x.shape)):
                 if xd != od:
                     b_dim += [i]
             gL_x = gL_x.sum(dim=tuple(b_dim), keepdim=True)
-        if gL_x.shape != x.symval.shape:
-            raise ValueError(f"not same {gL_x.shape=}, {x.symval.shape=}")
+        if gL_x.shape != x.voidval.shape:
+            raise ValueError(f"not same {gL_x.shape=}, {x.voidval.shape=}")
         return [gL_x]
 
 
@@ -386,7 +386,7 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (z,) = cotangents
-        return [z.reshape(x.symval.shape)]
+        return [z.reshape(x.voidval.shape)]
 
 
 @operator_set.register("permute")
@@ -506,12 +506,12 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
         (z,) = cotangents
-        x_shape = x.symval.shape
+        x_shape = x.voidval.shape
         assert isinstance(x, UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
-                tuple(np.subtract(x.symval.shape, limits)),
+                tuple(np.subtract(x.voidval.shape, limits)),
                 (0,) * len(starts),
             )
         else:
@@ -609,7 +609,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (z,) = cotangents
-        x_shapes = [o.symval.shape if type(o) is UndefPrimal else o.shape for o in xs]
+        x_shapes = [o.voidval.shape if type(o) is UndefPrimal else o.shape for o in xs]
         if type(z) is None:
             return [None if type(o) is UndefPrimal else None for o in xs]
         else:  # TODO: replace numpy with pure Python
@@ -729,9 +729,7 @@ class Matmul(BinaryReduceOperator):
                 shape = x.shape[:-1]
             else:
                 assert x.shape[-1] == w.shape[-2], f"{shapes_str}"
-                assert len(x.shape) == len(
-                    w.shape
-                ), f"Different ndim broadcasting not supported, {shapes_str}"
+                assert len(x.shape) == len(w.shape), f"Different ndim broadcasting not supported, {shapes_str}"
                 assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {shapes_str}"
                 shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
@@ -759,17 +757,14 @@ class Matmul(BinaryReduceOperator):
 @operator_set.register("conv")
 class Conv(BinaryReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-        def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
-            return (x,) * cnt if isinstance(x, int) else x
-
-        (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-        assert groups * cin == cin_ and len(x.shape) == len(
+        (bsz, cin_x), (cout, cin_w), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+        assert groups * cin_x == cin_w and len(x.shape) == len(
             w.shape
-        ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
+        ), f"{x.shape} != {w.shape} where ({groups*cin_w=}{cin_w=})"
         if isinstance(padding, (tuple, list)):
             assert len(padding) == 2 * len(HW) or len(padding) == len(
                 HW
-            ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+            ), f"{2*len(HW)=} or {len(HW)=}, but {len(padding)=} for {x.shape=}"
         padding = (
             [padding] * 2 * len(HW)
             if isinstance(padding, int)
@@ -777,12 +772,12 @@ class Conv(BinaryReduceOperator):
         )
         padding = tuple(padding)
         if isinstance(stride, int):
-            stride = make_pair(stride, len(HW))
+            stride = (x,) * len(HW)
         if isinstance(dilation, int):
-            dilation = make_pair(dilation, len(HW))
+            dilation = (dilation,) * len(HW)
         assert len(HW) == len(stride) and len(HW) == len(
             dilation
-        ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+        ), f"{len(HW)=} {len(stride)=} {len(HW)=} {len(dilation)=}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
@@ -790,16 +785,11 @@ class Conv(BinaryReduceOperator):
         x_shape = x.shape
         w_shape = w.shape
         s_dims = []
-        padding_start, padding_end = padding[0::2], padding[1::2]
+        ps, pe = padding[0::2], padding[1::2]
         for i, s in enumerate(x.shape[2:]):
-            out_s = ((s + padding_start[i] + padding_end[i] - dilation[i] * (w_shape[i + 2] - 1) - 1) // stride[i]) + 1
+            out_s = ((s + ps[i] + pe[i] - dilation[i] * (w_shape[i + 2] - 1) - 1) // stride[i]) + 1
             s_dims += [out_s]
-
-        # Calculate output shape
-        out_channels = w_shape[0]
-        out_shape = (x_shape[0], out_channels, *s_dims)
-        if out_shape[-2] != out_shape[-1]:
-            breakpoint()
+        out_shape = (x_shape[0], w_shape[0] // groups, *s_dims)
 
         return [VoidTensor(out_shape, x.dtype)]
 

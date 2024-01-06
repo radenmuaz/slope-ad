@@ -8,14 +8,19 @@
 
 Slope is a small automatic differentation (AD) engine, focused on machine learning (ML).
 It is written to be educational and hackable, yet does things end-to-end, from training to deployment.
-Tensor operations are like Pytorch, but it has functional API like JAX.
-Small enough, but nowhere tiny like tinygrad.
+- Tensor API like Pytorch, 
+- Higher-order derivaives, functional API and pytrees like JAX
+- Operator decompositions and easily add new backend like tinygrad.
+
+
 # Install
 
 Clone this repo then
 ```
 pip install -e .
 ```
+
+Or you can just copy `src/slope` to your projects
 
 # Quickstart
 
@@ -27,9 +32,9 @@ Most of the things you aer familiar in Pytorch works in Slope, probably.
 
 ```python
 import slope
-x = torch.ones(2, 5)
-w = torch.arange(15).reshape(5,3)
-b = torch.tensor([1., 2., 3.], dtype=slope.float32)
+x = slope.ones(2, 5)
+w = slope.arange(15).reshape(5,3)
+b = slope.tensor([1., 2., 3.], dtype=slope.float32)
 y = x @ w
 print(y)
 ```
@@ -45,7 +50,7 @@ Actually these lines when run, are jitted as individual programs eagerly
 
 ```python
 
-x = torch.full((1,), 2.)
+x = slope.full((1,), 2.)
 x = x + 1
 ```
 
@@ -101,11 +106,11 @@ def train_step(x, w, y, lr):
     return w
 
 N = 50
-x = torch.randn(N, 2)
-y = torch.randn(N, 1)
-w = torch.randn(1, 5)
+x = slope.randn(N, 2)
+y = slope.randn(N, 1)
+w = slope.randn(1, 5)
 w0 = w
-lr = torch.tensor([0.001])
+lr = slope.tensor([0.001])
 for i in range(10):
     w = train_step(x, w, y, lr)
 

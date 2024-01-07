@@ -270,15 +270,15 @@ backend = IREEBackend(
 def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
     jit_name = f"{jit_program.name}"
-    jit_codegen_out = self.codegen(
-        jit_program,
-        args,
-        fn_name=jit_name,
-        fn_defs=fn_defs,
-    )
-    assert jit_name not in fn_defs.keys()
-    fn_defs[jit_name] = jit_codegen_out["code_lines"]
-    fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
+    if jit_name not in fn_defs.keys():
+        jit_codegen_out = self.codegen(
+            jit_program,
+            args,
+            fn_name=jit_name,
+            fn_defs=fn_defs,
+        )
+        fn_defs[jit_name] = jit_codegen_out["code_lines"]
+        fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
     args_str = ", ".join(i["name"] for i in in_vals)
     sig = as_mlir_sig(tuple(i["type"] for i in in_vals), out_vals[0]["type"])
     ret = f"{', '.join(o['name'] for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"

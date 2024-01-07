@@ -564,13 +564,11 @@ class ReduceOperator(Operator):
         dim = tuple(a if a >= 0 else a + len(x.shape) for a in dim)
         return (x,), dict(dim=dim, keepdim=keepdim)
 
-    def vmap(self, dim_size, vals_in, dims_in, **params):
+    def vmap(self, dim_size, vals_in, dims_in, *, dim, keepdim):
         (x,), (x_bdim,) = vals_in, dims_in
-        dim = list(params["dim"])
         dim = tuple(a + (x_bdim <= a) for a in dim)
         out_bdim = x_bdim - sum(a < x_bdim for a in dim)
-        params["dim"] = tuple(dim)
-        return [self.do(x, **params)], [out_bdim]
+        return [self(x, dim=dim, keepdim=keepdim)], [out_bdim]
 
     def typecheck(self, x: VoidTensor, *, dim=None, keepdim=False) -> List[VoidTensor]:
         dim = [a + len(x.shape) if a < 0 else a for a in dim]
@@ -583,7 +581,7 @@ class ReduceOperator(Operator):
 
 
 class InitOperator(Operator):
-    def vmap(self, *, dim_size, vals_in, dims_in, **params):
+    def vmap(self, dim_size, vals_in, dims_in, **params):
         (x_bdim,) = dims_in
         y = self(**params)
         y = y.unsqueeze(x_bdim)
@@ -867,19 +865,20 @@ class Program:
                 idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
                 self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.voidval)
 
-    def as_mlir_shape(self, voidval, scalar_as_empty_array=False):
+    def pprint_shape(self, voidval, scalar_as_empty_array=False):
         xdtype = voidval.dtype.mlir
         if len(voidval.shape) > 0:
-            xshape = f"{'x'.join((repr(i) for i in voidval.shape))}"
-            return f"tensor<{xshape}x{xdtype}>"
+            xshape = f"{', '.join((repr(i) for i in voidval.shape))}"
+            return f"[{xshape}, {xdtype}]"
         else:
-            return f"tensor<{'0x'if scalar_as_empty_array else ''}{xdtype}>"
+            return f"[{xdtype}]"
 
-    def as_mlir_sig(self, in_voidvals, out_voidvals, unpack_unary_output=False):
-        in_code = ", ".join(self.as_mlir_shape(t) for t in in_voidvals)
-        out_code = ", ".join(self.as_mlir_shape(t) for t in out_voidvals)
+    def pprint_sig(self, in_voidvals, out_voidvals, unpack_unary_output=False):
+        in_code = ", ".join(self.pprint_shape(t) for t in in_voidvals)
+        in_code = f"({in_code})" if len(in_voidvals) > 1 else in_code
+        out_code = ", ".join(self.pprint_shape(t) for t in out_voidvals)
         out_code = f"({out_code})" if len(out_voidvals) > 1 or unpack_unary_output else out_code
-        typing_code = f" : ({in_code}) -> {out_code}"
+        typing_code = f"{in_code} -> {out_code}"
         return typing_code
 
     def indent(self, code):
@@ -892,7 +891,7 @@ class Program:
 
         def program_as_str(program):
             nonlocal fn_defs
-            in_binders_vars = list_map(lambda x: program.env[x], program.in_binders)
+            in_binders_vars = [program.env[i] for i in program.in_binders]
             body_code_lines = []
             for instruction in program.instructions:
                 if len(instruction.out_binders) == 0:
@@ -900,45 +899,44 @@ class Program:
                 params = instruction.params.copy()
                 for param_name, param in params.items():
                     if isinstance(param, Program):
-                        program_as_str(param)
-                        params[param_name] = f'"{param.name}"'
-                    elif isinstance(param, DType):
-                        params[param_name] = f"<{param.mlir}>"
-                    elif isinstance(param, tuple):
-                        params[param_name] = (
-                            self.as_mlir_shape(VoidTensor(param, Tensor.int64), scalar_as_empty_array=True)
-                            if param_name == "shape"
-                            else list(param)
-                        )
-                param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
-                in_vals = ", ".join(f"%{program.env[x].name}" for x in instruction.inputs)
-                out_vals = ", ".join(f"%{program.env[z].name}" for z in instruction.out_binders)
-                sig = self.as_mlir_sig(
+                        params[param_name] = f'{param.name}'
+                    if isinstance(param, DType):
+                        params[param_name] = f"slope.{param.name}"
+                param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items() if param_name != "program")
+                in_vals = ", ".join(f"{program.env[x].name}" for x in instruction.inputs)
+                out_vals = ", ".join(f"{program.env[z].name}" for z in instruction.out_binders)
+                sig = program.pprint_sig(
                     [program.env[x].voidval for x in instruction.inputs],
                     [program.env[y].voidval for y in instruction.out_binders],
                 )
-                line = f'{out_vals} = "slope.{instruction.op.name}"({in_vals}) {{{param_vals}) }} {sig}'
+                if instruction.op.name is not "jit_op":
+                    line = f'''{out_vals} = slope.{instruction.op.name}({in_vals}{", " if (param_vals and in_vals) else ""}{param_vals}) # {sig}'''
+                else:
+                    line = f'''{out_vals} = {params["program"]}({in_vals}{", " if param_vals else ""}{param_vals}) # {sig}'''
                 body_code_lines += [self.indent(line)]
 
-            fn_args_str = ", ".join([f"{i.name}: {program.as_mlir_shape(i.voidval)}" for i in in_binders_vars])
-            outs = list_map(lambda x: program.env[x], program.outs)
-            out_str = ", ".join([f"%{o.name}" for o in outs])
-            out_type_str = ", ".join([f"{program.as_mlir_shape(o.voidval)}" for o in outs])
-            out_type_str = f"({out_type_str})" if len(outs) > 1 else out_type_str
-            head_code_line = [f"func.func @{program.name} ({fn_args_str}) -> {out_type_str}"]
-            tail_code_line = [self.indent(f"func.return({out_str}): ({out_type_str}) -> ()")]
-            code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
+            fn_args_str = ", ".join([f"{i.name}" for i in in_binders_vars])
+            fn_static_args_str = ", ".join([f"{a}={a_val}" for a, a_val in program.static_args])
+            out_vars = [program.env[o] for o in program.outs]
+            fn_sig = program.pprint_sig(
+                [i.voidval for i in in_binders_vars],
+                [o.voidval for o in out_vars],
+            )
+            head_code_line = [f"def {program.name}({fn_args_str}{', ' if fn_args_str else ''}{fn_static_args_str}): # {fn_sig}"]
+            out_str = ", ".join([f"{o.name}" for o in out_vars])
+            tail_code_line = [self.indent(f"return {out_str}")]
+            code_lines = head_code_line + body_code_lines + tail_code_line + ["\n"]
             fn_defs[program.name] = code_lines
 
         program_as_str(self)
-        return "\n".join(line for code_lines in reversed(fn_defs.values()) for line in code_lines)
+        return "\n".join(line for code_lines in fn_defs.values() for line in code_lines)
 
     def __hash__(self):
         return hash(repr(self))
 
     def __eq__(self, other):
         return self is other
-
+    
 
 class ProgramType(NamedTuple):
     in_types: Tuple[VoidTensor]
@@ -2338,6 +2336,8 @@ def jit_partial_run(trace, tracers, *, program):
 
 class jit:
     def __init__(self, f, static_argnames=(), name=None):
+        if isinstance(static_argnames, str):
+            static_argnames = tuple(static_argnames.split(" "))
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         self.f = f
         self.name = name
@@ -2369,7 +2369,7 @@ class jit:
         voidvals_in = tree_map(lambda x: VoidTensor.like(get_voidval(x)), args)
         if self.name is None:
             # TODO: better unique jit name
-            self.name = f"jit_{str(hash((self.f, voidvals_in, static_args)))[1:5]}"
+            self.name = f"jit_{str(hash((self.f, voidvals_in, static_args)))[-5:]}"
         program, consts, out_tree = make_program(self.f, *voidvals_in, static_args=static_args, name=self.name)
         return program, consts, out_tree
 

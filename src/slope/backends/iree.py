@@ -544,15 +544,17 @@ def flip_impl(self, x, y, *, dim):
 @backend.set_impl(backend.operator_set.conv)
 def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
     padding = [[s, e] for s, e in zip(list(padding[0::2]), list(padding[1::2]))]
-    HW = len(x["type"].shape[2:])
-    # return f"""ret = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})"""
+    D = len(x["type"].shape[2:])
+    nD = repr(list(range(D)))[1:-1]
+    xdims = f'[b, f, {nD}]'
+    wdims = f'[o, i, {nD}]'
     return f"""{y["name"]} = "stablehlo.convolution"({x["name"]}, {w["name"]}) {{
   window_strides = dense<{list(stride)}> : tensor<{len(stride)}xi64>,
-  padding = dense<{padding}> : tensor<{HW}x{HW}xi64>,
-  lhs_dilation = dense<1> : tensor<{HW}xi64>,
-  rhs_dilation = dense<{list(dilation)}> : tensor<{HW}xi64>,
-  window_reversal = dense<false> : tensor<{HW}xi1>,
-  dimension_numbers = #stablehlo.conv<[b, f, 0, 1]x[o, i, 0, 1]->[b, f, 0, 1]>,
+  padding = dense<{padding}> : tensor<{D}x{D}xi64>,
+  lhs_dilation = dense<1> : tensor<{D}xi64>,
+  rhs_dilation = dense<{list(dilation)}> : tensor<{D}xi64>,
+  window_reversal = dense<false> : tensor<{D}xi1>,
+  dimension_numbers = #stablehlo.conv<{xdims}x{wdims}->{xdims}>,
   feature_group_count = {groups} : i64,
   batch_group_count = 1 : i64,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]

@@ -13,14 +13,14 @@ class Result(NamedTuple):
 
 class TestGrad(unittest.TestCase):
     @staticmethod
-    def run_ad_fns(f, *args):
+    def run_ad_fns(f, *args, **kwargs):
         args_dot = [slope.ones_like(x) for x in args]
-        y, f_lin = slope.linearize(f, *args)
+        y, f_lin = slope.linearize(f, *args, **kwargs)
         y_dot = f_lin(*args_dot)
         loss_fn = slope.value_and_grad(lambda *args,: f(*args).sum())
         L, gL_y = loss_fn(*args)
-        slope.dblog(f"{args=}", enable=slope.core.backend.LOG_JIT)
         res = Result(y, y_dot, L, gL_y)
+        slope.dblog(f"{args=}", enable=slope.core.backend.LOG_JIT)
         slope.dblog(f"{res=}", enable=slope.core.backend.LOG_JIT)
 
     def test_maximum(self):

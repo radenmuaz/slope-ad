@@ -740,6 +740,12 @@ class Matmul(BinaryReduceOperator):
         else:
             raise ValueError(f"Invalid dimensions for matmul, {shapes_str}")
         return [VoidTensor(shape, x.dtype)]
+    
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        return [self(x, w, **params)], [x_bdim, w_bdim]
 
     def jvp(self, primals, tangents):
         (x, w), (x_dot, w_dot) = primals, tangents
@@ -757,41 +763,55 @@ class Matmul(BinaryReduceOperator):
 @operator_set.register("conv")
 class Conv(BinaryReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-        (bsz, cin_x), (cout, cin_w), HW = x.shape[:2], w.shape[:2], w.shape[2:]
-        assert groups * cin_x == cin_w and len(x.shape) == len(
-            w.shape
-        ), f"{x.shape} != {w.shape} where ({groups*cin_w=}{cin_w=})"
+        assert x.ndim == w.ndim, "weight must be (N, C, *D), weight (O, I, *D) where D=(H, ...,  W, ...)"
+        (bsz, cin_x), (cout, cin_w), D = x.shape[:2], w.shape[:2], w.shape[2:]
+        assert groups * cin_x == cin_w, "input and weight input channel dim mismatch"
         if isinstance(padding, (tuple, list)):
-            assert len(padding) == 2 * len(HW) or len(padding) == len(
-                HW
-            ), f"{2*len(HW)=} or {len(HW)=}, but {len(padding)=} for {x.shape=}"
+            assert len(padding) == 2 * len(D) or len(padding) == len(
+                D
+            ), f"{2*len(D)=} or {len(D)=}, but {len(padding)=} for {x.shape=}"
         padding = (
-            [padding] * 2 * len(HW)
+            [padding] * 2 * len(D)
             if isinstance(padding, int)
-            else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)])
+            else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)])
         )
         padding = tuple(padding)
         if isinstance(stride, int):
-            stride = (x,) * len(HW)
+            stride = (stride,) * len(D)
         if isinstance(dilation, int):
-            dilation = (dilation,) * len(HW)
-        assert len(HW) == len(stride) and len(HW) == len(
+            dilation = (dilation,) * len(D)
+        assert len(D) == len(stride) and len(D) == len(
             dilation
-        ), f"{len(HW)=} {len(stride)=} {len(HW)=} {len(dilation)=}"
+        ), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-
+    
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
         assert x.dtype == w.dtype
-        x_shape = x.shape
-        w_shape = w.shape
         s_dims = []
         ps, pe = padding[0::2], padding[1::2]
         for i, s in enumerate(x.shape[2:]):
-            out_s = ((s + ps[i] + pe[i] - dilation[i] * (w_shape[i + 2] - 1) - 1) // stride[i]) + 1
+            out_s = ((s + ps[i] + pe[i] - dilation[i] * (w.shape[i + 2] - 1) - 1) // stride[i]) + 1
             s_dims += [out_s]
-        out_shape = (x_shape[0], w_shape[0] // groups, *s_dims)
-
+        bsz = x.shape[0]
+        yc = w.shape[0]# if x.ndim == w.ndim else 1]
+        out_shape = (bsz, yc // groups, *tuple(s_dims))
         return [VoidTensor(out_shape, x.dtype)]
+
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w), (x_bdim, _) = vals_in, dims_in
+        assert x.ndim == w.ndim+1, "weight cannot be batched"
+        N = x.shape[x_bdim]
+        cin = w.shape[1]
+        Dx = x.shape[-(w.ndim-2):]
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        op_bdims = x.shape[:-(w.ndim-1)]
+        x = x.reshape(math.prod(op_bdims), cin, *Dx)
+        y = self(x, w, **params)
+        cout = y.shape[1]
+        Dy = y.shape[2:]
+        y = y.reshape(*op_bdims, cout, *Dy)
+        # w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        return [y], [x_bdim]
 
     def jvp(self, primals, tangents, *, groups, stride, dilation, padding):
         (x, w), (x_dot, w_dot) = primals, tangents

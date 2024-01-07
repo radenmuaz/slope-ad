@@ -588,18 +588,18 @@ def maxpool2d(x, kernel_size=(2, 2), stride=None, dilation=1):
 
 @procedure_set.register()
 def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
-    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    (bs, cin_), (cout, cin), D = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
     ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+        assert len(padding) == 2 * len(D) or len(padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(padding)} for tensor of shape {x.shape}"
     padding_ = (
-        [padding] * 2 * len(HW)
+        [padding] * 2 * len(D)
         if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+        else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)][::-1])
     )
     padding_ = tuple(padding_)
 
@@ -609,10 +609,10 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
         return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
 
     x = pad2d(x, padding_)
-    x = x.pool(HW, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
-    rcout, oyx = cout // groups, x.shape[2 : -len(HW)]
-    x = x.reshape((bs, groups, cin, 1, *oyx, *HW))
-    x = x.expand((bs, groups, cin, rcout, *oyx, *HW))
+    x = x.pool(D, stride, dilation)  # (bs, groups*cin, oy, ox, H, W)
+    rcout, oyx = cout // groups, x.shape[2 : -len(D)]
+    x = x.reshape((bs, groups, cin, 1, *oyx, *D))
+    x = x.expand((bs, groups, cin, rcout, *oyx, *D))
     x = x.permute(
         (
             0,
@@ -620,11 +620,11 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
             3,
             *[4 + i for i in range(len(oyx))],
             2,
-            *[4 + len(oyx) + i for i in range(len(HW))],
+            *[4 + len(oyx) + i for i in range(len(D))],
         )
     )
-    # (bs, groups, rcout, *oyx, cin, *HW)
-    x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *HW))
+    # (bs, groups, rcout, *oyx, cin, *D)
+    x = x * w.reshape((1, groups, rcout, *[1] * len(oyx), cin, *D))
     x = x.sum([-1 - i for i in range(1 + len(oyx))], keepdim=True)
     x = x.reshape((bs, cout, *oyx))
     ret = x
@@ -639,10 +639,10 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
     def flatten_seq(l):
         return [item for sublist in l for item in sublist]
 
-    HW, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
+    D, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
     w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
     w = w.permute((0, 2, 1, *trailing)).flip(trailing)
-    stride = make_pair(stride, len(HW))
+    stride = make_pair(stride, len(D))
     if any(s > 1 for s in stride):
         x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
         x_ = x
@@ -661,10 +661,10 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
             for k, d, p, op in reversed(
                 list(
                     zip(
-                        HW,
-                        make_pair(dilation, len(HW)),
-                        make_pair(padding, len(HW)),
-                        make_pair(output_padding, len(HW)),
+                        D,
+                        make_pair(dilation, len(D)),
+                        make_pair(padding, len(D)),
+                        make_pair(output_padding, len(D)),
                     )
                 )
             )

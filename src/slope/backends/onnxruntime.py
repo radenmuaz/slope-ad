@@ -1001,27 +1001,27 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
         return (x,) * cnt if isinstance(x, int) else x
 
-    (bs, cin_), (cout, cin), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    (bs, cin_), (cout, cin), D = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
     ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+        assert len(padding) == 2 * len(D) or len(padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(padding)} for tensor of shape {x.shape}"
     padding = (
-        [padding] * 2 * len(HW)
+        [padding] * 2 * len(D)
         if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+        else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)][::-1])
     )
     padding = tuple(padding)
     if isinstance(stride, int):
-        stride = make_pair(stride, len(HW))
+        stride = make_pair(stride, len(D))
     if isinstance(dilation, int):
-        dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(
+        dilation = make_pair(dilation, len(D))
+    assert len(D) == len(stride) and len(D) == len(
         dilation
-    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    ), f"stride/dilation mismatch kernel:{D} stride:{stride} dilation:{dilation}"
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
 
@@ -1093,40 +1093,40 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
     def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
         return (x,) * cnt if isinstance(x, int) else x
 
-    (bs, cin_), (cin, cout), HW = x.shape[:2], w.shape[:2], w.shape[2:]
+    (bs, cin_), (cin, cout), D = x.shape[:2], w.shape[:2], w.shape[2:]
     assert groups * cin == cin_ and len(x.shape) == len(
         w.shape
     ), f"Input dim shape {x.shape} does not match the shape of the ws {w.shape}. ({groups*cin} vs. {cin_})"
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x.shape}"
+        assert len(padding) == 2 * len(D) or len(padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(padding)} for tensor of shape {x.shape}"
 
     if isinstance(output_padding, (tuple, list)):
-        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x.shape}"
+        assert len(output_padding) == 2 * len(D) or len(output_padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(output_padding)} for tensor of shape {x.shape}"
     padding = tuple(
-        [padding] * 2 * len(HW)
+        [padding] * 2 * len(D)
         if isinstance(padding, int)
-        else (padding if len(padding) == 2 * len(HW) else [p for p in padding for _ in range(2)][::-1])
+        else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)][::-1])
     )
     output_padding = tuple(
-        [output_padding] * 2 * len(HW)
+        [output_padding] * 2 * len(D)
         if isinstance(output_padding, int)
         else (
             output_padding
-            if len(output_padding) == 2 * len(HW)
+            if len(output_padding) == 2 * len(D)
             else [p for p in output_padding for _ in range(2)][::-1]
         )
     )
     if isinstance(stride, int):
-        stride = make_pair(stride, len(HW))
+        stride = make_pair(stride, len(D))
     if isinstance(dilation, int):
-        dilation = make_pair(dilation, len(HW))
-    assert len(HW) == len(stride) and len(HW) == len(
+        dilation = make_pair(dilation, len(D))
+    assert len(D) == len(stride) and len(D) == len(
         dilation
-    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    ), f"stride/dilation mismatch kernel:{D} stride:{stride} dilation:{dilation}"
     return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
 
 
@@ -1135,30 +1135,30 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
     assert x.dtype == w.dtype
     x_shape = x.shape
     w_shape = w.shape
-    (bs, cin_), (cin, cout), HW = x_shape[:2], w_shape[:2], w_shape[2:]
+    (bs, cin_), (cin, cout), D = x_shape[:2], w_shape[:2], w_shape[2:]
     assert (
         groups * cin == cin_
     ), f"Input dim shape {x_shape} does not match the shape of the ws {w_shape}. ({groups*cin} vs. {cin_})"
 
     if isinstance(padding, (tuple, list)):
-        assert len(padding) == 2 * len(HW) or len(padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(padding)} for tensor of shape {x_shape}"
+        assert len(padding) == 2 * len(D) or len(padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(padding)} for tensor of shape {x_shape}"
 
     if isinstance(output_padding, (tuple, list)):
-        assert len(output_padding) == 2 * len(HW) or len(output_padding) == len(
-            HW
-        ), f"Expected padding of length {2*len(HW)} or {len(HW)}, but got {len(output_padding)} for tensor of shape {x_shape}"
+        assert len(output_padding) == 2 * len(D) or len(output_padding) == len(
+            D
+        ), f"Expected padding of length {2*len(D)} or {len(D)}, but got {len(output_padding)} for tensor of shape {x_shape}"
 
     if isinstance(stride, int):
-        stride = [stride] * len(HW)
+        stride = [stride] * len(D)
 
     if isinstance(dilation, int):
-        dilation = [dilation] * len(HW)
+        dilation = [dilation] * len(D)
 
-    assert len(HW) == len(stride) and len(HW) == len(
+    assert len(D) == len(stride) and len(D) == len(
         dilation
-    ), f"stride/dilation mismatch kernel:{HW} stride:{stride} dilation:{dilation}"
+    ), f"stride/dilation mismatch kernel:{D} stride:{stride} dilation:{dilation}"
 
     # Calculate output shape
     result_shape = tuple(
@@ -1166,7 +1166,7 @@ def typecheck(self, x, w, *, groups, stride, dilation, padding, output_padding):
         + [
             (s - 1) * stride[i]
             - (padding[i * 2] + padding[i * 2 + 1])
-            + dilation[i] * (HW[i] - 1)
+            + dilation[i] * (D[i] - 1)
             + (output_padding[i * 2] + output_padding[i * 2 + 1]) // 2
             + 1
             for i, s in enumerate(x_shape[2:])

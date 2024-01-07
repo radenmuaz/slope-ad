@@ -26,18 +26,13 @@ import types
 from contextlib import contextmanager
 import itertools
 import weakref
-from collections import defaultdict
-from enum import Enum, auto
 import operator as operator_py
-import string
 import numpy as np
 import math
 import inspect
 from functools import partial, lru_cache
-import slope
 import mmap
 import traceback
-import importlib
 
 
 # ================
@@ -608,15 +603,7 @@ class ShapeOperator(Operator):
 
 
 class BinaryReduceOperator(Operator):
-    def vmap(self, dim_size, vals_in, dims_in, **params):
-        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
-        if x_bdim != w_bdim:
-            if x_bdim is None:
-                x = VMapTrace.move_vmap_dim(x, dim_size, x_bdim, w_bdim)
-                x_bdim = w_bdim
-            else:
-                w = VMapTrace.move_vmap_dim(w, dim_size, w_bdim, x_bdim)
-        return [self(x, w, **params)], [x_bdim]
+   pass
 
 
 class OperatorSet:
@@ -1829,11 +1816,11 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
         (dim_size,) = dims
     with new_main(VMapTrace, dim_size) as main:
         trace = VMapTrace(main)
-        tracers_in = [VMapTraceTensor(trace, x, ax) if ax is not None else x for x, ax in list_zip(args, in_dim)]
+        tracers_in = [VMapTraceTensor(trace, x, dim) if dim is not None else x for x, dim in list_zip(args, in_dim)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
-        vals_out, bdims_out = unzip2((t.val, t.vmap_dim) for t in tracers_out)
-    ret = [VMapTrace.move_vmap_dim(val_out, dim_size, bdim, 0) for val_out, bdim in zip(vals_out, bdims_out)]
+        vals_out, y_vmap_dims = unzip2((t.val, t.vmap_dim) for t in tracers_out)
+    ret = [VMapTrace.move_vmap_dim(val_out, dim_size, bdim, out_dim) for val_out, bdim, out_dim in zip(vals_out, y_vmap_dims, out_dim)]
     return ret
 
 

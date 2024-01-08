@@ -852,6 +852,8 @@ class Program:
                 prefix = "y" if outb in self.outs else "z"
                 idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
                 self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.voidval)
+        
+        self.curr_repr = repr(self)
 
     def pprint_shape(self, voidval, scalar_as_empty_array=False):
         xdtype = voidval.dtype.mlir
@@ -900,7 +902,7 @@ class Program:
 
 
     def __hash__(self):
-        return hash(repr(self))
+        return hash(self.curr_repr)
 
     def __eq__(self, other):
         return self is other

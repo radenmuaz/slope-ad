@@ -31,13 +31,13 @@ def train_step(model, batch, optimizer):
 # @slope.jit
 def test_all(model, x, y):
     out = model(x)
-    y_hat = out.argmax(-1)
-    corrects = (y_hat == y).cast(slope.float32)
-    accuracy = corrects.mean()
+    # y_hat = out.argmax(-1)
+    # corrects = (y_hat == y).cast(slope.float32)
+    # accuracy = corrects.mean()
 
-    # y_hat = np.argmax(out.numpy() ,-1)
-    # corrects = (y_hat == y.numpy()).astype(np.float32)
-    # accuracy = np.mean(corrects)
+    y_hat = np.argmax(out.numpy() ,-1)
+    corrects = (y_hat == y.numpy()).astype(np.float32)
+    accuracy = np.mean(corrects)
     
     return accuracy
 

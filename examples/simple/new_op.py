@@ -1,6 +1,6 @@
 import slope
 
-@slope.M().backend.procedure_set.register()
+@slope.core.backend.procedure_set.register()
 def relu(x):
     w = slope.zeros_like(x)
     y = x.maximum(w)

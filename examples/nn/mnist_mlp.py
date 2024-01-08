@@ -35,9 +35,9 @@ def test_all(model, x, y):
     corrects = (y_hat == y).cast(slope.float32)
     accuracy = corrects.mean()
 
-    # y_hat2 = np.argmax(out.numpy() ,-1)
-    # corrects2 = (y_hat2 == y.numpy()).astype(np.float32)
-    # accuracy2 = np.mean(corrects2)
+    # y_hat = np.argmax(out.numpy() ,-1)
+    # corrects = (y_hat == y.numpy()).astype(np.float32)
+    # accuracy = np.mean(corrects)
     
     return accuracy
 

@@ -2370,9 +2370,8 @@ class jit:
     def get_jit_name(cls, args, static_args, prefix="jit", short=False):
         name = f"{prefix}_"
         if short:
-            void_args = tuple(VoidTensor.like(a) for a in args)
             static_args_tup = tuple(static_args.items())
-            ids = repr(hash((prefix, void_args, static_args_tup)))[-4:]
+            ids = repr(hash((prefix, args, static_args_tup)))[-4:]
             name = f"{prefix}_{ids}"
         else:
             for a in args:
@@ -2386,7 +2385,6 @@ class jit:
             name = name.replace(".", "_dt_")
             
         return name
-
     def get_program(self, *args, **static_args):
         sig = inspect.signature(self.f)
         if all("*" not in repr(v) for v in sig.parameters.values()):
@@ -2405,7 +2403,7 @@ class jit:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
 
         voidvals_in = tree_map(lambda x: VoidTensor.like(get_voidval(x)), args)
-        self.name = self.get_jit_name(args, static_args, prefix=self.name, short=True)
+        self.name = self.get_jit_name(voidvals_in, static_args, prefix=self.name, short=True)
         program, consts, out_tree = make_program(
             self.f, *voidvals_in, static_args=tuple(static_args.items()), name=self.name
         )

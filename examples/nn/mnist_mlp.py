@@ -93,6 +93,6 @@ if __name__ == "__main__":
             # if i % 10 == 0: print(f"Train epoch: {epoch}, batch: {i}/{num_batches}, loss: {loss.numpy():.2f}")
         epoch_time = time.time() - start_time
 
-        test_acc = test_all(model, x_test, y_test).numpy()
+        test_acc = test_all(model, x_test, y_test)
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
         print(f"Test set accuracy {test_acc:0.2f}")

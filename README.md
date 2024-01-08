@@ -39,6 +39,15 @@ Check out examples in `examples/simple` for short snippets.
 
 MNIST classifier example is in `example/mnist_mlp.py`
 
+```
+python example/mnist_mlp.p
+Starting training...
+...
+Train epoch: 2, batch: 299/300, loss: 12.51: 100%|██████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 139.36it/s]
+Epoch 2 in 2.15 sec
+Test set accuracy 0.97
+```
+
 CIFAR10 resnet classifier example is in `example/cifar10_convnet.py`
 
 `src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX

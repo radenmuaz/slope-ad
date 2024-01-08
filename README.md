@@ -39,7 +39,7 @@ Check out examples in `examples/simple` for short snippets.
 MNIST classifier example is in `example/mnist_mlp.py`
 
 `src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX
-You are encouraged to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/iree.py`
+You are encouraged to read the source, `__init__.py`, `core.py`, `operators.py`, `procedures.py` and `backends/iree.py`
 
 # Slope has familiar Pytorch-like syntax
 

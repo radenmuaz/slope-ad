@@ -85,7 +85,7 @@ f_jitobj.export('./f_export_folder') # see the folder of what are exported.
 
 # Derivatives and gradients
 
-Slope has several AD functions, like `slope.jvp` `slope.jvp` and `slope.grad`
+Slope has several AD functions, like `slope.jvp` `slope.vjp` and `slope.grad`
 
 To do the usual backprop things:
 ```python

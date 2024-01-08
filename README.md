@@ -32,7 +32,13 @@ Or you can just copy `src/slope` to your projects.
 
 Tensor operation semantics feel like pytorch, but AD semantics like JAX (or functorch)
 
-# Slope have familiar Pytorch-like syntax
+Check out examples in `examples/simple` for short snippets.
+MNIST classifier example is in `example/mnist_mlp.py`
+
+`src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX
+You are encouraged to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/iree.py`
+
+# Slope has familiar Pytorch-like syntax
 
 Most of the things familiar in Pytorch works in Slope, probably.
 
@@ -115,17 +121,8 @@ for i in range(10):
 
 ```
 
-# That's about it
-
-Check out examples in `examples/simple` for more short snippets.
-MNIST classifier example is in `example/mnist_mlp.py`
-
-`src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX
-
-You are encourage to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/iree.py`
-
 # Contributing
-
+m
 Fork this repo and hack, and maybe do a PR, too many things need to be done (see Roadmap)
 Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 

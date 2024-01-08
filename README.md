@@ -50,7 +50,7 @@ import slope
 x = slope.ones(2, 5)
 w = slope.arange(15).reshape(5,3)
 b = slope.tensor([1., 2., 3.], dtype=slope.float32)
-y = x @ w
+y = x @ w + b
 print(y)
 ```
 
@@ -117,7 +117,6 @@ N = 50
 x = slope.randn(N, 2)
 y = slope.randn(N, 1)
 w = slope.randn(1, 5)
-w0 = w
 lr = slope.tensor([0.001])
 for i in range(10):
     w = train_step(x, w, y, lr)

@@ -89,7 +89,6 @@ It has several utility methods for printing the generated backend code and expor
 ```python
 f_jitobj = f.get_jit_object(x)
 print(f_jitobj.code)
-f_jitobj.export('./f_export_folder') # see the folder of what are exported.
 ```
 
 # Derivatives and gradients

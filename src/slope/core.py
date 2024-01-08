@@ -852,7 +852,7 @@ class Program:
                 prefix = "y" if outb in self.outs else "z"
                 idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
                 self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.voidval)
-        
+
         self.curr_repr = repr(self)
 
     def pprint_shape(self, voidval, scalar_as_empty_array=False):
@@ -870,7 +870,7 @@ class Program:
         out_code = f"({out_code})" if len(out_voidvals) > 1 or unpack_unary_output else out_code
         typing_code = f"{in_code} -> {out_code}"
         return typing_code
-    
+
     def __repr__(self):
         fn_defs = self.instructions_as_code(self, dict())
         return "\n".join(line for code_lines in fn_defs.values() for line in code_lines)
@@ -888,18 +888,17 @@ class Program:
                 if not dry_run:
                     backend.save(args[i], const_path)
                 dblog(f"Saved {ibv.name} at {const_path}", enable=backend.LOG_BACKEND)
-                head_code_lines += [f'''{ibv.name} = slope.load("./{const_filename}")''']
+                head_code_lines += [f"""{ibv.name} = slope.load("./{const_filename}")"""]
         head_code_lines += [""]
         code = "\n".join(head_code_lines + [line for code_lines in fn_defs.values() for line in code_lines])
         dblog(f"Contents of {self.name}:\n```\n{code}\n```", enable=backend.LOG_BACKEND)
         program_path = os.path.join(dir_path, "main.py")
         if not dry_run:
-            with open(program_path, 'w') as f:
+            with open(program_path, "w") as f:
                 f.write(code)
         dblog(f"Saved program {self.name} at {program_path}", enable=backend.LOG_BACKEND)
-        ls_contents = '\n\t'.join(os.listdir(dir_path))
+        ls_contents = "\n\t".join(os.listdir(dir_path))
         dblog(f"Contents of {dir_path}:\n\t{ls_contents}", enable=backend.LOG_BACKEND)
-
 
     def __hash__(self):
         return hash(self.curr_repr)
@@ -907,13 +906,13 @@ class Program:
     def __eq__(self, other):
         return self is other
 
-
     @classmethod
     def instructions_as_code(cls, program, fn_defs):
         def indent(code, indent_amount):
             spaces = " " * (len(code) - len(code.lstrip()))
             spaces += " " * indent_amount
             return "\n".join([spaces + line for line in code.strip().split("\n")])
+
         in_binders_vars = [program.env[i] for i in program.in_binders]
         body_code_lines = []
         for instruction in program.instructions:
@@ -949,11 +948,11 @@ class Program:
         out_str = ", ".join([f"{o.name}" for o in out_vars])
         tail_code_line = [indent(f"return {out_str}", program.indent_amount)]
         code_lines = head_code_line + body_code_lines + tail_code_line + ["\n"]
-       
+
         fn_defs[program.name] = code_lines
         return fn_defs
-    
-    
+
+
 class ProgramType(NamedTuple):
     in_types: Tuple[VoidTensor]
     out_types: Tuple[VoidTensor]
@@ -2361,7 +2360,7 @@ class jit:
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         self.f = f
         self.name = name if name is not None else self.f.__name__
-        
+
         self.static_argnames = static_argnames
 
     @classmethod
@@ -2385,8 +2384,9 @@ class jit:
             name = name.replace(",", "_cm_")
             name = name.replace(" ", "")
             name = name.replace(".", "_dt_")
-            
+
         return name
+
     def get_program(self, *args, **static_args):
         sig = inspect.signature(self.f)
         if all("*" not in repr(v) for v in sig.parameters.values()):
@@ -2405,7 +2405,12 @@ class jit:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
 
         voidvals_in = tree_map(lambda x: VoidTensor.like(get_voidval(x)), args)
-        self.name = self.get_jit_name(voidvals_in, static_args, prefix=self.name, short=True)
+        # self.name = self.get_jit_name(voidvals_in, static_args, prefix=self.name, short=True)
+        static_args = tuple(static_args.items())
+        if self.name is None:
+            self.name = f"jit_{str(hash((self.f, voidvals_in, static_args)))[-5:]}"
+        program, consts, out_tree = make_program(self.f, *voidvals_in, static_args=static_args, name=self.name)
+        return program, consts, out_tree
         program, consts, out_tree = make_program(
             self.f, *voidvals_in, static_args=tuple(static_args.items()), name=self.name
         )

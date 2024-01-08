@@ -546,8 +546,8 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
     padding = [[s, e] for s, e in zip(list(padding[0::2]), list(padding[1::2]))]
     D = len(x["type"].shape[2:])
     nD = repr(list(range(D)))[1:-1]
-    xdims = f'[b, f, {nD}]'
-    wdims = f'[o, i, {nD}]'
+    xdims = f"[b, f, {nD}]"
+    wdims = f"[o, i, {nD}]"
     return f"""{y["name"]} = "stablehlo.convolution"({x["name"]}, {w["name"]}) {{
   window_strides = dense<{list(stride)}> : tensor<{len(stride)}xi64>,
   padding = dense<{padding}> : tensor<{D}x{D}xi64>,

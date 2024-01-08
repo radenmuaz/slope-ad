@@ -5,11 +5,13 @@ from slope.core import Tensor
 import numpy as np
 from typing import NamedTuple
 
+
 class Result(NamedTuple):
     y: Tensor
     y_dot: Tensor
     L: Tensor
     gL_y: Tensor
+
 
 class TestGrad(unittest.TestCase):
     @staticmethod

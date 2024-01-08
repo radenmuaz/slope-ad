@@ -12,8 +12,3 @@ x = slope.ones(1)
 y = f(x, p=1.)
 program = f.get_jit_object(x, p=1.).program
 print(program)
-
-# x = slope.ones(1)
-# y = f(x, x)
-# program = f.get_jit_object(x, x).program
-# print(program)

@@ -166,7 +166,7 @@ class DType(NamedTuple):
     numpy: type
 
     def __repr__(self):
-        return f"{self.name}"
+        return f"slope.{self.name}"
 
 
 class TensorBuffer:
@@ -364,19 +364,6 @@ class Operator:
         self.nary_outputs = nary_outputs
         if self.nary_inputs:
             self.reorg_args = self.reorg_args_nary
-
-    def get_jit_name(self, args, params):
-        name = f"{self.name}_"
-        for a in args:
-            name += f"shape_{a.shape}_dtype_{a.dtype}_"
-        for k, v in params.items():
-            name += f"{k}_{v}_"
-        name = name.replace("(", "_lp_")
-        name = name.replace(")", "_rp_")
-        name = name.replace(",", "_cm_")
-        name = name.replace(" ", "")
-        name = name.replace(".", "_dt_")
-        return name
 
     def __hash__(self):
         return hash(self.name)
@@ -601,7 +588,7 @@ class ShapeOperator(Operator):
 
 
 class BinaryReduceOperator(Operator):
-   pass
+    pass
 
 
 class OperatorSet:
@@ -831,6 +818,7 @@ class Instruction(NamedTuple):
 class ProgramEnvVar(NamedTuple):
     name: str
     voidval: VoidTensor
+    is_const: bool = False
 
 
 class Program:
@@ -856,7 +844,7 @@ class Program:
         for inb in self.in_binders:
             prefix = "x" if type(inb.voidval) is VoidTensor else "c"
             idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
-            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.voidval)
+            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.voidval, True if prefix == "c" else False)
         for instruction in self.instructions:
             if len(instruction.out_binders) == 0:
                 continue
@@ -889,7 +877,7 @@ class Program:
     def __repr__(self):
         fn_defs = dict()
 
-        def program_as_str(program):
+        def program_as_str(program, args=None):
             nonlocal fn_defs
             in_binders_vars = [program.env[i] for i in program.in_binders]
             body_code_lines = []
@@ -899,33 +887,37 @@ class Program:
                 params = instruction.params.copy()
                 for param_name, param in params.items():
                     if isinstance(param, Program):
-                        params[param_name] = f'{param.name}'
+                        program_as_str(param, instruction.inputs)
+                        params[param_name] = f"{param.name}"
                     if isinstance(param, DType):
                         params[param_name] = f"slope.{param.name}"
-                param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items() if param_name != "program")
+                param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
                 in_vals = ", ".join(f"{program.env[x].name}" for x in instruction.inputs)
                 out_vals = ", ".join(f"{program.env[z].name}" for z in instruction.out_binders)
                 sig = program.pprint_sig(
                     [program.env[x].voidval for x in instruction.inputs],
                     [program.env[y].voidval for y in instruction.out_binders],
                 )
-                if instruction.op.name is not "jit_op":
-                    line = f'''{out_vals} = slope.{instruction.op.name}({in_vals}{", " if (param_vals and in_vals) else ""}{param_vals}) # {sig}'''
-                else:
-                    line = f'''{out_vals} = {params["program"]}({in_vals}{", " if param_vals else ""}{param_vals}) # {sig}'''
+                line = f"""{out_vals} = slope.{instruction.op.name}({in_vals}{", " if (param_vals and in_vals) else ""}{param_vals}) # {sig}"""
                 body_code_lines += [self.indent(line)]
 
             fn_args_str = ", ".join([f"{i.name}" for i in in_binders_vars])
-            fn_static_args_str = ", ".join([f"{a}={a_val}" for a, a_val in program.static_args])
+            # fn_static_args_str = ", ".join([f"{a}={a_val}" for a, a_val in program.static_args])
             out_vars = [program.env[o] for o in program.outs]
             fn_sig = program.pprint_sig(
                 [i.voidval for i in in_binders_vars],
                 [o.voidval for o in out_vars],
             )
-            head_code_line = [f"def {program.name}({fn_args_str}{', ' if fn_args_str else ''}{fn_static_args_str}): # {fn_sig}"]
+            head_code_line = [f"def {program.name}({fn_args_str}): # {fn_sig}"]
             out_str = ", ".join([f"{o.name}" for o in out_vars])
             tail_code_line = [self.indent(f"return {out_str}")]
             code_lines = head_code_line + body_code_lines + tail_code_line + ["\n"]
+            if args:
+                for i in in_binders_vars:
+                    code_lines += [f"{i.name} = {i.voidval}"]
+                code_lines += [
+                    f"{program.name} = slope.make_program(\n  {program.name},\n  {', '.join(i.name for i in in_binders_vars)}\n)\n"
+                ]
             fn_defs[program.name] = code_lines
 
         program_as_str(self)
@@ -936,7 +928,7 @@ class Program:
 
     def __eq__(self, other):
         return self is other
-    
+
 
 class ProgramType(NamedTuple):
     in_types: Tuple[VoidTensor]
@@ -1186,7 +1178,7 @@ class RunTrace(Trace):
             ret = op.meta_impl(*args, **params)
         else:
             fn = self.get_fn(op, *tuple(VoidTensor.like(a) for a in args), **params)
-            ret = jit(fn, static_argnames=("params",), name=op.get_jit_name(args, params))(*args, **params)
+            ret = jit(fn, static_argnames=("params",), name=jit.get_jit_name(args, params, op.name))(*args, **params)
 
         return ret
 
@@ -1818,7 +1810,10 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, y_vmap_dims = unzip2((t.val, t.vmap_dim) for t in tracers_out)
-    ret = [VMapTrace.move_vmap_dim(val_out, dim_size, bdim, out_dim) for val_out, bdim, out_dim in zip(vals_out, y_vmap_dims, out_dim)]
+    ret = [
+        VMapTrace.move_vmap_dim(val_out, dim_size, bdim, out_dim)
+        for val_out, bdim, out_dim in zip(vals_out, y_vmap_dims, out_dim)
+    ]
     return ret
 
 
@@ -2347,6 +2342,20 @@ class jit:
     def with_options(cls, static_argnames=(), name=None):
         return partial(cls, static_argnames=static_argnames, name=name)
 
+    @classmethod
+    def get_jit_name(cls, args, static_args, prefix="jit"):
+        name = f"{prefix}_"
+        for a in args:
+            name += f"shape_{a.shape}_dtype_{a.dtype}_"
+        for k, v in static_args.items():
+            name += f"{k}_{v}_"
+        name = name.replace("(", "_lp_")
+        name = name.replace(")", "_rp_")
+        name = name.replace(",", "_cm_")
+        name = name.replace(" ", "")
+        name = name.replace(".", "_dt_")
+        return name
+
     def get_program(self, *args, **static_args):
         sig = inspect.signature(self.f)
         if all("*" not in repr(v) for v in sig.parameters.values()):
@@ -2364,13 +2373,12 @@ class jit:
             else:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
 
-        static_args = tuple(static_args.items())
-
         voidvals_in = tree_map(lambda x: VoidTensor.like(get_voidval(x)), args)
         if self.name is None:
-            # TODO: better unique jit name
-            self.name = f"jit_{str(hash((self.f, voidvals_in, static_args)))[-5:]}"
-        program, consts, out_tree = make_program(self.f, *voidvals_in, static_args=static_args, name=self.name)
+            self.name = self.get_jit_name(args, static_args, prefix="jit")
+        program, consts, out_tree = make_program(
+            self.f, *voidvals_in, static_args=tuple(static_args.items()), name=self.name
+        )
         return program, consts, out_tree
 
     def __call__(self, *args, **static_args):

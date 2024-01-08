@@ -1115,9 +1115,7 @@ def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0, output_
         [output_padding] * 2 * len(D)
         if isinstance(output_padding, int)
         else (
-            output_padding
-            if len(output_padding) == 2 * len(D)
-            else [p for p in output_padding for _ in range(2)][::-1]
+            output_padding if len(output_padding) == 2 * len(D) else [p for p in output_padding for _ in range(2)][::-1]
         )
     )
     if isinstance(stride, int):

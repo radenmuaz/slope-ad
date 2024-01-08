@@ -740,7 +740,7 @@ class Matmul(BinaryReduceOperator):
         else:
             raise ValueError(f"Invalid dimensions for matmul, {shapes_str}")
         return [VoidTensor(shape, x.dtype)]
-    
+
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
@@ -780,11 +780,9 @@ class Conv(BinaryReduceOperator):
             stride = (stride,) * len(D)
         if isinstance(dilation, int):
             dilation = (dilation,) * len(D)
-        assert len(D) == len(stride) and len(D) == len(
-            dilation
-        ), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
+        assert len(D) == len(stride) and len(D) == len(dilation), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-    
+
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
         assert x.dtype == w.dtype
         s_dims = []
@@ -793,18 +791,18 @@ class Conv(BinaryReduceOperator):
             out_s = ((s + ps[i] + pe[i] - dilation[i] * (w.shape[i + 2] - 1) - 1) // stride[i]) + 1
             s_dims += [out_s]
         bsz = x.shape[0]
-        yc = w.shape[0]# if x.ndim == w.ndim else 1]
+        yc = w.shape[0]  # if x.ndim == w.ndim else 1]
         out_shape = (bsz, yc // groups, *tuple(s_dims))
         return [VoidTensor(out_shape, x.dtype)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, _) = vals_in, dims_in
-        assert x.ndim == w.ndim+1, "weight cannot be batched"
+        assert x.ndim == w.ndim + 1, "weight cannot be batched"
         N = x.shape[x_bdim]
         cin = w.shape[1]
-        Dx = x.shape[-(w.ndim-2):]
+        Dx = x.shape[-(w.ndim - 2) :]
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-        op_bdims = x.shape[:-(w.ndim-1)]
+        op_bdims = x.shape[: -(w.ndim - 1)]
         x = x.reshape(math.prod(op_bdims), cin, *Dx)
         y = self(x, w, **params)
         cout = y.shape[1]

@@ -8,6 +8,9 @@
 
 Slope is a small automatic differentation (AD) engine, focused on machine learning (ML).
 Currently it uses IREE and StableHLO MLIR as backend.
+
+This project is in very early stage.
+
 It is written to be educational and hackable, yet does things end-to-end, from training to deployment.
 - Tensor API like Pytorch, 
 - Higher-order derivatives, stateless functional API and pytrees like JAX
@@ -122,7 +125,7 @@ for i in range(10):
 ```
 
 # Contributing
-m
+
 Fork this repo and hack, and maybe do a PR, too many things need to be done (see Roadmap)
 Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 

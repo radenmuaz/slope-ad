@@ -7,28 +7,34 @@
 ```
 
 Slope is a small automatic differentation (AD) engine, focused on machine learning (ML).
+Currently it uses IREE and StableHLO MLIR as backend.
 It is written to be educational and hackable, yet does things end-to-end, from training to deployment.
 - Tensor API like Pytorch, 
-- Higher-order derivaives, functional API and pytrees like JAX
+- Higher-order derivatives, stateless functional API and pytrees like JAX
 - Operator decompositions and easily add new backend like tinygrad.
 
+Slope aims to be some sort of ML *middleware* -- you can go up and use Slope as building blocks to write NN modules, classes, trainer, self-attention, etc. yet you can go down to define new operators, backends and extend the core in `src/slope/{core.py, operators.py, procedures.py, nn.py, backends}`
 
 # Install
 
-Clone this repo then
+NOTE: For Mac user you must use Python 3.11 because it is minimum version for latest IREE wheel for Mac.
+
+Install dependencies, clone this repo then install editable
 ```
+pip install iree-compiler iree-runtime
+https://github.com/radenmuaz/slope
 pip install -e .
 ```
 
-Or you can just copy `src/slope` to your projects
+Or you can just copy `src/slope` to your projects.
 
 # Quickstart
 
-Slope is an automatic diffentation (AD) library, where the Tensor semantics feel like pytorch, but AD semantics feels like JAX (maybe also functorch)
+Tensor operation semantics feel like pytorch, but AD semantics like JAX (or functorch)
 
 # Slope have familiar Pytorch-like syntax
 
-Most of the things you aer familiar in Pytorch works in Slope, probably.
+Most of the things familiar in Pytorch works in Slope, probably.
 
 ```python
 import slope
@@ -39,14 +45,10 @@ y = x @ w
 print(y)
 ```
 
-```
-
-```
-
 # Every operations are compiled with slope.jit
 
 
-Actually these lines when run, are jitted as individual programs eagerly
+Actually when these lines are run, each operation calls jitted as individual programs eagerly.
 
 ```python
 
@@ -61,21 +63,18 @@ Then call the function
 def f(x):
     y = x * x
     return y
-# Also works if prefer not using @slope.jit decorator
-#f = slope.jit(f)
+# Alternative way to jit
+# f = slope.jit(f)
 
-# Then call the jitted function
 x = slope.full((1,), 2.)
 y = f(x)
 ```
 
-```
-
-```
+TODO: Besides eager and jit, make async eager like Pytorch.
 
 # Reveal contents of jitted function
 
-A decorated function with `slope.jit` is an instance object of `slope.core.Machine.jit`,
+A decorated function with `slope.jit` is an instance object of `slope.core.jit`,
 It has several utility methods for printing the generated backend code and exporting the function
 
 ```python
@@ -119,8 +118,23 @@ for i in range(10):
 # That's about it
 
 Check out examples in `examples/simple` for more short snippets.
-
-`slope/nn.py` provides example nn.Module system like in Pytorch, but with usage API like JAX
 MNIST classifier example is in `example/mnist_mlp.py`
 
-You are encourage to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/numpy_backend.py`
+`src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX
+
+You are encourage to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/iree.py`
+
+# Contributing
+
+Fork this repo and hack, and maybe do a PR, too many things need to be done (see Roadmap)
+Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
+
+# Roadmap
+- cuda
+- onnxruntime backend
+- numpy backend
+- scatter gather ops
+- gpt2 training
+- whisper inference
+- passing state random sampling threefry
+- core tests, operators tests on all Trace types

@@ -7,7 +7,7 @@ from slope.core import (
     ProcedureSet,
     Tensor,
     TensorBuffer,
-    VoidTensor,
+    SymbolicTensor,
     UndefPrimal,
     list_zip,
     list_map,
@@ -15,7 +15,17 @@ from slope.core import (
 
 import math
 import numpy as np
-from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, Callable
+from typing import (
+    Tuple,
+    List,
+    Dict,
+    Any,
+    Optional,
+    Sequence,
+    Union,
+    Iterator,
+    Callable,
+)
 from collections import defaultdict
 import importlib
 import os
@@ -58,8 +68,8 @@ operator_set.alias(cast, "astype")
 
 
 @cast.set_method
-def typecheck(self, x: VoidTensor, *, dtype) -> List[VoidTensor]:
-    return [VoidTensor(x.shape, dtype)]
+def typecheck(self, x: SymbolicTensor, *, dtype) -> List[SymbolicTensor]:
+    return [SymbolicTensor(x.shape, dtype, device)]
 
 
 @cast.set_method
@@ -174,7 +184,7 @@ def T(self, cotangents, x):
 
 @invert.set_method
 def typecheck(self, x, **params):
-    return [VoidTensor(x.shape, slope.bool)]
+    return [SymbolicTensor(x.shape, slope.bool)]
 
 
 # -----------------------
@@ -270,7 +280,10 @@ def T(self, cotangents, x, w):
     if type(x) is UndefPrimal:
         return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), None]
     elif type(w) is UndefPrimal:
-        return [None, gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
+        return [
+            None,
+            gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))),
+        ]
 
 
 maximum = Operator.binary("maximum")
@@ -315,33 +328,33 @@ def T(self, cotangents, x, w):
 
 
 @equal.set_method
-def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
+def typecheck(self, x: SymbolicTensor, y: SymbolicTensor, **params) -> List[SymbolicTensor]:
     # difference with default binary typecheck: force dtype bool
-    if not type(x) in (Tensor, VoidTensor) or not type(x) in (
+    if not type(x) in (Tensor, SymbolicTensor) or not type(x) in (
         Tensor,
-        VoidTensor,
+        SymbolicTensor,
     ):
         raise TypeError
-    void_x = VoidTensor(x.shape, Tensor.bool)
-    void_y = VoidTensor(y.shape, Tensor.bool)
-    if void_x == void_y:
-        return [void_x]
-    shape_delta = len(void_x.shape) - len(void_y.shape)
+    symx = SymbolicTensor(x.shape, Tensor.bool)
+    symy = SymbolicTensor(y.shape, Tensor.bool)
+    if symx == symy:
+        return [symx]
+    shape_delta = len(symx.shape) - len(symy.shape)
     if shape_delta > 0:
-        void_y = VoidTensor((1,) * shape_delta + void_y.shape, Tensor.bool)
+        symy = SymbolicTensor((1,) * shape_delta + symy.shape, Tensor.bool)
     elif shape_delta < 0:
-        void_x = VoidTensor((1,) * -shape_delta + void_x.shape, Tensor.bool)
-    if void_x == void_y:
-        return [void_x]
+        symx = SymbolicTensor((1,) * -shape_delta + symx.shape, Tensor.bool)
+    if symx == symy:
+        return [symx]
     else:
-        shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
-        if void_x.shape != shape_ret:
-            void_x = VoidTensor(shape_ret, Tensor.bool)
-        if void_y.shape != shape_ret:
-            void_y = VoidTensor(shape_ret, Tensor.bool)
-        if void_x != void_y:
+        shape_ret = tuple([max(x, w) for x, w in zip(symx.shape, symy.shape)])
+        if symx.shape != shape_ret:
+            symx = SymbolicTensor(shape_ret, Tensor.bool)
+        if symy.shape != shape_ret:
+            symy = SymbolicTensor(shape_ret, Tensor.bool)
+        if symx != symy:
             raise TypeError
-        return [void_x]
+        return [symx]
 
 
 max = Operator.reduce("max")
@@ -373,7 +386,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(out.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.expand(x.void_tensor.shape)
+    out = out.expand(x.symtensor.shape)
 
 
 sum = Operator.reduce("sum")
@@ -396,7 +409,7 @@ def T(self, cotangents, x, *, dim, keepdim):
         dim = [a if a >= 0 else len(out.shape) + a + 1 for a in dim]
         for a in reversed(sorted(dim)):
             out = out.reshape(out.shape[:a] + (1,) + out.shape[a:])
-    out = out.expand(x.void_tensor.shape)
+    out = out.expand(x.symtensor.shape)
 
     return [out]
 
@@ -435,33 +448,33 @@ def jvp(self, primals, tangents, *, shape, dim=None):
 
 
 @expand.set_method
-def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
+def typecheck(self, x: SymbolicTensor, *, shape: Sequence[int]) -> List[SymbolicTensor]:
     original_shape = list(x.shape)
     assert len(original_shape) == len(shape)
     assert all((od == d) or (od < d and od == 1) for od, d in zip(original_shape, shape))
     # assert all(a <= b for a, b in zip(e_shape, shape))
-    return [VoidTensor(tuple(shape), x.dtype)]
+    return [SymbolicTensor(tuple(shape), x.dtype, x.device)]
 
 
 @expand.set_method
 def T(self, cotangents, x, *, shape):
     (z,) = cotangents
     out = z
-    if x.void_tensor.shape == out.shape:
+    if x.symtensor.shape == out.shape:
         return [out]
     else:
         b_dim = []
-        assert len(x.void_tensor.shape) == len(out.shape)
-        for i, (xd, od) in enumerate(zip(x.void_tensor.shape, out.shape)):
+        assert len(x.symtensor.shape) == len(out.shape)
+        for i, (xd, od) in enumerate(zip(x.symtensor.shape, out.shape)):
             if xd != od:
                 b_dim += [i]
         out = out.sum(dim=tuple(b_dim), keepdim=True)
-    if out.shape != x.void_tensor.shape:
-        raise ValueError(f"not same {out.shape=}, {x.void_tensor.shape=}")
+    if out.shape != x.symtensor.shape:
+        raise ValueError(f"not same {out.shape=}, {x.symtensor.shape=}")
     return [out]
 
 
-reshape = Operator.other("reshape", nary_inputs=True)
+reshape = Operator.other("reshape", variadic_inputs=True)
 operator_set.register(reshape)
 operator_set.alias(reshape, "view")
 
@@ -489,14 +502,14 @@ def jvp(self, primals, tangents, *, shape):
 
 
 @reshape.set_method
-def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
-    return [VoidTensor(tuple(shape), x.dtype)]
+def typecheck(self, x: SymbolicTensor, *, shape: Sequence[int]) -> List[SymbolicTensor]:
+    return [SymbolicTensor(tuple(shape), x.dtype, x.device)]
 
 
 @reshape.set_method
 def T(self, cotangents, x, *, shape):
     (z,) = cotangents
-    return [z.reshape(x.void_tensor.shape)]
+    return [z.reshape(x.symtensor.shape)]
 
 
 permute = Operator.other("permute")
@@ -522,9 +535,9 @@ def jvp(self, primals, tangents, *, perm):
 
 
 @permute.set_method
-def typecheck(self, x: VoidTensor, *, perm: Sequence[int]) -> List[VoidTensor]:
+def typecheck(self, x: SymbolicTensor, *, perm: Sequence[int]) -> List[SymbolicTensor]:
     shape = [x.shape[i] for i in perm]
-    return [VoidTensor(shape, x.dtype)]
+    return [SymbolicTensor(shape, x.dtype)]
 
 
 @permute.set_method
@@ -578,21 +591,23 @@ def jvp(self, primals, tangents, *, padding, mode, value):
 
 
 @pad.set_method
-def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
+def typecheck(self, x: SymbolicTensor, *, padding, mode, value) -> List[SymbolicTensor]:
     lo, hi = padding[0::2], padding[1::2]
     interior = [0] * (len(padding) // 2)
 
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
-    shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
+    shape = tuple(
+        sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape)
+    )
     if not all(d >= 0 for d in shape):
         raise ValueError(
             f"Dimension size after padding is not at least 0, "
             f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
             f"{shape=}"
         )
-    res = VoidTensor(shape, x.dtype)
+    res = SymbolicTensor(shape, x.dtype)
     return [res]
 
 
@@ -654,27 +669,30 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 
 
 @slice.set_method
-def typecheck(self, x: VoidTensor, *, starts, limits, strides=None) -> List[VoidTensor]:
+def typecheck(self, x: SymbolicTensor, *, starts, limits, strides=None) -> List[SymbolicTensor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
-            [limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)]
+            [
+                limit if type(start) is int and start == 0 else limit - start
+                for start, limit in list_zip(starts, limits)
+            ]
         )
-        return [VoidTensor(shape, x.dtype)]
+        return [SymbolicTensor(shape, x.dtype)]
     else:
         # TODO: compute strided shape without numpy
         x = np.zeros(x.shape)
         x = x[[slice_py(s, l, r) for s, l, r in list_zip(starts, limits, strides)]]
-        return [VoidTensor(x.shape, x.dtype)]
+        return [SymbolicTensor(x.shape, x.dtype)]
 
 
 @slice.set_method
 def T(self, cotangents, x, *, starts, limits, strides):
     # TODO: compute tuple arithmetic without numpy
     (z,) = cotangents
-    x_shape = x.void_tensor.shape
+    x_shape = x.symtensor.shape
     assert isinstance(x, UndefPrimal)
     if np.all(np.equal(strides, 1)):
-        lo, hi = (starts, tuple(np.subtract(x.void_tensor.shape, limits)))
+        lo, hi = (starts, tuple(np.subtract(x.symtensor.shape, limits)))
     else:
         real_limits = np.add(
             starts,
@@ -723,8 +741,8 @@ def jvp(self, primals, tangents, *, dim):
 
 
 @flip.set_method
-def typecheck(self, x: VoidTensor, *, dim):
-    return [VoidTensor(tuple(x.shape), x.dtype)]
+def typecheck(self, x: SymbolicTensor, *, dim):
+    return [SymbolicTensor(tuple(x.shape), x.dtype)]
 
 
 @flip.set_method
@@ -733,7 +751,7 @@ def T(self, cotangents, x, *, dim):
     return [z.flip(dim)]
 
 
-cat = Operator.other("cat", nary_inputs=True)
+cat = Operator.other("cat", variadic_inputs=True)
 operator_set.register(cat)
 operator_set.alias(cat, "cat")
 
@@ -757,7 +775,7 @@ def jvp(self, primals, tangents, *, dim=0):
 
 
 @cat.set_method
-def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
+def typecheck(self, *xs: SymbolicTensor, dim=0) -> List[SymbolicTensor]:
     if len(set(x.ndim for x in xs)) != 1:
         msg = "Cannot cat tensors with different numbers of dimensions: got {}."
         raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -776,13 +794,13 @@ def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
 
     concat_size = sum_py(x.shape[dim] for x in xs)
     ex_shape = xs[0].shape
-    return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
+    return [SymbolicTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
 
 
 @cat.set_method
 def T(self, cotangents, *xs, dim=0):
     (z,) = cotangents
-    x_shapes = [o.void_tensor.shape if type(o) is UndefPrimal else o.shape for o in xs]
+    x_shapes = [o.symtensor.shape if type(o) is UndefPrimal else o.shape for o in xs]
     if type(z) is None:
         return [None if type(o) is UndefPrimal else None for o in xs]
     else:  # TODO: replace numpy with pure Python
@@ -810,7 +828,14 @@ operator_set.register(full)
 
 
 @full.set_method
-def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
+def args_fixer(
+    self,
+    *,
+    shape,
+    fill_value,
+    dtype=slope.core.dtypes.float32,
+    device=slope.core.devices.cpu,
+):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
@@ -819,12 +844,12 @@ def args_fixer(self, *, shape, fill_value, dtype=Tensor.float32):
         fill_value = float(fill_value)
     elif "int" in dtype.name:
         fill_value = int(fill_value)
-    return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
+    return (), dict(shape=shape, fill_value=fill_value, dtype=dtype, device=device)
 
 
 @full.set_method
-def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
-    return [VoidTensor(tuple(shape), dtype)]
+def typecheck(self, *, shape, fill_value, dtype, device) -> List[SymbolicTensor]:
+    return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
 random_uniform = Operator.init("random_uniform")
@@ -834,17 +859,23 @@ operator_set.alias(random_uniform, "rand")
 
 
 @random_uniform.set_method
-def args_fixer(self, *, shape=None, dtype=Tensor.float32):
+def args_fixer(
+    self,
+    *,
+    shape=None,
+    dtype=slope.core.dtypes.float32,
+    device=slope.core.devices.cpu,
+):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
         shape = ()
-    return (), dict(shape=shape, dtype=dtype)
+    return (), dict(shape=shape, dtype=dtype, device=device)
 
 
 @random_uniform.set_method
-def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
-    return [VoidTensor(tuple(shape), dtype)]
+def typecheck(self, *, shape, dtype, device) -> List[SymbolicTensor]:
+    return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
 random_normal = Operator.init("random_normal")
@@ -854,17 +885,29 @@ operator_set.alias(random_normal, "randn")
 
 
 @random_normal.set_method
-def args_fixer(self, *, shape=None, dtype=Tensor.float32):
+def args_fixer(
+    self,
+    *,
+    shape=None,
+    dtype=slope.core.dtypes.float32,
+    device=slope.core.devices.cpu,
+):
     if isinstance(shape, int):
         shape = (shape,)
     elif shape is None:
         shape = ()
-    return (), dict(shape=shape, dtype=dtype)
+    return (), dict(shape=shape, dtype=dtype, device=device)
 
 
 @random_normal.set_method
-def typecheck(self, *, shape, dtype=Tensor.float32) -> List[VoidTensor]:
-    return [VoidTensor(tuple(shape), dtype)]
+def typecheck(
+    self,
+    *,
+    shape,
+    dtype=slope.core.dtypes.float32,
+    device=slope.core.devices.cpu,
+) -> List[SymbolicTensor]:
+    return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
 arange = Operator.init("arange")
@@ -882,8 +925,8 @@ def args_fixer(self, *, start, stop=None, stride=None, dtype=Tensor.int32):
 
 
 @arange.set_method
-def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
-    return [VoidTensor((stop - start,) * stride, dtype)]
+def typecheck(self, *, start, stop, stride, dtype) -> List[SymbolicTensor]:
+    return [SymbolicTensor((stop - start,) * stride, dtype)]
 
 
 # shape_ad = Operator.other("shape_ad")
@@ -906,8 +949,8 @@ def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
 
 #     return [None]
 # @shape_ad.set_method
-# def typecheck(self) -> List[VoidTensor]:
-#     return [VoidTensor( (1,)*self.ndim, slope.int32)]
+# def typecheck(self) -> List[SymbolicTensor]:
+#     return [SymbolicTensor( (1,)*self.ndim, slope.int32)]
 
 
 # --------------
@@ -919,7 +962,7 @@ compile_py = compile
 compiler = Compiler(name="numpy", default_dtype=slope.SLOPE_DTYPE)
 compiler.set_dtype_map(
     {
-        Tensor.float32: np.dtype("float32"),
+        slope.core.dtypes.float32: np.dtype("float32"),
         Tensor.int64: np.dtype("int64"),
         Tensor.int32: np.dtype("int32"),
         Tensor.int8: np.dtype("int8"),
@@ -967,7 +1010,9 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
     for i in range(num_consts):
         const_name = in_binders[i]["name"]
         const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
-        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
+        load_consts_code += (
+            f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
+        )
         np.save(const_path, in_binders[i]["type"].numpy())
     input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
     args_code = ", ".join(ib["name"] for ib in in_binders)
@@ -1054,9 +1099,9 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     body_code_lines = []
 
     for inb in program.in_binders:
-        prefix = "x" if type(inb.void_tensor) is VoidTensor else "c"
+        prefix = "x" if type(inb.symtensor) is SymbolicTensor else "c"
         idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.void_tensor)
+        backend[inb] = dict(name=f"{prefix}{idx}", type=inb.symtensor)
 
     for instruction in program.instructions:
         if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -1065,7 +1110,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         for outb in instruction.out_binders:
             prefix = "y" if outb in program.outs else "z"
             idx = sum_py([1 if v["name"][0] == prefix else 0 for v in backend.values()])
-            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.void_tensor)
+            backend[outb] = dict(name=f"{prefix}{idx}", type=outb.symtensor)
 
         out_vals = list_map(lambda z: backend[z]["name"], instruction.out_binders)
         if instruction.op.op_type is slope.core.OperatorType.Meta:
@@ -1082,7 +1127,8 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
                 raise NotImplementedError
         for np_dtype in self.dtype_map.values():  # fix dtype kwargs not having 'np.' prefix
             impl_code = impl_code.replace(
-                np_dtype.name, "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}"
+                np_dtype.name,
+                "bool" if np_dtype is np.dtype("bool") else f"np.{np_dtype.name}",
             )
 
         for impl_code_line in impl_code.split("\n"):  # handle multi-line code
@@ -1095,7 +1141,9 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # ]
     fn_args_str = ", ".join(arg_type_strs)
 
-    outs = list_map(lambda x: backend[x], program.outs)  # TODO: input that is output should has identity op
+    outs = list_map(
+        lambda x: backend[x], program.outs
+    )  # TODO: input that is output should has identity op
     out_type_strs = [o["name"] for o in outs]
     # out_type_asserts = [
     #     f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
@@ -1111,8 +1159,16 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         # functions_code_lines += fn_def_code_lines
         functions_code_lines += fn_def_code_lines
 
-    code_lines = head_code_lines + [indent(l, il1) for l in functions_code_lines] + body_code_lines + return_line
-    slope.dblog(f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n", enable=slope.LOG_JIT)
+    code_lines = (
+        head_code_lines
+        + [indent(l, il1) for l in functions_code_lines]
+        + body_code_lines
+        + return_line
+    )
+    slope.dblog(
+        f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n",
+        enable=slope.LOG_JIT,
+    )
 
     if fn_name == "main":
         del self.fn_count
@@ -1161,9 +1217,13 @@ compiler.set_impl(operator_set.random_normal)(
         f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
     )
 )
-compiler.set_impl(operator_set.expand)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
+compiler.set_impl(operator_set.expand)(
+    lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})"
+)
 
-compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
+compiler.set_impl(operator_set.reshape)(
+    lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})"
+)
 
 
 @compiler.set_impl(operator_set.pad)
@@ -1176,8 +1236,12 @@ compiler.set_impl(operator_set.slice)(
     lambda self, x, *, starts, limits, strides: f"ret = {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
 )
 
-compiler.set_impl(operator_set.cat)(lambda self, *xs, dim: f"ret = np.concatenate(({','.join(xs)}), axis={dim})")
-compiler.set_impl(operator_set.permute)(lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})")
+compiler.set_impl(operator_set.cat)(
+    lambda self, *xs, dim: f"ret = np.concatenate(({','.join(xs)}), axis={dim})"
+)
+compiler.set_impl(operator_set.permute)(
+    lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})"
+)
 compiler.set_impl(operator_set.flip)(lambda self, x, *, dim: f"ret = np.flip({x}, axis={dim})")
 
 
@@ -1334,23 +1398,31 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
-        0
-    ).expand(r, c)
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(
+        -k, c - k, **kwargs
+    ).unsqueeze(0).expand(r, c)
 
 
 @procedure_set.register()
 def triu(self, k: int = 0) -> Tensor:
-    return slope._tri(self.shape[-2], self.shape[-1], k=k, dtype=self.dtype, device=self.device).where(
-        self, slope.zeros_like(self)
-    )
+    return slope._tri(
+        self.shape[-2],
+        self.shape[-1],
+        k=k,
+        dtype=self.dtype,
+        device=self.device,
+    ).where(self, slope.zeros_like(self))
 
 
 @procedure_set.register()
 def tril(self, k: int = 0) -> Tensor:
-    return slope._tri(self.shape[-2], self.shape[-1], k=k + 1, dtype=self.dtype, device=self.device).where(
-        slope.zeros_like(self), self
-    )
+    return slope._tri(
+        self.shape[-2],
+        self.shape[-1],
+        k=k + 1,
+        dtype=self.dtype,
+        device=self.device,
+    ).where(slope.zeros_like(self), self)
 
 
 @procedure_set.register()
@@ -1420,7 +1492,9 @@ def getitem(self, val):
     for i, v in enumerate(orig_slices):
         count[type(v) if not isinstance(v, slope.core.Tensor) else "tensor"] += [i]
 
-    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(self.shape):
+    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(
+        self.shape
+    ):
         raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
@@ -1439,24 +1513,43 @@ def getitem(self, val):
     ]
 
     start, stop, strides = (
-        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
+        zip(*y)
+        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)])
+        else ((), (), ())
     )
-    new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
-    sliced_tensor = self.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
+    new_slice = tuple(
+        (s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides)
+    )
+    sliced_tensor = self.padslice(new_slice).flip(
+        dim=tuple([i for i, s in enumerate(strides) if s < 0])
+    )
     new_shape = sliced_tensor.shape
     if any(abs_py(s) != 1 for s in strides):
         strides = tuple(abs_py(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
-            tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))
+            tuple(
+                (0, s - (dim_sz % s) if dim_sz % s != 0 else 0)
+                for s, dim_sz in zip(strides, sliced_tensor.shape)
+            )
         )
         # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-        reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
+        reshaped_tensor = padded_tensor.reshape(
+            flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
+        )
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
+        sliced_tensor = reshaped_tensor.padslice(
+            tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
+        )
 
-    final_shape, it_shape, dim, tensors, dim_collapsed = [], iter(new_shape), [], [], 0
+    final_shape, it_shape, dim, tensors, dim_collapsed = (
+        [],
+        iter(new_shape),
+        [],
+        [],
+        0,
+    )
     for i, s in enumerate(orig_slices):
         if s is None:
             final_shape.append(1)
@@ -1478,8 +1571,15 @@ def getitem(self, val):
         # compute sum_dim, arange, and idx
         sum_dim = [d if n == 0 else d + max_dim - n for n, d in enumerate(dim)]
         slice_arange = [
-            slope.arange(ret.shape[d], dtype=slope.int32, requires_grad=False, device=self.device).reshape(
-                *[1] * sd, ret.shape[d], *[1] * (ret.ndim + max_dim - n - sd - 1)
+            slope.arange(
+                ret.shape[d],
+                dtype=slope.int32,
+                requires_grad=False,
+                device=self.device,
+            ).reshape(
+                *[1] * sd,
+                ret.shape[d],
+                *[1] * (ret.ndim + max_dim - n - sd - 1),
             )
             for n, (sd, d) in enumerate(zip(sum_dim, dim))
         ]
@@ -1501,14 +1601,22 @@ def getitem(self, val):
             for n, i in enumerate(idx[1:], 1)
         ]
         idx = first_idx + rest_idx
-        ret = ret.reshape(*ret.shape[: sum_dim[0] + 1], *[1] * max_dim, *ret.shape[sum_dim[0] + 1 :])
+        ret = ret.reshape(
+            *ret.shape[: sum_dim[0] + 1],
+            *[1] * max_dim,
+            *ret.shape[sum_dim[0] + 1 :],
+        )
         # iteratively fancy index
         for a, i, sd in zip(slice_arange, idx, sum_dim):
             ret = (a == i).mul(ret).sum(sd)
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret = ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
+            ret = ret.permute(
+                ret_dims[dim[0] : dim[0] + max_dim]
+                + ret_dims[: dim[0]]
+                + ret_dims[dim[0] + max_dim :]
+            )
     return ret
 
 
@@ -1521,7 +1629,9 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(flatten_seq(padding), value=value)  # flatten
-    starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
+    starts, limits, strides = tuple(
+        zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)])
+    )
     x = x.slice(starts, limits, strides)
     return x
 
@@ -1536,13 +1646,17 @@ def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
 @procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
+    assert all(
+        s >= i for s, i in zip(x.shape, idx.shape)
+    ), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
         dim += x.ndim
     idx = idx.transpose(ax=dim, aw=0).expand_dims(-1)
     permarg = list(range(x.ndim))
     permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
+        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
+        if dim != 0
+        else permarg[1:] + [permarg[0]]
     )
     return (
         (
@@ -1584,7 +1698,9 @@ def repeat(x, repeats):
 @procedure_set.register(static_argnames="dim")
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
-    slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
+    slice_params = [
+        [slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)
+    ]
     return tuple(x[tuple(sl)] for sl in slice_params)
 
 
@@ -1600,7 +1716,11 @@ def squeeze(x, dim=None):
         )
     if dim < 0:
         dim += x.ndim
-    return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
+    return (
+        x
+        if x.shape[dim] != 1
+        else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
+    )
 
 
 @procedure_set.register(static_argnames="dim")
@@ -1624,7 +1744,13 @@ def flatten(x, start_dim=0):
 
 @procedure_set.register(static_argnames="dim")
 def cumsum(x, dim: int = 0):
-    return x.transpose(dim, -1).pad((x.shape[dim] - 1, 0)).pool((x.shape[dim],)).sum(-1).transpose(dim, -1)
+    return (
+        x.transpose(dim, -1)
+        .pad((x.shape[dim] - 1, 0))
+        .pool((x.shape[dim],))
+        .sum(-1)
+        .transpose(dim, -1)
+    )
 
 
 @staticmethod

@@ -15,7 +15,7 @@ class Result(NamedTuple):
 
 class TestGrad(unittest.TestCase):
     @staticmethod
-    def run_ad_fns(f, *args, **kwargs):
+    def run_program(f, *args, **kwargs):
         args_dot = [slope.ones_like(x) for x in args]
         y, f_lin = slope.linearize(f, *args, **kwargs)
         y_dot = f_lin(*args_dot)

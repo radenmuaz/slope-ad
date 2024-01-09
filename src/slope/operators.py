@@ -10,14 +10,24 @@ from slope.core import (
     BinaryReduceOperator,
     OperatorSet,
     Tensor,
-    VoidTensor,
+    SymbolicTensor,
     UndefPrimal,
     list_zip,
 )
 
 import math
 import numpy as np
-from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
+from typing import (
+    Tuple,
+    List,
+    Dict,
+    Any,
+    Optional,
+    Sequence,
+    Union,
+    Iterator,
+    NamedTuple,
+)
 from collections import defaultdict
 import iree.compiler
 import iree.runtime
@@ -47,8 +57,8 @@ class StopGradient(UnaryOperator):
 
 @operator_set.register("cast", aliases=["astype"])
 class Cast(UnaryOperator):
-    def typecheck(self, x: VoidTensor, *, dtype) -> List[VoidTensor]:
-        return [VoidTensor(x.shape, dtype)]
+    def typecheck(self, x: SymbolicTensor, *, dtype) -> List[SymbolicTensor]:
+        return [SymbolicTensor(x.shape, dtype, x.device)]
 
     def jvp(self, primals, tangents, *, dtype):
         (x,), (x_dot,) = primals, tangents
@@ -108,7 +118,7 @@ class Log(UnaryOperator):
 @operator_set.register("invert")
 class Invert(UnaryOperator):
     def typecheck(self, x, **params):
-        return [VoidTensor(x.shape, slope.bool)]
+        return [SymbolicTensor(x.shape, slope.core.dtypes.bool, x.device)]
 
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -187,7 +197,10 @@ class Pow(BinaryOperator):
         if type(x) is UndefPrimal:
             return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), None]
         elif type(w) is UndefPrimal:
-            return [None, gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x)))]
+            return [
+                None,
+                gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))),
+            ]
 
 
 @operator_set.register("maximum")
@@ -210,41 +223,49 @@ class Maximuum(BinaryOperator):
 
 @operator_set.register("equal")
 class Equal(BinaryOperator):
-    def typecheck(self, x: VoidTensor, y: VoidTensor, **params) -> List[VoidTensor]:
+    def typecheck(self, x: SymbolicTensor, y: SymbolicTensor, **params) -> List[SymbolicTensor]:
         # difference with default binary typecheck: force dtype bool
-        if not type(x) in (Tensor, VoidTensor) or not type(x) in (
+        if not type(x) in (Tensor, SymbolicTensor) or not type(x) in (
             Tensor,
-            VoidTensor,
+            SymbolicTensor,
         ):
             raise TypeError
         if x.dtype != y.dtype:
             raise TypeError
-        void_x = VoidTensor.like(x)
-        void_y = VoidTensor.like(y)
-        if void_x == void_y:
-            return [VoidTensor(void_x.shape, Tensor.bool)]
-        shape_delta = len(void_x.shape) - len(void_y.shape)
+        symx = SymbolicTensor.like(x)
+        symy = SymbolicTensor.like(y)
+        if symx == symy:
+            return [SymbolicTensor(symx.shape, slope.core.dtypes.bool, x.device)]
+        shape_delta = len(symx.shape) - len(symy.shape)
         if shape_delta > 0:
-            void_y = VoidTensor((1,) * shape_delta + void_y.shape, Tensor.bool)
+            symy = SymbolicTensor(
+                (1,) * shape_delta + symy.shape,
+                slope.core.dtypes.bool,
+                x.device,
+            )
         elif shape_delta < 0:
-            x = x.reshape((1,) * -shape_delta + void_x.shape)
-            void_x = VoidTensor((1,) * -shape_delta + void_x.shape, Tensor.bool)
-        if void_x == void_y:
-            return [void_x]
+            x = x.reshape((1,) * -shape_delta + symx.shape)
+            symx = SymbolicTensor(
+                (1,) * -shape_delta + symx.shape,
+                slope.core.dtypes.bool,
+                x.device,
+            )
+        if symx == symy:
+            return [symx]
         else:
-            shape_ret = tuple([max(x, w) for x, w in zip(void_x.shape, void_y.shape)])
-            if void_x.shape != shape_ret:
-                void_x = VoidTensor(shape_ret, Tensor.bool)
-            if void_y.shape != shape_ret:
-                void_y = VoidTensor(shape_ret, Tensor.bool)
-            if void_x != void_y:
+            shape_ret = tuple([max(x, w) for x, w in zip(symx.shape, symy.shape)])
+            if symx.shape != shape_ret:
+                symx = SymbolicTensor(shape_ret, slope.core.dtypes.bool, x.device)
+            if symy.shape != shape_ret:
+                symy = SymbolicTensor(shape_ret, slope.core.dtypes.bool, x.device)
+            if symx != symy:
                 raise TypeError
-            return [void_x]
+            return [symx]
 
     def jvp(self, primals, tangents):
         (x, w), _ = primals, tangents
         out_primal = x.equal(w)
-        return [out_primal], [slope.full(out_primal.shape, True, Tensor.bool)]
+        return [out_primal], [slope.full(out_primal.shape, True, slope.core.dtypes.bool, x.device)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
@@ -278,7 +299,7 @@ class Max(ReduceOperator):
             dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
-        gL_x = gL_x.expand(x.voidval.shape)
+        gL_x = gL_x.expand(x.symval.shape)
 
 
 @operator_set.register("sum")
@@ -296,7 +317,7 @@ class Sum(ReduceOperator):
             dim = [a if a >= 0 else len(gL_x.shape) + a + 1 for a in dim]
             for a in reversed(sorted(dim)):
                 gL_x = gL_x.reshape(gL_x.shape[:a] + (1,) + gL_x.shape[a:])
-        gL_x = gL_x.expand(x.voidval.shape)
+        gL_x = gL_x.expand(x.symval.shape)
 
         return [gL_x]
 
@@ -320,11 +341,11 @@ class Expand(ShapeOperator):
             x = x.reshape((1,) * len(shape))
         return (x,), dict(shape=shape)
 
-    def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
+    def typecheck(self, x: SymbolicTensor, *, shape: Sequence[int]) -> List[SymbolicTensor]:
         shape = tuple(shape)
         assert len(x.shape) == len(shape)
         assert all(a <= b for a, b in zip(x.shape, shape))
-        return [VoidTensor(tuple(shape), x.dtype)]
+        return [SymbolicTensor(tuple(shape), x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, shape):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -341,21 +362,21 @@ class Expand(ShapeOperator):
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
         gL_x = gL_y
-        if x.voidval.shape == gL_x.shape:
+        if x.symval.shape == gL_x.shape:
             return [gL_x]
         else:
             b_dim = []
-            assert len(x.voidval.shape) == len(gL_x.shape)
-            for i, (xd, od) in enumerate(zip(x.voidval.shape, gL_x.shape)):
+            assert len(x.symval.shape) == len(gL_x.shape)
+            for i, (xd, od) in enumerate(zip(x.symval.shape, gL_x.shape)):
                 if xd != od:
                     b_dim += [i]
             gL_x = gL_x.sum(dim=tuple(b_dim), keepdim=True)
-        if gL_x.shape != x.voidval.shape:
-            raise ValueError(f"not same {gL_x.shape=}, {x.voidval.shape=}")
+        if gL_x.shape != x.symval.shape:
+            raise ValueError(f"not same {gL_x.shape=}, {x.symval.shape=}")
         return [gL_x]
 
 
-@operator_set.register("reshape", nary_inputs=True, aliases=["view"])
+@operator_set.register("reshape", variadic_inputs=True, aliases=["view"])
 class Reshape(ShapeOperator):
     def args_fixer(self, x, *args, **kwargs):
         if "shape" in kwargs.keys():
@@ -377,8 +398,8 @@ class Reshape(ShapeOperator):
         y = self(x, tuple(x.shape[:1] + shape))
         return [y], [x_bdim]
 
-    def typecheck(self, x: VoidTensor, *, shape: Sequence[int]) -> List[VoidTensor]:
-        return [VoidTensor(tuple(shape), x.dtype)]
+    def typecheck(self, x: SymbolicTensor, *, shape: Sequence[int]) -> List[SymbolicTensor]:
+        return [SymbolicTensor(tuple(shape), x.dtype, x.device)]
 
     def jvp(self, primals, tangents, *, shape):
         (x,), (x_dot,) = primals, tangents
@@ -386,14 +407,14 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (z,) = cotangents
-        return [z.reshape(x.voidval.shape)]
+        return [z.reshape(x.symval.shape)]
 
 
 @operator_set.register("permute")
 class Permute(ShapeOperator):
-    def typecheck(self, x: VoidTensor, *, perm: Sequence[int]) -> List[VoidTensor]:
+    def typecheck(self, x: SymbolicTensor, *, perm: Sequence[int]) -> List[SymbolicTensor]:
         shape = [x.shape[i] for i in perm]
-        return [VoidTensor(shape, x.dtype)]
+        return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, perm):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -426,7 +447,7 @@ class Pad(ShapeOperator):
         assert (x.ndim * 2) % len(padding) == 0
         return (x,), dict(padding=padding, mode=mode, value=value)
 
-    def typecheck(self, x: VoidTensor, *, padding, mode, value) -> List[VoidTensor]:
+    def typecheck(self, x: SymbolicTensor, *, padding, mode, value) -> List[SymbolicTensor]:
         padding = padding[::-1]
         lo, hi = padding[0::2], padding[1::2]
         interior = [0] * (len(padding) // 2)
@@ -434,14 +455,16 @@ class Pad(ShapeOperator):
         def _dilate_dim(d, dilation):
             return 0 if d == 0 else 1 + dilation * (d - 1)
 
-        shape = tuple(sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
+        shape = tuple(
+            sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape)
+        )
         if not all(d >= 0 for d in shape):
             raise ValueError(
                 f"Dimension size after padding is not at least 0, "
                 f"got result shape {res}, for {lo=} {hi=} {interior=} {value=}"
                 f"{shape=}"
             )
-        res = VoidTensor(shape, x.dtype)
+        res = SymbolicTensor(shape, x.dtype, x.device)
         return [res]
 
     def vmap(self, dim_size, vals_in, dims_in, *, padding, mode, value):
@@ -465,7 +488,11 @@ class Pad(ShapeOperator):
                 tuple(s - h for s, h in list_zip(z.shape, hi)),
                 tuple([1] * len(interior)),
             )
-            res = unpadded.slice(tuple([0] * len(lo)), unpadded.shape, tuple(r + 1 for r in interior))
+            res = unpadded.slice(
+                tuple([0] * len(lo)),
+                unpadded.shape,
+                tuple(r + 1 for r in interior),
+            )
         else:
             res = None
         return [res]
@@ -478,7 +505,7 @@ class Slice(ShapeOperator):
             strides = (1,) * len(starts)
         return (x,), dict(starts=starts, limits=limits, strides=strides)
 
-    def typecheck(self, x: VoidTensor, *, starts, limits, strides=None) -> List[VoidTensor]:
+    def typecheck(self, x: SymbolicTensor, *, starts, limits, strides=None) -> List[SymbolicTensor]:
         if strides is None or tuple(strides) == (1,) * len(x.shape):
             shape = tuple(
                 [
@@ -486,12 +513,12 @@ class Slice(ShapeOperator):
                     for start, limit in list_zip(starts, limits)
                 ]
             )
-            return [VoidTensor(shape, x.dtype)]
+            return [SymbolicTensor(shape, x.dtype, x.device)]
         else:
             # TODO: compute strided shape without numpy
             x = np.zeros(x.shape)
             x = x[tuple(slice(s, l, r) for s, l, r in list_zip(starts, limits, strides))]
-            return [VoidTensor(x.shape, x.dtype)]
+            return [SymbolicTensor(x.shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, starts, limits, strides):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -506,12 +533,12 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
         (z,) = cotangents
-        x_shape = x.voidval.shape
+        x_shape = x.symval.shape
         assert isinstance(x, UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
-                tuple(np.subtract(x.voidval.shape, limits)),
+                tuple(np.subtract(x.symval.shape, limits)),
                 (0,) * len(starts),
             )
         else:
@@ -525,7 +552,11 @@ class Slice(ShapeOperator):
                     )
                 ),
             )
-            lo, hi, interior = list_zip(starts, np.subtract(x_shape, real_limits), np.subtract(strides, 1))
+            lo, hi, interior = list_zip(
+                starts,
+                np.subtract(x_shape, real_limits),
+                np.subtract(strides, 1),
+            )
         padding = []
         for l, h in zip(reversed(lo), reversed(hi)):
             padding += [l, h]
@@ -546,8 +577,8 @@ class Flip(ShapeOperator):
             dim = tuple(dim)
         return (x,), dict(dim=dim)
 
-    def typecheck(self, x: VoidTensor, *, dim):
-        return [VoidTensor(tuple(x.shape), x.dtype)]
+    def typecheck(self, x: SymbolicTensor, *, dim):
+        return [SymbolicTensor(tuple(x.shape), x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
         (x,), (x_bdim,) = vals_in, dims_in
@@ -564,7 +595,7 @@ class Flip(ShapeOperator):
         return [z.flip(dim)]
 
 
-@operator_set.register("cat", nary_inputs=True, aliases=["concatenate"])
+@operator_set.register("cat", variadic_inputs=True, aliases=["concatenate"])
 class Cat(ShapeOperator):
     def args_fixer(self, *xs, dim=None):
         if type(xs) in (tuple, list) and type(xs[0]) in (tuple, list):
@@ -577,7 +608,9 @@ class Cat(ShapeOperator):
             dim = 0
         return xs, dict(dim=dim)
 
-    def typecheck(self, *xs: VoidTensor, dim=0) -> List[VoidTensor]:
+    def typecheck(self, *xs: SymbolicTensor, dim=0) -> List[SymbolicTensor]:
+        assert all(x.dtype == x[0].dtype for x in xs[1:])
+        assert all(x.device == x[0].device for x in xs[1:])
         if len(set(x.ndim for x in xs)) != 1:
             msg = "Cannot cat tensors with different numbers of dimensions: got {}."
             raise TypeError(msg.format(", ".join(str(o.shape) for o in xs)))
@@ -596,11 +629,20 @@ class Cat(ShapeOperator):
 
         concat_size = sum(x.shape[dim] for x in xs)
         ex_shape = xs[0].shape
-        return [VoidTensor(ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :], xs[0].dtype)]
+        return [
+            SymbolicTensor(
+                ex_shape[:dim] + (concat_size,) + ex_shape[dim + 1 :],
+                xs[0].dtype,
+                xs[0].device,
+            )
+        ]
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
         (*xs,), (*xs_bdim,) = vals_in, dims_in
-        xs = tuple(slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0) for x, x_bdim in zip(xs, xs_bdim))
+        xs = tuple(
+            slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+            for x, x_bdim in zip(xs, xs_bdim)
+        )
         y = self(xs, dim=dim + 1)
         return [y], [0]
 
@@ -609,7 +651,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (z,) = cotangents
-        x_shapes = [o.voidval.shape if type(o) is UndefPrimal else o.shape for o in xs]
+        x_shapes = [o.symval.shape if type(o) is UndefPrimal else o.shape for o in xs]
         if type(z) is None:
             return [None if type(o) is UndefPrimal else None for o in xs]
         else:  # TODO: replace numpy with pure Python
@@ -635,67 +677,93 @@ class Cat(ShapeOperator):
 
 @operator_set.register("full")
 class Full(InitOperator):
-    def args_fixer(self, *, shape, fill_value, dtype=None):
+    def args_fixer(self, *, shape, fill_value, dtype=None, device=None):
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
             shape = ()
         if dtype is None:
             dtype = slope.core.backend.DEFAULT_DTYPE
+        if device is None:
+            device = slope.core.backend.DEFAULT_DEVICE
         if "float" in dtype.name:
             fill_value = float(fill_value)
         elif "int" in dtype.name:
             fill_value = int(fill_value)
-        return (), dict(shape=shape, fill_value=fill_value, dtype=dtype)
+        return (), dict(shape=shape, fill_value=fill_value, dtype=dtype, device=device)
 
-    def typecheck(self, *, shape, fill_value, dtype) -> List[VoidTensor]:
-        return [VoidTensor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, fill_value, dtype, device) -> List[SymbolicTensor]:
+        return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
-@operator_set.register("random_uniform", aliases=["rand"])
+@operator_set.register("random_uniform", variadic_inputs=True, aliases=["rand"])
 class RandomUniform(InitOperator):
-    def args_fixer(self, *, shape, dtype=None):
+    def args_fixer(self, *args, **kwargs):
+        if "shape" in kwargs.keys():
+            shape = kwargs["shape"]
+        elif isinstance(args[0], (tuple, list)):
+            shape = args[0]
+        else:
+            shape = args
+        shape = tuple(shape)
+        dtype = kwargs.get("dtype", None)
+        device = kwargs.get("device", None)
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
             shape = ()
         if dtype is None:
             dtype = slope.core.backend.DEFAULT_DTYPE
-        return (), dict(shape=shape, dtype=dtype)
+        if device is None:
+            device = slope.core.backend.DEFAULT_DEVICE
+        return (), dict(shape=shape, dtype=dtype, device=device)
 
-    def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
-        return [VoidTensor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, dtype, device) -> List[SymbolicTensor]:
+        return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
-@operator_set.register("random_normal", aliases=["randn"])
+@operator_set.register("random_normal", variadic_inputs=True, aliases=["randn"])
 class RandomNormal(InitOperator):
-    def args_fixer(self, *, shape=None, dtype=None):
+    def args_fixer(self, *args, **kwargs):
+        if "shape" in kwargs.keys():
+            shape = kwargs["shape"]
+        elif isinstance(args[0], (tuple, list)):
+            shape = args[0]
+        else:
+            shape = args
+        shape = tuple(shape)
+        dtype = kwargs.get("dtype", None)
+        device = kwargs.get("device", None)
         if isinstance(shape, int):
             shape = (shape,)
         elif shape is None:
             shape = ()
         if dtype is None:
             dtype = slope.core.backend.DEFAULT_DTYPE
-        return (), dict(shape=shape, dtype=dtype)
+        if device is None:
+            device = slope.core.backend.DEFAULT_DEVICE
+        return (), dict(shape=shape, dtype=dtype, device=device)
 
-    def typecheck(self, *, shape, dtype) -> List[VoidTensor]:
-        return [VoidTensor(tuple(shape), dtype)]
+    def typecheck(self, *, shape, dtype, device) -> List[SymbolicTensor]:
+        return [SymbolicTensor(tuple(shape), dtype, device)]
 
 
 @operator_set.register("arange", aliases=["iota"])
 class Arange(InitOperator):
-    def args_fixer(self, *, start, stop=None, stride=None, dtype=None):
+    def args_fixer(self, *, start, stop=None, stride=None, dtype=None, device=None):
         if stop is None:
             stop = start
             start = 0
         if stride is None:
             stride = 1
         if dtype is None:
-            dtype = Tensor.int64
-        return (), dict(start=start, stop=stop, stride=stride, dtype=dtype)
+            dtype = slope.core.dtypes.int64
+        if device is None:
+            device = slope.core.backend.DEFAULT_DEVICE
+        return (), dict(start=start, stop=stop, stride=stride, dtype=dtype, device=device)
 
-    def typecheck(self, *, start, stop, stride, dtype) -> List[VoidTensor]:
-        return [VoidTensor((((stop - start) * stride),), dtype)]
+    def typecheck(self, *, start, stop, stride, dtype, device) -> List[SymbolicTensor]:
+        return [SymbolicTensor((((stop - start) * stride),), dtype, device)]
 
 
 # -------------------
@@ -729,8 +797,12 @@ class Matmul(BinaryReduceOperator):
                 shape = x.shape[:-1]
             else:
                 assert x.shape[-1] == w.shape[-2], f"{shapes_str}"
-                assert len(x.shape) == len(w.shape), f"Different ndim broadcasting not supported, {shapes_str}"
-                assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {shapes_str}"
+                assert len(x.shape) == len(
+                    w.shape
+                ), f"Different ndim broadcasting not supported, {shapes_str}"
+                assert (
+                    x.shape[:-2] == w.shape[:-2]
+                ), f"dim -1 broadcasting not supported, {shapes_str}"
                 shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
                 # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
@@ -739,7 +811,7 @@ class Matmul(BinaryReduceOperator):
                 # shape = (*bdim_shape, x.shape[-2], w.shape[-1])
         else:
             raise ValueError(f"Invalid dimensions for matmul, {shapes_str}")
-        return [VoidTensor(shape, x.dtype)]
+        return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
@@ -763,7 +835,9 @@ class Matmul(BinaryReduceOperator):
 @operator_set.register("conv")
 class Conv(BinaryReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-        assert x.ndim == w.ndim, "weight must be (N, C, *D), weight (O, I, *D) where D=(H, ...,  W, ...)"
+        assert (
+            x.ndim == w.ndim
+        ), "weight must be (N, C, *D), weight (O, I, *D) where D=(H, ...,  W, ...)"
         (bsz, cin_x), (cout, cin_w), D = x.shape[:2], w.shape[:2], w.shape[2:]
         assert groups * cin_x == cin_w, "input and weight input channel dim mismatch"
         if isinstance(padding, (tuple, list)):
@@ -780,7 +854,9 @@ class Conv(BinaryReduceOperator):
             stride = (stride,) * len(D)
         if isinstance(dilation, int):
             dilation = (dilation,) * len(D)
-        assert len(D) == len(stride) and len(D) == len(dilation), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
+        assert len(D) == len(stride) and len(D) == len(
+            dilation
+        ), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
@@ -793,7 +869,7 @@ class Conv(BinaryReduceOperator):
         bsz = x.shape[0]
         yc = w.shape[0]  # if x.ndim == w.ndim else 1]
         out_shape = (bsz, yc // groups, *tuple(s_dims))
-        return [VoidTensor(out_shape, x.dtype)]
+        return [SymbolicTensor(out_shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, _) = vals_in, dims_in
@@ -815,7 +891,13 @@ class Conv(BinaryReduceOperator):
         (x, w), (x_dot, w_dot) = primals, tangents
         y = x.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
         y_dot1 = x_dot.conv(w, groups=groups, stride=stride, dilation=dilation, padding=padding)
-        y_dot2 = x.conv(w_dot, groups=groups, stride=stride, dilation=dilation, padding=padding)
+        y_dot2 = x.conv(
+            w_dot,
+            groups=groups,
+            stride=stride,
+            dilation=dilation,
+            padding=padding,
+        )
 
         return [y], [y_dot1 + y_dot2]
 
@@ -842,7 +924,13 @@ class Conv(BinaryReduceOperator):
         elif type(w) is UndefPrimal:
             gL_w = (
                 x.transpose(0, 1)
-                .conv(gL_y.transpose(0, 1), groups=groups, stride=dilation, dilation=stride, padding=padding)
+                .conv(
+                    gL_y.transpose(0, 1),
+                    groups=groups,
+                    stride=dilation,
+                    dilation=stride,
+                    padding=padding,
+                )
                 .transpose(0, 1)
             )
             if gL_w.shape != w.shape:

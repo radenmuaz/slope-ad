@@ -1,5 +1,5 @@
 import slope
-from slope.core import Tensor, VoidTensor, TreeDef
+from slope.core import Tensor, SymbolicTensor, TreeDef
 from typing import Tuple, List, Optional
 
 import operator as operator_py
@@ -28,16 +28,20 @@ class Module:
         module_attrs = dict()
 
         for k, v in self.__dict__.items():
-            if isinstance(v, (Tensor, VoidTensor)):
+            if isinstance(v, (Tensor, SymbolicTensor)):
                 tensor_attrs[k] = None
             elif isinstance(v, (list, tuple)) and not isinstance(v, TreeDef):
                 v_flat, v_treedef = slope.tree_flatten(v)
-                if all(isinstance(vi, (Tensor, VoidTensor)) for vi in v_flat):
+                if all(isinstance(vi, (Tensor, SymbolicTensor)) for vi in v_flat):
                     tensor_attrs[k] = None
             elif isinstance(v, Module):
                 module_attrs[k] = None
 
-        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
+        static_dict = {
+            k: v
+            for k, v in self.__dict__.items()
+            if k not in tuple(tensor_attrs) + tuple(module_attrs)
+        }
         return dict(
             cls=self.__class__,
             tensor_attrs=tuple(tensor_attrs.keys()),
@@ -53,7 +57,7 @@ class Module:
         return attrs if with_name else tuple(attrs.values())
 
     def get_tensors(self, with_name=False):
-        return self.get_attrs((Tensor, VoidTensor), with_name)
+        return self.get_attrs((Tensor, SymbolicTensor), with_name)
 
     def get_modules(self, with_name=False):
         return self.get_attrs(Module, with_name)
@@ -81,7 +85,7 @@ class Module:
 
         def find(obj, prefix):
             nonlocal tensor_attrs, module_attrs
-            if isinstance(obj, (Tensor, VoidTensor)):
+            if isinstance(obj, (Tensor, SymbolicTensor)):
                 tensor_attrs.add(prefix.strip("."))
                 return
             if isinstance(obj, Module):
@@ -91,7 +95,11 @@ class Module:
                     find(v, f"{prefix}{str(k)}.")
 
         find(self, "")
-        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
+        static_dict = {
+            k: v
+            for k, v in self.__dict__.items()
+            if k not in tuple(tensor_attrs) + tuple(module_attrs)
+        }
         return dict(
             cls=self.__class__,
             tensor_attrs=tuple(tensor_attrs),
@@ -157,7 +165,9 @@ class Optimizer(Module):
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         # g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
-        step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
+        step_out, (leaf0, leaf0_treedef) = slope.tree_map(
+            self.step, params, *(g_params, *state_attrs), out_leaf=True
+        )
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
         params_out, state = step_out_T
         # params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
@@ -178,7 +188,14 @@ class GD(Optimizer):
 
 
 class SGD(Optimizer):
-    def __init__(self, params, lr=0.001, momentum: float = 0, weight_decay=0.0, nesterov=False):
+    def __init__(
+        self,
+        params,
+        lr=0.001,
+        momentum: float = 0,
+        weight_decay=0.0,
+        nesterov=False,
+    ):
         super().__init__(params, lr)
         self.hp.momentum = momentum
         self.hp.weight_decay = weight_decay
@@ -284,7 +301,9 @@ def variance_scaling(
             return slope.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
 
         else:
-            raise ValueError(f"invalid distribution for variance scaling initializer: {distribution}")
+            raise ValueError(
+                f"invalid distribution for variance scaling initializer: {distribution}"
+            )
 
     return init
 
@@ -376,8 +395,12 @@ class Embedding(Module):
 
     def __call__(self, idx: Tensor) -> Tensor:
         if not hasattr(self, "vocab_counter"):
-            self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
-        return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
+            self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(
+                1, 1, self.vocab_size
+            )
+        return (self.vocab_counter == idx.unsqueeze(2)).expand(
+            *idx.shape, self.vocab_size
+        ) @ self.weight
 
 
 class Linear(Module):
@@ -434,7 +457,8 @@ class ConvNd(Module):
         groups=1,
         bias=True,
         # W_init=glorot_normal(),
-        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
+        W_init=lambda shape: slope.randn(shape)
+        * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
         dims=2,
     ):
         self.in_channels = in_channels
@@ -449,7 +473,13 @@ class ConvNd(Module):
         self.bias = slope.zeros(out_channels) if bias else None
 
     def __call__(self, x):
-        return x.conv(self.weight, groups=self.groups, stride=self.stride, dilation=self.dilation, padding=self.padding)
+        return x.conv(
+            self.weight,
+            groups=self.groups,
+            stride=self.stride,
+            dilation=self.dilation,
+            padding=self.padding,
+        )
 
 
 class Conv1d(ConvNd):
@@ -466,7 +496,16 @@ class Conv1d(ConvNd):
         W_init=glorot_normal(),
     ):
         super().__init__(
-            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=1
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            W_init,
+            dims=1,
         )
 
 
@@ -484,7 +523,16 @@ class Conv2d(ConvNd):
         W_init=glorot_normal(),
     ):
         super().__init__(
-            in_channels, out_channels, kernel_size, stride, padding, dilation, groups, bias, W_init, dims=2
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            groups,
+            bias,
+            W_init,
+            dims=2,
         )
 
 
@@ -558,7 +606,9 @@ class BatchNorm(Module):
                 z_numel = math.prod(z.shape)
                 z_ratio = z_numel / (z_numel - z.shape[1]) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
-                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
+                self.running_var = (
+                    1 - self.momentum
+                ) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
                 # mean = self.running_mean
                 # invstd = (self.running_var + self.eps).rsqrt()
@@ -574,16 +624,24 @@ BatchNorm1d = BatchNorm2d = BatchNorm
 
 class LayerNorm(Module):
     def __init__(
-        self, normalized_shape: Union[int, Tuple[int, ...]], eps: float = 1e-5, elementwise_affine: bool = True
+        self,
+        normalized_shape: Union[int, Tuple[int, ...]],
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
     ):
-        self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+        self.normalized_shape = (
+            (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
+        )
         self.dim, self.eps, self.elementwise_affine = (
             tuple(-1 - i for i in range(len(self.normalized_shape))),
             eps,
             elementwise_affine,
         )
         self.weight, self.bias = (
-            (Tensor.ones(*self.normalized_shape), Tensor.zeros(*self.normalized_shape))
+            (
+                Tensor.ones(*self.normalized_shape),
+                Tensor.zeros(*self.normalized_shape),
+            )
             if elementwise_affine
             else (None, None)
         )

@@ -8,14 +8,24 @@ from slope.core import (
     ProcedureSet,
     Tensor,
     TensorBuffer,
-    VoidTensor,
+    SymbolicTensor,
     list_zip,
     list_map,
 )
 
 import math
 import numpy as np
-from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple
+from typing import (
+    Tuple,
+    List,
+    Dict,
+    Any,
+    Optional,
+    Sequence,
+    Union,
+    Iterator,
+    NamedTuple,
+)
 from collections import defaultdict
 import iree.compiler
 import iree.runtime
@@ -31,17 +41,19 @@ slice_py = slice
 compile_py = compile
 
 
-def as_mlir_shape(voidval):
-    xdtype = voidval.dtype.mlir
-    if len(voidval.shape) > 0:
-        xshape = f"{'x'.join((repr(i) for i in voidval.shape))}"
+def as_mlir_shape(symval):
+    xdtype = symval.dtype.mlir
+    if len(symval.shape) > 0:
+        xshape = f"{'x'.join((repr(i) for i in symval.shape))}"
         return f"tensor<{xshape}x{xdtype}>"
     else:
         return f"tensor<{xdtype}>"
 
 
-def as_mlir_sig(in_voidvals, out_voidval):
-    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_voidvals)}) -> {as_mlir_shape(out_voidval)}"
+def as_mlir_sig(in_symvals, out_symval):
+    typing_code = (
+        f" : ({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
+    )
     return typing_code
 
 
@@ -51,7 +63,7 @@ class IREEBackend(Backend):
         device = device or self.DEFAULT_DEVICE
         # device_type, device_id = device.split(":") if ":" in device else (device, 0)
         np_val = np.array(val, dtype=dtype.numpy)
-        iree_device = iree.runtime.get_device("local-task")
+        iree_device = iree.runtime.get_device(self.device_map[device])
         val = iree.runtime.asdevicearray(iree_device, np_val)
         return Tensor(TensorBuffer(val))
 
@@ -59,7 +71,7 @@ class IREEBackend(Backend):
         return tensor.buf.val.to_host()
 
     def device_of(self, tensor):
-        return tensor.buf.val._device
+        return self.device_map_inv[str(tensor.buf.val._device)]
 
     def shape_of(self, tensor):
         return tuple(tensor.buf.val.shape)
@@ -68,7 +80,6 @@ class IREEBackend(Backend):
         return self.dtype_map_inv[tensor.buf.val.dtype]
 
     def export(self, jit_object, output_path, *args, **kwargs):
-        raise NotImplementedError
         code = jit_object.code
         model = onnx.parser.parse_model(code)
         os.makedirs(output_path, exist_ok=True)
@@ -96,10 +107,12 @@ class IREEBackend(Backend):
             input_shape = in_binders[i]["type"].shape
             dtype = in_binders[i]["type"].dtype
             input_dtype = ("np." + dtype.numpy.__name__) if dtype is not Tensor.bool else "bool"
-            test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
+            test_input_code += (
+                f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
+            )
 
         module_path = os.path.join(output_path, "__init__.py")
-        module_code = f"""import onnxruntime
+        module_code = f"""import iree_runtime
     import os
     import numpy as np
 
@@ -173,9 +186,9 @@ class IREEBackend(Backend):
         body_code_lines = []
 
         for inb in program.in_binders:
-            prefix = "%x" if type(inb.voidval) is VoidTensor else "%c"
+            prefix = "%x" if type(inb.symval) is SymbolicTensor else "%c"
             idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-            env[inb] = dict(name=f"{prefix}{idx}", type=inb.voidval)
+            env[inb] = dict(name=f"{prefix}{idx}", type=inb.symval)
 
         for instruction in program.instructions:
             if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
@@ -184,28 +197,32 @@ class IREEBackend(Backend):
             for outb in instruction.out_binders:
                 prefix = "%y" if outb in program.outs else "%z"
                 idx = sum([1 if v["name"][0:2] == prefix else 0 for v in env.values()])
-                env[outb] = dict(name=f"{prefix}{idx}", type=outb.voidval)
+                env[outb] = dict(name=f"{prefix}{idx}", type=outb.symval)
 
             out_vals = list_map(lambda z: env[z], instruction.out_binders)
             if isinstance(instruction.op, MetaOperator):
-                impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
+                impl_code, fn_defs = self.impls[instruction.op](
+                    args, instruction, fn_defs, in_vals, out_vals
+                )
             else:
                 if instruction.op in self.impls.keys():
-                    impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
+                    impl_code = self.impls[instruction.op](
+                        *in_vals, *out_vals, **instruction.params
+                    )
                 else:
                     # No impl is defined, fallback to procedure
                     op = instruction.op
                     op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
                     op_procedure = getattr(self.procedure_set, op_name)
-                    voidvals_in = tuple(inp.voidval for inp in instruction.inputs)
+                    symvals_in = tuple(inp.symval for inp in instruction.inputs)
                     params = instruction.params
                     op_program, consts, _ = slope.core.make_program(
                         op_procedure,
-                        *voidvals_in,
+                        *symvals_in,
                         static_args=tuple(params.items()),
                         name=op.name,
                     )
-                    name = op.get_jit_name(tuple(voidvals_in), params)
+                    name = op.get_jit_name(tuple(symvals_in), params)
                     if name not in fn_defs.keys():
                         op_codegen_out = self.codegen(
                             op_program,
@@ -228,7 +245,9 @@ class IREEBackend(Backend):
         in_binders = list_map(lambda x: env[x], program.in_binders)
         fn_args_str = ", ".join([f"{i['name']}: {as_mlir_shape(i['type'])}" for i in in_binders])
 
-        outs = list_map(lambda x: env[x], program.outs)  # TODO: input that is output should has identity op
+        outs = list_map(
+            lambda x: env[x], program.outs
+        )  # TODO: input that is output should has identity op
         out_str = ", ".join([f"{o['name']}" for o in outs])
         out_type_str = ", ".join([f"{as_mlir_shape(o['type'])}" for o in outs])
 
@@ -248,20 +267,29 @@ class IREEBackend(Backend):
         if fn_name == "main":
             del self.fn_count
         assert len(outs) == len(program.outs)
-        return dict(code_lines=code_lines, fn_defs=fn_defs, in_binders=in_binders, outs=outs)
+        return dict(
+            code_lines=code_lines,
+            fn_defs=fn_defs,
+            in_binders=in_binders,
+            outs=outs,
+        )
 
 
 backend = IREEBackend(
     operator_set,
     procedure_set,
     {
-        Tensor.float32: np.dtypes.Float32DType(),
-        Tensor.uint8: np.dtypes.UInt8DType(),
-        Tensor.int8: np.dtypes.Int8DType(),
-        Tensor.bool: np.dtypes.BoolDType(),
-        Tensor.int32: np.dtypes.Int32DType(),
-        Tensor.int64: np.dtypes.Float64DType(),
-        Tensor.float16: np.dtypes.Float16DType(),
+        slope.core.dtypes.float32: np.dtypes.Float32DType(),
+        slope.core.dtypes.uint8: np.dtypes.UInt8DType(),
+        slope.core.dtypes.int8: np.dtypes.Int8DType(),
+        slope.core.dtypes.bool: np.dtypes.BoolDType(),
+        slope.core.dtypes.int32: np.dtypes.Int32DType(),
+        slope.core.dtypes.int64: np.dtypes.Float64DType(),
+        slope.core.dtypes.float16: np.dtypes.Float16DType(),
+    },
+    {
+        slope.core.devices.cpu: "local-task",
+        slope.core.devices.cuda0: "cuda:0",
     },
 )
 
@@ -302,7 +330,9 @@ def sqrt_impl(self, x, y):
 
 @backend.set_impl(backend.operator_set.exp)
 def exp_impl(self, x, y):
-    return f'{y["name"]} = "stablehlo.exponential"({x["name"]}) {as_mlir_sig((x["type"],), y["type"])}'
+    return (
+        f'{y["name"]} = "stablehlo.exponential"({x["name"]}) {as_mlir_sig((x["type"],), y["type"])}'
+    )
 
 
 @backend.set_impl(backend.operator_set.log)
@@ -327,23 +357,17 @@ def add_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.sub)
 def sub_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.subtract"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.subtract"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.mul)
 def mul_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.multiply"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.multiply"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.div)
 def div_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.divide"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.divide"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.pow)
@@ -362,9 +386,7 @@ def equal_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.maximum)
 def maximum_impl(self, x, w, y):
-    return (
-        f'{y["name"]} = "stablehlo.maximum"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
-    )
+    return f'{y["name"]} = "stablehlo.maximum"({x["name"]}, {w["name"]}) {as_mlir_sig((x["type"], w["type"]), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.matmul)
@@ -372,7 +394,11 @@ def matmul_impl(self, x, w, y):
     x_name, x_type = x["name"], x["type"]
     w_name, w_type = w["name"], w["type"]
     y_name, y_type = y["name"], y["type"]
-    x_bdims = [] if (w_type.ndim <= 2 or x_type.ndim == 1) else list(range(x_type.ndim - (2 if x_type.ndim > 2 else 1)))
+    x_bdims = (
+        []
+        if (w_type.ndim <= 2 or x_type.ndim == 1)
+        else list(range(x_type.ndim - (2 if x_type.ndim > 2 else 1)))
+    )
     w_bdims = [] if (w_type.ndim == 1 or x_type.ndim <= 2) else list(range(w_type.ndim - 2))
     x_cdim = 0 if x_type.ndim == 1 else x_type.ndim - 1
     w_cdim = 0 if w_type.ndim == 1 else w_type.ndim - 2
@@ -391,12 +417,16 @@ def matmul_impl(self, x, w, y):
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
     zero = "0." if "f" in y["type"].dtype.mlir else "0"
-    y_init_type = VoidTensor((), y["type"].dtype)
+    y_init_type = SymbolicTensor((), y["type"].dtype, y["type"].device)
     y_mlir_type = as_mlir_shape(y_init_type)
     y_out_type = (
         y["type"]
         if not keepdim
-        else VoidTensor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
+        else SymbolicTensor(
+            tuple(d for i, d in enumerate(y["type"].shape) if i not in dim),
+            y["type"].dtype,
+            y["type"].device,
+        )
     )
     return f"""
 {y["name"]}_init = stablehlo.constant dense<{zero}> : {as_mlir_shape(y_init_type)}
@@ -412,13 +442,21 @@ def sum_impl(self, x, y, *, dim, keepdim):
 
 @backend.set_impl(backend.operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
-    min_val = {Tensor.float32: "1.E-38", Tensor.int8: "-128", Tensor.int32: "-65536"}[x["type"].dtype]
-    y_init_type = VoidTensor((), y["type"].dtype)
+    min_val = {
+        slope.core.dtypes.float32: "1.E-38",
+        slope.core.dtypes.int8: "-128",
+        slope.core.dtypes.int32: "-65536",
+    }[x["type"].dtype]
+    y_init_type = SymbolicTensor((), y["type"].dtype, y["type"].device)
     y_mlir_type = as_mlir_shape(y_init_type)
     y_out_type = (
         y["type"]
         if not keepdim
-        else VoidTensor(tuple(d for i, d in enumerate(y["type"].shape) if i not in dim), y["type"].dtype)
+        else SymbolicTensor(
+            tuple(d for i, d in enumerate(y["type"].shape) if i not in dim),
+            y["type"].dtype,
+            y["type"].device,
+        )
     )
     return f"""
 {y["name"]}_init = stablehlo.constant dense<{min_val}> : {as_mlir_shape(y_init_type)}
@@ -434,27 +472,29 @@ def max_impl(self, x, y, *, dim, keepdim):
 
 
 @backend.set_impl(backend.operator_set.arange)
-def arange_impl(self, y, *, start, stop, stride, dtype):
+def arange_impl(self, y, *, start, stop, stride, dtype, device):
     return f'{y["name"]} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.full)
-def full_impl(self, y, *, shape, fill_value, dtype):
+def full_impl(self, y, *, shape, fill_value, dtype, device):
     fill_value = float(fill_value) if "f" in dtype.mlir else int(fill_value)
     fill_value = repr(fill_value)
-    fill_value = fill_value.replace("e", "E") if "." in fill_value else fill_value.replace("e", ".E")
+    fill_value = (
+        fill_value.replace("e", "E") if "." in fill_value else fill_value.replace("e", ".E")
+    )
     return f'{y["name"]} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {as_mlir_shape(y["type"])} }} {as_mlir_sig((), y["type"])}'
 
 
 @backend.set_impl(backend.operator_set.random_uniform)
-def random_uniform_impl(self, y, *, shape, dtype):
+def random_uniform_impl(self, y, *, shape, dtype, device):
     zero = "0." if "f" in y["type"].dtype.mlir else "0"
     one = "1." if "f" in y["type"].dtype.mlir else "1"
-    a_type = b_type = VoidTensor((), dtype)
+    a_type = b_type = SymbolicTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = VoidTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
-    y_out_type = y["type"] if not is_scalar else VoidTensor((1,), y["type"].dtype)
+    shape_type = SymbolicTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
+    y_out_type = y["type"] if not is_scalar else SymbolicTensor((1,), y["type"].dtype)
     return f"""{y["name"]}_a = stablehlo.constant dense<{zero}> : {as_mlir_shape(a_type)}
 {y["name"]}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 {y["name"]}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
@@ -464,14 +504,16 @@ def random_uniform_impl(self, y, *, shape, dtype):
 
 
 @backend.set_impl(backend.operator_set.random_normal)
-def random_normal_impl(self, y, *, shape, dtype):
+def random_normal_impl(self, y, *, shape, dtype, device):
     zero = "0." if "f" in y["type"].dtype.mlir else "0"
     one = "1." if "f" in y["type"].dtype.mlir else "1"
-    a_type = b_type = VoidTensor((), dtype)
+    a_type = b_type = SymbolicTensor((), dtype, device)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = VoidTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
-    y_out_type = y["type"] if not is_scalar else VoidTensor((1,), y["type"].dtype)
+    shape_type = SymbolicTensor((1,) if is_scalar else (len(shape),), slope.dtypes.int64, device)
+    y_out_type = (
+        y["type"] if not is_scalar else SymbolicTensor((1,), y["type"].dtype, y["type"].device)
+    )
     return f"""{y["name"]}_a = stablehlo.constant dense<{zero}> : {as_mlir_shape(a_type)}
 {y["name"]}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 {y["name"]}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
@@ -496,7 +538,7 @@ def reshape_impl(self, x, y, *, shape):
 @backend.set_impl(backend.operator_set.pad)
 def pad_impl(self, x, y, *, padding, mode, value):
     value = float(value) if "f" in x["type"].dtype.mlir else int(value)
-    value_type = VoidTensor((), x["type"].dtype)
+    value_type = SymbolicTensor((), x["type"].dtype, x["type"].device)
     lo = padding[0::2][::-1]
     hi = padding[1::2][::-1]
     return f"""{y["name"]}_value = stablehlo.constant dense<{value}> : {as_mlir_shape(value_type)}

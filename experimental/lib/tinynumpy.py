@@ -637,7 +637,7 @@ class Tensor(object):
         elif hasattr(self._data, "buffer_info"):  # Python's np.Tensor
             ptr = self._data.buffer_info()[0]
         elif isinstance(self._data, bytes):
-            ptr = ctypes.cast(self._data, ctypes.c_void_p).value
+            ptr = ctypes.cast(self._data, ctypes.c_symp).value
             readonly = True
         else:
             raise TypeError("Cannot get address to underlying Tensor data")
@@ -1266,7 +1266,7 @@ class Tensor(object):
         return out
 
     def astype(self, dtype):
-        out = empty(self.shape, dtype)
+        out = empty(self.shape, dtype, device)
         out[:] = self
 
     def view(self, dtype=None, type=None):

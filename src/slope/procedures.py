@@ -2,6 +2,7 @@ import slope
 from slope.core import (
     ProcedureSet,
     Tensor,
+    dtypes
 )
 import math
 import numpy as np
@@ -526,7 +527,7 @@ def arange_with_cumsum(start, stop=None, step=1):
 
 
 @procedure_set.register()
-def one_hot(x, k, dtype=slope.core.dtypes.int32):
+def one_hot(x, k, dtype=dtypes.int32):
     return (x[:, None].cast(dtype) == slope.arange(k, dtype=dtype)).cast(dtype)
 
 

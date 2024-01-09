@@ -1386,7 +1386,7 @@ class VMapTraceTensor(TraceTensor):
         else:
             shape = list(symval.shape)
             del shape[self.vmap_dim]
-            return SymbolicTensor(tuple(shape), symval.dtype)
+            return SymbolicTensor(tuple(shape), symval.dtype,  symval.device)
 
     def full_lower(self):
         if self.vmap_dim is None:
@@ -2019,6 +2019,10 @@ def jvp_flat(f, primals, tangents, *, has_aux, global_data, **static_args):
 def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args):
     primals_flat, in_tree = tree_flatten(primals)
     tangents_flat, in_tree2 = tree_flatten(tangents)
+    for p, t in zip(primals_flat, tangents_flat):
+        assert p.shape == t.shape, f"{p.shape=} != {t.shape=}"
+        assert p.dtype == t.dtype, f"{p.dtype=} != {t.dtype=}"
+        assert p.device == t.device, f"{p.device=} != {t.device=}"
     if in_tree != in_tree2:
         raise TypeError
     f, out_tree_store = flatten_fn(f, in_tree, has_aux=has_aux)
@@ -2076,7 +2080,7 @@ def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any
         else:
             shape = list(symval.shape)
             shape.insert(batch_dim, axis_size)
-            return SymbolicTensor(tuple(shape), symval.dtype)
+            return SymbolicTensor(tuple(shape), symval.dtype, symval.device)
 
     vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
     in_symvals = [

@@ -11,6 +11,8 @@ from slope.core import (
     SymbolicTensor,
     list_zip,
     list_map,
+    dtypes,
+    devices
 )
 
 import math
@@ -279,17 +281,17 @@ backend = IREEBackend(
     operator_set,
     procedure_set,
     {
-        slope.core.dtypes.float32: np.dtypes.Float32DType(),
-        slope.core.dtypes.uint8: np.dtypes.UInt8DType(),
-        slope.core.dtypes.int8: np.dtypes.Int8DType(),
-        slope.core.dtypes.bool: np.dtypes.BoolDType(),
-        slope.core.dtypes.int32: np.dtypes.Int32DType(),
-        slope.core.dtypes.int64: np.dtypes.Float64DType(),
-        slope.core.dtypes.float16: np.dtypes.Float16DType(),
+        dtypes.float32: np.dtypes.Float32DType(),
+        dtypes.uint8: np.dtypes.UInt8DType(),
+        dtypes.int8: np.dtypes.Int8DType(),
+        dtypes.bool: np.dtypes.BoolDType(),
+        dtypes.int32: np.dtypes.Int32DType(),
+        dtypes.int64: np.dtypes.Float64DType(),
+        dtypes.float16: np.dtypes.Float16DType(),
     },
     {
-        slope.core.devices.cpu: "local-task",
-        slope.core.devices.cuda0: "cuda:0",
+        devices.cpu: "local-task",
+        devices.cuda0: "cuda:0",
     },
 )
 
@@ -443,9 +445,9 @@ def sum_impl(self, x, y, *, dim, keepdim):
 @backend.set_impl(backend.operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
     min_val = {
-        slope.core.dtypes.float32: "1.E-38",
-        slope.core.dtypes.int8: "-128",
-        slope.core.dtypes.int32: "-65536",
+        dtypes.float32: "1.E-38",
+        dtypes.int8: "-128",
+        dtypes.int32: "-65536",
     }[x["type"].dtype]
     y_init_type = SymbolicTensor((), y["type"].dtype, y["type"].device)
     y_mlir_type = as_mlir_shape(y_init_type)

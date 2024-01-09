@@ -2043,10 +2043,10 @@ def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args)
     return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
 
-# def jacfwd(f, x):
-#     pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-#     vecs_in = eye(math.prod(x.shape)).reshape(x.shape * 2)
-#     return vmap(pushfwd, (0,))(vecs_in)
+def jacfwd(f, x):
+    pushfwd = lambda v: jvp(f, (x,), (v,))[1]
+    vecs_in = backend.eye(math.prod(x.shape)).reshape(x.shape * 2)
+    return vmap(pushfwd, (0,))(vecs_in)
 
 
 @lru_cache_verbose()

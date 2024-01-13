@@ -274,7 +274,7 @@ backend = IREEBackend(
         dtypes.int8: np.dtypes.Int8DType(),
         dtypes.bool: np.dtypes.BoolDType(),
         dtypes.int32: np.dtypes.Int32DType(),
-        dtypes.int64: np.dtypes.Float64DType(),
+        dtypes.int64: np.dtypes.Int64DType(),
         dtypes.float16: np.dtypes.Float16DType(),
     },
     {
@@ -594,13 +594,14 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 """
 
 
-
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
-    offset_dims = list(range(batch_dims+1, w.symval.ndim))
-    lim = batch_dims + (len(w.symval.shape[batch_dims+1:])) - len(x.symval.shape[:batch_dims+1])
+    offset_dims = list(range(batch_dims + 1, w.symval.ndim))
+    lim = (
+        batch_dims + (len(w.symval.shape[batch_dims + 1 :])) - len(x.symval.shape[: batch_dims + 1])
+    )
     lim = None if lim == 0 else lim
-    slice_sizes = [1]+list(x.symval.shape[(batch_dims+1):lim])
+    slice_sizes = [1] + list(x.symval.shape[(batch_dims + 1) : lim])
     return f"""%{y.name} = "stablehlo.gather"(%{x.name}, %{w.name}) {{
   dimension_numbers = #stablehlo.gather<
     offset_dims = {offset_dims},
@@ -608,6 +609,6 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     start_index_map = [0],
     index_vector_dim = {batch_dims+1}>,
   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
-  indices_are_sorted = false
+  indices_are_sorted = true
 }} {as_mlir_sig((x.symval, w.symval), y.symval)}
 """

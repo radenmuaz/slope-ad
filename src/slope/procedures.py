@@ -388,13 +388,14 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     x = x.slice(starts, limits, strides)
     return x
 
+
 # @procedure_set.register()
 # def padslice(x, pads: Sequence[Optional[Tuple[int, int]]], value: float = 0):
 #     pads = tuple(a if a is not None else (0, s) for s, a in zip(x.shape, pads))
 #     pads1 = tuple((max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(pads))
 #     pads2 = tuple(item for sublist in pads1 for item in sublist)[::-1]
 #     x = x.pad(pads1, value=value)  # flatten
-    
+
 #     starts, limits, strides = tuple(
 #         zip(*[(p[0] + p1[0], p[1] + p1[0], 1) for (p, p1) in zip(pads, pads1)])
 #     )
@@ -403,6 +404,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
 #     # starts, limits, strides = tuple(
 #         # zip(*[(p[0] + p_[i][0], p[1] + p_[i][0], 1) for i, p in enumerate(arg)])
 #     # )
+
 
 @procedure_set.register()
 def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
@@ -496,6 +498,7 @@ def unsqueeze(x, dim) -> Tensor:
     if dim < 0:
         dim = len(x.shape) + dim + 1
     return x.reshape(x.shape[:dim] + (1,) + x.shape[dim:])
+
 
 @procedure_set.register()
 def transpose(x, ax=1, aw=0):

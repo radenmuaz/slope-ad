@@ -1,7 +1,8 @@
 import slope
 
-x = slope.arange(10).reshape(2,5)
-w = slope.tensor([2,3], dtype=slope.int32)[..., None]
+x = slope.arange(10, dtype=slope.float32).reshape(2,5)
+w = slope.tensor([1,0])[..., None]
+w = w.cast(slope.int64)
 y = x.gather_nd(w)
 
 print(f"{x=}")

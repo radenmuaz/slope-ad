@@ -941,6 +941,7 @@ class Conv(GeneralReduceOperator):
             assert gL_w.shape == w.shape
             return [None, gL_w]
 
+
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(
@@ -972,6 +973,7 @@ def gather(x, idx, dim: int):
         .sum(-1)
         .transpose(0, dim)
     )
+
 
 # @operator_set.register("gather")
 # class Gather(GeneralReduceOperator):
@@ -1008,19 +1010,20 @@ def gather(x, idx, dim: int):
 
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
-    def args_fixer(self, x, w, *, batch_dims: int=0):
-        return (x,w), dict(batch_dims=batch_dims)
+    def args_fixer(self, x, w, *, batch_dims: int = 0):
+        return (x, w), dict(batch_dims=batch_dims)
+
     def typecheck(self, x, w, *, batch_dims: int):
         assert x.ndim > 0 and w.ndim > 0
         assert x.shape[:batch_dims] == w.shape[:batch_dims]
         assert batch_dims < min(x.ndim, w.ndim)
         # for i in range(x.ndim):
         #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
-        assert 1<=w.shape[-1] <= x.ndim - batch_dims
-        bszs = w.shape[:batch_dims+1]
-        lim = batch_dims + (len(w.shape[batch_dims+1:])) - len(x.shape[:batch_dims+1])
+        assert 1 <= w.shape[-1] <= x.ndim - batch_dims
+        bszs = w.shape[: batch_dims + 1]
+        lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
         lim = None if lim == 0 else lim
-        slice_sizes = x.shape[(batch_dims+1):lim]
+        slice_sizes = x.shape[(batch_dims + 1) : lim]
         if w.shape[-1] == w.ndim - batch_dims:
             slice_sizes = ()
 
@@ -1047,10 +1050,7 @@ class GatherND(GeneralReduceOperator):
             return [None, x.transpose(-1, -2) @ gL_y]
 
 
-
-def _gather_shape_rule(
-    x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map
-):
+def _gather_shape_rule(x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map):
     index_vector_dim = w.ndim - 1
     output_offset_ndim = len(offset_dims)
     output_shape_ndim = output_offset_ndim + w.ndim - 1
@@ -1063,9 +1063,7 @@ def _gather_shape_rule(
     for i in range(output_offset_ndim):
         assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
     for i in range(len(start_index_map)):
-        assert not (
-            (start_index_map[i] < 0 or start_index_map[i] >= x.ndim)
-        )
+        assert not ((start_index_map[i] < 0 or start_index_map[i] >= x.ndim))
 
     for i in range(len(slice_sizes)):
         slice_size = slice_sizes[i]
@@ -1082,14 +1080,15 @@ def _gather_shape_rule(
     indices_shape = iter(indices_shape)
 
     slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
-    return SymbolicTensor(tuple(
-        next(slice_sizes) if i in offset_dims else next(indices_shape)
-        for i in range(output_shape_ndim)
-    ), )
+    return SymbolicTensor(
+        tuple(
+            next(slice_sizes) if i in offset_dims else next(indices_shape)
+            for i in range(output_shape_ndim)
+        ),
+    )
 
-def _gather_shape_rule(
-    x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map
-):
+
+def _gather_shape_rule(x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map):
     index_vector_dim = w.ndim - 1
     output_offset_ndim = len(offset_dims)
     output_shape_ndim = output_offset_ndim + w.ndim - 1
@@ -1102,9 +1101,7 @@ def _gather_shape_rule(
     for i in range(output_offset_ndim):
         assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
     for i in range(len(start_index_map)):
-        assert not (
-            (start_index_map[i] < 0 or start_index_map[i] >= x.ndim)
-        )
+        assert not ((start_index_map[i] < 0 or start_index_map[i] >= x.ndim))
 
     for i in range(len(slice_sizes)):
         slice_size = slice_sizes[i]
@@ -1121,7 +1118,9 @@ def _gather_shape_rule(
     indices_shape = iter(indices_shape)
 
     slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
-    return SymbolicTensor(tuple(
-        next(slice_sizes) if i in offset_dims else next(indices_shape)
-        for i in range(output_shape_ndim)
-    ), )
+    return SymbolicTensor(
+        tuple(
+            next(slice_sizes) if i in offset_dims else next(indices_shape)
+            for i in range(output_shape_ndim)
+        ),
+    )

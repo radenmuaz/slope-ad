@@ -1050,77 +1050,45 @@ class GatherND(GeneralReduceOperator):
             return [None, x.transpose(-1, -2) @ gL_y]
 
 
-def _gather_shape_rule(x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map):
-    index_vector_dim = w.ndim - 1
-    output_offset_ndim = len(offset_dims)
-    output_shape_ndim = output_offset_ndim + w.ndim - 1
 
-    assert w.ndim < index_vector_dim or index_vector_dim < 0
-    assert x.ndim == len(slice_sizes)
-    assert len(slice_sizes) == offset_dims.ndim + collapsed_slice_dims.ndim
-    assert len(start_index_map) == w.shape[index_vector_dim]
+@operator_set.register("scatter_nd")
+class ScatterND(GeneralReduceOperator):
+    def args_fixer(self, x, w, u, *, batch_dims: int = 0):
+        return (x, w, u), dict(batch_dims=batch_dims)
 
-    for i in range(output_offset_ndim):
-        assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
-    for i in range(len(start_index_map)):
-        assert not ((start_index_map[i] < 0 or start_index_map[i] >= x.ndim))
+    def typecheck(self, x, w, u, *, batch_dims: int):
+        assert x.ndim > 0 and w.ndim > 0
+        assert x.shape[:batch_dims] == w.shape[:batch_dims]
+        assert batch_dims < min(x.ndim, w.ndim)
+        # for i in range(x.ndim):
+        #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
+        assert 1 <= w.shape[-1] <= x.ndim - batch_dims
+        bszs = w.shape[: batch_dims + 1]
+        lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
+        lim = None if lim == 0 else lim
+        slice_sizes = x.shape[(batch_dims + 1) : lim]
+        if w.shape[-1] == w.ndim - batch_dims:
+            slice_sizes = ()
 
-    for i in range(len(slice_sizes)):
-        slice_size = slice_sizes[i]
-        corresponding_input_size = x.shape[i]
-        assert (slice_size > 0) and all(corresponding_input_size > s for s in slice_size)
+        shape = (*bszs, *slice_sizes)
+        assert len(shape) == (w.ndim + x.ndim - w.shape[-1] - 1 - batch_dims)
+        return [SymbolicTensor(shape, x.dtype, x.device)]
 
-    for i in range(len(collapsed_slice_dims)):
-        assert slice_sizes[collapsed_slice_dims[i]] == 1
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        return [self(x, w, **params)], [x_bdim, w_bdim]
 
-    indices_shape = list(w.shape)
-    if len(indices_shape) == index_vector_dim:
-        indices_shape += [1]
-    indices_shape.pop(index_vector_dim)
-    indices_shape = iter(indices_shape)
+    def jvp(self, primals, tangents):
+        (x, w), (x_dot, w_dot) = primals, tangents
+        return [x @ w], [(x_dot @ w) + (x @ w_dot)]
 
-    slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
-    return SymbolicTensor(
-        tuple(
-            next(slice_sizes) if i in offset_dims else next(indices_shape)
-            for i in range(output_shape_ndim)
-        ),
-    )
+    def T(self, cotangents, x, w):
+        (gL_y,) = cotangents
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+        if type(x) is UndefPrimal:
+            return [gL_y @ w.transpose(-1, -2), None]
+        elif type(w) is UndefPrimal:
+            return [None, x.transpose(-1, -2) @ gL_y]
 
-
-def _gather_shape_rule(x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map):
-    index_vector_dim = w.ndim - 1
-    output_offset_ndim = len(offset_dims)
-    output_shape_ndim = output_offset_ndim + w.ndim - 1
-
-    assert w.ndim < index_vector_dim or index_vector_dim < 0
-    assert x.ndim == len(slice_sizes)
-    assert len(slice_sizes) == offset_dims.ndim + collapsed_slice_dims.ndim
-    assert len(start_index_map) == w.shape[index_vector_dim]
-
-    for i in range(output_offset_ndim):
-        assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
-    for i in range(len(start_index_map)):
-        assert not ((start_index_map[i] < 0 or start_index_map[i] >= x.ndim))
-
-    for i in range(len(slice_sizes)):
-        slice_size = slice_sizes[i]
-        corresponding_input_size = x.shape[i]
-        assert (slice_size > 0) and all(corresponding_input_size > s for s in slice_size)
-
-    for i in range(len(collapsed_slice_dims)):
-        assert slice_sizes[collapsed_slice_dims[i]] == 1
-
-    indices_shape = list(w.shape)
-    if len(indices_shape) == index_vector_dim:
-        indices_shape += [1]
-    indices_shape.pop(index_vector_dim)
-    indices_shape = iter(indices_shape)
-
-    slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
-    return SymbolicTensor(
-        tuple(
-            next(slice_sizes) if i in offset_dims else next(indices_shape)
-            for i in range(output_shape_ndim)
-        ),
-    )

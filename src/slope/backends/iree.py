@@ -609,6 +609,34 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     start_index_map = [0],
     index_vector_dim = {batch_dims+1}>,
   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
-  indices_are_sorted = true
+  indices_are_sorted = false
+}} {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
+
+
+@backend.set_impl(backend.operator_set.scatter_nd)
+def scatter_nd_impl(self, x, w, u, y, *, batch_dims):
+    y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
+    y_mlir_type = as_mlir_shape(y_init_type)
+    zero = "0." if "f" in y.symval.dtype.mlir else "0"
+
+    update_window_dims = list(range(batch_dims + 1, w.symval.ndim))
+    lim = (
+        batch_dims + (len(w.symval.shape[batch_dims + 1 :])) - len(x.symval.shape[: batch_dims + 1])
+    )
+    lim = None if lim == 0 else lim
+    slice_sizes = [1] + list(x.symval.shape[(batch_dims + 1) : lim])
+    return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
+    ^bb0(%arg0: t{y_mlir_type}, %arg1: {y_mlir_type}):
+    %0 = "stablehlo.add"(%arg0, %arg1) : {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
+    "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
+}}) {{
+  scatter_dimension_numbers = #stablehlo.scatter<
+    update_window_dims = {update_window_dims},
+    inserted_window_dims = [0],
+    scatter_dims_to_operand_dims = [0],
+    index_vector_dim = {batch_dims+1}>,
+  indices_are_sorted = false,
+  unique_indices = false
 }} {as_mlir_sig((x.symval, w.symval), y.symval)}
 """

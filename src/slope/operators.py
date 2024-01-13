@@ -7,7 +7,7 @@ from slope.core import (
     ReduceOperator,
     ShapeOperator,
     InitOperator,
-    BinaryReduceOperator,
+    GeneralReduceOperator,
     OperatorSet,
     Tensor,
     SymbolicTensor,
@@ -773,7 +773,7 @@ class Arange(InitOperator):
 
 
 @operator_set.register("matmul")
-class Matmul(BinaryReduceOperator):
+class Matmul(GeneralReduceOperator):
     def typecheck(self, x, w):
         shapes_str = f"{x.shape=}, {w.shape=}"
         assert x.dtype == w.dtype
@@ -834,7 +834,7 @@ class Matmul(BinaryReduceOperator):
 
 
 @operator_set.register("conv")
-class Conv(BinaryReduceOperator):
+class Conv(GeneralReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
         assert (
             x.ndim == w.ndim
@@ -940,3 +940,188 @@ class Conv(BinaryReduceOperator):
                 gL_w = gL_w.slice(starts, ends)
             assert gL_w.shape == w.shape
             return [None, gL_w]
+
+def gather(x, idx, dim: int):
+    assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
+    assert all(
+        s >= i for s, i in zip(x.shape, idx.shape)
+    ), "all dim of idx.shape must be smaller than x.shape"
+    if dim < 0:
+        dim += x.ndim
+    idx = idx.transpose(ax=dim, aw=0).unsqueeze(-1)
+    permarg = list(range(x.ndim))
+    permarg = (
+        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
+        if dim != 0
+        else permarg[1:] + [permarg[0]]
+    )
+    return (
+        (
+            (
+                idx
+                == slope.arange(
+                    x.shape[dim],
+                    dtype=slope.int32,
+                    device=x.device,
+                )
+            )
+            * x.permute(*permarg)
+            .padslice(tuple(*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])))
+            .unsqueeze(0)
+        )
+        .sum(-1)
+        .transpose(0, dim)
+    )
+
+# @operator_set.register("gather")
+# class Gather(GeneralReduceOperator):
+#     def typecheck(self, x, w, *, batch_dims: int):
+#         assert x.shape[:batch_dims] == w.shape[:batch_dims]
+#         assert batch_dims < min(x.ndim, w.ndim)
+#         assert  1 <= w.shape[-1] <= (x.ndim - w.ndim)
+#         for i in range(x.ndim):
+#             assert -x.shape[i] <= w[...,i] <= x.shape[i] - 1
+
+#         shape = tuple()
+#         assert len(shape) == w.ndim + (x.ndim -1)
+#         assert len(shape) == (x.ndim + w.ndim - w.shape[-1] - 1 - batch_dims)
+#         return [SymbolicTensor(shape, x.dtype, x.device)]
+
+#     def vmap(self, dim_size, vals_in, dims_in, **params):
+#         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+#         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+#         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+#         return [self(x, w, **params)], [x_bdim, w_bdim]
+
+#     def jvp(self, primals, tangents):
+#         (x, w), (x_dot, w_dot) = primals, tangents
+#         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
+
+#     def T(self, cotangents, x, w):
+#         (gL_y,) = cotangents
+#         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+#         if type(x) is UndefPrimal:
+#             return [gL_y @ w.transpose(-1, -2), None]
+#         elif type(w) is UndefPrimal:
+#             return [None, x.transpose(-1, -2) @ gL_y]
+
+
+@operator_set.register("gather_nd")
+class GatherND(GeneralReduceOperator):
+    def args_fixer(self, x, w, *, batch_dims: int=0):
+        return (x,w), dict(batch_dims=batch_dims)
+    def typecheck(self, x, w, *, batch_dims: int):
+        assert x.ndim > 0 and w.ndim > 0
+        assert x.shape[:batch_dims] == w.shape[:batch_dims]
+        assert batch_dims < min(x.ndim, w.ndim)
+        # for i in range(x.ndim):
+        #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
+        assert 1<=w.shape[-1] <= x.ndim - batch_dims
+        bszs = w.shape[:batch_dims+1]
+        lim = batch_dims + (len(w.shape[batch_dims+1:])) - len(x.shape[:batch_dims+1])
+        lim = None if lim == 0 else lim
+        slice_sizes = x.shape[(batch_dims+1):lim]
+        if w.shape[-1] == w.ndim - batch_dims:
+            slice_sizes = ()
+
+        shape = (*bszs, *slice_sizes)
+        assert len(shape) == (w.ndim + x.ndim - w.shape[-1] - 1 - batch_dims)
+        return [SymbolicTensor(shape, x.dtype, x.device)]
+
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        return [self(x, w, **params)], [x_bdim, w_bdim]
+
+    def jvp(self, primals, tangents):
+        (x, w), (x_dot, w_dot) = primals, tangents
+        return [x @ w], [(x_dot @ w) + (x @ w_dot)]
+
+    def T(self, cotangents, x, w):
+        (gL_y,) = cotangents
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+        if type(x) is UndefPrimal:
+            return [gL_y @ w.transpose(-1, -2), None]
+        elif type(w) is UndefPrimal:
+            return [None, x.transpose(-1, -2) @ gL_y]
+
+
+
+def _gather_shape_rule(
+    x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map
+):
+    index_vector_dim = w.ndim - 1
+    output_offset_ndim = len(offset_dims)
+    output_shape_ndim = output_offset_ndim + w.ndim - 1
+
+    assert w.ndim < index_vector_dim or index_vector_dim < 0
+    assert x.ndim == len(slice_sizes)
+    assert len(slice_sizes) == offset_dims.ndim + collapsed_slice_dims.ndim
+    assert len(start_index_map) == w.shape[index_vector_dim]
+
+    for i in range(output_offset_ndim):
+        assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
+    for i in range(len(start_index_map)):
+        assert not (
+            (start_index_map[i] < 0 or start_index_map[i] >= x.ndim)
+        )
+
+    for i in range(len(slice_sizes)):
+        slice_size = slice_sizes[i]
+        corresponding_input_size = x.shape[i]
+        assert (slice_size > 0) and all(corresponding_input_size > s for s in slice_size)
+
+    for i in range(len(collapsed_slice_dims)):
+        assert slice_sizes[collapsed_slice_dims[i]] == 1
+
+    indices_shape = list(w.shape)
+    if len(indices_shape) == index_vector_dim:
+        indices_shape += [1]
+    indices_shape.pop(index_vector_dim)
+    indices_shape = iter(indices_shape)
+
+    slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
+    return SymbolicTensor(tuple(
+        next(slice_sizes) if i in offset_dims else next(indices_shape)
+        for i in range(output_shape_ndim)
+    ), )
+
+def _gather_shape_rule(
+    x, w, *, offset_dims, slice_sizes, collapsed_slice_dims, start_index_map
+):
+    index_vector_dim = w.ndim - 1
+    output_offset_ndim = len(offset_dims)
+    output_shape_ndim = output_offset_ndim + w.ndim - 1
+
+    assert w.ndim < index_vector_dim or index_vector_dim < 0
+    assert x.ndim == len(slice_sizes)
+    assert len(slice_sizes) == offset_dims.ndim + collapsed_slice_dims.ndim
+    assert len(start_index_map) == w.shape[index_vector_dim]
+
+    for i in range(output_offset_ndim):
+        assert not (offset_dims[i] < 0 or offset_dims[i] >= output_shape_ndim)
+    for i in range(len(start_index_map)):
+        assert not (
+            (start_index_map[i] < 0 or start_index_map[i] >= x.ndim)
+        )
+
+    for i in range(len(slice_sizes)):
+        slice_size = slice_sizes[i]
+        corresponding_input_size = x.shape[i]
+        assert (slice_size > 0) and all(corresponding_input_size > s for s in slice_size)
+
+    for i in range(len(collapsed_slice_dims)):
+        assert slice_sizes[collapsed_slice_dims[i]] == 1
+
+    indices_shape = list(w.shape)
+    if len(indices_shape) == index_vector_dim:
+        indices_shape += [1]
+    indices_shape.pop(index_vector_dim)
+    indices_shape = iter(indices_shape)
+
+    slice_sizes = (s for i, s in enumerate(slice_sizes) if i not in collapsed_slice_dims)
+    return SymbolicTensor(tuple(
+        next(slice_sizes) if i in offset_dims else next(indices_shape)
+        for i in range(output_shape_ndim)
+    ), )

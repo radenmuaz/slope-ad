@@ -12,7 +12,7 @@ from slope.core import (
     list_zip,
     list_map,
     dtypes,
-    devices
+    devices,
 )
 
 import math
@@ -63,7 +63,6 @@ class IREEBackend(Backend):
     def from_numpy(self, val, dtype=None, device=None):
         dtype = dtype or self.DEFAULT_DTYPE
         device = device or self.DEFAULT_DEVICE
-        # device_type, device_id = device.split(":") if ":" in device else (device, 0)
         np_val = np.array(val, dtype=dtype.numpy)
         iree_device = iree.runtime.get_device(self.device_map[device])
         val = iree.runtime.asdevicearray(iree_device, np_val)
@@ -234,13 +233,13 @@ class IREEBackend(Backend):
         # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
 
         in_binders = list_map(lambda x: program.env[x], program.in_binders)
-        fn_args_str = ", ".join([f'%{i.name}: {as_mlir_shape(i.symval)}' for i in in_binders])
+        fn_args_str = ", ".join([f"%{i.name}: {as_mlir_shape(i.symval)}" for i in in_binders])
 
         outs = list_map(
             lambda x: program.env[x], program.outs
         )  # TODO: input that is output should has identity op
         out_str = ", ".join([f"%{o.name}" for o in outs])
-        out_type_str = ", ".join([f'{as_mlir_shape(o.symval)}' for o in outs])
+        out_type_str = ", ".join([f"{as_mlir_shape(o.symval)}" for o in outs])
 
         head_code_line = [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
         tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()', il1)]
@@ -321,9 +320,7 @@ def sqrt_impl(self, x, y):
 
 @backend.set_impl(backend.operator_set.exp)
 def exp_impl(self, x, y):
-    return (
-        f'%{y.name} = "stablehlo.exponential"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
-    )
+    return f'%{y.name} = "stablehlo.exponential"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.log)
@@ -461,7 +458,12 @@ def max_impl(self, x, y, *, dim, keepdim):
 
 @backend.set_impl(backend.operator_set.arange)
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
-    return f'%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}'
+    ret = ""
+    if stride == 1 and start == 0:
+        ret += f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
+    else:
+        ret += f"""%{y.name}_ = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
+    return ret
 
 
 @backend.set_impl(backend.operator_set.full)
@@ -589,4 +591,23 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
   batch_group_count = 1 : i64,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
 }}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
+
+
+
+@backend.set_impl(backend.operator_set.gather_nd)
+def gather_nd_impl(self, x, w, y, *, batch_dims):
+    offset_dims = list(range(batch_dims+1, w.symval.ndim))
+    lim = batch_dims + (len(w.symval.shape[batch_dims+1:])) - len(x.symval.shape[:batch_dims+1])
+    lim = None if lim == 0 else lim
+    slice_sizes = [1]+list(x.symval.shape[(batch_dims+1):lim])
+    return f"""%{y.name} = "stablehlo.gather"(%{x.name}, %{w.name}) {{
+  dimension_numbers = #stablehlo.gather<
+    offset_dims = {offset_dims},
+    collapsed_slice_dims = [0],
+    start_index_map = [0],
+    index_vector_dim = {batch_dims+1}>,
+  slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
+  indices_are_sorted = false
+}} {as_mlir_sig((x.symval, w.symval), y.symval)}
 """

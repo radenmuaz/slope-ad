@@ -2,11 +2,13 @@ import os
 from slope import core
 import importlib
 import numpy as np
+
 np.set_printoptions(precision=5, threshold=1000, edgeitems=5, linewidth=120)
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
 core.set_backend(importlib.import_module(f"slope.backends.{SLOPE_BACKEND}").backend)
 
 from slope import nn
+
 
 def __getattr__(attr):
     if attr in (globals_dict := globals()):

@@ -351,7 +351,7 @@ class Tensor:
         return self.numel() * self.element_size()
 
     def __repr__(self):
-        return f"<Tensor:\nval=\n{self.numpy()},\nshape={self.shape}, dtype={self.dtype.format_code}, device={self.device.format_code}>"
+        return f"{self.numpy()}\n<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}>"
 
 
 class SymbolicTensor(Tensor):
@@ -392,7 +392,9 @@ class SymbolicTensor(Tensor):
         return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
 
     def __repr__(self):
-        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.format_code}, device={self.device}>"
+        return (
+            f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
+        )
 
     # def __getattr__(self, attr):
     #     if attr in vars(backend.operator_set).keys():
@@ -658,7 +660,7 @@ class ShapeOperator(Operator):
     pass
 
 
-class BinaryReduceOperator(Operator):
+class GeneralReduceOperator(Operator):
     pass
 
 
@@ -1386,7 +1388,7 @@ class VMapTraceTensor(TraceTensor):
         else:
             shape = list(symval.shape)
             del shape[self.vmap_dim]
-            return SymbolicTensor(tuple(shape), symval.dtype,  symval.device)
+            return SymbolicTensor(tuple(shape), symval.dtype, symval.device)
 
     def full_lower(self):
         if self.vmap_dim is None:
@@ -1626,6 +1628,7 @@ class UndefPrimal(NamedTuple):
         return f"<UndefPrimal: symval={self.symval}>"
 
     str_short = __repr__
+
 
 class PartialValue(NamedTuple):
     symval: SymbolicTensor

@@ -1050,7 +1050,6 @@ class GatherND(GeneralReduceOperator):
             return [None, x.transpose(-1, -2) @ gL_y]
 
 
-
 @operator_set.register("scatter_nd")
 class ScatterND(GeneralReduceOperator):
     def args_fixer(self, x, w, u, *, batch_dims: int = 0):
@@ -1058,21 +1057,20 @@ class ScatterND(GeneralReduceOperator):
 
     def typecheck(self, x, w, u, *, batch_dims: int):
         assert x.ndim > 0 and w.ndim > 0
+        assert u.ndim == w.ndim - 1
         assert x.shape[:batch_dims] == w.shape[:batch_dims]
         assert batch_dims < min(x.ndim, w.ndim)
         # for i in range(x.ndim):
         #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
         assert 1 <= w.shape[-1] <= x.ndim - batch_dims
-        bszs = w.shape[: batch_dims + 1]
-        lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
-        lim = None if lim == 0 else lim
-        slice_sizes = x.shape[(batch_dims + 1) : lim]
-        if w.shape[-1] == w.ndim - batch_dims:
-            slice_sizes = ()
+        # bszs = w.shape[: batch_dims + 1]
+        # lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
+        # lim = None if lim == 0 else lim
+        # slice_sizes = x.shape[(batch_dims + 1) : lim]
+        # if w.shape[-1] == w.ndim - batch_dims:
+        #     slice_sizes = ()
 
-        shape = (*bszs, *slice_sizes)
-        assert len(shape) == (w.ndim + x.ndim - w.shape[-1] - 1 - batch_dims)
-        return [SymbolicTensor(shape, x.dtype, x.device)]
+        return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
@@ -1091,4 +1089,3 @@ class ScatterND(GeneralReduceOperator):
             return [gL_y @ w.transpose(-1, -2), None]
         elif type(w) is UndefPrimal:
             return [None, x.transpose(-1, -2) @ gL_y]
-

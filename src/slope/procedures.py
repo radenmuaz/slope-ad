@@ -318,6 +318,7 @@ def getitem(x, val):
     ret = sliced_tensor.reshape(tuple(final_shape))
 
     if tensors:  # Fancy/tensor indexing
+        # return x.gather_nd(val)
         # normalize idx
         idx = [t.sign().neg().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
         max_dim = max(i.ndim for i in idx)
@@ -414,7 +415,15 @@ def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
 
 
 @procedure_set.register()
-def gather(x, idx, dim: int):
+def gather(x, dim, idx):
+    if dim != 0:
+        x, idx = x.transpose(0,idx), idx.transpose(0,idx)
+    ret = x.gather_nd(idx, batch_dims=0)
+    if dim != 0:
+        ret = ret.transpose(0,idx)
+    return ret
+@procedure_set.register()
+def gather_arange(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(
         s >= i for s, i in zip(x.shape, idx.shape)
@@ -834,3 +843,54 @@ def log_softmax(x, dim=-1):
     x = x - x.max(dim, keepdim=True)
     logsumexp_x = x.exp().sum(dim, keepdim=True).log()
     return x - logsumexp_x
+
+# TODO:
+
+# nograd_functions = [
+#     np.all,
+#     np.allclose,
+#     np.any,
+#     #np.argmax,
+#     np.argmin,
+#     np.argpartition,
+#     np.argsort,
+#     np.argwhere,
+#     np.around,
+#     np.array_equal,
+#     np.array_equiv,
+#     np.ceil,
+#     np.count_nonzero,
+#     #np.equal,
+#     np.fix,
+#     np.flatnonzero,
+#     np.floor,
+#     np.floor_divide,
+#     np.greater,
+#     np.greater_equal,
+#     np.isclose,
+#     np.isfinite,
+#     np.isinf,
+#     np.isnan,
+#     np.isneginf,
+#     np.isposinf,
+#     np.isscalar,
+#     np.less,
+#     np.less_equal,
+#     np.logical_and,
+#     np.logical_not,
+#     np.logical_or,
+#     np.logical_xor,
+#     np.ndim,
+#     np.nonzero,
+#     np.not_equal,
+#     np.ones_like,
+#     np.result_type,
+#     np.rint,
+#     np.round,
+#     np.searchsorted,
+#     np.shape,
+#     np.sign,
+#     np.size,
+#     np.trunc,
+#     np.zeros_like,
+# ]

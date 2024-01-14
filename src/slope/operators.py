@@ -1014,21 +1014,22 @@ class GatherND(GeneralReduceOperator):
         return (x, w), dict(batch_dims=batch_dims)
 
     def typecheck(self, x, w, *, batch_dims: int):
-        assert x.ndim > 0 and w.ndim > 0
-        assert x.shape[:batch_dims] == w.shape[:batch_dims]
-        assert batch_dims < min(x.ndim, w.ndim)
-        # for i in range(x.ndim):
-        #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
-        assert 1 <= w.shape[-1] <= x.ndim - batch_dims
-        bszs = w.shape[: batch_dims + 1]
-        lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
+        r = x.ndim
+        q = w.ndim
+        b = batch_dims
+        assert r > 0 and q > 0
+        assert x.shape[:b] == w.shape[:b]
+        assert b < min(q, r)
+        assert 1 <= w.shape[-1] <= r - b
+        bszs = x.shape[: b + 1]
+        lim = (len(w.shape[b + 1 :])) - len(x.shape[b + 1:])
+        if w.shape[-1] == r-b:
+            lim += 1
         lim = None if lim == 0 else lim
-        slice_sizes = x.shape[(batch_dims + 1) : lim]
-        if w.shape[-1] == w.ndim - batch_dims:
-            slice_sizes = ()
-
+        slice_sizes = x.shape[(b + 1) : lim]
         shape = (*bszs, *slice_sizes)
-        assert len(shape) == (w.ndim + x.ndim - w.shape[-1] - 1 - batch_dims)
+        assert (lhs:= len(shape)) == (rhs:=(q + r - w.shape[-1] - 1 - b)), (
+            f"{lhs=}; {rhs=}")
         return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

@@ -417,11 +417,13 @@ def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
 @procedure_set.register()
 def gather(x, dim, idx):
     if dim != 0:
-        x, idx = x.transpose(0,idx), idx.transpose(0,idx)
+        x, idx = x.transpose(0, idx), idx.transpose(0, idx)
     ret = x.gather_nd(idx, batch_dims=0)
     if dim != 0:
-        ret = ret.transpose(0,idx)
+        ret = ret.transpose(0, idx)
     return ret
+
+
 @procedure_set.register()
 def gather_arange(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
@@ -843,6 +845,7 @@ def log_softmax(x, dim=-1):
     x = x - x.max(dim, keepdim=True)
     logsumexp_x = x.exp().sum(dim, keepdim=True).log()
     return x - logsumexp_x
+
 
 # TODO:
 

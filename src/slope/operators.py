@@ -1022,14 +1022,13 @@ class GatherND(GeneralReduceOperator):
         assert b < min(q, r)
         assert 1 <= w.shape[-1] <= r - b
         bszs = x.shape[: b + 1]
-        lim = (len(w.shape[b + 1 :])) - len(x.shape[b + 1:])
-        if w.shape[-1] == r-b:
+        lim = (len(w.shape[b + 1 :])) - len(x.shape[b + 1 :])
+        if w.shape[-1] == r - b:
             lim += 1
         lim = None if lim == 0 else lim
         slice_sizes = x.shape[(b + 1) : lim]
         shape = (*bszs, *slice_sizes)
-        assert (lhs:= len(shape)) == (rhs:=(q + r - w.shape[-1] - 1 - b)), (
-            f"{lhs=}; {rhs=}")
+        assert (lhs := len(shape)) == (rhs := (q + r - w.shape[-1] - 1 - b)), f"{lhs=}; {rhs=}"
         return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

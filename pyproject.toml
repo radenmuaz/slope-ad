@@ -16,6 +16,13 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
+dependencies = [
+  "numpy",
+  "iree-compiler",
+  "iree-runtime",
+  "onnx",
+  "onnxruntime",
+]
 
 [project.urls]
 Homepage = "https://github.com/radenmuaz/slope"

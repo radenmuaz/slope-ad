@@ -596,14 +596,14 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
-    # offset_dims = list(range(batch_dims + 1, w.symval.ndim))
-    # start_index_map = list(range(w.symval.shape[-1]))
-    offset_dims = list(range(w.symval.ndim-batch_dims-1, w.symval.ndim))
-    start_index_map = list(range(batch_dims,w.symval.shape[-1] + batch_dims))
-    collapsed_slice_dims = list(range(len(w.symval.shape[:-1])))
+    offset_dims = list(range(batch_dims + 1, w.symval.ndim))
     squeeze_after = w.symval.shape[-1] == x.symval.ndim - batch_dims
     if squeeze_after:
-        slice_sizes = [1]*w.symval.shape[-1]
+    # collapsed_slice_dims = list(range(len(w.symval.shape[:-1])))
+        # start_index_map = list(range(w.symval.shape[-1]))
+        start_index_map = list(range(batch_dims,w.symval.shape[-1]))
+        collapsed_slice_dims =list(range(x.symval.ndim-1))
+        slice_sizes = [1]*x.symval.shape[-1]
         y_symval = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
         return f"""%{y.name}_ = "stablehlo.gather"(%{x.name}, %{w.name}) {{
   dimension_numbers = #stablehlo.gather<
@@ -617,12 +617,8 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
 %{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_symval,), y.symval)}
 """
     else:
-        lim = (
-            batch_dims + (len(w.symval.shape[batch_dims + 1 :])) - len(x.symval.shape[: batch_dims + 1])
-        )
-        lim = None if lim == 0 else lim
-        slice_sizes = list(x.symval.shape[(batch_dims + 1) : lim])
-        slice_sizes = [1] + list(x.symval.shape[(batch_dims + 1) : lim])
+        start_index_map = collapsed_slice_dims =list(range(batch_dims,w.symval.shape[-1] + batch_dims))
+        slice_sizes = [1]*len(x.symval.shape[:-1]) + [x.symval.shape[-1]]
         return f"""%{y.name} = "stablehlo.gather"(%{x.name}, %{w.name}) {{
   dimension_numbers = #stablehlo.gather<
   offset_dims = {offset_dims},
@@ -634,23 +630,36 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
 }} {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
     
+# OK
+# func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf32>)
+# {
+#     %y0 = "stablehlo.gather"(%x0, %x1) {
+#       dimension_numbers = #stablehlo.gather<
+#       offset_dims = [1],
+#       collapsed_slice_dims = [0, 1],
+#       start_index_map = [0, 1],
+#       index_vector_dim = 1>,
+#       slice_sizes = dense<[1, 1, 2]> : tensor<3xi64>,
+#       indices_are_sorted = false
+#     }  : (tensor<2x2x2xf32>,tensor<2x2xi32>) -> tensor<2x2xf32>
+    
+#     "func.return"(%y0): (tensor<2x2xf32>) -> ()
+# }
 
-
-#     offset_dims = [1]
-#     start_index_map = [0,1]
-#     collapsed_slice_dims = [0,1]
-#     lim = None if lim == 0 else lim
-#     slice_sizes = [1,1,2]
-#     return f"""%{y.name} = "stablehlo.gather"(%{x.name}, %{w.name}) {{
-#   dimension_numbers = #stablehlo.gather<
-#   offset_dims = {offset_dims},
-#   collapsed_slice_dims = {collapsed_slice_dims},
-#   start_index_map = {start_index_map},
-#   index_vector_dim = {batch_dims+1}>,
-#   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
-#   indices_are_sorted = false
-# }} {as_mlir_sig((x.symval, w.symval), y.symval)}
-# """
+    offset_dims = [1]
+    start_index_map = [0,1]
+    collapsed_slice_dims = [0,1]
+    slice_sizes = [1,1,2]
+    return f"""%{y.name} = "stablehlo.gather"(%{x.name}, %{w.name}) {{
+  dimension_numbers = #stablehlo.gather<
+  offset_dims = {offset_dims},
+  collapsed_slice_dims = {collapsed_slice_dims},
+  start_index_map = {start_index_map},
+  index_vector_dim = {batch_dims+1}>,
+  slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
+  indices_are_sorted = false
+}} {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
 
 
 @backend.set_impl(backend.operator_set.scatter_nd)

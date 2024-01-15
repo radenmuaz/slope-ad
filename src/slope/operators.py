@@ -1012,7 +1012,7 @@ def gather(x, idx, dim: int):
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):
         return (x, w), dict(batch_dims=batch_dims)
-
+    
     def typecheck(self, x, w, *, batch_dims: int):
         r = x.ndim
         q = w.ndim
@@ -1021,15 +1021,19 @@ class GatherND(GeneralReduceOperator):
         assert x.shape[:b] == w.shape[:b]
         assert b < min(q, r)
         assert 1 <= w.shape[-1] <= r - b
-        bszs = x.shape[: b + 1]
-        lim = (len(w.shape[b + 1 :])) - len(x.shape[b + 1 :])
-        if w.shape[-1] == r - b:
-            lim += 1
-        lim = None if lim == 0 else lim
-        slice_sizes = x.shape[(b + 1) : lim]
-        shape = (*bszs, *slice_sizes)
-        assert (lhs := len(shape)) == (rhs := (q + r - w.shape[-1] - 1 - b)), f"{lhs=}; {rhs=}"
+        assert w.shape[-1] <= r - b
+        data_shape = x.shape
+        indices_shape = w.shape
+        data_shape = data_shape[batch_dims:]
+        indices_shape = indices_shape[batch_dims:]
+
+        shape = ()
+        for i in range(len(indices_shape) - 1):
+            shape += (indices_shape[i],)
+        shape += data_shape[indices_shape[-1]:]
+
         return [SymbolicTensor(shape, x.dtype, x.device)]
+        
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in

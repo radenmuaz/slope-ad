@@ -1,12 +1,45 @@
 import slope
 
 
-# print('#1')
+print('#1')
+x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
+w = slope.tensor([[0,0],[1,1]], dtype=slope.int32)
+print(f"{x=}")
+print(f"{w=}")
+y = x.gather_nd(w)
+print(f"{y=}")
+
+# print('\n#2')
 # x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
-# w = slope.tensor([[0,0],[1,1]], dtype=slope.int32)
+# w = slope.tensor([[1],[0]]).cast(slope.int64)
 # print(f"{x=}")
 # print(f"{w=}")
 # y = x.gather_nd(w)
+# print(f"{y=}")
+
+# print('\n#3')
+# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
+# w = slope.tensor([[0,1],[1,0]], dtype=slope.int32)
+# print(f"{x=}")
+# print(f"{w=}")
+# y = x.gather_nd(w)
+# print(f"{y=}")
+
+
+# print('\n#4')
+# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
+# w = slope.tensor([[[0,1]],[[1,0]]], dtype=slope.int32)
+# print(f"{x=}")
+# print(f"{w=}")
+# y = x.gather_nd(w)
+# print(f"{y=}")
+
+# print('\n#5')
+# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
+# w = slope.tensor([[1],[0]], dtype=slope.int32)
+# print(f"{x=}")
+# print(f"{w=}")
+# y = x.gather_nd(w, 1)
 # print(f"{y=}")
 
 '''
@@ -27,14 +60,6 @@ func.func @main (%x0: tensor<2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2xf32>)
     "func.return"(%y0): (tensor<2xf32>) -> ()
 }
 '''
-# print('\n#2')
-# x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
-# w = slope.tensor([[1],[0]]).cast(slope.int64)
-# print(f"{x=}")
-# print(f"{w=}")
-# y = x.gather_nd(w)
-# print(f"{y=}")
-
 '''
 
 func.func @main (%x0: tensor<2x2xf32>, %x1: tensor<2x1xi32>) -> (tensor<2x2xf32>)
@@ -53,13 +78,6 @@ func.func @main (%x0: tensor<2x2xf32>, %x1: tensor<2x1xi32>) -> (tensor<2x2xf32>
 }
 '''
 
-# print('\n#3')
-# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
-# w = slope.tensor([[0,1],[1,0]], dtype=slope.int32)
-# print(f"{x=}")
-# print(f"{w=}")
-# y = x.gather_nd(w)
-# print(f"{y=}")
 '''
 
 func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf32>)
@@ -78,13 +96,6 @@ func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf3
 }
 '''
 
-# print('\n#4')
-# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
-# w = slope.tensor([[[0,1]],[[1,0]]], dtype=slope.int32)
-# print(f"{x=}")
-# print(f"{w=}")
-# y = x.gather_nd(w)
-# print(f"{y=}")
 
 '''
 <stdin>:3:11: error: start_index_map size (2) 
@@ -105,13 +116,6 @@ func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x1x2xi32>) -> (tensor<2x2x
 }
 '''
 
-# print('\n#5')
-# x = slope.tensor([[[0,1],[2,3]],[[4,5],[6,7]]], dtype=slope.float32)
-# w = slope.tensor([[1],[0]], dtype=slope.int32)
-# print(f"{x=}")
-# print(f"{w=}")
-# y = x.gather_nd(w, 1)
-# print(f"{y=}")
 
 ###############
 

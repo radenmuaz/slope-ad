@@ -1022,15 +1022,17 @@ class GatherND(GeneralReduceOperator):
         assert b < min(q, r)
         assert 1 <= w.shape[-1] <= r - b
         assert w.shape[-1] <= r - b
-        data_shape = x.shape
-        indices_shape = w.shape
-        data_shape = data_shape[batch_dims:]
-        indices_shape = indices_shape[batch_dims:]
+        shape = (w.shape[0:q-1]) + x.shape[w.shape[-1]:]
 
-        shape = ()
-        for i in range(len(indices_shape) - 1):
-            shape += (indices_shape[i],)
-        shape += data_shape[indices_shape[-1]:]
+        # data_shape = x.shape
+        # indices_shape = w.shape
+        # data_shape = data_shape[batch_dims:]
+        # indices_shape = indices_shape[batch_dims:]
+
+        # shape = ()
+        # for i in range(len(indices_shape) - 1):
+        #     shape += (indices_shape[i],)
+        # shape += data_shape[indices_shape[-1]:]
 
         return [SymbolicTensor(shape, x.dtype, x.device)]
         

@@ -974,40 +974,6 @@ def gather(x, idx, dim: int):
         .transpose(0, dim)
     )
 
-
-# @operator_set.register("gather")
-# class Gather(GeneralReduceOperator):
-#     def typecheck(self, x, w, *, batch_dims: int):
-#         assert x.shape[:batch_dims] == w.shape[:batch_dims]
-#         assert batch_dims < min(x.ndim, w.ndim)
-#         assert  1 <= w.shape[-1] <= (x.ndim - w.ndim)
-#         for i in range(x.ndim):
-#             assert -x.shape[i] <= w[...,i] <= x.shape[i] - 1
-
-#         shape = tuple()
-#         assert len(shape) == w.ndim + (x.ndim -1)
-#         assert len(shape) == (x.ndim + w.ndim - w.shape[-1] - 1 - batch_dims)
-#         return [SymbolicTensor(shape, x.dtype, x.device)]
-
-#     def vmap(self, dim_size, vals_in, dims_in, **params):
-#         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
-#         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-#         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
-#         return [self(x, w, **params)], [x_bdim, w_bdim]
-
-#     def jvp(self, primals, tangents):
-#         (x, w), (x_dot, w_dot) = primals, tangents
-#         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
-
-#     def T(self, cotangents, x, w):
-#         (gL_y,) = cotangents
-#         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-#         if type(x) is UndefPrimal:
-#             return [gL_y @ w.transpose(-1, -2), None]
-#         elif type(w) is UndefPrimal:
-#             return [None, x.transpose(-1, -2) @ gL_y]
-
-
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):
@@ -1022,17 +988,15 @@ class GatherND(GeneralReduceOperator):
         assert b < min(q, r)
         assert 1 <= w.shape[-1] <= r - b
         assert w.shape[-1] <= r - b
-        shape = (w.shape[0:q-1]) + x.shape[w.shape[-1]:]
-
-        # data_shape = x.shape
-        # indices_shape = w.shape
-        # data_shape = data_shape[batch_dims:]
-        # indices_shape = indices_shape[batch_dims:]
-
-        # shape = ()
-        # for i in range(len(indices_shape) - 1):
-        #     shape += (indices_shape[i],)
-        # shape += data_shape[indices_shape[-1]:]
+        # Step 1: Remove batch dimensions
+        data_shape = x.shape[b:]
+        indices_shape = w.shape[b:]
+        # Step 2: Calculate the dimensions of the output tensor
+        output_shape = [indices_shape[i] for i in range(len(indices_shape) - 1)]
+        # Step 3: Append the remaining dimensions from the data tensor
+        output_shape.extend(data_shape[indices_shape[-1]:])
+        # Step 4: Prepend batch dimensions to the output shape
+        shape = data_shape[:batch_dims] + tuple(output_shape)
 
         return [SymbolicTensor(shape, x.dtype, x.device)]
         
@@ -1043,17 +1007,14 @@ class GatherND(GeneralReduceOperator):
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
-    def jvp(self, primals, tangents):
+    def jvp(self, primals, tangents, *, batch_dims):
         (x, w), (x_dot, w_dot) = primals, tangents
-        return [x @ w], [(x_dot @ w) + (x @ w_dot)]
+        return [self(x,w, batch_dims)], [self(x_dot,w, batch_dims)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(x) is UndefPrimal:
-            return [gL_y @ w.transpose(-1, -2), None]
-        elif type(w) is UndefPrimal:
-            return [None, x.transpose(-1, -2) @ gL_y]
+        return [x.scatter_nd(w, gL_y)
+                , None]
 
 
 @operator_set.register("scatter_nd")
@@ -1066,16 +1027,7 @@ class ScatterND(GeneralReduceOperator):
         assert u.ndim == w.ndim - 1
         assert x.shape[:batch_dims] == w.shape[:batch_dims]
         assert batch_dims < min(x.ndim, w.ndim)
-        # for i in range(x.ndim):
-        #     assert -x.shape[i] <= w.shape[batch_dims:][i] <= x.shape[i] - 1
         assert 1 <= w.shape[-1] <= x.ndim - batch_dims
-        # bszs = w.shape[: batch_dims + 1]
-        # lim = batch_dims + (len(w.shape[batch_dims + 1 :])) - len(x.shape[: batch_dims + 1])
-        # lim = None if lim == 0 else lim
-        # slice_sizes = x.shape[(batch_dims + 1) : lim]
-        # if w.shape[-1] == w.ndim - batch_dims:
-        #     slice_sizes = ()
-
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

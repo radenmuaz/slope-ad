@@ -14,7 +14,7 @@ from typing import (
     NamedTuple,
 )
 from collections import defaultdict
-
+import functools
 abs_py = abs
 
 
@@ -846,6 +846,21 @@ def log_softmax(x, dim=-1):
     logsumexp_x = x.exp().sum(dim, keepdim=True).log()
     return x - logsumexp_x
 
+@procedure_set.register()
+def gather_nd(
+    params,
+    indices,
+    batch_dims=0):
+    def _gather_nd_single(params, indices):
+        idx = indices.moveaxis(-1, 0)
+        return params[idx]
+    assert batch_dims > 0, ('Negative `batch_dims` is currently unsupported.')
+    assert batch_dims == 0
+    gather_nd_ = functools.reduce(
+        lambda g, f: f(g), [slope.vmap] * int(batch_dims),
+        _gather_nd_single
+        ) if batch_dims > 0 else _gather_nd_single
+    return gather_nd_(params, indices)
 
 # TODO:
 

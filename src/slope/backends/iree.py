@@ -640,7 +640,10 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     r = x.symval.ndim
     q = w.symval.ndim
     b = batch_dims
-    offset_dims = list(range(b+1, q))
+    if b == 0:
+        offset_dims = list(range(1, q))
+    else:
+        offset_dims = list(range(b+1, q))
     # index_vector_dim = b+1
     index_vector_dim = q-1
     # N*(q-b-1) dim tensors
@@ -658,7 +661,7 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     elif indices_shape[-1] < r - b:
         # Each tensor slice corresponding to data[0:b-1, indices_slice , :]
         slice_sizes = [*[1]*(r-1), *operand_shape[-1:]]
-        start_index_map = [i for i, s in enumerate(slice_sizes) if s==1]
+        start_index_map = [i for i, s in enumerate(slice_sizes) if s==1 and i < q-b]
 
         collapsed_slice_dims = []
         # do_squeeze = False
@@ -667,7 +670,7 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
                 collapsed_slice_dims += [i]
         # collapsed_slice_dims = [i for i, s in enumerate(slice_sizes) if s==1]
 
-        if len(collapsed_slice_dims) != len(start_index_map):
+        if (len(collapsed_slice_dims) != len(start_index_map)) and b==0:
             y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
 
     else:

@@ -643,27 +643,34 @@ def gather_impl(self, x, w, y, *, axis):
     index_vector_dim = q-1
     y_pre = None
     if indices_shape[-1] == r:
-        # Each scalar value corresponding to data[0:b-1,indices_slice]
         slice_sizes = [1]*r
-        start_index_map = list(range(q))
-        collapsed_slice_dims = [i for i in range(b+1,len(slice_sizes)) 
+        start_index_map = [i for i in range(q)]
+        if axis != 0:
+            start_index_map = start_index_map[axis:] + start_index_map[:axis]
+        collapsed_slice_dims = [i for i in range(1-axis,len(slice_sizes)-axis) 
                                 if slice_sizes[i] == 1 and operand_shape[i] == indices_shape[i]]
         
         y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
-        
     elif indices_shape[-1] < r:
-        # Each tensor slice corresponding to data[0:b-1, indices_slice , :]
-
         slice_sizes = [*[1]*(r-1), *operand_shape[-1:]]
-        start_index_map = [i for i, s in enumerate(slice_sizes) if s==1 and i < q-b]
+        start_index_map = [i+axis for i, s in enumerate(slice_sizes) if s==1 and i < q]
 
         collapsed_slice_dims = []
         for i in range(len(slice_sizes)):
             if slice_sizes[i] == 1 and len(offset_dims)+len(collapsed_slice_dims) != r:
                 collapsed_slice_dims += [i]
         
-        if (len(collapsed_slice_dims) != len(start_index_map)) and b==0:
+        if (len(collapsed_slice_dims) != len(start_index_map)):
             y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
+                
+        # offset_dims = [1]
+        # index_vector_dim = 1
+        # start_index_map =      [0]
+        # collapsed_slice_dims = [0,1]
+        # slice_sizes =          [1, 1, 2]
+        # [[2,3],[4,5]]   
+        # y_pre = SymbolicTensor((2,2,1), y.symval.dtype, y.symval.device)
+        # y_pre = SymbolicTensor((1,2,2), y.symval.dtype, y.symval.device)
 
 
     else:
@@ -685,20 +692,24 @@ def gather_impl(self, x, w, y, *, axis):
 
 
 
-@backend.set_impl(backend.operator_set.scatter_nd)
-def scatter_nd_impl(self, x, w, u, y, *, batch_dims):
+@backend.set_impl(backend.operator_set.scatter)
+def scatter_impl(self, x, w, u, y, *, axis):
     y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
     y_mlir_type = as_mlir_shape(y_init_type)
+
     lim = (
-        batch_dims + (len(w.symval.shape[batch_dims + 1 :])) - len(x.symval.shape[: batch_dims + 1])
+        (len(w.symval.shape[1 :])) - len(x.symval.shape[:+ 1])
     )
     lim = None if lim == 0 else lim
-    update_window_dims = list(x.symval.shape[(batch_dims + 1) : lim])
-    inserted_window_dims = [0]
-    scatter_dims_to_operand_dims = [0]
-    one = 1.0 if "f" in x.symval.dtype.mlir else 1
+    update_window_dims = list(x.symval.shape[1 : lim])
+    inserted_window_dims = [0+axis]
+    scatter_dims_to_operand_dims = [0+axis]
+
+    index_vector_dim = w.symval.ndim-1
+
     # TODO: Find cheaper way to copy if exists
-    return f"""%{x.name}_1 = "stablehlo.constant"(){{ value = dense<{one}> : {as_mlir_shape(x.symval)} }} {as_mlir_sig((), x.symval)}
+    return f"""%{x.name}_1 = "stablehlo.constant"(){{
+        value = dense<{1.0 if "f" in x.symval.dtype.mlir else 1}> : {as_mlir_shape(x.symval)} }} {as_mlir_sig((), x.symval)}
 %{x.name}_ = "stablehlo.multiply"(%{x.name}, %{x.name}_1) {as_mlir_sig((x.symval,  x.symval), x.symval)}
 %{y.name} = "stablehlo.scatter"(%{x.name}_, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
@@ -709,7 +720,7 @@ def scatter_nd_impl(self, x, w, u, y, *, batch_dims):
   update_window_dims = {update_window_dims},
   inserted_window_dims = {inserted_window_dims},
   scatter_dims_to_operand_dims = {scatter_dims_to_operand_dims},
-  index_vector_dim = {batch_dims+1}>,
+  index_vector_dim = {index_vector_dim}>,
   indices_are_sorted = false,
   unique_indices = false
 }} {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}

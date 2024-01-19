@@ -942,6 +942,7 @@ class Conv(GeneralReduceOperator):
             return [None, gL_w]
 
 
+
 @operator_set.register("gather")
 class Gather(GeneralReduceOperator):
     def args_fixer(self, x, w, *, axis: int = 0):
@@ -950,20 +951,11 @@ class Gather(GeneralReduceOperator):
     def typecheck(self, x, w, *, axis: int):
         r = x.ndim
         q = w.ndim
-        b = axis
         assert r > 0 and q > 0
-        assert x.shape[:b] == w.shape[:b]
-        assert b < min(q, r)
-        assert 1 <= w.shape[-1] <= r - b
-        assert w.shape[-1] <= r - b
-        # output_shape = [w.shape[b:][i] for i in range(len(w.shape[b:]) - 1)]
-        # output_shape.extend(x.shape[b:][w.shape[b:][-1]:])
-        # shape = x.shape[b:][:b] + tuple(output_shape)
-        bx = x.shape[b:]
-        bw = w.shape[b:]
-        shape = bx[:b] + bw[:len(bw) - 1] + bx[bw[-1]:]
-
-
+        assert 1 <= w.shape[-1] <= r
+        assert w.shape[-1] <= r
+        assert axis < min(x.ndim, w.ndim)
+        shape = w.shape[:q - 1] + x.shape[w.shape[-1]:]
         return [SymbolicTensor(shape, x.dtype, x.device)]
         
 
@@ -979,21 +971,19 @@ class Gather(GeneralReduceOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        return [x.scatter_nd(w, gL_y)
-                , None]
+        return [x.scatter(w, gL_y), None]
 
 
-@operator_set.register("scatter_nd")
-class ScatterND(GeneralReduceOperator):
+@operator_set.register("scatter")
+class Scatter(GeneralReduceOperator):
     def args_fixer(self, x, w, u, *, axis: int = 0):
         return (x, w, u), dict(axis=axis)
 
     def typecheck(self, x, w, u, *, axis: int):
         assert x.ndim > 0 and w.ndim > 0
         assert u.ndim == w.ndim - 1
-        assert x.shape[:axis] == w.shape[:axis]
         assert axis < min(x.ndim, w.ndim)
-        assert 1 <= w.shape[-1] <= x.ndim - axis
+        assert 1 <= w.shape[-1] <= x.ndim
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
@@ -1006,10 +996,14 @@ class ScatterND(GeneralReduceOperator):
         (x, w), (x_dot, w_dot) = primals, tangents
         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
 
-    def T(self, cotangents, x, w):
+    def jvp(self, primals, tangents, *, axis):
+        (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
+        return [self(x,w,u, axis)], [self(x_dot,w_dot, u_dot, axis)]
+
+    def T(self, cotangents, x, w, u):
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [gL_y @ w.transpose(-1, -2), None]
+            return [gL_y.gather(u), None]
         elif type(w) is UndefPrimal:
-            return [None, x.transpose(-1, -2) @ gL_y]
+            return [self, None]

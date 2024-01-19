@@ -942,61 +942,27 @@ class Conv(GeneralReduceOperator):
             return [None, gL_w]
 
 
-def gather(x, idx, dim: int):
-    assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(
-        s >= i for s, i in zip(x.shape, idx.shape)
-    ), "all dim of idx.shape must be smaller than x.shape"
-    if dim < 0:
-        dim += x.ndim
-    idx = idx.transpose(ax=dim, aw=0).unsqueeze(-1)
-    permarg = list(range(x.ndim))
-    permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
-        if dim != 0
-        else permarg[1:] + [permarg[0]]
-    )
-    return (
-        (
-            (
-                idx
-                == slope.arange(
-                    x.shape[dim],
-                    dtype=slope.int32,
-                    device=x.device,
-                )
-            )
-            * x.permute(*permarg)
-            .padslice(tuple(*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])))
-            .unsqueeze(0)
-        )
-        .sum(-1)
-        .transpose(0, dim)
-    )
-
-@operator_set.register("gather_nd")
-class GatherND(GeneralReduceOperator):
-    def args_fixer(self, x, w, *, batch_dims: int = 0):
-        return (x, w), dict(batch_dims=batch_dims)
+@operator_set.register("gather")
+class Gather(GeneralReduceOperator):
+    def args_fixer(self, x, w, *, axis: int = 0):
+        return (x, w), dict(axis=axis)
     
-    def typecheck(self, x, w, *, batch_dims: int):
+    def typecheck(self, x, w, *, axis: int):
         r = x.ndim
         q = w.ndim
-        b = batch_dims
+        b = axis
         assert r > 0 and q > 0
         assert x.shape[:b] == w.shape[:b]
         assert b < min(q, r)
         assert 1 <= w.shape[-1] <= r - b
         assert w.shape[-1] <= r - b
-        # Step 1: Remove batch dimensions
-        data_shape = x.shape[b:]
-        indices_shape = w.shape[b:]
-        # Step 2: Calculate the dimensions of the output tensor
-        output_shape = [indices_shape[i] for i in range(len(indices_shape) - 1)]
-        # Step 3: Append the remaining dimensions from the data tensor
-        output_shape.extend(data_shape[indices_shape[-1]:])
-        # Step 4: Prepend batch dimensions to the output shape
-        shape = data_shape[:batch_dims] + tuple(output_shape)
+        # output_shape = [w.shape[b:][i] for i in range(len(w.shape[b:]) - 1)]
+        # output_shape.extend(x.shape[b:][w.shape[b:][-1]:])
+        # shape = x.shape[b:][:b] + tuple(output_shape)
+        bx = x.shape[b:]
+        bw = w.shape[b:]
+        shape = bx[:b] + bw[:len(bw) - 1] + bx[bw[-1]:]
+
 
         return [SymbolicTensor(shape, x.dtype, x.device)]
         
@@ -1007,9 +973,9 @@ class GatherND(GeneralReduceOperator):
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
-    def jvp(self, primals, tangents, *, batch_dims):
+    def jvp(self, primals, tangents, *, axis):
         (x, w), (x_dot, w_dot) = primals, tangents
-        return [self(x,w, batch_dims)], [self(x_dot,w, batch_dims)]
+        return [self(x,w, axis)], [self(x_dot,w, axis)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
@@ -1019,15 +985,15 @@ class GatherND(GeneralReduceOperator):
 
 @operator_set.register("scatter_nd")
 class ScatterND(GeneralReduceOperator):
-    def args_fixer(self, x, w, u, *, batch_dims: int = 0):
-        return (x, w, u), dict(batch_dims=batch_dims)
+    def args_fixer(self, x, w, u, *, axis: int = 0):
+        return (x, w, u), dict(axis=axis)
 
-    def typecheck(self, x, w, u, *, batch_dims: int):
+    def typecheck(self, x, w, u, *, axis: int):
         assert x.ndim > 0 and w.ndim > 0
         assert u.ndim == w.ndim - 1
-        assert x.shape[:batch_dims] == w.shape[:batch_dims]
-        assert batch_dims < min(x.ndim, w.ndim)
-        assert 1 <= w.shape[-1] <= x.ndim - batch_dims
+        assert x.shape[:axis] == w.shape[:axis]
+        assert axis < min(x.ndim, w.ndim)
+        assert 1 <= w.shape[-1] <= x.ndim - axis
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

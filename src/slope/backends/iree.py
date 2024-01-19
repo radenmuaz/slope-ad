@@ -633,23 +633,16 @@ func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf3
 }
 '''
 
-@backend.set_impl(backend.operator_set.gather_nd)
-def gather_nd_impl(self, x, w, y, *, batch_dims):
+@backend.set_impl(backend.operator_set.gather)
+def gather_impl(self, x, w, y, *, axis):
     operand_shape = list(x.symval.shape)
     indices_shape = list(w.symval.shape)
     r = x.symval.ndim
     q = w.symval.ndim
-    b = batch_dims
-    if b == 0:
-        offset_dims = list(range(1, q))
-    else:
-        offset_dims = list(range(b+1, q))
-    # index_vector_dim = b+1
+    offset_dims = list(range(1, q))
     index_vector_dim = q-1
-    # N*(q-b-1) dim tensors
     y_pre = None
-    # shape = (indices_shape[0:q-1]) + operand_shape[indices_shape[-1]:]
-    if indices_shape[-1] == r - b:
+    if indices_shape[-1] == r:
         # Each scalar value corresponding to data[0:b-1,indices_slice]
         slice_sizes = [1]*r
         start_index_map = list(range(q))
@@ -658,20 +651,20 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
         
         y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
         
-    elif indices_shape[-1] < r - b:
+    elif indices_shape[-1] < r:
         # Each tensor slice corresponding to data[0:b-1, indices_slice , :]
+
         slice_sizes = [*[1]*(r-1), *operand_shape[-1:]]
         start_index_map = [i for i, s in enumerate(slice_sizes) if s==1 and i < q-b]
 
         collapsed_slice_dims = []
-        # do_squeeze = False
         for i in range(len(slice_sizes)):
             if slice_sizes[i] == 1 and len(offset_dims)+len(collapsed_slice_dims) != r:
                 collapsed_slice_dims += [i]
-        # collapsed_slice_dims = [i for i, s in enumerate(slice_sizes) if s==1]
-
+        
         if (len(collapsed_slice_dims) != len(start_index_map)) and b==0:
             y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
+
 
     else:
         raise ValueError

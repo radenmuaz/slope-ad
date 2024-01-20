@@ -633,6 +633,13 @@ func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf3
 }
 '''
 
+# @backend.set_impl(backend.operator_set.gather)
+# def gather_impl(self, x, w, y, *, axis):
+#     return f"""%{y.name} = "stablehlo.torch_index_select "(%{x.name}, %{w.name}) {{
+#     batch_dims = 0 : i64, dim = 0 : i64
+# # }} {as_mlir_sig((x.symval, w.symval), y.symval)}
+# # """ 
+
 @backend.set_impl(backend.operator_set.gather)
 def gather_impl(self, x, w, y, *, axis):
     operand_shape = list(x.symval.shape)
@@ -662,16 +669,6 @@ def gather_impl(self, x, w, y, *, axis):
         
         if (len(collapsed_slice_dims) != len(start_index_map)):
             y_pre = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
-                
-        # offset_dims = [1]
-        # index_vector_dim = 1
-        # start_index_map =      [0]
-        # collapsed_slice_dims = [0,1]
-        # slice_sizes =          [1, 1, 2]
-        # [[2,3],[4,5]]   
-        # y_pre = SymbolicTensor((2,2,1), y.symval.dtype, y.symval.device)
-        # y_pre = SymbolicTensor((1,2,2), y.symval.dtype, y.symval.device)
-
 
     else:
         raise ValueError
@@ -687,6 +684,9 @@ def gather_impl(self, x, w, y, *, axis):
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_pre,), y.symval)}' 
  if y_pre is not None else ''}
 """ 
+
+
+
 # <stdin>:3:11: error: start_index_map size (1) is not equal to size of index dimension (1) of start_indices (2)
 # <stdin>:3:11: error: slice_sizes size (1) not equal to (implied) operand rank (2)
 
@@ -697,21 +697,16 @@ def scatter_impl(self, x, w, u, y, *, axis):
     y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
     y_mlir_type = as_mlir_shape(y_init_type)
 
-    lim = (
-        (len(w.symval.shape[1 :])) - len(x.symval.shape[:+ 1])
-    )
+    r = x.symval.ndim
+    q = w.symval.ndim
+    index_vector_dim = q-1
+    lim = (q-1 - x.symval.shape[0])
     lim = None if lim == 0 else lim
     update_window_dims = list(x.symval.shape[1 : lim])
-    inserted_window_dims = [0+axis]
-    scatter_dims_to_operand_dims = [0+axis]
+    inserted_window_dims = [0]
+    scatter_dims_to_operand_dims = [0]
 
-    index_vector_dim = w.symval.ndim-1
-
-    # TODO: Find cheaper way to copy if exists
-    return f"""%{x.name}_1 = "stablehlo.constant"(){{
-        value = dense<{1.0 if "f" in x.symval.dtype.mlir else 1}> : {as_mlir_shape(x.symval)} }} {as_mlir_sig((), x.symval)}
-%{x.name}_ = "stablehlo.multiply"(%{x.name}, %{x.name}_1) {as_mlir_sig((x.symval,  x.symval), x.symval)}
-%{y.name} = "stablehlo.scatter"(%{x.name}_, %{w.name}, %{u.name}) ({{
+    return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
     %0 = "stablehlo.add"(%arg0, %arg1) {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
@@ -725,3 +720,56 @@ def scatter_impl(self, x, w, u, y, *, axis):
   unique_indices = false
 }} {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}
 """
+
+ ## x = slope.zeros(8,1), x = slope.zeros(8,2)
+    # update_window_dims = []
+    # inserted_window_dims = [0,1]
+    # scatter_dims_to_operand_dims = [0]
+    # index_vector_dim = 1
+
+    # operand_dims = list(range(r))
+    # update_window_dims = [axis]
+    # inserted_window_dims = [dim for dim in operand_dims if dim != axis]
+    # scatter_dims_to_operand_dims = [axis]
+    # index_vector_dim = axis
+
+    # update_window_dims = [1]
+    # inserted_window_dims = [1]
+    # scatter_dims_to_operand_dims = [0,1]
+    # index_vector_dim = 1
+
+    # update_window_dims = [1]
+    # inserted_window_dims = [1]
+    # scatter_dims_to_operand_dims = [0,1]
+    # index_vector_dim = 0
+
+'''
+// %input: [
+//          [[1, 2], [3, 4], [5, 6], [7, 8]],
+//          [[9, 10], [11, 12], [13, 14], [15, 16]],
+//          [[17, 18], [19, 20], [21, 22], [23, 24]]
+//         ]
+// %scatter_indices: [[[0, 2], [1, 0], [2, 1]], [[0, 1], [1, 0], [0, 9]]]
+// %update: [
+//           [[[1, 1], [1, 1]], [[1, 1], [1, 1]], [[1, 1], [1, 1]]],
+//           [[[1, 1], [1, 1]], [[1, 1], [1, 1]], [[1, 1], [1, 1]]]
+//          ]
+%result = "stablehlo.scatter"(%input, %scatter_indices, %update) ({
+  ^bb0(%arg0: tensor<i64>, %arg1: tensor<i64>):
+    %0 = "stablehlo.add"(%arg0, %arg1) : (tensor<i64>, tensor<i64>) -> tensor<i64>
+    "stablehlo.return"(%0) : (tensor<i64>) -> ()
+}) {
+  scatter_dimension_numbers = #stablehlo.scatter<
+    update_window_dims = [2, 3],
+    inserted_window_dims = [0],
+    scatter_dims_to_operand_dims = [1, 0],
+    index_vector_dim = 2>,
+  indices_are_sorted = false,
+  unique_indices = false
+} : (tensor<3x4x2xi64>, tensor<2x3x2xi64>, tensor<2x3x2x2xi64>) -> tensor<3x4x2xi64>
+// %result: [
+//           [[1, 2], [5, 6], [7, 8], [7, 8]],
+//           [[10, 11], [12, 13], [14, 15], [16, 17]],
+//           [[18, 19], [20, 21], [21, 22], [23, 24]]
+//          ]
+'''

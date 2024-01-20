@@ -1,14 +1,13 @@
 import slope
 
-
-# print('#1')
-# x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
-# w = slope.tensor([[1,0],[0,1]], dtype=slope.int32)
-# # w = slope.tensor([[0,0],[1,1]], dtype=slope.int32)
-# print(f"{x=}")
-# print(f"{w=}")
-# y = x.gather(w,1)
-# print(f"{y=}")
+print('#1')
+x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
+w = slope.tensor([[1,0],[0,1]], dtype=slope.int32)
+# w = slope.tensor([[0,0],[1,1]], dtype=slope.int32)
+print(f"{x=}")
+print(f"{w=}")
+y = x.gather(w,1)
+print(f"{y=}")
 
 # print('\n#2')
 # x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
@@ -52,16 +51,3 @@ import slope
 # y = x.gather(w)
 # breakpoint()
 # print(f"{y=}")
-
-#######################
-
-x = slope.ones(8)
-print(f"before: {x=}")
-w = slope.tensor([[4], [3], [1], [7]], dtype=slope.int32)
-u = slope.tensor([9., 10., 11., 12.])
-y = slope.scatter(x,w,u)
-
-print(f"{w=}")
-print(f"{u=}")
-print(f"{x=}")
-print(f"{y=}")

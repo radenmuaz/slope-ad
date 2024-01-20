@@ -967,7 +967,7 @@ class Gather(GeneralReduceOperator):
 
     def jvp(self, primals, tangents, *, axis):
         (x, w), (x_dot, w_dot) = primals, tangents
-        return [self(x,w, axis)], [self(x_dot,w, axis)]
+        return [self(x,w, axis)], [self(x_dot,w_dot, axis)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
@@ -980,10 +980,10 @@ class Scatter(GeneralReduceOperator):
         return (x, w, u), dict(axis=axis)
 
     def typecheck(self, x, w, u, *, axis: int):
-        assert x.ndim > 0 and w.ndim > 0
-        assert u.ndim == w.ndim - 1
-        assert axis < min(x.ndim, w.ndim)
-        assert 1 <= w.shape[-1] <= x.ndim
+        # assert x.ndim > 0 and w.ndim > 0
+        # assert u.ndim == w.ndim - 1
+        # assert axis < min(x.ndim, w.ndim)
+        # assert 1 <= w.shape[-1] <= x.ndim
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

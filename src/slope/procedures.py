@@ -15,6 +15,7 @@ from typing import (
 )
 from collections import defaultdict
 import functools
+
 abs_py = abs
 
 
@@ -168,23 +169,19 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= slope.arange(
-        -k, c - k, **kwargs
-    ).unsqueeze(0).expand(r, c)
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= slope.arange(-k, c - k, **kwargs).unsqueeze(0).expand(
+        r, c
+    )
 
 
 @procedure_set.register()
 def triu(x, k: int = 0) -> Tensor:
-    return _tri(x.shape[-2], x.shape[-1], k=k, dtype=x.dtype, device=x.device).where(
-        x, slope.zeros_like(x)
-    )
+    return _tri(x.shape[-2], x.shape[-1], k=k, dtype=x.dtype, device=x.device).where(x, slope.zeros_like(x))
 
 
 @procedure_set.register()
 def tril(x, k: int = 0) -> Tensor:
-    return _tri(x.shape[-2], x.shape[-1], k=k + 1, dtype=x.dtype, device=x.device).where(
-        slope.zeros_like(x), x
-    )
+    return _tri(x.shape[-2], x.shape[-1], k=k + 1, dtype=x.dtype, device=x.device).where(slope.zeros_like(x), x)
 
 
 @procedure_set.register()
@@ -266,35 +263,24 @@ def getitem(x, val):
     ]
 
     start, stop, strides = (
-        zip(*y)
-        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)])
-        else ((), (), ())
+        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, x.shape)]) else ((), (), ())
     )
-    new_slice = tuple(
-        (s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides)
-    )
-    sliced_tensor = x.padslice(new_slice).flip(
-        dim=tuple([i for i, s in enumerate(strides) if s < 0])
-    )
+    new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
+    sliced_tensor = x.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs_py(s) != 1 for s in strides):
         strides = tuple(abs_py(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
             tuple(
-                (0, s - (dim_sz % s) if dim_sz % s != 0 else 0)
-                for s, dim_sz in zip(strides, sliced_tensor.shape)[::-1]
+                (0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape)[::-1]
             )
         )
         # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-        reshaped_tensor = padded_tensor.reshape(
-            flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-        )
+        reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.padslice(
-            tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
-        )
+        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = (
         [],
@@ -366,11 +352,7 @@ def getitem(x, val):
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret = ret.permute(
-                ret_dims[dim[0] : dim[0] + max_dim]
-                + ret_dims[: dim[0]]
-                + ret_dims[dim[0] + max_dim :]
-            )
+            ret = ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
@@ -383,9 +365,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(flatten_seq(padding)[::-1], value=value)  # flatten
-    starts, limits, strides = tuple(
-        zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)])
-    )
+    starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
     return x
 
@@ -427,17 +407,13 @@ def gather(x, dim, idx):
 @procedure_set.register()
 def gather_arange(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(
-        s >= i for s, i in zip(x.shape, idx.shape)
-    ), "all dim of idx.shape must be smaller than x.shape"
+    assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
         dim += x.ndim
     idx = idx.transpose(ax=dim, aw=0).expand_dims(-1)
     permarg = list(range(x.ndim))
     permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
-        if dim != 0
-        else permarg[1:] + [permarg[0]]
+        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     )
     return (
         (
@@ -479,9 +455,7 @@ def repeat(x, repeats):
 @procedure_set.register()
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
-    slice_params = [
-        [slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)
-    ]
+    slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
     return tuple(x[tuple(sl)] for sl in slice_params)
 
 
@@ -497,11 +471,7 @@ def squeeze(x, dim=None):
         )
     if dim < 0:
         dim += x.ndim
-    return (
-        x
-        if x.shape[dim] != 1
-        else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
-    )
+    return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
 
 
 @procedure_set.register(aliases=("expand_dims",))
@@ -525,13 +495,7 @@ def flatten(x, start_dim=0):
 
 @procedure_set.register()
 def cumsum(x, dim: int = 0):
-    return (
-        x.transpose(dim, -1)
-        .pad((x.shape[dim] - 1, 0))
-        .pool((x.shape[dim],))
-        .sum(-1)
-        .transpose(dim, -1)
-    )
+    return x.transpose(dim, -1).pad((x.shape[dim] - 1, 0)).pool((x.shape[dim],)).sum(-1).transpose(dim, -1)
 
 
 @staticmethod
@@ -606,9 +570,7 @@ def pool(
     k_ = kernel_size
     assert len(x.shape) >= len(k_), f"can't pool {x.shape} with {k_}"
     s_, d_ = make_pair(stride, len(k_)), make_pair(dilation, len(k_))
-    assert len(k_) == len(s_) and len(k_) == len(
-        d_
-    ), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
+    assert len(k_) == len(s_) and len(k_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
     slc_prefix, prefix, i_ = (
         [(0, x) for x in x.shape[0 : -len(k_)]],
         x.shape[0 : -len(k_)],
@@ -616,9 +578,7 @@ def pool(
     )
     if any(k > s for k, s in zip(k_, s_)) or any(d != 1 for d in d_):
         o_ = [(i - d * (k - 1) - 1) // s + 1 for i, d, k, s in zip(i_, d_, k_, s_)]
-        e_ = [
-            math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)
-        ]  # expands such that we don't need padding
+        e_ = [math.ceil(k * (i + d) / i) for k, i, d in zip(k_, i_, d_)]  # expands such that we don't need padding
         xup = x
         xup = xup.reshape((*prefix, *flatten_seq((1, i) for i in i_)))
         xup = xup.expand((*prefix, *flatten_seq((e, i) for e, i in zip(e_, i_))))
@@ -626,14 +586,10 @@ def pool(
         # slide by dilation
         xup = xup.padslice(slc_prefix + [(0, k * (i + d)) for k, i, d in zip(k_, i_, d_)])
         xup = xup.reshape((*prefix, *flatten_seq((k, i + d) for k, i, d in zip(k_, i_, d_))))
-        xup = xup.padslice(
-            slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_))
-        )
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o * s)) for k, o, s in zip(k_, o_, s_)))
         # handle stride, and permute to move reduce to the end
         xup = xup.reshape((*prefix, *flatten_seq((k, o, s) for k, o, s in zip(k_, o_, s_))))
-        xup = xup.padslice(
-            slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_))
-        )
+        xup = xup.padslice(slc_prefix + flatten_seq(((0, k), (0, o), (0, 1)) for k, o in zip(k_, o_)))
         xup = xup.reshape((*prefix, *flatten_seq((k, o) for k, o in zip(k_, o_))))
         return xup.permute(
             (
@@ -690,9 +646,7 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
     padding_ = (
         [padding] * 2 * len(D)
         if isinstance(padding, int)
-        else (
-            padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)][::-1]
-        )
+        else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)][::-1])
     )
     padding_ = tuple(padding_)
 
@@ -745,8 +699,7 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
         x = x.reshape(*x.shape[:2], *[k * s for k, s in zip(x.shape[2::2], stride)])
         x = x.slice(
             (0, 0) + (0,) * len(x.shape[2:]),
-            (x.shape[0], x.shape[1])
-            + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1],
+            (x.shape[0], x.shape[1]) + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1],
         )
     padding_ = padding
     padding = flatten_seq(
@@ -802,15 +755,11 @@ def scaled_dot_product_attention(
 ) -> Tensor:
     if is_causal:
         attn_mask = (
-            slope.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device)
-            .tril(0)
-            .cast(slope.bool)
+            slope.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
         )
     if attn_mask is not None and attn_mask.dtype == slope.bool:
         attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
-    return (x @ key.transpose(-2, -1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(
-        dropout_p
-    ) @ value
+    return (x @ key.transpose(-2, -1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
 
 
 @procedure_set.register()
@@ -845,6 +794,7 @@ def log_softmax(x, dim=-1):
     x = x - x.max(dim, keepdim=True)
     logsumexp_x = x.exp().sum(dim, keepdim=True).log()
     return x - logsumexp_x
+
 
 # @procedure_set.register()
 # def gather_nd(

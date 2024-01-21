@@ -112,9 +112,7 @@ def lru_cache_verbose(
                 enable=backend.LOG_LRU,
             )
             tb = (
-                "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace(
-                    "\n    ", ":\t"
-                )
+                "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace("\n    ", ":\t")
                 + "-" * 20
                 + "\n"
             )
@@ -351,7 +349,9 @@ class Tensor:
         return self.numel() * self.element_size()
 
     def __repr__(self):
-        return f"{self.numpy()}\n<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}>"
+        return (
+            f"{self.numpy()}\n<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}>"
+        )
 
 
 class SymbolicTensor(Tensor):
@@ -392,9 +392,7 @@ class SymbolicTensor(Tensor):
         return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
 
     def __repr__(self):
-        return (
-            f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
-        )
+        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
 
     # def __getattr__(self, attr):
     #     if attr in vars(backend.operator_set).keys():
@@ -457,23 +455,15 @@ class Operator:
     def reorg_args(self, args, params):
         sig = inspect.signature(self.typecheck)
         args_strs = [
-            k
-            for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
+            k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
         ]
-        params_strs = [
-            k
-            for k, v in sig.parameters.items()
-            if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"
-        ]
+        params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
 
         if args:
             if len(args) > len(args_strs):
                 args, rest = args[: len(args_strs)], args[len(args_strs) :]
                 if params_strs:
-                    new_params = {
-                        k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params
-                    }
+                    new_params = {k: rest_arg for k, rest_arg in zip(params_strs, rest) if k not in params}
                     params = {**new_params, **params}
             else:
                 args = tuple([params[k] if k in params else arg for k, arg in zip(args_strs, args)])
@@ -487,9 +477,7 @@ class Operator:
         tracers_in = [trace.instantiate_const(t) for t in tracers]
         symvals_in = [t.symval for t in tracers_in]
         symvals_out = self.typecheck(*symvals_in, **params)
-        tracers_out = [
-            PartialRunTraceTensor(trace, make_unknown_pval(symval), None) for symval in symvals_out
-        ]
+        tracers_out = [PartialRunTraceTensor(trace, make_unknown_pval(symval), None) for symval in symvals_out]
         instruction = InstructionDraft(
             self,
             tracers_in,
@@ -511,9 +499,7 @@ class Operator:
                 instruction.out_binders,
             )
             unks_out = [True for i in instruction.out_binders]
-            res = [
-                v for unk, v in zip(unks_in, instruction.inputs) if ((not unk) and type(v) is Var)
-            ]
+            res = [v for unk, v in zip(unks_in, instruction.inputs) if ((not unk) and type(v) is Var)]
         else:
             instruction1 = instruction
             instruction2 = None
@@ -935,9 +921,7 @@ class Program:
         for inb in self.in_binders:
             prefix = "x" if type(inb.symval) is SymbolicTensor else "c"
             idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
-            self.env[inb] = ProgramEnvVar(
-                f"{prefix}{idx}", inb.symval, True if prefix == "c" else False
-            )
+            self.env[inb] = ProgramEnvVar(f"{prefix}{idx}", inb.symval, True if prefix == "c" else False)
         for instruction in self.instructions:
             if len(instruction.out_binders) == 0:
                 continue
@@ -986,9 +970,7 @@ class Program:
                 )
                 head_code_lines += [f"""{ibv.name} = slope.load("./{const_filename}")"""]
         head_code_lines += [""]
-        code = "\n".join(
-            head_code_lines + [line for code_lines in fn_defs.values() for line in code_lines]
-        )
+        code = "\n".join(head_code_lines + [line for code_lines in fn_defs.values() for line in code_lines])
         dblog(
             f"Contents of {self.name}:\n```\n{code}\n```",
             enable=backend.LOG_BACKEND,
@@ -1030,12 +1012,8 @@ class Program:
                 if isinstance(param, Program):
                     sub_program = param
                     fn_defs = cls.instructions_as_code(sub_program, fn_defs)
-                    program_in_vals = ", ".join(
-                        f"{program.env[x].name}" for x in instruction.inputs
-                    )
-                    params[
-                        param_name
-                    ] = f"slope.make_program({sub_program.name}, {program_in_vals})[0]"
+                    program_in_vals = ", ".join(f"{program.env[x].name}" for x in instruction.inputs)
+                    params[param_name] = f"slope.make_program({sub_program.name}, {program_in_vals})[0]"
                 if isinstance(param, DType):
                     params[param_name] = f"slope.{param.name}"
             param_vals = ", ".join(f"{param_name}={param}" for param_name, param in params.items())
@@ -1178,9 +1156,7 @@ class JitObject:
         args = tree_map(lambda a: a.val if isinstance(a, Tensor) else a, args)
         try:
             outs = self.fn(*args, **params)
-            if not isinstance(
-                outs, tuple
-            ):  # TODO: IREE FunctionInvoker destructure 1-tuple, need to undo
+            if not isinstance(outs, tuple):  # TODO: IREE FunctionInvoker destructure 1-tuple, need to undo
                 outs = (outs,)
         except Exception as e:
             dblog(self.code, enable=backend.LOG_JIT)
@@ -1257,9 +1233,7 @@ class JitOp(MetaOperator):
         outs1_res = bind(backend.jit_op, *known_vals, program=program1)
         outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
         res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-        outs2 = [
-            PartialRunTraceTensor(trace, make_unknown_pval(v.symval), None) for v in program2.outs
-        ]
+        outs2 = [PartialRunTraceTensor(trace, make_unknown_pval(v.symval), None) for v in program2.outs]
         instruction = InstructionDraft(
             self,
             res_tracers + unknown_tracers,
@@ -1272,9 +1246,7 @@ class JitOp(MetaOperator):
 
         return merge_lists(out_unknowns, outs1, outs2)
 
-    def partial_run_instruction(
-        self, unks_in, instruction
-    ) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
+    def partial_run_instruction(self, unks_in, instruction) -> Tuple[Instruction, Instruction, List[bool], List[Var]]:
         program = instruction.params["program"]
         program1, program2, out_unknowns, num_res = partial_run_program(program, unks_in)
         ins1, ins2 = partition_list(unks_in, instruction.inputs)
@@ -1540,9 +1512,7 @@ class ProgramBuilder:
         self.constvals[var] = val
         return var
 
-    def build(
-        self, in_tracers: Any, out_tracers: Any, static_args, name
-    ) -> Tuple[Program, List[Any]]:
+    def build(self, in_tracers: Any, out_tracers: Any, static_args, name) -> Tuple[Program, List[Any]]:
         constvars, constvals = unzip2(self.constvals.items())
         t2v = lambda t: self.tracer_to_var[id(t)]
         in_binders = constvars + [t2v(t) for t in in_tracers]
@@ -1968,10 +1938,7 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
         (dim_size,) = dims
     with new_main(VMapTrace, dim_size) as main:
         trace = VMapTrace(main)
-        tracers_in = [
-            VMapTraceTensor(trace, x, dim) if dim is not None else x
-            for x, dim in list_zip(args, in_dim)
-        ]
+        tracers_in = [VMapTraceTensor(trace, x, dim) if dim is not None else x for x, dim in list_zip(args, in_dim)]
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, y_vmap_dims = unzip2((t.val, t.vmap_dim) for t in tracers_out)
@@ -2053,9 +2020,7 @@ def jacfwd(f, x):
 
 
 @lru_cache_verbose()
-def make_program(
-    f: Callable, *symvals_in: SymbolicTensor, static_args, name
-) -> Tuple[Program, List[Any], TreeDef]:
+def make_program(f: Callable, *symvals_in: SymbolicTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:
     symvals_in, in_tree = tree_flatten(symvals_in)
     f, out_tree_store = flatten_fn(f, in_tree)
     builder = ProgramBuilder()
@@ -2066,10 +2031,7 @@ def make_program(
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             # tracers_out = [full_raise(trace, out) for out in outs]
             # raise check because of aux is not ProgramTraceTensor
-            tracers_out = [
-                full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val
-                for out in outs
-            ]
+            tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val for out in outs]
             program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
     return program, consts, out_tree_store()
@@ -2086,9 +2048,7 @@ def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any
             return SymbolicTensor(tuple(shape), symval.dtype, symval.device)
 
     vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
-    in_symvals = [
-        unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)
-    ]
+    in_symvals = [unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)]
     program, consts, _ = make_program(
         vmap_traceable,
         *in_symvals,
@@ -2422,9 +2382,7 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
     return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
 
 
-def run_program_transposed(
-    program: Program, args: List[Any], cotangents: List[Any], **others
-) -> List[Any]:
+def run_program_transposed(program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
 
@@ -2453,17 +2411,13 @@ def run_program_transposed(
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
-    ret = [
-        read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal
-    ]
+    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
 
     return ret
 
 
 @lru_cache_verbose()
-def transpose_program(
-    program: Program, undef_primals: tuple[bool, ...]
-) -> tuple[Program, list[Any]]:
+def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
     symvals_in, symvals_out = typecheck_program(program)
     traceable = partial(run_program_transposed, program)
     args = [UndefPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
@@ -2520,9 +2474,7 @@ def jit_partial_run(trace, tracers, *, program):
     outs1_res = backend.jit_op(*known_vals, program=program)
     outs1, res = split_list(outs1_res, len(program1.outs) - num_res)
     res_tracers = [trace.instantiate_const(full_raise(trace, x)) for x in res]
-    outs2 = [
-        PartialRunTraceTensor(trace, PartialValue.unknown(v.symval), None) for v in program2.outs
-    ]
+    outs2 = [PartialRunTraceTensor(trace, PartialValue.unknown(v.symval), None) for v in program2.outs]
     draft = InstructionDraft(
         backend.jit_op,
         res_tracers + unknown_tracers,
@@ -2572,38 +2524,26 @@ class jit:
     def get_program(self, *args, **static_args):
         sig = inspect.signature(self.f)
         if all("*" not in repr(v) for v in sig.parameters.values()):
-            args_strs = [
-                k
-                for k, v in sig.parameters.items()
-                if k != "self" and k not in self.static_argnames
-            ]
-            static_args_strs = [
-                k for k, v in sig.parameters.items() if k != "self" and k in self.static_argnames
-            ]
+            args_strs = [k for k, v in sig.parameters.items() if k != "self" and k not in self.static_argnames]
+            static_args_strs = [k for k, v in sig.parameters.items() if k != "self" and k in self.static_argnames]
 
             if args:
                 if len(args) > len(args_strs):
                     assert static_args_strs
                     args, rest = args[: len(args_strs)], args[len(args_strs) :]
                     new_static_args = {
-                        k: rest_arg
-                        for k, rest_arg in zip(static_args_strs, rest)
-                        if k not in static_args
+                        k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
                     }
                     static_args = {**new_static_args, **static_args}
             else:
-                args = tuple(
-                    [static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)]
-                )
+                args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
 
         symvals_in = tree_map(lambda x: SymbolicTensor.like(get_symval(x)), args)
         # self.name = self.get_jit_name(symvals_in, static_args, prefix=self.name, short=True)
         static_args = tuple(static_args.items())
         if self.name is None:
             self.name = f"jit_{str(hash((self.f, symvals_in, static_args)))[-5:]}"
-        program, consts, out_tree = make_program(
-            self.f, *symvals_in, static_args=static_args, name=self.name
-        )
+        program, consts, out_tree = make_program(self.f, *symvals_in, static_args=static_args, name=self.name)
         return program, consts, out_tree
         program, consts, out_tree = make_program(
             self.f,

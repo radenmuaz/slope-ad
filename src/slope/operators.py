@@ -456,9 +456,7 @@ class Pad(ShapeOperator):
         def _dilate_dim(d, dilation):
             return 0 if d == 0 else 1 + dilation * (d - 1)
 
-        shape = tuple(
-            sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape)
-        )
+        shape = tuple(sum([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
         if not all(d >= 0 for d in shape):
             raise ValueError(
                 f"Dimension size after padding is not at least 0, "
@@ -640,10 +638,7 @@ class Cat(ShapeOperator):
 
     def vmap(self, dim_size, vals_in, dims_in, *, dim):
         (*xs,), (*xs_bdim,) = vals_in, dims_in
-        xs = tuple(
-            slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
-            for x, x_bdim in zip(xs, xs_bdim)
-        )
+        xs = tuple(slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0) for x, x_bdim in zip(xs, xs_bdim))
         y = self(xs, dim=dim + 1)
         return [y], [0]
 
@@ -798,12 +793,8 @@ class Matmul(GeneralReduceOperator):
                 shape = x.shape[:-1]
             else:
                 assert x.shape[-1] == w.shape[-2], f"{shapes_str}"
-                assert len(x.shape) == len(
-                    w.shape
-                ), f"Different ndim broadcasting not supported, {shapes_str}"
-                assert (
-                    x.shape[:-2] == w.shape[:-2]
-                ), f"dim -1 broadcasting not supported, {shapes_str}"
+                assert len(x.shape) == len(w.shape), f"Different ndim broadcasting not supported, {shapes_str}"
+                assert x.shape[:-2] == w.shape[:-2], f"dim -1 broadcasting not supported, {shapes_str}"
                 shape = (*x.shape[:-2], x.shape[-2], w.shape[-1])
                 # TODO: broadcasting support
                 # x_bdims, w_bdims = x.shape[:-2], w.shape[:-2]
@@ -836,9 +827,7 @@ class Matmul(GeneralReduceOperator):
 @operator_set.register("conv")
 class Conv(GeneralReduceOperator):
     def args_fixer(self, x, w, *, groups=1, stride=1, dilation=1, padding=0):
-        assert (
-            x.ndim == w.ndim
-        ), "weight must be (N, C, *D), weight (O, I, *D) where D=(H, ...,  W, ...)"
+        assert x.ndim == w.ndim, "weight must be (N, C, *D), weight (O, I, *D) where D=(H, ...,  W, ...)"
         (bsz, cin_x), (cout, cin_w), D = x.shape[:2], w.shape[:2], w.shape[2:]
         assert groups * cin_x == cin_w, "input and weight input channel dim mismatch"
         if isinstance(padding, (tuple, list)):
@@ -855,9 +844,7 @@ class Conv(GeneralReduceOperator):
             stride = (stride,) * len(D)
         if isinstance(dilation, int):
             dilation = (dilation,) * len(D)
-        assert len(D) == len(stride) and len(D) == len(
-            dilation
-        ), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
+        assert len(D) == len(stride) and len(D) == len(dilation), f"{len(D)=} {len(stride)=} {len(D)=} {len(dilation)=}"
         return (x, w), dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
 
     def typecheck(self, x, w, *, groups, stride, dilation, padding):
@@ -942,22 +929,20 @@ class Conv(GeneralReduceOperator):
             return [None, gL_w]
 
 
+@operator_set.register("gather_nd")
+class GatherND(GeneralReduceOperator):
+    def args_fixer(self, x, w, *, batch_dims: int = 0):
+        return (x, w), dict(batch_dims=batch_dims)
 
-@operator_set.register("gather")
-class Gather(GeneralReduceOperator):
-    def args_fixer(self, x, w, *, axis: int = 0):
-        return (x, w), dict(axis=axis)
-    
-    def typecheck(self, x, w, *, axis: int):
+    def typecheck(self, x, w, *, batch_dims: int):
         r = x.ndim
         q = w.ndim
         assert r > 0 and q > 0
         assert 1 <= w.shape[-1] <= r
         assert w.shape[-1] <= r
-        assert axis < min(x.ndim, w.ndim)
-        shape = w.shape[:q - 1] + x.shape[w.shape[-1]:]
+        assert batch_dims < min(x.ndim, w.ndim)
+        shape = w.shape[: q - 1] + x.shape[w.shape[-1] :]
         return [SymbolicTensor(shape, x.dtype, x.device)]
-        
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
@@ -965,21 +950,21 @@ class Gather(GeneralReduceOperator):
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
-    def jvp(self, primals, tangents, *, axis):
+    def jvp(self, primals, tangents, *, batch_dims):
         (x, w), (x_dot, w_dot) = primals, tangents
-        return [self(x,w, axis)], [self(x_dot,w_dot, axis)]
+        return [self(x, w, batch_dims)], [self(x_dot, w_dot, batch_dims)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
         return [x.scatter(w, gL_y), None]
 
 
-@operator_set.register("scatter")
-class Scatter(GeneralReduceOperator):
-    def args_fixer(self, x, w, u, *, axis: int = 0):
-        return (x, w, u), dict(axis=axis)
+@operator_set.register("scatter_nd")
+class ScatterND(GeneralReduceOperator):
+    def args_fixer(self, x, w, u, *, batch_dims: int = 0):
+        return (x, w, u), dict(batch_dims=batch_dims)
 
-    def typecheck(self, x, w, u, *, axis: int):
+    def typecheck(self, x, w, u, *, batch_dims: int):
         # assert x.ndim > 0 and w.ndim > 0
         # assert u.ndim == w.ndim - 1
         # assert axis < min(x.ndim, w.ndim)
@@ -998,7 +983,7 @@ class Scatter(GeneralReduceOperator):
 
     def jvp(self, primals, tangents, *, axis):
         (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
-        return [self(x,w,u, axis)], [self(x_dot,w_dot, u_dot, axis)]
+        return [self(x, w, u, axis)], [self(x_dot, w_dot, u_dot, axis)]
 
     def T(self, cotangents, x, w, u):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)

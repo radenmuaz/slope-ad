@@ -598,9 +598,7 @@ def typecheck(self, x: SymbolicTensor, *, padding, mode, value) -> List[Symbolic
     def _dilate_dim(d, dilation):
         return 0 if d == 0 else 1 + dilation * (d - 1)
 
-    shape = tuple(
-        sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape)
-    )
+    shape = tuple(sum_py([l, h, _dilate_dim(d, r + 1)]) for l, h, r, d in list_zip(lo, hi, interior, x.shape))
     if not all(d >= 0 for d in shape):
         raise ValueError(
             f"Dimension size after padding is not at least 0, "
@@ -672,10 +670,7 @@ def jvp(self, primals, tangents, *, starts, limits, strides=None):
 def typecheck(self, x: SymbolicTensor, *, starts, limits, strides=None) -> List[SymbolicTensor]:
     if strides is None or tuple(strides) == (1,) * len(x.shape):
         shape = tuple(
-            [
-                limit if type(start) is int and start == 0 else limit - start
-                for start, limit in list_zip(starts, limits)
-            ]
+            [limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)]
         )
         return [SymbolicTensor(shape, x.dtype)]
     else:
@@ -1010,9 +1005,7 @@ def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs)
     for i in range(num_consts):
         const_name = in_binders[i]["name"]
         const_path = os.path.join(consts_dir_path, f"{const_name}.npy")
-        load_consts_code += (
-            f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
-        )
+        load_consts_code += f"""{const_name} = np.load(os.path.join(consts_dir_path, "{const_name}.npy"))\n"""
         np.save(const_path, in_binders[i]["type"].numpy())
     input_args_code = ", ".join(ib["name"] for ib in in_binders[num_consts:])
     args_code = ", ".join(ib["name"] for ib in in_binders)
@@ -1141,9 +1134,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
     # ]
     fn_args_str = ", ".join(arg_type_strs)
 
-    outs = list_map(
-        lambda x: backend[x], program.outs
-    )  # TODO: input that is output should has identity op
+    outs = list_map(lambda x: backend[x], program.outs)  # TODO: input that is output should has identity op
     out_type_strs = [o["name"] for o in outs]
     # out_type_asserts = [
     #     f"{self.dtype_map[o['type'].dtype]}[{repr(list(o['type'].shape))[1:-1]}] {o['name']}" for o in outs
@@ -1159,12 +1150,7 @@ def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> Li
         # functions_code_lines += fn_def_code_lines
         functions_code_lines += fn_def_code_lines
 
-    code_lines = (
-        head_code_lines
-        + [indent(l, il1) for l in functions_code_lines]
-        + body_code_lines
-        + return_line
-    )
+    code_lines = head_code_lines + [indent(l, il1) for l in functions_code_lines] + body_code_lines + return_line
     slope.dblog(
         f"\n-- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n==\n",
         enable=slope.LOG_JIT,
@@ -1217,13 +1203,9 @@ compiler.set_impl(operator_set.random_normal)(
         f"ret = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={dtype})"
     )
 )
-compiler.set_impl(operator_set.expand)(
-    lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})"
-)
+compiler.set_impl(operator_set.expand)(lambda self, x, *, shape: f"ret = np.broadcast_to({x}, shape={shape})")
 
-compiler.set_impl(operator_set.reshape)(
-    lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})"
-)
+compiler.set_impl(operator_set.reshape)(lambda self, x, *, shape: f"ret = np.reshape({x}, newshape={shape})")
 
 
 @compiler.set_impl(operator_set.pad)
@@ -1236,12 +1218,8 @@ compiler.set_impl(operator_set.slice)(
     lambda self, x, *, starts, limits, strides: f"ret = {x}[tuple(slice(s, l, st) for s, l, st in zip({starts}, {limits}, {strides}))]"
 )
 
-compiler.set_impl(operator_set.cat)(
-    lambda self, *xs, dim: f"ret = np.concatenate(({','.join(xs)}), axis={dim})"
-)
-compiler.set_impl(operator_set.permute)(
-    lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})"
-)
+compiler.set_impl(operator_set.cat)(lambda self, *xs, dim: f"ret = np.concatenate(({','.join(xs)}), axis={dim})")
+compiler.set_impl(operator_set.permute)(lambda self, x, *, perm: f"ret = np.transpose({x}, axes={perm})")
 compiler.set_impl(operator_set.flip)(lambda self, x, *, dim: f"ret = np.flip({x}, axis={dim})")
 
 
@@ -1398,9 +1376,9 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(
-        -k, c - k, **kwargs
-    ).unsqueeze(0).expand(r, c)
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
+        0
+    ).expand(r, c)
 
 
 @procedure_set.register()
@@ -1492,9 +1470,7 @@ def getitem(self, val):
     for i, v in enumerate(orig_slices):
         count[type(v) if not isinstance(v, slope.core.Tensor) else "tensor"] += [i]
 
-    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(
-        self.shape
-    ):
+    if (num_slices := len(count[int]) + len(count[slice_py]) + len(count["tensor"])) > len(self.shape):
         raise IndexError(f"too many indices for tensor of dimension {len(self.shape)}")
     if len(ellipsis_found := count[type(Ellipsis)]) > 1:
         raise IndexError("an index can only have a single ellipsis ('...')")
@@ -1513,35 +1489,22 @@ def getitem(self, val):
     ]
 
     start, stop, strides = (
-        zip(*y)
-        if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)])
-        else ((), (), ())
+        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     )
-    new_slice = tuple(
-        (s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides)
-    )
-    sliced_tensor = self.padslice(new_slice).flip(
-        dim=tuple([i for i, s in enumerate(strides) if s < 0])
-    )
+    new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
+    sliced_tensor = self.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
     if any(abs_py(s) != 1 for s in strides):
         strides = tuple(abs_py(s) for s in strides)
         # Pad: add pad at the end: [dim_sz] -> [dim_sz_padded]
         padded_tensor = sliced_tensor.pad(
-            tuple(
-                (0, s - (dim_sz % s) if dim_sz % s != 0 else 0)
-                for s, dim_sz in zip(strides, sliced_tensor.shape)
-            )
+            tuple((0, s - (dim_sz % s) if dim_sz % s != 0 else 0) for s, dim_sz in zip(strides, sliced_tensor.shape))
         )
         # Reshape: [dim_sz_padded] -> [dim_sz_padded // s, s]
-        reshaped_tensor = padded_tensor.reshape(
-            flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides))
-        )
+        reshaped_tensor = padded_tensor.reshape(flatten([sh // s, s] for sh, s in zip(padded_tensor.shape, strides)))
         new_shape = reshaped_tensor.shape[::2]
         # Shrink: do [:, 0]
-        sliced_tensor = reshaped_tensor.padslice(
-            tuple(flatten(((0, sh), (0, 1)) for sh in new_shape))
-        )
+        sliced_tensor = reshaped_tensor.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in new_shape)))
 
     final_shape, it_shape, dim, tensors, dim_collapsed = (
         [],
@@ -1612,11 +1575,7 @@ def getitem(self, val):
         # special permute case
         if dim[0] != 0 and len(dim) != 1 and dim != list(range(dim[0], dim[-1] + 1)):
             ret_dims = list(range(ret.ndim))
-            ret = ret.permute(
-                ret_dims[dim[0] : dim[0] + max_dim]
-                + ret_dims[: dim[0]]
-                + ret_dims[dim[0] + max_dim :]
-            )
+            ret = ret.permute(ret_dims[dim[0] : dim[0] + max_dim] + ret_dims[: dim[0]] + ret_dims[dim[0] + max_dim :])
     return ret
 
 
@@ -1629,9 +1588,7 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max_py(0, -p[0]), max_py(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
     x = x.pad(flatten_seq(padding), value=value)  # flatten
-    starts, limits, strides = tuple(
-        zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)])
-    )
+    starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)
     return x
 
@@ -1646,17 +1603,13 @@ def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
 @procedure_set.register(static_argnames="dim")
 def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(
-        s >= i for s, i in zip(x.shape, idx.shape)
-    ), "all dim of idx.shape must be smaller than x.shape"
+    assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:
         dim += x.ndim
     idx = idx.transpose(ax=dim, aw=0).expand_dims(-1)
     permarg = list(range(x.ndim))
     permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
-        if dim != 0
-        else permarg[1:] + [permarg[0]]
+        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     )
     return (
         (
@@ -1698,9 +1651,7 @@ def repeat(x, repeats):
 @procedure_set.register(static_argnames="dim")
 def split(x, num: int, dim: int):
     dim, step = dim + x.ndim if dim < 0 else dim, math.ceil(x.shape[dim] / num)
-    slice_params = [
-        [slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)
-    ]
+    slice_params = [[slice(None)] * dim + [slice(k, k + step)] for k in range(0, x.shape[dim], step)]
     return tuple(x[tuple(sl)] for sl in slice_params)
 
 
@@ -1716,11 +1667,7 @@ def squeeze(x, dim=None):
         )
     if dim < 0:
         dim += x.ndim
-    return (
-        x
-        if x.shape[dim] != 1
-        else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
-    )
+    return x if x.shape[dim] != 1 else x.reshape(*[size for idx, size in enumerate(x.shape) if idx != dim])
 
 
 @procedure_set.register(static_argnames="dim")
@@ -1744,13 +1691,7 @@ def flatten(x, start_dim=0):
 
 @procedure_set.register(static_argnames="dim")
 def cumsum(x, dim: int = 0):
-    return (
-        x.transpose(dim, -1)
-        .pad((x.shape[dim] - 1, 0))
-        .pool((x.shape[dim],))
-        .sum(-1)
-        .transpose(dim, -1)
-    )
+    return x.transpose(dim, -1).pad((x.shape[dim] - 1, 0)).pool((x.shape[dim],)).sum(-1).transpose(dim, -1)
 
 
 @staticmethod

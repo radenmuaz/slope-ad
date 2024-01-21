@@ -37,11 +37,7 @@ class Module:
             elif isinstance(v, Module):
                 module_attrs[k] = None
 
-        static_dict = {
-            k: v
-            for k, v in self.__dict__.items()
-            if k not in tuple(tensor_attrs) + tuple(module_attrs)
-        }
+        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
         return dict(
             cls=self.__class__,
             tensor_attrs=tuple(tensor_attrs.keys()),
@@ -95,11 +91,7 @@ class Module:
                     find(v, f"{prefix}{str(k)}.")
 
         find(self, "")
-        static_dict = {
-            k: v
-            for k, v in self.__dict__.items()
-            if k not in tuple(tensor_attrs) + tuple(module_attrs)
-        }
+        static_dict = {k: v for k, v in self.__dict__.items() if k not in tuple(tensor_attrs) + tuple(module_attrs)}
         return dict(
             cls=self.__class__,
             tensor_attrs=tuple(tensor_attrs),
@@ -165,9 +157,7 @@ class Optimizer(Module):
     def __call__(self, params, g_params):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         # g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
-        step_out, (leaf0, leaf0_treedef) = slope.tree_map(
-            self.step, params, *(g_params, *state_attrs), out_leaf=True
-        )
+        step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
         params_out, state = step_out_T
         # params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
@@ -301,9 +291,7 @@ def variance_scaling(
             return slope.rand(size=shape.astype(dtype)) * (3 * variance).sqrt()
 
         else:
-            raise ValueError(
-                f"invalid distribution for variance scaling initializer: {distribution}"
-            )
+            raise ValueError(f"invalid distribution for variance scaling initializer: {distribution}")
 
     return init
 
@@ -395,12 +383,8 @@ class Embedding(Module):
 
     def __call__(self, idx: Tensor) -> Tensor:
         if not hasattr(self, "vocab_counter"):
-            self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(
-                1, 1, self.vocab_size
-            )
-        return (self.vocab_counter == idx.unsqueeze(2)).expand(
-            *idx.shape, self.vocab_size
-        ) @ self.weight
+            self.vocab_counter = Tensor.arange(self.vocab_size, requires_grad=False).reshape(1, 1, self.vocab_size)
+        return (self.vocab_counter == idx.unsqueeze(2)).expand(*idx.shape, self.vocab_size) @ self.weight
 
 
 class Linear(Module):
@@ -457,8 +441,7 @@ class ConvNd(Module):
         groups=1,
         bias=True,
         # W_init=glorot_normal(),
-        W_init=lambda shape: slope.randn(shape)
-        * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
+        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
         dims=2,
     ):
         self.in_channels = in_channels
@@ -606,9 +589,7 @@ class BatchNorm(Module):
                 z_numel = math.prod(z.shape)
                 z_ratio = z_numel / (z_numel - z.shape[1]) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
-                self.running_var = (
-                    1 - self.momentum
-                ) * self.running_var + self.momentum * z_ratio * var
+                self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
                 # mean = self.running_mean
                 # invstd = (self.running_var + self.eps).rsqrt()
@@ -629,9 +610,7 @@ class LayerNorm(Module):
         eps: float = 1e-5,
         elementwise_affine: bool = True,
     ):
-        self.normalized_shape = (
-            (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
-        )
+        self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else tuple(normalized_shape)
         self.dim, self.eps, self.elementwise_affine = (
             tuple(-1 - i for i in range(len(self.normalized_shape))),
             eps,

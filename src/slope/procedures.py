@@ -304,7 +304,6 @@ def getitem(x, val):
     ret = sliced_tensor.reshape(tuple(final_shape))
 
     if tensors:  # Fancy/tensor indexing
-        # return x.gather_nd(val)
         # normalize idx
         idx = [t.sign().neg().relu() * ret.shape[d] + t for d, t in zip(dim, tensors)]
         max_dim = max(i.ndim for i in idx)
@@ -370,42 +369,14 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     return x
 
 
-# @procedure_set.register()
-# def padslice(x, pads: Sequence[Optional[Tuple[int, int]]], value: float = 0):
-#     pads = tuple(a if a is not None else (0, s) for s, a in zip(x.shape, pads))
-#     pads1 = tuple((max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(pads))
-#     pads2 = tuple(item for sublist in pads1 for item in sublist)[::-1]
-#     x = x.pad(pads1, value=value)  # flatten
-
-#     starts, limits, strides = tuple(
-#         zip(*[(p[0] + p1[0], p[1] + p1[0], 1) for (p, p1) in zip(pads, pads1)])
-#     )
-#     x = x.slice(starts, limits, strides)
-#     return x
-#     # starts, limits, strides = tuple(
-#         # zip(*[(p[0] + p_[i][0], p[1] + p_[i][0], 1) for i, p in enumerate(arg)])
-#     # )
-
-
 @procedure_set.register()
 def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
     # (padding_left, padding_right, padding_top, padding_bottom)
     slc = [(-p0, s + p1) for p0, p1, s in zip(padding[::2], padding[1::2], x.shape[::-1])][::-1]
     return x.padslice([(0, s) for s in x.shape[: -(len(padding) // 2)]] + slc, value=value)
 
-
 @procedure_set.register()
-def gather(x, dim, idx):
-    if dim != 0:
-        x, idx = x.transpose(0, idx), idx.transpose(0, idx)
-    ret = x.gather_nd(idx, batch_dims=0)
-    if dim != 0:
-        ret = ret.transpose(0, idx)
-    return ret
-
-
-@procedure_set.register()
-def gather_arange(x, idx, dim: int):
+def gather(x, idx, dim: int):
     assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
     assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
     if dim < 0:

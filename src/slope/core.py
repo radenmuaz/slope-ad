@@ -48,8 +48,8 @@ def dblog(*msg, enable=True):
 def unzip2(pairs) -> Tuple[List[Any], List[Any]]:
     lst1, lst2 = [], []
     for i1, i2 in pairs:
-        lst1.append(i1)
-        lst2.append(i2)
+        lst1 += [i1]
+        lst2 += [i2]
     return lst1, lst2
 
 
@@ -88,7 +88,7 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     lst2: List[Any] = []
     lists = lst1, lst2
     for b, x in list_zip(bs, l):
-        lists[b].append(x)
+        lists[b] += [x]
     return lst1, lst2
 
 
@@ -234,6 +234,10 @@ class Tensor:
         self.buf = val
 
     @property
+    def symval(self):
+        return SymbolicTensor.like(self)
+
+    @property
     def default_dtype(self):
         return backend.default_dtype
 
@@ -350,7 +354,7 @@ class Tensor:
 
     def __repr__(self):
         return (
-            f"{self.numpy()}\n<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}>"
+            f"<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}, val=\n{self.numpy()}\n>"
         )
 
 
@@ -360,6 +364,14 @@ class SymbolicTensor(Tensor):
         self._shape = tuple(int(i) for i in shape)
         self._dtype = dtype
         self._device = device
+    
+    @property
+    def symval(self):
+        return self
+
+    @property
+    def val(self):
+        raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
 
     @property
     def shape(self):
@@ -764,6 +776,16 @@ class Backend:
         if type(val) is bytes:
             val = np.frombuffer(val, dtype=dtype)
         return self.from_numpy(val, dtype, device)
+
+    def symbolic_tensor(
+        self,
+        shape: Union[list, tuple, np.ndarray, "TensorBuffer"] = None,
+        dtype: Optional[Any] = None,
+        device=None,
+    ):
+        dtype = dtype or self.DEFAULT_DTYPE
+        device = device or self.DEFAULT_DEVICE
+        return SymbolicTensor(shape, dtype, device)
 
     def seed(self, seed):
         raise NotImplementedError
@@ -1307,6 +1329,15 @@ class RunTrace(Trace):
 
         return fn
 
+class SymbolicRunTrace(Trace):
+    # pure = lambda self, x: x
+    def pure(self, val: Any) -> SymbolicTensor:
+        return val.symval
+
+    def run_op(self, op, tracers, params):
+        symvals_in = tree_map(lambda x: x.symval, tracers)
+        symvals_out = op.typecheck(*symvals_in, **params)
+        return symvals_out
 
 class TraceTensor(Tensor):
     PYTHON_TYPES = {
@@ -1443,9 +1474,6 @@ class ProgramTrace(Trace):
     def builder(self):
         return self.main.global_data
 
-    def __init__(self, main: MainTrace) -> None:
-        self.main = main
-
     def new_arg(self, symval) -> ProgramTraceTensor:
         symval = SymbolicTensor.like(symval)
         tracer = self.builder.new_tracer(self, symval)
@@ -1462,7 +1490,6 @@ class ProgramTrace(Trace):
         return tracer
 
     def run_op(self, op, tracers, params):
-        symvals_in = [t.symval for t in tracers]
         symvals_in = tree_map(lambda x: x.symval, tracers)
         symvals_out = op.typecheck(*symvals_in, **params)
 
@@ -1490,11 +1517,11 @@ class ProgramBuilder:
 
     def new_tracer(self, trace: ProgramTrace, symval: SymbolicTensor) -> ProgramTraceTensor:
         tracer = ProgramTraceTensor(trace, symval)
-        self.tracers.append(tracer)
+        self.tracers += [tracer]
         return tracer
 
     def add_instruction(self, instruction: Instruction) -> None:
-        self.instructions.append(instruction)
+        self.instructions += [instruction]
 
     def add_var(self, tracer: ProgramTraceTensor) -> Var:
         assert id(tracer) not in self.tracer_to_var
@@ -1665,7 +1692,7 @@ class PartialRunTrace(Trace):
 
 
 trace_stack: List[MainTrace] = []
-dynamic_trace: Optional[MainTrace] = None
+stashed_trace: Optional[MainTrace] = None
 trace_stack += [MainTrace(0, RunTrace, None)]
 
 
@@ -1799,10 +1826,11 @@ def tree_map(f: Callable[..., Any], tree, *rest, out_leaf=False) -> Any:
 
 
 @contextmanager
-def new_main(trace_type: Type["Trace"], global_data=None):
+def new_main_trace(trace_type: Type["Trace"], global_data=None):
+    global trace_stack
     level = len(trace_stack)
     main = MainTrace(level, trace_type, global_data)
-    trace_stack.append(main)
+    trace_stack += [main]
 
     try:
         yield main
@@ -1810,14 +1838,6 @@ def new_main(trace_type: Type["Trace"], global_data=None):
         trace_stack.pop()
 
 
-@contextmanager
-def new_dynamic(main: MainTrace):
-    global dynamic_trace
-    prev_dynamic_trace, dynamic_trace = dynamic_trace, main
-    try:
-        yield
-    finally:
-        dynamic_trace = prev_dynamic_trace
 
 
 def bind(op, *args, **params):
@@ -1846,8 +1866,8 @@ def find_top_trace(xs) -> Trace:
         default=trace_stack[0],
         key=operator_py.attrgetter("level"),
     )
-    if dynamic_trace and dynamic_trace.level > top_main.level:
-        top_main = dynamic_trace
+    if stashed_trace and stashed_trace.level > top_main.level:
+        top_main = stashed_trace
     return top_main.trace_type(top_main)
 
 
@@ -1936,7 +1956,7 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
         dims = set([x.shape[d] for x, d in list_zip(args, in_dim) if d is not None])
         assert len(dims) == 1
         (dim_size,) = dims
-    with new_main(VMapTrace, dim_size) as main:
+    with new_main_trace(VMapTrace, dim_size) as main:
         trace = VMapTrace(main)
         tracers_in = [VMapTraceTensor(trace, x, dim) if dim is not None else x for x, dim in list_zip(args, in_dim)]
         outs = f(*tracers_in)
@@ -1969,7 +1989,7 @@ def vmap(f, in_dim=0, out_dim=0, dim_size=None):
 
 
 def jvp_flat(f, primals, tangents, *, has_aux, global_data, **static_args):
-    with new_main(JVPTrace, global_data) as main:
+    with new_main_trace(JVPTrace, global_data) as main:
         trace = JVPTrace(main)
         tracers_in = [JVPTraceTensor(trace, x, t) for x, t in list_zip(primals, tangents)]
         jvp_flat_ret = f(*tracers_in, **static_args)
@@ -2019,18 +2039,40 @@ def jacfwd(f, x):
     return vmap(pushfwd, (0,))(vecs_in)
 
 
+
+@contextmanager
+def stash_trace(main: MainTrace):
+    global stashed_trace
+    prev_stashed_trace, stashed_trace = stashed_trace, main
+    try:
+        yield
+    finally:
+        stashed_trace = prev_stashed_trace
+
+
+@contextmanager
+def symbolic_run():
+    level = len(trace_stack)
+    main = MainTrace(level, SymbolicRunTrace, global_data=None)
+    trace_stack += [main]
+    global stashed_trace
+    prev_stashed_trace, stashed_trace = stashed_trace, main
+    try:
+        yield
+    finally:
+        stashed_trace = prev_stashed_trace
+        trace_stack.pop()
+
 @lru_cache_verbose()
 def make_program(f: Callable, *symvals_in: SymbolicTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:
     symvals_in, in_tree = tree_flatten(symvals_in)
     f, out_tree_store = flatten_fn(f, in_tree)
     builder = ProgramBuilder()
-    with new_main(ProgramTrace, builder) as main:
-        with new_dynamic(main):
+    with new_main_trace(ProgramTrace, builder) as main:
+        with stash_trace(main):
             trace = ProgramTrace(main)
             tracers_in = [trace.new_arg(symval) for symval in symvals_in]
             outs = f(*tracers_in, **{k: v for k, v in static_args})
-            # tracers_out = [full_raise(trace, out) for out in outs]
-            # raise check because of aux is not ProgramTraceTensor
             tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val for out in outs]
             program, consts = builder.build(tracers_in, tracers_out, static_args, name)
 
@@ -2079,7 +2121,7 @@ def jvp_program(program: Program) -> Tuple[Program, List[Any]]:
 def partial_run_flat(
     f: Callable, pvals_in: List["PartialValue"], has_aux, global_data=None
 ) -> Tuple[Program, List["PartialValue"], List[Any]]:
-    with new_main(PartialRunTrace, global_data) as main:
+    with new_main_trace(PartialRunTrace, global_data) as main:
         trace = PartialRunTrace(main)
         tracers_in = [trace.new_arg(pval) for pval in pvals_in]
         outs = f(*tracers_in)
@@ -2273,7 +2315,7 @@ def tracers_to_program(
             tracer_to_var[id(t)] = var
         elif isinstance(t.draft, InstructionDraft):
             if id(t.draft) not in processed_instructions:
-                instructions.append(draft_to_instruction(tracer_to_var, t.draft))
+                instructions += [draft_to_instruction(tracer_to_var, t.draft)]
                 processed_instructions.add(id(t.draft))
         else:
             raise TypeError(t.draft)
@@ -2317,10 +2359,10 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
     childless_nodes = [node for node in out_nodes if not child_counts[id(node)]]
     while childless_nodes:
         node = childless_nodes.pop()
-        sorted_nodes.append(node)
+        sorted_nodes += [node]
         for parent in parents(node):
             if child_counts[id(parent)] == 1:
-                childless_nodes.append(parent)
+                childless_nodes += [parent]
             else:
                 child_counts[id(parent)] -= 1
 

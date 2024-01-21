@@ -10,8 +10,6 @@ from tqdm import tqdm
 from lib.datasets.mnist import get_mnist
 
 import numpy as np
-
-
 def loss_fn(model, batch):
     x, y_onehot = batch
     preds = model(x)

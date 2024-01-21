@@ -595,8 +595,6 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, batch_dims):
-    if batch_dims > 0:
-        raise NotImplementedError
     operand_shape = list(x.symval.shape)
     indices_shape = list(w.symval.shape)
     r = x.symval.ndim
@@ -607,10 +605,9 @@ def gather_nd_impl(self, x, w, y, batch_dims):
     y_reshape = None
     w_arange = None
     if b > 0:
-        w_arange = SymbolicTensor(tuple(range(operand_shape[i]) for i in range(b)),
-                                  w.symval.dtype,
-                                  w.symval.device
-                                  )
+        w_arange = w.symval
+        # breakpoint()
+        # w_arange = SymbolicTensor(w.symval.shape, w.symval.dtype, w.symval.device)
 
     if indices_shape[-1] == r:
         slice_sizes = [1]*r
@@ -623,7 +620,7 @@ def gather_nd_impl(self, x, w, y, batch_dims):
         y_reshape = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
     elif indices_shape[-1] < r:
         slice_sizes = [*[1]*(r-1), *operand_shape[-1:]]
-        start_index_map = [i+b for i, s in enumerate(slice_sizes) if s==1 and i < q]
+        start_index_map = [i for i, s in enumerate(slice_sizes) if s==1 and i < q]
 
         collapsed_slice_dims = []
         for i in range(len(slice_sizes)):
@@ -635,15 +632,13 @@ def gather_nd_impl(self, x, w, y, batch_dims):
 
     else:
         raise ValueError
-    w_symval = w.symval if w_arange is None else SymbolicTensor(w_arange.shape + w.symval.shape,
-        w.symval.dtype,
-                                  w.symval.device
-    )
+    w_symval = w.symval if w_arange is None else SymbolicTensor(
+        tuple(d+b if i == b else d for i, d in enumerate(w.symval.shape)), w.symval.dtype,  w.symval.device)
     y_symval = y.symval if y_reshape is None else y_reshape
     y_affix = "" if y_reshape is None else "_"
     w_affix = "" if w_arange is None else "_"
     return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} {as_mlir_sig((), w_arange)}
-    %{w.name}_ = stablehlo.concatenate {w.name}_i, {w.name} dim = {b} {as_mlir_sig((w_arange, w.symval), w_symval)} '''
+%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} {as_mlir_sig((w_arange, w.symval), w_symval)} '''
     if w_arange is not None else ''}
 %{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
   dimension_numbers = #stablehlo.gather<
@@ -653,7 +648,7 @@ def gather_nd_impl(self, x, w, y, batch_dims):
   index_vector_dim = {index_vector_dim}>,
   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
   indices_are_sorted = false
-}} {as_mlir_sig((x.symval, w.symval), y_symval)}
+}} {as_mlir_sig((x.symval, w_symval), y_symval)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_symval,), y.symval)}' 
  if y_reshape is not None else ''}
 """ 

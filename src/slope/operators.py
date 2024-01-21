@@ -937,11 +937,15 @@ class GatherND(GeneralReduceOperator):
     def typecheck(self, x, w, *, batch_dims: int):
         r = x.ndim
         q = w.ndim
+        b = batch_dims
         assert r > 0 and q > 0
         assert 1 <= w.shape[-1] <= r
         assert w.shape[-1] <= r
-        assert batch_dims < min(x.ndim, w.ndim)
-        shape = w.shape[: q - 1] + x.shape[w.shape[-1] :]
+        assert b < min(x.ndim, w.ndim)
+        # shape = w.shape[: q - 1] + x.shape[w.shape[-1] :]
+        bx = x.shape[b:]
+        bw = w.shape[b:]
+        shape = bx[:b] + bw[:len(bw) - 1] + bx[bw[-1]:]
         return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

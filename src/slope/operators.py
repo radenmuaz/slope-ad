@@ -965,14 +965,16 @@ class GatherND(GeneralReduceOperator):
 
 @operator_set.register("scatter_nd")
 class ScatterND(GeneralReduceOperator):
-    def args_fixer(self, x, w, u, *, batch_dims: int = 0):
-        return (x, w, u), dict(batch_dims=batch_dims)
+    def args_fixer(self, x, w, u):
+        return (x, w, u), dict()
 
-    def typecheck(self, x, w, u, *, batch_dims: int):
-        # assert x.ndim > 0 and w.ndim > 0
-        # assert u.ndim == w.ndim - 1
-        # assert axis < min(x.ndim, w.ndim)
-        # assert 1 <= w.shape[-1] <= x.ndim
+    def typecheck(self, x, w, u):
+        assert w.ndim >= 2
+        index_depth = w.shape[-1]
+        batch_shape = w.shape[:-1]
+        assert index_depth <= x.ndim
+        inner_shape = x.shape[index_depth:]
+        assert u.shape == batch_shape + inner_shape
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
@@ -985,9 +987,9 @@ class ScatterND(GeneralReduceOperator):
         (x, w), (x_dot, w_dot) = primals, tangents
         return [x @ w], [(x_dot @ w) + (x @ w_dot)]
 
-    def jvp(self, primals, tangents, *, axis):
+    def jvp(self, primals, tangents):
         (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
-        return [self(x, w, u, axis)], [self(x_dot, w_dot, u_dot, axis)]
+        return [self(x, w, u)], [self(x_dot, w_dot, u_dot)]
 
     def T(self, cotangents, x, w, u):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)

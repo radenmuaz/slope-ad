@@ -606,8 +606,6 @@ def gather_nd_impl(self, x, w, y, batch_dims):
     w_arange = None
     if b > 0:
         w_arange = w.symval
-        # breakpoint()
-        # w_arange = SymbolicTensor(w.symval.shape, w.symval.dtype, w.symval.device)
 
     if indices_shape[-1] == r:
         slice_sizes = [1]*r
@@ -632,13 +630,13 @@ def gather_nd_impl(self, x, w, y, batch_dims):
 
     else:
         raise ValueError
-    w_symval = w.symval if w_arange is None else SymbolicTensor(
+    w_fixed = w.symval if w_arange is None else SymbolicTensor(
         tuple(d+b if i == b else d for i, d in enumerate(w.symval.shape)), w.symval.dtype,  w.symval.device)
-    y_symval = y.symval if y_reshape is None else y_reshape
+    y_fixed = y.symval if y_reshape is None else y_reshape
     y_affix = "" if y_reshape is None else "_"
     w_affix = "" if w_arange is None else "_"
     return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} {as_mlir_sig((), w_arange)}
-%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} {as_mlir_sig((w_arange, w.symval), w_symval)} '''
+%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} {as_mlir_sig((w_arange, w.symval), w_fixed)} '''
     if w_arange is not None else ''}
 %{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
   dimension_numbers = #stablehlo.gather<
@@ -648,23 +646,21 @@ def gather_nd_impl(self, x, w, y, batch_dims):
   index_vector_dim = {index_vector_dim}>,
   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
   indices_are_sorted = false
-}} {as_mlir_sig((x.symval, w_symval), y_symval)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_symval,), y.symval)}' 
+}} {as_mlir_sig((x.symval, w_fixed), y_fixed)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_fixed,), y.symval)}' 
  if y_reshape is not None else ''}
 """ 
 
 
 @backend.set_impl(backend.operator_set.scatter_nd)
-def scatter_nd_impl(self, x, w, u, y, *, axis):
+def scatter_nd_impl(self, x, w, u, y):
     y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
     y_mlir_type = as_mlir_shape(y_init_type)
 
     r = x.symval.ndim
     q = w.symval.ndim
     index_vector_dim = q-1
-    lim = (q-1 - x.symval.shape[0])
-    lim = None if lim == 0 else lim
-    update_window_dims = list(x.symval.shape[1 : lim])
+    update_window_dims = list(range(1,u.symval.ndim))
     inserted_window_dims = [0]
     scatter_dims_to_operand_dims = [0]
 
@@ -682,34 +678,3 @@ def scatter_nd_impl(self, x, w, u, y, *, axis):
   unique_indices = false
 }} {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}
 """
-
-'''
-// %input: [
-//          [[1, 2], [3, 4], [5, 6], [7, 8]],
-//          [[9, 10], [11, 12], [13, 14], [15, 16]],
-//          [[17, 18], [19, 20], [21, 22], [23, 24]]
-//         ]
-// %scatter_indices: [[[0, 2], [1, 0], [2, 1]], [[0, 1], [1, 0], [0, 9]]]
-// %update: [
-//           [[[1, 1], [1, 1]], [[1, 1], [1, 1]], [[1, 1], [1, 1]]],
-//           [[[1, 1], [1, 1]], [[1, 1], [1, 1]], [[1, 1], [1, 1]]]
-//          ]
-%result = "stablehlo.scatter"(%input, %scatter_indices, %update) ({
-  ^bb0(%arg0: tensor<i64>, %arg1: tensor<i64>):
-    %0 = "stablehlo.add"(%arg0, %arg1) : (tensor<i64>, tensor<i64>) -> tensor<i64>
-    "stablehlo.return"(%0) : (tensor<i64>) -> ()
-}) {
-  scatter_dimension_numbers = #stablehlo.scatter<
-    update_window_dims = [2, 3],
-    inserted_window_dims = [0],
-    scatter_dims_to_operand_dims = [1, 0],
-    index_vector_dim = 2>,
-  indices_are_sorted = false,
-  unique_indices = false
-} : (tensor<3x4x2xi64>, tensor<2x3x2xi64>, tensor<2x3x2x2xi64>) -> tensor<3x4x2xi64>
-// %result: [
-//           [[1, 2], [5, 6], [7, 8], [7, 8]],
-//           [[10, 11], [12, 13], [14, 15], [16, 17]],
-//           [[18, 19], [20, 21], [21, 22], [23, 24]]
-//          ]
-'''

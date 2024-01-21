@@ -593,53 +593,6 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 }}  {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
-# For convenience, we label dimensions in the output array not in offset_dims as batch_dims.
-
-# The output is an array of rank batch_dims.size + offset_dims.size.
-
-# The operand.rank must equal the sum of offset_dims.size and collapsed_slice_dims.size. 
-# Also, slice_sizes.size has to be equal to operand.rank.
-
-# If index_vector_dim is equal to start_indices.rank 
-# we implicitly consider start_indices to have a trailing 1 dimension 
-# (i.e. if start_indices was of shape [6,7] and index_vector_dim is 2 
-# then we implicitly consider the shape of start_indices to be [6,7,1]).
-
-# The bounds for the output array along dimension i is computed as follows:
-
-# If i is present in batch_dims (i.e. is equal to batch_dims[k] for some k) 
-# then we pick the corresponding dimension bounds out of start_indices.shape,
-# skipping index_vector_dim 
-# (i.e. pick start_indices.shape.dims[k] if k < index_vector_dim and start_indices.shape.dims[k+1] otherwise).
-
-# # If i is present in offset_dims (i.e. equal to offset_dims[k] for some k) 
-# then we pick the corresponding bound out of slice_sizes after accounting 
-# for collapsed_slice_dims 
-# (i.e. we pick adjusted_slice_sizes[k] where adjusted_slice_sizes
-# is slice_sizes with the bounds at indices collapsed_slice_dims removed).
-
-'''
-
-func.func @main (%x0: tensor<2x2x2xf32>, %x1: tensor<2x2xi32>) -> (tensor<2x2xf32>)
-{
-    %y0 = "stablehlo.gather"(%x0, %x1) {
-      dimension_numbers = #stablehlo.gather<
-       : tensor<3xi64>,
-      indices_are_sorted = false
-    }  : (tensor<2x2x2xf32>,tensor<2x2xi32>) -> tensor<2x2xf32>
-    
-    
-    "func.return"(%y0): (tensor<2x2xf32>) -> ()
-}
-'''
-
-# @backend.set_impl(backend.operator_set.gather)
-# def gather_impl(self, x, w, y, *, axis):
-#     return f"""%{y.name} = "stablehlo.torch_index_select "(%{x.name}, %{w.name}) {{
-#     batch_dims = 0 : i64, dim = 0 : i64
-# # }} {as_mlir_sig((x.symval, w.symval), y.symval)}
-# # """ 
-
 @backend.set_impl(backend.operator_set.gather)
 def gather_impl(self, x, w, y, *, axis):
     operand_shape = list(x.symval.shape)
@@ -686,12 +639,6 @@ def gather_impl(self, x, w, y, *, axis):
 """ 
 
 
-
-# <stdin>:3:11: error: start_index_map size (1) is not equal to size of index dimension (1) of start_indices (2)
-# <stdin>:3:11: error: slice_sizes size (1) not equal to (implied) operand rank (2)
-
-
-
 @backend.set_impl(backend.operator_set.scatter)
 def scatter_impl(self, x, w, u, y, *, axis):
     y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
@@ -720,28 +667,6 @@ def scatter_impl(self, x, w, u, y, *, axis):
   unique_indices = false
 }} {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}
 """
-
- ## x = slope.zeros(8,1), x = slope.zeros(8,2)
-    # update_window_dims = []
-    # inserted_window_dims = [0,1]
-    # scatter_dims_to_operand_dims = [0]
-    # index_vector_dim = 1
-
-    # operand_dims = list(range(r))
-    # update_window_dims = [axis]
-    # inserted_window_dims = [dim for dim in operand_dims if dim != axis]
-    # scatter_dims_to_operand_dims = [axis]
-    # index_vector_dim = axis
-
-    # update_window_dims = [1]
-    # inserted_window_dims = [1]
-    # scatter_dims_to_operand_dims = [0,1]
-    # index_vector_dim = 1
-
-    # update_window_dims = [1]
-    # inserted_window_dims = [1]
-    # scatter_dims_to_operand_dims = [0,1]
-    # index_vector_dim = 0
 
 '''
 // %input: [

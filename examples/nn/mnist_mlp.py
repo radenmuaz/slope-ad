@@ -26,16 +26,16 @@ def train_step(model, batch, optimizer):
     return loss, new_model, new_optimizer
 
 
-# @slope.jit
+@slope.jit
 def test_all(model, x, y):
     out = model(x)
-    # y_hat = out.argmax(-1)
-    # corrects = (y_hat == y).cast(slope.float32)
-    # accuracy = corrects.mean()
+    y_hat = out.argmax(-1)
+    corrects = (y_hat == y).cast(slope.float32)
+    accuracy = corrects.mean()
 
-    y_hat = np.argmax(out.numpy() ,-1)
-    corrects = (y_hat == y.numpy()).astype(np.float32)
-    accuracy = np.mean(corrects)
+    # y_hat = np.argmax(out.numpy() ,-1)
+    # corrects = (y_hat == y.numpy()).astype(np.float32)
+    # accuracy = np.mean(corrects)
     
     return accuracy
 
@@ -93,4 +93,4 @@ if __name__ == "__main__":
 
         test_acc = test_all(model, x_test, y_test)
         print(f"Epoch {epoch} in {epoch_time:0.2f} sec")
-        print(f"Test set accuracy {test_acc:0.2f}")
+        print(f"Test set accuracy {test_acc.numpy():0.2f}")

@@ -141,19 +141,16 @@ def min(x, dim=None, keepdim=False):
 @procedure_set.register()
 def argmax(x, dim=None, keepdim=False):
     if dim is None:
-        idx = (x == x.max(dim)) * slope.arange(
-            math.prod(x.shape) - 1,
-            -1,
-            -1,
-            dtype=slope.int32,
-        ).reshape(x.shape)
-        return math.prod(x.shape) - idx.max() - 1
+        ar = slope.arange(math.prod(x.shape) - 1, -1, -1, dtype=x.dtype)
+        ar = ar.reshape(x.shape)
+        idx = (x == x.max(dim)).cast(x.dtype) * ar
+        return math.prod(x.shape) - idx.max().cast(slope.int32) - 1
     dim = dim + len(x.shape) if dim < 0 else dim
-    m = (x == x.max(dim=dim, keepdim=True)).cast(slope.int32)
-    idx = m * slope.arange(x.shape[dim] - 1, -1, -1, dtype=slope.int32)
-    idx = idx.reshape(x.shape[dim], *[1] * (x.ndim - dim - 1))
+    m = (x == x.max(dim=dim, keepdim=True)).cast(x.dtype)
+    idx = m * slope.arange(x.shape[dim] - 1, -1, -1, dtype=x.dtype)
+    # idx = idx.reshape(x.shape[dim], *[1] * (x.ndim - dim - 1))
     ret = x.shape[dim] - idx.max(dim=dim, keepdim=keepdim) - 1
-    return ret
+    return ret.cast(slope.int32)
 
 
 @procedure_set.register()

@@ -371,7 +371,7 @@ class SymbolicTensor(Tensor):
 
     @property
     def val(self):
-        raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
+       raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
 
     @property
     def shape(self):
@@ -386,11 +386,14 @@ class SymbolicTensor(Tensor):
         return self._device
 
     @classmethod
-    def like(cls, maybe_tensor):
-        shape = maybe_tensor.shape
-        dtype = maybe_tensor.dtype
-        device = maybe_tensor.device
+    def like(cls, maybe_tensor, **but):
+        shape = but.get("shape", maybe_tensor.shape)
+        dtype = but.get("dtype", maybe_tensor.dtype)
+        device = but.get("device",maybe_tensor.device)
         return cls(shape, dtype, device)
+
+    def override(self, **but):
+        return self.like(self, **but)
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -407,14 +410,16 @@ class SymbolicTensor(Tensor):
         return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
 
     # def __getattr__(self, attr):
-    #     if attr in vars(backend.operator_set).keys():
-    #         op = getattr(backend.operator_set, attr)
-    #     elif attr in vars(backend.procedure_set).keys():
-    #         procedure = getattr(backend.procedure_set, attr)
-    #         assert not isinstance(procedure, classmethod), f"use {attr} instead of self.{attr}"
-    #         return partial(procedure, self)
-    #     else:
-    #         return self.__getattribute__(attr)
+    #     with symbolic_run():
+    #         if attr in vars(backend.operator_set).keys():
+    #             op = getattr(backend.operator_set, attr)
+    #             return partial(op, self)
+    #         elif attr in vars(backend.procedure_set).keys():
+    #             procedure = getattr(backend.procedure_set, attr)
+    #             assert not isinstance(procedure, classmethod), f"use {attr} instead of self.{attr}"
+    #             return partial(procedure, self)
+    #         else:
+    #             return self.__getattribute__(attr)
 
 
 # ================
@@ -532,7 +537,7 @@ class UnaryOperator(Operator):
         return [self(x, **params)], [x_bdim]
 
     def typecheck(self, x, **params):
-        return [SymbolicTensor.like(x)]
+        return [x.override()]
 
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -592,18 +597,18 @@ class BinaryOperator(Operator):
             return [symx]
         shape_delta = len(symx.shape) - len(symy.shape)
         if shape_delta > 0:
-            symy = SymbolicTensor((1,) * shape_delta + symy.shape, symy.dtype)
+            symy = symy.override(shape=(1,) * shape_delta + symy.shape)
         elif shape_delta < 0:
             x = x.reshape((1,) * -shape_delta + symx.shape)
-            symx = SymbolicTensor((1,) * -shape_delta + symx.shape, symx.dtype)
+            symx = symx.override(shape=(1,) * -shape_delta + symx.shape)
         if symx == symy:
             return [symx]
         else:
             shape_ret = tuple([max(x, w) for x, w in zip(symx.shape, symy.shape)])
             if symx.shape != shape_ret:
-                symx = SymbolicTensor(shape_ret, symx.dtype)
+                symx = symx.override(shape=shape_ret)
             if symy.shape != shape_ret:
-                symy = SymbolicTensor(shape_ret, symy.dtype)
+                symy = symx.override(shape=shape_ret)
             if symx != symy:
                 raise TypeError
             return [symx]
@@ -635,7 +640,7 @@ class ReduceOperator(Operator):
             new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
         else:
             new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
-        return [SymbolicTensor(tuple(new_shape), x.dtype, x.device)]
+        return [x.override(shape=tuple(new_shape))]
 
 
 class InitOperator(Operator):
@@ -1391,7 +1396,7 @@ class VMapTraceTensor(TraceTensor):
         else:
             shape = list(symval.shape)
             del shape[self.vmap_dim]
-            return SymbolicTensor(tuple(shape), symval.dtype, symval.device)
+            return symval.override(shape=tuple(shape))
 
     def full_lower(self):
         if self.vmap_dim is None:
@@ -2052,6 +2057,7 @@ def stash_trace(main: MainTrace):
 
 @contextmanager
 def symbolic_run():
+    global trace_stack
     level = len(trace_stack)
     main = MainTrace(level, SymbolicRunTrace, global_data=None)
     trace_stack += [main]
@@ -2087,7 +2093,7 @@ def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any
         else:
             shape = list(symval.shape)
             shape.insert(batch_dim, axis_size)
-            return SymbolicTensor(tuple(shape), symval.dtype, symval.device)
+            return symval.override(shape=tuple(shape))
 
     vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
     in_symvals = [unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)]
@@ -2581,7 +2587,6 @@ class jit:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
 
         symvals_in = tree_map(lambda x: SymbolicTensor.like(get_symval(x)), args)
-        # self.name = self.get_jit_name(symvals_in, static_args, prefix=self.name, short=True)
         static_args = tuple(static_args.items())
         if self.name is None:
             self.name = f"jit_{str(hash((self.f, symvals_in, static_args)))[-5:]}"

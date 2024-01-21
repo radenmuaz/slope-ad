@@ -756,10 +756,20 @@ class Arange(InitOperator):
             dtype = dtypes.int32
         if device is None:
             device = slope.core.backend.DEFAULT_DEVICE
+        if 'f' in dtype.mlir:
+            start, stop, stride = float(start), float(stop), float(stride)
+        elif 'i' in dtype.mlir:
+            start, stop, stride = int(start), int(stop), int(stride)
         return (), dict(start=start, stop=stop, stride=stride, dtype=dtype, device=device)
 
     def typecheck(self, *, start, stop, stride, dtype, device) -> List[SymbolicTensor]:
-        return [SymbolicTensor((((stop - start) * stride),), dtype, device)]
+        
+        assert stride != 0
+        if stride > 0:
+            assert stop > start
+        else:
+            assert stop < start
+        return [SymbolicTensor((int(math.ceil((abs(stop - start) / abs(stride)))),), dtype, device)]
 
 
 # -------------------

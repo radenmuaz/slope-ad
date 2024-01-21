@@ -458,14 +458,50 @@ def max_impl(self, x, y, *, dim, keepdim):
 
 @backend.set_impl(backend.operator_set.arange)
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
-    ret = ""
     if stride == 1 and start == 0:
-        ret += f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
-    else:
-        ret += f"""%{y.name}_ = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
-    return ret
+        return f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
+    normalized = math.ceil(abs(stop-start)/stride)
+    iota_symval = y.symval.override(shape=tuple(normalized*i if i != 1 else i for i in y.symval.shape))
+    one_symval = y.symval.override(shape=(1,))
+    return f"""
+%{y.name}_scale_ = stablehlo.constant dense<{stride}> : {as_mlir_shape(one_symval)}
+%{y.name}_scale = "stablehlo.broadcast_in_dim"(%{y.name}_scale_) {{
+        broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
+        }} {as_mlir_sig(( one_symval,), y.symval)}
+%{y.name}_shift_ = stablehlo.constant dense<{start}> : {as_mlir_shape(y.symval.override(shape=(1,)))}
+%{y.name}_shift = "stablehlo.broadcast_in_dim"(%{y.name}_shift_) {{
+        broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
+        }} {as_mlir_sig(( one_symval,), y.symval)}
+%{y.name}__ = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}
+%{y.name}_ = "stablehlo.multiply"(%{y.name}__, %{y.name}_scale) {as_mlir_sig((y.symval, y.symval), y.symval)}
+%{y.name} = "stablehlo.add"(%{y.name}_, %{y.name}_shift) {as_mlir_sig((y.symval, y.symval), y.symval)}
+"""
 
+'''
 
+#1
+y=<tf.Tensor: shape=(5,), dtype=int32, numpy=array([0, 2, 4, 6, 8], dtype=int32)>
+module {
+  func.func @__inference_range_11(%arg0: tensor<i32>, %arg1: tensor<i32>, %arg2: tensor<i32>) -> tensor<?xi32> attributes {allow_soft_placement = false} {
+    %0 = stablehlo.subtract %arg1, %arg0 : tensor<i32>
+    %1 = stablehlo.abs %0 : tensor<i32>
+    %2 = stablehlo.convert %1 : (tensor<i32>) -> tensor<f64>
+    %3 = stablehlo.convert %arg2 : (tensor<i32>) -> tensor<f64>
+    %4 = stablehlo.divide %2, %3 : tensor<f64>
+    %5 = stablehlo.ceil %4 : tensor<f64>
+    %6 = stablehlo.convert %5 : (tensor<f64>) -> tensor<i64>
+    %7 = stablehlo.reshape %6 : (tensor<i64>) -> tensor<1xi64>
+    %8 = stablehlo.dynamic_iota %7, dim = 0 : (tensor<1xi64>) -> tensor<?xi32>
+    %9 = shape.shape_of %8 : tensor<?xi32> -> tensor<1xindex>
+    %10 = stablehlo.dynamic_broadcast_in_dim %arg2, %9, dims = [] : (tensor<i32>, tensor<1xindex>) -> tensor<?xi32>
+    %11 = stablehlo.multiply %8, %10 : tensor<?xi32>
+    %12 = shape.shape_of %11 : tensor<?xi32> -> tensor<1xindex>
+    %13 = stablehlo.dynamic_broadcast_in_dim %arg0, %12, dims = [] : (tensor<i32>, tensor<1xindex>) -> tensor<?xi32>
+    %14 = stablehlo.add %11, %13 : tensor<?xi32>
+    return %14 : tensor<?xi32>
+  }
+}
+'''
 @backend.set_impl(backend.operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype, device):
     fill_value = float(fill_value) if "f" in dtype.mlir else int(fill_value)

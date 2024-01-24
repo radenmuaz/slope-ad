@@ -35,9 +35,9 @@ import mmap
 import traceback
 
 
-# ================
+# =================================
 #   Utils
-# ================
+# =================================
 
 
 def dblog(*msg, enable=True):
@@ -162,9 +162,9 @@ class Hashed:
         return f"Hashed: {repr(self.val)}"
 
 
-# ================
+# =================================
 #   Tensors
-# ================
+# =================================
 
 
 class DType(NamedTuple):
@@ -408,22 +408,10 @@ class SymbolicTensor(Tensor):
     def __repr__(self):
         return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
 
-    # def __getattr__(self, attr):
-    #     with symbolic_run():
-    #         if attr in vars(backend.operator_set).keys():
-    #             op = getattr(backend.operator_set, attr)
-    #             return partial(op, self)
-    #         elif attr in vars(backend.procedure_set).keys():
-    #             procedure = getattr(backend.procedure_set, attr)
-    #             assert not isinstance(procedure, classmethod), f"use {attr} instead of self.{attr}"
-    #             return partial(procedure, self)
-    #         else:
-    #             return self.__getattribute__(attr)
 
-
-# ================
+# =================================
 #   Operator
-# ================
+# =================================
 
 
 class Operator:
@@ -891,9 +879,9 @@ class Backend:
                     m[start + data_start : start + data_end] = t.numpy().tobytes()
 
 
-# ================
-#   IR, Programs, Instructions
-# ================
+# =================================
+#   Program 
+# =================================
 
 
 class Var:
@@ -1078,9 +1066,9 @@ class ProgramType(NamedTuple):
         return f"({in_types}) -> ({out_types})"
 
 
-# ================
+# =================================
 #   Tracer and Trace
-# ================
+# =================================
 
 
 class Empty:
@@ -1159,13 +1147,13 @@ class Leaf:
 
     def __eq__(self, other):
         return True  # make TreeDef __eq__ don't care Leaf
-        # if isinstance(other, Leaf):
+        # if isinstance(other, Leaf): # TODO: test above assumption
         #     return self.val == other.val
 
 
-# ================
+# =================================
 #   jit operator
-# ================
+# =================================
 
 
 class JitObject:
@@ -1283,9 +1271,9 @@ class JitOp(MetaOperator):
         return instruction1, instruction2, out_unknowns, res
 
 
-# ================
+# =================================
 #   Compiler
-# ================
+# =================================
 
 
 class MainTrace(NamedTuple):

@@ -88,7 +88,8 @@ def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     lst2: List[Any] = []
     lists = lst1, lst2
     for b, x in list_zip(bs, l):
-        lists[b] += [x]
+        lst = lists[int(b)]
+        lst += [x]
     return lst1, lst2
 
 
@@ -332,8 +333,8 @@ class Tensor:
     def device(self):
         return backend.device_of(self)
 
-    def numpy(self):
-        return backend.numpy_of(self)
+    def numpy(self, memmap=False):
+        return backend.numpy_of(self, memmap)
 
     @property
     def shape(self):
@@ -353,9 +354,7 @@ class Tensor:
         return self.numel() * self.element_size()
 
     def __repr__(self):
-        return (
-            f"<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}, val=\n{self.numpy()}\n>"
-        )
+        return f"<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}, val=\n{self.numpy()}\n>"
 
 
 class SymbolicTensor(Tensor):
@@ -364,14 +363,14 @@ class SymbolicTensor(Tensor):
         self._shape = tuple(int(i) for i in shape)
         self._dtype = dtype
         self._device = device
-    
+
     @property
     def symval(self):
         return self
 
     @property
     def val(self):
-       raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
+        raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
 
     @property
     def shape(self):
@@ -389,7 +388,7 @@ class SymbolicTensor(Tensor):
     def like(cls, maybe_tensor, **but):
         shape = but.get("shape", maybe_tensor.shape)
         dtype = but.get("dtype", maybe_tensor.dtype)
-        device = but.get("device",maybe_tensor.device)
+        device = but.get("device", maybe_tensor.device)
         return cls(shape, dtype, device)
 
     def override(self, **but):
@@ -1334,6 +1333,7 @@ class RunTrace(Trace):
 
         return fn
 
+
 class SymbolicRunTrace(Trace):
     # pure = lambda self, x: x
     def pure(self, val: Any) -> SymbolicTensor:
@@ -1343,6 +1343,7 @@ class SymbolicRunTrace(Trace):
         symvals_in = tree_map(lambda x: x.symval, tracers)
         symvals_out = op.typecheck(*symvals_in, **params)
         return symvals_out
+
 
 class TraceTensor(Tensor):
     PYTHON_TYPES = {
@@ -1843,8 +1844,6 @@ def new_main_trace(trace_type: Type["Trace"], global_data=None):
         trace_stack.pop()
 
 
-
-
 def bind(op, *args, **params):
     top_trace = find_top_trace(args)
     tracers = tuple([full_raise(top_trace, arg) for arg in args])
@@ -2044,7 +2043,6 @@ def jacfwd(f, x):
     return vmap(pushfwd, (0,))(vecs_in)
 
 
-
 @contextmanager
 def stash_trace(main: MainTrace):
     global stashed_trace
@@ -2068,6 +2066,7 @@ def symbolic_run():
     finally:
         stashed_trace = prev_stashed_trace
         trace_stack.pop()
+
 
 @lru_cache_verbose()
 def make_program(f: Callable, *symvals_in: SymbolicTensor, static_args, name) -> Tuple[Program, List[Any], TreeDef]:

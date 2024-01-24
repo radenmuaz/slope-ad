@@ -756,14 +756,13 @@ class Arange(InitOperator):
             dtype = dtypes.int32
         if device is None:
             device = slope.core.backend.DEFAULT_DEVICE
-        if 'f' in dtype.mlir:
+        if "f" in dtype.mlir:
             start, stop, stride = float(start), float(stop), float(stride)
-        elif 'i' in dtype.mlir:
+        elif "i" in dtype.mlir:
             start, stop, stride = int(start), int(stop), int(stride)
         return (), dict(start=start, stop=stop, stride=stride, dtype=dtype, device=device)
 
     def typecheck(self, *, start, stop, stride, dtype, device) -> List[SymbolicTensor]:
-        
         assert stride != 0
         if stride > 0:
             assert stop > start
@@ -955,7 +954,7 @@ class GatherND(GeneralReduceOperator):
         # shape = w.shape[: q - 1] + x.shape[w.shape[-1] :]
         bx = x.shape[b:]
         bw = w.shape[b:]
-        shape = bx[:b] + bw[:len(bw) - 1] + bx[bw[-1]:]
+        shape = bx[:b] + bw[: len(bw) - 1] + bx[bw[-1] :]
         return [SymbolicTensor(shape, x.dtype, x.device)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

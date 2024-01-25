@@ -356,13 +356,16 @@ def div_impl(self, x, w, y):
 def pow_impl(self, x, w, y):
     return f'%{y.name} = "stablehlo.power"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
+
 def get_compare_type(dtype):
-    return  ("FLOAT"
+    return (
+        "FLOAT"
         if dtypes.is_float(dtype)
         else "SIGNED"
         if dtypes.is_int(dtype) and dtype is not dtypes.uint8
         else "UNSIGNED"
     )
+
 
 @backend.set_impl(backend.operator_set.equal)
 def equal_impl(self, x, w, y):
@@ -622,44 +625,6 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 @backend.set_impl(backend.operator_set.where)
 def where_impl(self, x, w, u, y):
     return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}"""
-    # x_symval_i = x.symval.override(shape=x.symval.shape[1:])
-    # x_symval_i_int = x_symval_i.override(dtype=slope.int32)
-    # w_symval_i = w.symval.override(shape=w.symval.shape[1:])
-    # u_symval_i = u.symval.override(shape=u.symval.shape[1:])
-    # y_symval_i = y.symval.override(shape=y.symval.shape[1:])
-#     return f"""%{y.name} = "stablehlo.map"(%{w.name}) ({{
-#   ^bb0(%arg0: tensor<{w.symval.dtype.mlir}>):
-#     %0 = "stablehlo.convert"(%arg0) : {as_mlir_sig((y_symval_i,), y_symval_i)}
-#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
-#     }}) {{
-#   dimensions = dense<[0]> : tensor<1xi64>
-# }} : {as_mlir_sig((y.symval,), y.symval)}
-# """
-#     return f"""%{y.name} = "stablehlo.map"(%{x.name}, %{w.name}, %{u.name}) ({{
-#   ^bb0(%arg0: tensor<{x.symval.dtype.mlir}>, %arg1: tensor<{w.symval.dtype.mlir}>, %arg2: tensor<{u.symval.dtype.mlir}>):
-#     %arg0_ = "stablehlo.convert"(%arg0) : {as_mlir_sig((x_symval_i,), x_symval_i_int)}
-#     %0 = "stablehlo.case"(%arg0_) (
-#         {{"stablehlo.return"(%arg1) : ({as_mlir_shape(w_symval_i)}) -> ()}},
-#         {{"stablehlo.return"(%arg2) : ({as_mlir_shape(u_symval_i)}) -> ()}}
-#         ) : {as_mlir_sig((x_symval_i_int
-#         ,), y_symval_i)}
-#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
-#     }}) {{
-#   dimensions = dense<[0]> : tensor<1xi64>
-# }} : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}
-# """
-
-#     return f"""%{y.name} = "stablehlo.map"(%{x.name}, %{w.name}, %{u.name}) ({{
-#   ^bb0(%arg0: tensor<{x.symval.dtype.mlir}>, %arg1: tensor<{w.symval.dtype.mlir}>, %arg2: tensor<{u.symval.dtype.mlir}>):
-#     %0 = "stablehlo.if"(%arg0) (
-#         {{"stablehlo.return"(%arg1) : ({as_mlir_shape(w_symval_i)}) -> ()}},
-#         {{"stablehlo.return"(%arg2) : ({as_mlir_shape(u_symval_i)}) -> ()}}
-#         ) : {as_mlir_sig((x_symval_i,), y_symval_i)}
-#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
-#     }}) {{
-#   dimensions = dense<[0]> : tensor<1xi64>
-# }} : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}
-# """
 
 
 @backend.set_impl(backend.operator_set.gather_nd)

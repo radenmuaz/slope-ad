@@ -48,13 +48,7 @@ def ones_like(y):
 
 @procedure_set.register()
 def eye(dim: int, **kwargs):
-    return (
-        slope.full((dim, 1), 1, **kwargs)
-        .pad(((0, 0), (0, dim)))
-        .reshape(dim * (dim + 1))
-        .shrink(((0, dim * dim),))
-        .reshape(dim, dim)
-    )
+    return slope.ones((dim,1)).pad((0,dim,0,0)).flatten().padslice(((0,dim*dim),)).reshape(dim, dim)
 
 
 @procedure_set.register()
@@ -64,7 +58,7 @@ def where(x, trueval, falseval):
     if not isinstance(falseval, Tensor):
         falseval = slope.full(falseval, device=x.device)
     cond = x != x.zeros_like()
-    if not trueval.dtype is dtypes.bool:
+    if not any(val.dtype is dtypes.bool for val in (trueval, falseval)):
         cond = cond.cast(trueval.dtype)
         return cond * trueval + (cond.ones_like() - cond) * falseval
     else:
@@ -288,7 +282,8 @@ def getitem(x, indices) -> Tensor:
     for dim in type_dim[None]:
         new_shape.insert(dim, 1)
     for dim in (
-        dims_collapsed := tuple(dim + sum_(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))
+        tuple(dim + sum_(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))
+        # dims_collapsed := tuple(dim + sum_(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))
     ):
         new_shape.pop(dim)
 
@@ -642,19 +637,14 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
 
 @procedure_set.register()
 def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
-    def make_pair(x: Union[int, Tuple[int, ...]], cnt=2) -> Tuple[int, ...]:
-        return (x,) * cnt if isinstance(x, int) else x
-
-    def flatten_seq(l):
-        return [item for sublist in l for item in sublist]
-
+    make_pair = lambda x, cnt=2: (x,) * cnt if isinstance(x, int) else x
+    flatten_seq = lambda l: [item for sublist in l for item in sublist]
     D, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
     w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
     w = w.permute((0, 2, 1, *trailing)).flip(trailing)
     stride = make_pair(stride, len(D))
     if any(s > 1 for s in stride):
         x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))
-        x_ = x
         pads = (0, 0, 0, 0, *flatten_seq((0, 0, 0, s - 1) for s in stride))
         pads = pads[::-1]
         x = x.pad(pads)
@@ -663,7 +653,6 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
             (0, 0) + (0,) * len(x.shape[2:]),
             (x.shape[0], x.shape[1]) + tuple([k - (s - 1) for k, s in zip(x.shape[2:], stride)])[::-1],
         )
-    padding_ = padding
     padding = flatten_seq(
         (
             ((k - 1) * d - p, (k - 1) * d - p + op)

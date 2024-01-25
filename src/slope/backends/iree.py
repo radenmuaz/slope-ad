@@ -36,14 +36,6 @@ import os
 from slope.operators import operator_set
 from slope.procedures import procedure_set
 import tempfile
-import mmap
-
-max_py = max
-abs_py = abs
-slice_py = slice
-
-compile_py = compile
-
 
 def as_mlir_shape(symval):
     xdtype = symval.dtype.mlir
@@ -420,7 +412,7 @@ def matmul_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
-    zero = "0." if "f" in y.symval.dtype.mlir else "0"
+    zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
     y_init_type = SymbolicTensor((), y.symval.dtype, y.symval.device)
     y_mlir_type = as_mlir_shape(y_init_type)
     y_out_type = (
@@ -507,8 +499,8 @@ def full_impl(self, y, *, shape, fill_value, dtype, device):
 
 @backend.set_impl(backend.operator_set.random_uniform)
 def random_uniform_impl(self, y, *, shape, dtype, device):
-    zero = "0." if "f" in y.symval.dtype.mlir else "0"
-    one = "1." if "f" in y.symval.dtype.mlir else "1"
+    zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
+    one = "1."  if dtypes.is_float(y.symval.dtype) else "1"
     a_type = b_type = SymbolicTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
@@ -524,8 +516,8 @@ def random_uniform_impl(self, y, *, shape, dtype, device):
 
 @backend.set_impl(backend.operator_set.random_normal)
 def random_normal_impl(self, y, *, shape, dtype, device):
-    zero = "0." if "f" in y.symval.dtype.mlir else "0"
-    one = "1." if "f" in y.symval.dtype.mlir else "1"
+    zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
+    one = "1." if dtypes.is_float(y.symval.dtype) else "1"
     a_type = b_type = SymbolicTensor((), dtype, device)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
@@ -620,6 +612,16 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 }}  {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
+
+@backend.set_impl(backend.operator_set.where)
+def where_impl(self, x, w, u, y ):
+    return f"""%{y.name} = "stablehlo.case"(%{x.name}) ({{
+  "stablehlo.return"(%{w.name}) : {as_mlir_shape(y.symval)} -> ()
+}}, {{
+  "stablehlo.return"(%{u.name}) : {as_mlir_shape(y.symval)} -> ()
+}}
+ {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, batch_dims):

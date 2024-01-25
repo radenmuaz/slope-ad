@@ -901,6 +901,36 @@ class Conv(GeneralReduceOperator):
             return [None, gL_w]
 
 
+
+@operator_set.register("where")
+class Where(GeneralReduceOperator):
+    def args_fixer(self, x, w, u):
+        return (x, w, u), dict()
+
+    def typecheck(self, x, w, u):
+        return [SymbolicTensor(x.shape, x.dtype, x.device)]
+
+    def vmap(self, dim_size, vals_in, dims_in, **params):
+        (x, w, u), (x_bdim, w_bdim, u_bdim) = vals_in, dims_in
+        x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
+        w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        u = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        return [self(x, w, u)], [x_bdim, w_bdim, u_bdim]
+
+    def jvp(self, primals, tangents):
+        (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
+        return [self(x, w, u)], [self(x_dot, w_dot, u_dot)]
+
+    def T(self, cotangents, x, w, u):
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
+        (gL_y,) = cotangents
+        if type(x) is UndefPrimal:
+            return [None, None, None]
+        elif type(w) is UndefPrimal:
+            return [None, self(x, gL_y, gL_y.zeros_like()), None]
+        elif type(u) is UndefPrimal:
+            return [None, None, self(x, gL_y.zeros_like(), gL_y)]
+    
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):
@@ -924,6 +954,7 @@ class GatherND(GeneralReduceOperator):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
+        u = slope.core.VMapTrace.move_vmap_dim(u, dim_size, w_bdim, 0)
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
     def jvp(self, primals, tangents, *, batch_dims):

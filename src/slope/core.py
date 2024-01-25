@@ -540,6 +540,7 @@ class UnaryOperator(Operator):
 
 
 class BinaryOperator(Operator):
+    boolean_output = False
     def args_fixer(self, x, w, **params):
         if type(x) is UndefPrimal or type(w) is UndefPrimal:
             assert x.shape == w.shape
@@ -584,8 +585,8 @@ class BinaryOperator(Operator):
             SymbolicTensor,
         ):
             raise TypeError
-        symx = SymbolicTensor.like(x)
-        symy = SymbolicTensor.like(y)
+        symx = SymbolicTensor.like(x, dtype=dtypes.bool if self.boolean_output else x.dtype)
+        symy = SymbolicTensor.like(y, dtype=dtypes.bool if self.boolean_output else y.dtype)
         if x.dtype != y.dtype:
             raise TypeError
         if symx == symy:
@@ -612,6 +613,11 @@ class BinaryOperator(Operator):
         (x,), (x_dot,) = primals, tangents
         return [self(x, **params)], [self(x_dot, **params)]
 
+    def T(self, cotangents, x, w):
+        (gL_y,) = cotangents
+        if self.boolean_output:
+            gL_y = gL_y.cast(x.dtype)
+        return [gL_y, None]
 
 class ReduceOperator(Operator):
     def args_fixer(self, x, *, dim=None, keepdim=False):

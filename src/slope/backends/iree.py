@@ -373,6 +373,23 @@ def equal_impl(self, x, w, y):
 """
 
 
+@backend.set_impl(backend.operator_set.less)
+def less_impl(self, x, w, y):
+    return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{
+  comparison_direction = #stablehlo<comparison_direction LT>,
+  compare_type = #stablehlo<comparison_type FLOAT>
+}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
+
+@backend.set_impl(backend.operator_set.greater)
+def greater_impl(self, x, w, y):
+    return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{
+  comparison_direction = #stablehlo<comparison_direction GT>,
+  compare_type = #stablehlo<comparison_type FLOAT>
+}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+"""
+
+
 @backend.set_impl(backend.operator_set.maximum)
 def maximum_impl(self, x, w, y):
     return f'%{y.name} = "stablehlo.maximum"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'

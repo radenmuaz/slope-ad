@@ -224,54 +224,17 @@ class Maximuum(BinaryOperator):
 
 @operator_set.register("equal")
 class Equal(BinaryOperator):
-    def typecheck(self, x: SymbolicTensor, y: SymbolicTensor, **params) -> List[SymbolicTensor]:
-        # difference with default binary typecheck: force dtype bool
-        if not type(x) in (Tensor, SymbolicTensor) or not type(x) in (
-            Tensor,
-            SymbolicTensor,
-        ):
-            raise TypeError
-        if x.dtype != y.dtype:
-            raise TypeError
-        symx = SymbolicTensor.like(x)
-        symy = SymbolicTensor.like(y)
-        if symx == symy:
-            return [SymbolicTensor(symx.shape, dtypes.bool, x.device)]
-        shape_delta = len(symx.shape) - len(symy.shape)
-        if shape_delta > 0:
-            symy = SymbolicTensor(
-                (1,) * shape_delta + symy.shape,
-                dtypes.bool,
-                x.device,
-            )
-        elif shape_delta < 0:
-            x = x.reshape((1,) * -shape_delta + symx.shape)
-            symx = SymbolicTensor(
-                (1,) * -shape_delta + symx.shape,
-                dtypes.bool,
-                x.device,
-            )
-        if symx == symy:
-            return [symx]
-        else:
-            shape_ret = tuple([max(x, w) for x, w in zip(symx.shape, symy.shape)])
-            if symx.shape != shape_ret:
-                symx = SymbolicTensor(shape_ret, dtypes.bool, x.device)
-            if symy.shape != shape_ret:
-                symy = SymbolicTensor(shape_ret, dtypes.bool, x.device)
-            if symx != symy:
-                raise TypeError
-            return [symx]
+    boolean_output = True
 
-    def jvp(self, primals, tangents):
-        (x, w), _ = primals, tangents
-        out_primal = x.equal(w)
-        return [out_primal], [slope.full(out_primal.shape, True, dtypes.bool, x.device)]
+@operator_set.register("less")
+class Less(BinaryOperator):
+    boolean_output = True
 
-    def T(self, cotangents, x, w):
-        (gL_y,) = cotangents
-        gL_y = gL_y.cast(x.dtype)
-        return [gL_y, None]
+@operator_set.register("greater")
+class Greater(BinaryOperator):
+    boolean_output = True
+
+
 
 
 @operator_set.register("max")

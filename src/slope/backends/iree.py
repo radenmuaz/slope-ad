@@ -381,6 +381,7 @@ def less_impl(self, x, w, y):
 }}  {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
+
 @backend.set_impl(backend.operator_set.greater)
 def greater_impl(self, x, w, y):
     return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{

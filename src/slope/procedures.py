@@ -2,24 +2,14 @@ import slope
 from slope.core import ProcedureSet, Tensor, dtypes
 import math
 import numpy as np
-from typing import (
-    Tuple,
-    List,
-    Dict,
-    Any,
-    Optional,
-    Sequence,
-    Union,
-    Iterator,
-    NamedTuple,
-    DefaultDict
-)
+from typing import Tuple, List, Dict, Any, Optional, Sequence, Union, Iterator, NamedTuple, DefaultDict
 from collections import defaultdict
 import functools
 
-abs_py = abs
-
-
+max_ = max
+abs_ = abs
+min_ = min
+sum_ = sum
 procedure_set = ProcedureSet()
 
 
@@ -69,13 +59,19 @@ def eye(dim: int, **kwargs):
 
 @procedure_set.register()
 def where(x, trueval, falseval):
-    cond = x != x.zeros_like()
     if not isinstance(trueval, Tensor):
-        trueval = slope.full((), trueval)
+        trueval = slope.full(trueval, device=x.device)
     if not isinstance(falseval, Tensor):
-        falseval = slope.full((), falseval)
-    cond = cond.cast(trueval.dtype)
-    return cond * trueval + (x.ones_like() - cond) * falseval
+        falseval = slope.full(falseval, device=x.device)
+    cond = x != x.zeros_like()
+    if not trueval.dtype is dtypes.bool:
+        cond = cond.cast(trueval.dtype)
+        return cond * trueval + (cond.ones_like() - cond) * falseval
+    else:
+        cond = cond.cast(slope.float32)
+        trueval = trueval.cast(slope.float32)
+        falseval = falseval.cast(slope.float32)
+        return (cond * trueval + (cond.ones_like() - cond) * falseval).cast(dtypes.bool)
 
 
 @procedure_set.register()
@@ -108,13 +104,16 @@ def neg(x):
 def not_equal(x, w):
     return ~(x == w)
 
+
 @procedure_set.register()
 def greater_equal(x, w):
     return ~(x < w)
 
+
 @procedure_set.register()
 def less_equal(x, w):
     return ~(x > w)
+
 
 @procedure_set.register()
 def minimum(x, w):
@@ -215,16 +214,20 @@ def matmul(x, w):
     w = w.reshape((*w.shape[0:-2], 1, w.shape[-2], w.shape[-1])).transpose(-1, -2)
     return (x * w).sum(-1).reshape((*x.shape[0:-2], -1))
 
+
 @procedure_set.register()
 def getitem(x, indices) -> Tensor:
     # 1. indices normalization and validation
     # treat internal tuples and lists as Tensors and standardize indices to list type
     if isinstance(indices, list) and all(isinstance(s, int) for s in indices):
-        indices = [slope.tensor(indices, x.device,)]
-    elif isinstance(indices, (tuple, list)):
         indices = [
-            slope.tensor(list(i), x.device) if isinstance(i, (tuple, list)) else i for i in indices
+            slope.tensor(
+                indices,
+                x.device,
+            )
         ]
+    elif isinstance(indices, (tuple, list)):
+        indices = [slope.tensor(list(i), x.device) if isinstance(i, (tuple, list)) else i for i in indices]
     else:
         indices = [indices]
 
@@ -273,9 +276,9 @@ def getitem(x, indices) -> Tensor:
 
     new_slice, strides = ((), ()) if not indices_filtered else zip(*indices_filtered)
     ret = x.padslice(new_slice).flip(tuple(i for i, s in enumerate(strides) if s < 0))
-    if any(abs_py(s) != 1 for s in strides):
-        strides = tuple(abs(s) for s in strides)
-        round_up = lambda num, amt: (num+amt-1)//amt * amt
+    if any(abs_(s) != 1 for s in strides):
+        strides = tuple(abs_(s) for s in strides)
+        round_up = lambda num, amt: (num + amt - 1) // amt * amt
         ret = ret.pad(tuple((0, round_up(sh, s) - sh) for s, sh in zip(strides, ret.shape)))
         ret = ret.reshape(tuple(flatten((sh // s, s) for s, sh in zip(strides, ret.shape))))
         ret = ret.padslice(tuple(flatten(((0, sh), (0, 1)) for sh in ret.shape[::2]))).reshape(ret.shape[::2])
@@ -285,7 +288,7 @@ def getitem(x, indices) -> Tensor:
     for dim in type_dim[None]:
         new_shape.insert(dim, 1)
     for dim in (
-        dims_collapsed := tuple(dim + sum(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))
+        dims_collapsed := tuple(dim + sum_(1 for d in type_dim[None] if dim >= d) for dim in reversed(type_dim[int]))
     ):
         new_shape.pop(dim)
 
@@ -293,52 +296,53 @@ def getitem(x, indices) -> Tensor:
 
     # 3. advanced indexing (copy)
     if type_dim[Tensor]:
-        # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
-        def calc_dim(tensor_dim: int) -> int:
-            return (
-                tensor_dim
-                - sum(1 for d in dims_collapsed if tensor_dim >= d)
-                + sum(1 for d in type_dim[None] if tensor_dim >= d)
-            )
+        for i in tensor_index:
+            while i.ndim < ret.ndim:
+                i = i[None]
+            ret = ret.gather_nd(i)
+    return ret
+    ## impl like tinygrad tensor __getitem__:      
+    # if type_dim[Tensor]:
+        # # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
+        # def calc_dim(tensor_dim: int) -> int:
+        #     return (
+        #         tensor_dim
+        #         - sum_(1 for d in dims_collapsed if tensor_dim >= d)
+        #         + sum_(1 for d in type_dim[None] if tensor_dim >= d)
+        #     )
 
-        # track tensor_dim and tensor_index using a dict
-        # calc_dim to get dim and use that to normalize the negative tensor indices
-        idx: Dict[int, Tensor] = {
-            (dim := calc_dim(td)): (tensor < 0).where(ret.shape[dim], 0) + tensor
-            for td, tensor in zip(type_dim[Tensor], tensor_index)
-        }
-
-        # compute sum_dim, arange, and idx
-        max_idx_dim, first_dim, last_dim = max(i.ndim for i in idx.values()), min(idx.keys()), max(idx.keys())
-        sum_dim = tuple(d if n == 0 else d + max_idx_dim - n for n, d in enumerate(idx.keys()))
+        # # track tensor_dim and tensor_index using a dict
+        # # calc_dim to get dim and use that to normalize the negative tensor indices
+        # idx: Dict[int, Tensor] = {
+        #     (dim := calc_dim(td)): (t < 0).where(t.full_like(ret.shape[dim]), t.zeros_like()) + t
+        #     for td, t in zip(type_dim[Tensor], tensor_index)
+        # }
+        # # compute sum_dim, arange, and idx
+        # max_idx_dim, first_dim, last_dim = max_(i.ndim for i in idx.values()), min_(idx.keys()), max_(idx.keys())
+        # sum_dim = tuple(d if n == 0 else d + max_idx_dim - n for n, d in enumerate(idx.keys()))
         # arange = [
-        #     Tensor.arange(ret.shape[d], requires_grad=False, device=x.device).reshape(
+        #     slope.arange(ret.shape[d], device=x.device).reshape(
         #         ret.shape[d : d + 1] + (1,) * (ret.ndim + max_idx_dim - n - sd - 1)
         #     )
         #     for n, (sd, d) in enumerate(zip(sum_dim, idx.keys()))
         # ]  # noqa: E501
-        reshaped_idx = [
-            i.reshape(i.shape + (1,) * (ret.ndim - first_dim - (n or 1))) for n, i in enumerate(idx.values())
-        ]
-        ret_ = ret
-        ret = ret.reshape(ret.shape[: first_dim + 1] + (1,) * max_idx_dim + ret.shape[first_dim + 1 :])
+        # reshaped_idx = [
+        #     i.reshape(i.shape + (1,) * (ret.ndim - first_dim - (n or 1))) for n, i in enumerate(idx.values())
+        # ]
+        # ret_ = ret
+        # ret = ret.reshape(ret.shape[: first_dim + 1] + (1,) * max_idx_dim + ret.shape[first_dim + 1 :])
 
-        # iteratively eq -> mul -> sum fancy index
-        for i, sd in zip(reshaped_idx, sum_dim):
-            breakpoint()
-            ret = ret.gather(i)
-    #     # for a, i, sd in zip(arange, reshaped_idx, sum_dim):
-    #         # ret = (a == i).mul(ret).sum(sd)
+        # for a, i, sd in zip(arange, reshaped_idx, sum_dim):
+        #     ret = (a == i).cast(ret.dtype).mul(ret).sum(sd)
 
-        # special permute case
-        if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim + 1)):
-            ret_dims = list(range(ret.ndim))
-            ret = ret.permute(
-                ret_dims[first_dim : first_dim + max_idx_dim]
-                + ret_dims[:first_dim]
-                + ret_dims[first_dim + max_idx_dim :]
-            )
-    return ret
+        # # special permute case
+        # if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim + 1)):
+        #     ret_dims = list(range(ret.ndim))
+        #     ret = ret.permute(
+        #         ret_dims[first_dim : first_dim + max_idx_dim]
+        #         + ret_dims[:first_dim]
+        #         + ret_dims[first_dim + max_idx_dim :]
+        #     )
 
 
 @procedure_set.register()

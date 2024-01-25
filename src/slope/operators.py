@@ -226,15 +226,15 @@ class Maximuum(BinaryOperator):
 class Equal(BinaryOperator):
     boolean_output = True
 
+
 @operator_set.register("less")
 class Less(BinaryOperator):
     boolean_output = True
 
+
 @operator_set.register("greater")
 class Greater(BinaryOperator):
     boolean_output = True
-
-
 
 
 @operator_set.register("max")

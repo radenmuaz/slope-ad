@@ -196,7 +196,7 @@ class dtypes:
     name_dtype_map_inv = {v: k for k, v in name_dtype_map.items()}
     mlir_dtype_map = {k.mlir: k for k in all_dtypes}
     mlir_dtype_map_inv = {v: k for k, v in mlir_dtype_map.items()}
-    
+
     @classmethod
     def is_int(cls, dtype):
         return dtype in (cls.uint8, cls.int8, cls.int32, cls.int64)
@@ -541,6 +541,7 @@ class UnaryOperator(Operator):
 
 class BinaryOperator(Operator):
     boolean_output = False
+
     def args_fixer(self, x, w, **params):
         if type(x) is UndefPrimal or type(w) is UndefPrimal:
             assert x.shape == w.shape
@@ -618,6 +619,7 @@ class BinaryOperator(Operator):
         if self.boolean_output:
             gL_y = gL_y.cast(x.dtype)
         return [gL_y, None]
+
 
 class ReduceOperator(Operator):
     def args_fixer(self, x, *, dim=None, keepdim=False):

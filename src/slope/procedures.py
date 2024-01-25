@@ -48,7 +48,7 @@ def ones_like(y):
 
 @procedure_set.register()
 def eye(dim: int, **kwargs):
-    return slope.ones((dim,1)).pad((0,dim,0,0)).flatten().padslice(((0,dim*dim),)).reshape(dim, dim)
+    return slope.ones((dim, 1)).pad((0, dim, 0, 0)).flatten().padslice(((0, dim * dim),)).reshape(dim, dim)
 
 
 @procedure_set.register()
@@ -296,48 +296,48 @@ def getitem(x, indices) -> Tensor:
                 i = i[None]
             ret = ret.gather_nd(i)
     return ret
-    ## impl like tinygrad tensor __getitem__:      
+    ## impl like tinygrad tensor __getitem__:
     # if type_dim[Tensor]:
-        # # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
-        # def calc_dim(tensor_dim: int) -> int:
-        #     return (
-        #         tensor_dim
-        #         - sum_(1 for d in dims_collapsed if tensor_dim >= d)
-        #         + sum_(1 for d in type_dim[None] if tensor_dim >= d)
-        #     )
+    # # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
+    # def calc_dim(tensor_dim: int) -> int:
+    #     return (
+    #         tensor_dim
+    #         - sum_(1 for d in dims_collapsed if tensor_dim >= d)
+    #         + sum_(1 for d in type_dim[None] if tensor_dim >= d)
+    #     )
 
-        # # track tensor_dim and tensor_index using a dict
-        # # calc_dim to get dim and use that to normalize the negative tensor indices
-        # idx: Dict[int, Tensor] = {
-        #     (dim := calc_dim(td)): (t < 0).where(t.full_like(ret.shape[dim]), t.zeros_like()) + t
-        #     for td, t in zip(type_dim[Tensor], tensor_index)
-        # }
-        # # compute sum_dim, arange, and idx
-        # max_idx_dim, first_dim, last_dim = max_(i.ndim for i in idx.values()), min_(idx.keys()), max_(idx.keys())
-        # sum_dim = tuple(d if n == 0 else d + max_idx_dim - n for n, d in enumerate(idx.keys()))
-        # arange = [
-        #     slope.arange(ret.shape[d], device=x.device).reshape(
-        #         ret.shape[d : d + 1] + (1,) * (ret.ndim + max_idx_dim - n - sd - 1)
-        #     )
-        #     for n, (sd, d) in enumerate(zip(sum_dim, idx.keys()))
-        # ]  # noqa: E501
-        # reshaped_idx = [
-        #     i.reshape(i.shape + (1,) * (ret.ndim - first_dim - (n or 1))) for n, i in enumerate(idx.values())
-        # ]
-        # ret_ = ret
-        # ret = ret.reshape(ret.shape[: first_dim + 1] + (1,) * max_idx_dim + ret.shape[first_dim + 1 :])
+    # # track tensor_dim and tensor_index using a dict
+    # # calc_dim to get dim and use that to normalize the negative tensor indices
+    # idx: Dict[int, Tensor] = {
+    #     (dim := calc_dim(td)): (t < 0).where(t.full_like(ret.shape[dim]), t.zeros_like()) + t
+    #     for td, t in zip(type_dim[Tensor], tensor_index)
+    # }
+    # # compute sum_dim, arange, and idx
+    # max_idx_dim, first_dim, last_dim = max_(i.ndim for i in idx.values()), min_(idx.keys()), max_(idx.keys())
+    # sum_dim = tuple(d if n == 0 else d + max_idx_dim - n for n, d in enumerate(idx.keys()))
+    # arange = [
+    #     slope.arange(ret.shape[d], device=x.device).reshape(
+    #         ret.shape[d : d + 1] + (1,) * (ret.ndim + max_idx_dim - n - sd - 1)
+    #     )
+    #     for n, (sd, d) in enumerate(zip(sum_dim, idx.keys()))
+    # ]  # noqa: E501
+    # reshaped_idx = [
+    #     i.reshape(i.shape + (1,) * (ret.ndim - first_dim - (n or 1))) for n, i in enumerate(idx.values())
+    # ]
+    # ret_ = ret
+    # ret = ret.reshape(ret.shape[: first_dim + 1] + (1,) * max_idx_dim + ret.shape[first_dim + 1 :])
 
-        # for a, i, sd in zip(arange, reshaped_idx, sum_dim):
-        #     ret = (a == i).cast(ret.dtype).mul(ret).sum(sd)
+    # for a, i, sd in zip(arange, reshaped_idx, sum_dim):
+    #     ret = (a == i).cast(ret.dtype).mul(ret).sum(sd)
 
-        # # special permute case
-        # if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim + 1)):
-        #     ret_dims = list(range(ret.ndim))
-        #     ret = ret.permute(
-        #         ret_dims[first_dim : first_dim + max_idx_dim]
-        #         + ret_dims[:first_dim]
-        #         + ret_dims[first_dim + max_idx_dim :]
-        #     )
+    # # special permute case
+    # if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim + 1)):
+    #     ret_dims = list(range(ret.ndim))
+    #     ret = ret.permute(
+    #         ret_dims[first_dim : first_dim + max_idx_dim]
+    #         + ret_dims[:first_dim]
+    #         + ret_dims[first_dim + max_idx_dim :]
+    #     )
 
 
 @procedure_set.register()

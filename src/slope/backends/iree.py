@@ -37,6 +37,7 @@ from slope.operators import operator_set
 from slope.procedures import procedure_set
 import tempfile
 
+
 def as_mlir_shape(symval):
     xdtype = symval.dtype.mlir
     if len(symval.shape) > 0:
@@ -47,7 +48,7 @@ def as_mlir_shape(symval):
 
 
 def as_mlir_sig(in_symvals, out_symval):
-    typing_code = f" : ({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
+    typing_code = f"({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
     return typing_code
 
 
@@ -298,70 +299,77 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
 
 @backend.set_impl(backend.operator_set.cast)
 def cast_impl(self, x, y, *, dtype):
-    return f'%{y.name} = "stablehlo.convert"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.convert"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.stop_gradient)
 def stop_gradient_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.optimization_barrier"(%{x.name}){as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.optimization_barrier"(%{x.name}): {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.sqrt)
 def sqrt_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.sqrt"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.sqrt"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.exp)
 def exp_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.exponential"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.exponential"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.log)
 def log_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.log"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.log"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.sin)
 def sin_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.sine"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.sine"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.invert)
 def invert_impl(self, x, y):
-    return f'%{y.name} = "stablehlo.not"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.not"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.add)
 def add_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.add"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.add"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.sub)
 def sub_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.subtract"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.subtract"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.mul)
 def mul_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.multiply"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.multiply"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.div)
 def div_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.divide"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.divide"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.pow)
 def pow_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.power"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.power"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
+def get_compare_type(dtype):
+    return  ("FLOAT"
+        if dtypes.is_float(dtype)
+        else "SIGNED"
+        if dtypes.is_int(dtype) and dtype is not dtypes.uint8
+        else "UNSIGNED"
+    )
 
 @backend.set_impl(backend.operator_set.equal)
 def equal_impl(self, x, w, y):
     return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{
   comparison_direction = #stablehlo<comparison_direction EQ>,
-  compare_type = #stablehlo<comparison_type FLOAT>
-}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+  compare_type = #stablehlo<comparison_type {get_compare_type(x.symval.dtype)}>
+}}  : {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
 
@@ -369,8 +377,8 @@ def equal_impl(self, x, w, y):
 def less_impl(self, x, w, y):
     return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{
   comparison_direction = #stablehlo<comparison_direction LT>,
-  compare_type = #stablehlo<comparison_type FLOAT>
-}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+  compare_type = #stablehlo<comparison_type {get_compare_type(x.symval.dtype)}>
+}}  : {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
 
@@ -378,14 +386,14 @@ def less_impl(self, x, w, y):
 def greater_impl(self, x, w, y):
     return f"""%{y.name} = "stablehlo.compare"(%{x.name}, %{w.name}) {{
   comparison_direction = #stablehlo<comparison_direction GT>,
-  compare_type = #stablehlo<comparison_type FLOAT>
-}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+  compare_type = #stablehlo<comparison_type {get_compare_type(x.symval.dtype)}>
+}}  : {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
 
 @backend.set_impl(backend.operator_set.maximum)
 def maximum_impl(self, x, w, y):
-    return f'%{y.name} = "stablehlo.maximum"(%{x.name}, %{w.name}) {as_mlir_sig((x.symval, w.symval), y.symval)}'
+    return f'%{y.name} = "stablehlo.maximum"(%{x.name}, %{w.name}) : {as_mlir_sig((x.symval, w.symval), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.matmul)
@@ -406,7 +414,7 @@ def matmul_impl(self, x, w, y):
     rhs_contracting_dimensions = [{w_cdim}]
   >,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-    }}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+    }}  : {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
 
@@ -428,12 +436,12 @@ def sum_impl(self, x, y, *, dim, keepdim):
 %{y.name}_init = stablehlo.constant dense<{zero}> : {as_mlir_shape(y_init_type)}
 %{y.name}{'_' if keepdim else ''} = "stablehlo.reduce"(%{x.name}, %{y.name}_init) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
-    %0 = "stablehlo.add"(%arg0, %arg1) {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
+    %0 = "stablehlo.add"(%arg0, %arg1) : {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
-}} {as_mlir_sig((x.symval, y_init_type), y_out_type)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_out_type,), y.symval)}' if keepdim else ''}"""
+}} : {as_mlir_sig((x.symval, y_init_type), y_out_type)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if keepdim else ''}"""
 
 
 @backend.set_impl(backend.operator_set.max)
@@ -458,34 +466,32 @@ def max_impl(self, x, y, *, dim, keepdim):
 %{y.name}_init = stablehlo.constant dense<{min_val}> : {as_mlir_shape(y_init_type)}
 %{y.name}{'_' if keepdim else ''} = "stablehlo.reduce"(%{x.name}, %{y.name}_init) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
-    %0 = "stablehlo.maximum"(%arg0, %arg1) {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
+    %0 = "stablehlo.maximum"(%arg0, %arg1) : {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
-}} {as_mlir_sig((x.symval, y_init_type), y_out_type)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_out_type,), y.symval)}' if keepdim else ''}
+}} : {as_mlir_sig((x.symval, y_init_type), y_out_type)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if keepdim else ''}
 """
 
 
 @backend.set_impl(backend.operator_set.arange)
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
     if stride == 1 and start == 0:
-        return f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}"""
-    normalized = math.ceil(abs(stop - start) / stride)
-    iota_symval = y.symval.override(shape=tuple(normalized * i if i != 1 else i for i in y.symval.shape))
+        return f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} : {as_mlir_sig((), y.symval)}"""
     one_symval = y.symval.override(shape=(1,))
     return f"""
 %{y.name}_scale_ = stablehlo.constant dense<{stride}> : {as_mlir_shape(one_symval)}
 %{y.name}_scale = "stablehlo.broadcast_in_dim"(%{y.name}_scale_) {{
         broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
-        }} {as_mlir_sig(( one_symval,), y.symval)}
+        }} : {as_mlir_sig(( one_symval,), y.symval)}
 %{y.name}_shift_ = stablehlo.constant dense<{start}> : {as_mlir_shape(y.symval.override(shape=(1,)))}
 %{y.name}_shift = "stablehlo.broadcast_in_dim"(%{y.name}_shift_) {{
         broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
-        }} {as_mlir_sig(( one_symval,), y.symval)}
-%{y.name}__ = "stablehlo.iota"() {{iota_dimension = 0 : i64}} {as_mlir_sig((), y.symval)}
-%{y.name}_ = "stablehlo.multiply"(%{y.name}__, %{y.name}_scale) {as_mlir_sig((y.symval, y.symval), y.symval)}
-%{y.name} = "stablehlo.add"(%{y.name}_, %{y.name}_shift) {as_mlir_sig((y.symval, y.symval), y.symval)}
+        }} : {as_mlir_sig(( one_symval,), y.symval)}
+%{y.name}__ = "stablehlo.iota"() {{iota_dimension = 0 : i64}} : {as_mlir_sig((), y.symval)}
+%{y.name}_ = "stablehlo.multiply"(%{y.name}__, %{y.name}_scale) : {as_mlir_sig((y.symval, y.symval), y.symval)}
+%{y.name} = "stablehlo.add"(%{y.name}_, %{y.name}_shift) : {as_mlir_sig((y.symval, y.symval), y.symval)}
 """
 
 
@@ -494,13 +500,13 @@ def full_impl(self, y, *, shape, fill_value, dtype, device):
     fill_value = float(fill_value) if "f" in dtype.mlir else int(fill_value)
     fill_value = repr(fill_value)
     fill_value = fill_value.replace("e", "E") if "." in fill_value else fill_value.replace("e", ".E")
-    return f'%{y.name} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {as_mlir_shape(y.symval)} }} {as_mlir_sig((), y.symval)}'
+    return f'%{y.name} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {as_mlir_shape(y.symval)} }} : {as_mlir_sig((), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.random_uniform)
 def random_uniform_impl(self, y, *, shape, dtype, device):
     zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
-    one = "1."  if dtypes.is_float(y.symval.dtype) else "1"
+    one = "1." if dtypes.is_float(y.symval.dtype) else "1"
     a_type = b_type = SymbolicTensor((), dtype)
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
@@ -510,8 +516,8 @@ def random_uniform_impl(self, y, *, shape, dtype, device):
 %{y.name}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 %{y.name}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
 %{y.name}{'_' if is_scalar else ''} = "stablehlo.rng"(%{y.name}_a, %{y.name}_b,%{y.name}_shape) {{
-        rng_distribution = #stablehlo<rng_distribution UNIFORM>}} {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
+        rng_distribution = #stablehlo<rng_distribution UNIFORM>}} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
 
 
 @backend.set_impl(backend.operator_set.random_normal)
@@ -527,21 +533,21 @@ def random_normal_impl(self, y, *, shape, dtype, device):
 %{y.name}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 %{y.name}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
 %{y.name}{'_' if is_scalar else ''} = "stablehlo.rng"(%{y.name}_a, %{y.name}_b,%{y.name}_shape) {{
-        rng_distribution = #stablehlo<rng_distribution NORMAL>}} {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
+        rng_distribution = #stablehlo<rng_distribution NORMAL>}} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
 
 
 @backend.set_impl(backend.operator_set.expand)
 def expand_impl(self, x, y, *, shape):
     return f"""%{y.name} = "stablehlo.broadcast_in_dim"(%{x.name}) {{
         broadcast_dimensions = dense<{repr(list(range(len(shape))))}>: tensor<{len(shape)}xi64>
-        }} {as_mlir_sig(( x.symval,), y.symval)}
+        }} : {as_mlir_sig(( x.symval,), y.symval)}
 """
 
 
 @backend.set_impl(backend.operator_set.reshape)
 def reshape_impl(self, x, y, *, shape):
-    return f'%{y.name} = "stablehlo.reshape"(%{x.name}) {as_mlir_sig((x.symval,), y.symval)}'
+    return f'%{y.name} = "stablehlo.reshape"(%{x.name}) : {as_mlir_sig((x.symval,), y.symval)}'
 
 
 @backend.set_impl(backend.operator_set.pad)
@@ -555,7 +561,7 @@ def pad_impl(self, x, y, *, padding, mode, value):
   edge_padding_low = dense<{repr(list(lo))}> : tensor<{len(lo)}xi64>,
   edge_padding_high = dense<{repr(list(hi))}> : tensor<{len(hi)}xi64>,
   interior_padding = dense<{repr([0]*len(lo))}> : tensor<{len(lo)}xi64>
-}} {as_mlir_sig((x.symval, value_type), y.symval)}
+}} : {as_mlir_sig((x.symval, value_type), y.symval)}
 """
 
 
@@ -565,7 +571,7 @@ def slice_impl(self, x, y, *, starts, limits, strides):
   start_indices = dense<{repr(list(starts))}> : tensor<{len(starts)}xi64>,
   limit_indices = dense<{repr(list(limits))}> : tensor<{len(limits)}xi64>,
   strides = dense<{repr(list(strides))}> : tensor<{len(strides)}xi64>
-}} {as_mlir_sig((x.symval,), y.symval)}
+}} : {as_mlir_sig((x.symval,), y.symval)}
 """
 
 
@@ -574,21 +580,21 @@ def cat_impl(self, *xs, dim):
     xs, y = xs[:-1], xs[-1]
     return f"""%{y.name} = "stablehlo.concatenate"({', '.join([f'%{x.name}' for x in xs])}) {{
  dimension = {dim} : i64
-}} {as_mlir_sig(([x.symval for x in xs]), y.symval)}"""
+}} : {as_mlir_sig(([x.symval for x in xs]), y.symval)}"""
 
 
 @backend.set_impl(backend.operator_set.permute)
 def permute_impl(self, x, y, *, perm):
     return f"""%{y.name} = "stablehlo.transpose"(%{x.name}) {{
   permutation = dense<{repr(list(perm))}> : tensor<{len(perm)}xi64>
-}} {as_mlir_sig((x.symval,), y.symval)}"""
+}} : {as_mlir_sig((x.symval,), y.symval)}"""
 
 
 @backend.set_impl(backend.operator_set.flip)
 def flip_impl(self, x, y, *, dim):
     return f"""%{y.name} = "stablehlo.reverse"(%{x.name}) {{
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
-}}  {as_mlir_sig((x.symval,), y.symval)}
+}}  : {as_mlir_sig((x.symval,), y.symval)}
 """
 
 
@@ -609,19 +615,52 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
   feature_group_count = {groups} : i64,
   batch_group_count = 1 : i64,
   precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
-}}  {as_mlir_sig((x.symval, w.symval), y.symval)}
+}}  : {as_mlir_sig((x.symval, w.symval), y.symval)}
 """
 
 
 @backend.set_impl(backend.operator_set.where)
-def where_impl(self, x, w, u, y ):
-    return f"""%{y.name} = "stablehlo.case"(%{x.name}) ({{
-  "stablehlo.return"(%{w.name}) : {as_mlir_shape(y.symval)} -> ()
-}}, {{
-  "stablehlo.return"(%{u.name}) : {as_mlir_shape(y.symval)} -> ()
-}}
- {as_mlir_sig((x.symval, w.symval), y.symval)}
-"""
+def where_impl(self, x, w, u, y):
+    return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}"""
+    # x_symval_i = x.symval.override(shape=x.symval.shape[1:])
+    # x_symval_i_int = x_symval_i.override(dtype=slope.int32)
+    # w_symval_i = w.symval.override(shape=w.symval.shape[1:])
+    # u_symval_i = u.symval.override(shape=u.symval.shape[1:])
+    # y_symval_i = y.symval.override(shape=y.symval.shape[1:])
+#     return f"""%{y.name} = "stablehlo.map"(%{w.name}) ({{
+#   ^bb0(%arg0: tensor<{w.symval.dtype.mlir}>):
+#     %0 = "stablehlo.convert"(%arg0) : {as_mlir_sig((y_symval_i,), y_symval_i)}
+#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
+#     }}) {{
+#   dimensions = dense<[0]> : tensor<1xi64>
+# }} : {as_mlir_sig((y.symval,), y.symval)}
+# """
+#     return f"""%{y.name} = "stablehlo.map"(%{x.name}, %{w.name}, %{u.name}) ({{
+#   ^bb0(%arg0: tensor<{x.symval.dtype.mlir}>, %arg1: tensor<{w.symval.dtype.mlir}>, %arg2: tensor<{u.symval.dtype.mlir}>):
+#     %arg0_ = "stablehlo.convert"(%arg0) : {as_mlir_sig((x_symval_i,), x_symval_i_int)}
+#     %0 = "stablehlo.case"(%arg0_) (
+#         {{"stablehlo.return"(%arg1) : ({as_mlir_shape(w_symval_i)}) -> ()}},
+#         {{"stablehlo.return"(%arg2) : ({as_mlir_shape(u_symval_i)}) -> ()}}
+#         ) : {as_mlir_sig((x_symval_i_int
+#         ,), y_symval_i)}
+#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
+#     }}) {{
+#   dimensions = dense<[0]> : tensor<1xi64>
+# }} : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}
+# """
+
+#     return f"""%{y.name} = "stablehlo.map"(%{x.name}, %{w.name}, %{u.name}) ({{
+#   ^bb0(%arg0: tensor<{x.symval.dtype.mlir}>, %arg1: tensor<{w.symval.dtype.mlir}>, %arg2: tensor<{u.symval.dtype.mlir}>):
+#     %0 = "stablehlo.if"(%arg0) (
+#         {{"stablehlo.return"(%arg1) : ({as_mlir_shape(w_symval_i)}) -> ()}},
+#         {{"stablehlo.return"(%arg2) : ({as_mlir_shape(u_symval_i)}) -> ()}}
+#         ) : {as_mlir_sig((x_symval_i,), y_symval_i)}
+#     stablehlo.return %0: {as_mlir_shape(y_symval_i)}
+#     }}) {{
+#   dimensions = dense<[0]> : tensor<1xi64>
+# }} : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}
+# """
+
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, batch_dims):
@@ -673,8 +712,8 @@ def gather_nd_impl(self, x, w, y, batch_dims):
     y_fixed = y.symval if y_reshape is None else y_reshape
     y_affix = "" if y_reshape is None else "_"
     w_affix = "" if w_arange is None else "_"
-    return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} {as_mlir_sig((), w_arange)}
-%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} {as_mlir_sig((w_arange, w.symval), w_fixed)} '''
+    return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {as_mlir_sig((), w_arange)}
+%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {as_mlir_sig((w_arange, w.symval), w_fixed)} '''
     if w_arange is not None else ''}
 %{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
   dimension_numbers = #stablehlo.gather<
@@ -684,8 +723,8 @@ def gather_nd_impl(self, x, w, y, batch_dims):
   index_vector_dim = {index_vector_dim}>,
   slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
   indices_are_sorted = false
-}} {as_mlir_sig((x.symval, w_fixed), y_fixed)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) {as_mlir_sig((y_fixed,), y.symval)}' 
+}} : {as_mlir_sig((x.symval, w_fixed), y_fixed)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_fixed,), y.symval)}' 
  if y_reshape is not None else ''}
 """
 
@@ -704,7 +743,7 @@ def scatter_nd_impl(self, x, w, u, y):
 
     return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
-    %0 = "stablehlo.add"(%arg0, %arg1) {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
+    %0 = "stablehlo.add"(%arg0, %arg1) : {as_mlir_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
   scatter_dimension_numbers = #stablehlo.scatter<
@@ -714,5 +753,5 @@ def scatter_nd_impl(self, x, w, u, y):
   index_vector_dim = {index_vector_dim}>,
   indices_are_sorted = false,
   unique_indices = false
-}} {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}
+}} : {as_mlir_sig((x.symval, w.symval, u.symval), y.symval)}
 """

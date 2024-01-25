@@ -901,14 +901,13 @@ class Conv(GeneralReduceOperator):
             return [None, gL_w]
 
 
-
 @operator_set.register("where")
 class Where(GeneralReduceOperator):
     def args_fixer(self, x, w, u):
         return (x, w, u), dict()
 
     def typecheck(self, x, w, u):
-        return [SymbolicTensor(x.shape, x.dtype, x.device)]
+        return [w]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w, u), (x_bdim, w_bdim, u_bdim) = vals_in, dims_in
@@ -930,7 +929,8 @@ class Where(GeneralReduceOperator):
             return [None, self(x, gL_y, gL_y.zeros_like()), None]
         elif type(u) is UndefPrimal:
             return [None, None, self(x, gL_y.zeros_like(), gL_y)]
-    
+
+
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):

@@ -196,6 +196,14 @@ class dtypes:
     name_dtype_map_inv = {v: k for k, v in name_dtype_map.items()}
     mlir_dtype_map = {k.mlir: k for k in all_dtypes}
     mlir_dtype_map_inv = {v: k for k, v in mlir_dtype_map.items()}
+    
+    @classmethod
+    def is_int(cls, dtype):
+        return dtype in (cls.uint8, cls.int8, cls.int32, cls.int64)
+
+    @classmethod
+    def is_float(cls, dtype):
+        return dtype in (cls.float16, cls.float32)
 
 
 class Device(NamedTuple):
@@ -880,7 +888,7 @@ class Backend:
 
 
 # =================================
-#   Program 
+#   Program
 # =================================
 
 

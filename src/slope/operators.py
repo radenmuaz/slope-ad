@@ -1001,3 +1001,22 @@ class ScatterND(GeneralReduceOperator):
             return [gL_y.gather(u), None]
         elif type(w) is UndefPrimal:
             return [self, None]
+
+
+# @operator_set.register("rng_bits")
+# class RngBits(BinaryOperator):
+#     def args_fixer(self, x, *, shape=None, dtype=None, device=None):
+#         if isinstance(shape, int):
+#             shape = (shape,)
+#         elif shape is None:
+#             shape = ()
+#         if dtype is None:
+#             dtype = slope.core.backend.DEFAULT_DTYPE
+#         if device is None:
+#             device = slope.core.backend.DEFAULT_DEVICE
+#         return (x,), dict(shape=shape, dtype=dtype, device=device)
+
+#     def typecheck(self, x, *, shape, dtype, device) -> List[SymbolicTensor]:
+#         return [x.symval]
+#         # return [SymbolicTensor(tuple(shape), dtype, device)]
+    

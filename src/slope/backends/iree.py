@@ -541,6 +541,14 @@ def random_normal_impl(self, y, *, shape, dtype, device):
         rng_distribution = #stablehlo<rng_distribution NORMAL>}} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
 
+
+@backend.set_impl(backend.operator_set.rng_bits)
+def rng_bits_impl(self, x, y, *, shape, dtype, device):
+    return f"""%{y.name}_, %{y.name} =  "stablehlo.rng_bit_generator"(%{x.name}) {{
+  rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>
+}} : ({as_mlir_shape(x.symval)}) -> ({as_mlir_shape(x.symval)}, {as_mlir_shape(y.symval)})"""
+
+
 @backend.set_impl(backend.operator_set.expand)
 def expand_impl(self, x, y, *, shape):
     return f"""%{y.name} = "stablehlo.broadcast_in_dim"(%{x.name}) {{

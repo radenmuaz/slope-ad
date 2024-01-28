@@ -269,6 +269,7 @@ backend = IREEBackend(
         dtypes.bool: np.dtypes.BoolDType(),
         dtypes.int32: np.dtypes.Int32DType(),
         dtypes.int64: np.dtypes.Int64DType(),
+        dtypes.uint64: np.dtypes.UInt64DType(),
         dtypes.float16: np.dtypes.Float16DType(),
     },
     {
@@ -510,16 +511,17 @@ def full_impl(self, y, *, shape, fill_value, dtype, device):
 def random_uniform_impl(self, y, *, shape, dtype, device):
     zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
     one = "1." if dtypes.is_float(y.symval.dtype) else "1"
-    a_type = b_type = SymbolicTensor((), dtype)
+    a_type = b_type = y.symval.override(shape=())
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = SymbolicTensor((1,) if is_scalar else (len(shape),), Tensor.int64)
-    y_out_type = y.symval if not is_scalar else SymbolicTensor((1,), y.symval.dtype)
+    shape_type = y.symval.override(shape=(1,) if is_scalar else (len(shape),), dtype=dtypes.int64)
+    y_out_type = y.symval if not is_scalar else y.symval.override(shape=(1,))
     return f"""%{y.name}_a = stablehlo.constant dense<{zero}> : {as_mlir_shape(a_type)}
 %{y.name}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 %{y.name}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
 %{y.name}{'_' if is_scalar else ''} = "stablehlo.rng"(%{y.name}_a, %{y.name}_b,%{y.name}_shape) {{
-        rng_distribution = #stablehlo<rng_distribution UNIFORM>}} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
+        rng_distribution = #stablehlo<rng_distribution UNIFORM>
+        }} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
 
 
@@ -538,7 +540,6 @@ def random_normal_impl(self, y, *, shape, dtype, device):
 %{y.name}{'_' if is_scalar else ''} = "stablehlo.rng"(%{y.name}_a, %{y.name}_b,%{y.name}_shape) {{
         rng_distribution = #stablehlo<rng_distribution NORMAL>}} : {as_mlir_sig((a_type, b_type, shape_type), y_out_type)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
-
 
 @backend.set_impl(backend.operator_set.expand)
 def expand_impl(self, x, y, *, shape):

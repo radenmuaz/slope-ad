@@ -189,9 +189,10 @@ class dtypes:
     bool: Final[DType] = DType(0, 1, "bool", "i1", bool)
     int32: Final[DType] = DType(1, 4, "int32", "i32", np.int32)
     int64: Final[DType] = DType(2, 8, "int64", "i64", np.int64)
+    uint64: Final[DType] = DType(2, 8, "uint64", "ui64", np.uint64)
     float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)
 
-    all_dtypes = (bool, float16, float32, int8, int32, int64, uint8)
+    all_dtypes = (bool, float16, float32, int8, int32, int64, uint8, uint64)
     name_dtype_map = {k.name: k for k in all_dtypes}
     name_dtype_map_inv = {v: k for k, v in name_dtype_map.items()}
     mlir_dtype_map = {k.mlir: k for k in all_dtypes}
@@ -199,7 +200,7 @@ class dtypes:
 
     @classmethod
     def is_int(cls, dtype):
-        return dtype in (cls.uint8, cls.int8, cls.int32, cls.int64)
+        return dtype in (cls.uint8, cls.int8, cls.int32, cls.uint64, cls.int64)
 
     @classmethod
     def is_float(cls, dtype):

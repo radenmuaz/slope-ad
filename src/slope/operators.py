@@ -570,7 +570,7 @@ class Cat(ShapeOperator):
             dim = 0
         return xs, dict(dim=dim)
 
-    def typecheck(self, *xs: SymbolicTensor, dim=0) -> List[SymbolicTensor]:
+    def typecheck(self, *xs: Tuple[SymbolicTensor], dim=0) -> List[SymbolicTensor]:
         assert all(x.dtype == xs[0].dtype for x in xs[1:])
         assert all(x.device == xs[0].device for x in xs[1:])
         if len(set(x.ndim for x in xs)) != 1:

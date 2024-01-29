@@ -639,9 +639,10 @@ def conv(x, w, groups=1, stride=1, dilation=1, padding=0):
 def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_padding=0):
     make_pair = lambda x, cnt=2: (x,) * cnt if isinstance(x, int) else x
     flatten_seq = lambda l: [item for sublist in l for item in sublist]
-    D, trailing = w.shape[2:], list(range(3, len(w.shape) + 1))
-    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))
-    w = w.permute((0, 2, 1, *trailing)).flip(trailing)
+    D, trailing = w.shape[2:], tuple(range(3, len(w.shape) + 1))
+    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:]))) # (1, 64, 64, 3, 3)
+    w = w.permute((0, 2, 1, *trailing))
+    w = w.flip(trailing)
     stride = make_pair(stride, len(D))
     if any(s > 1 for s in stride):
         x = x.reshape((*x.shape[:2], *flatten_seq((k, 1) for k in x.shape[2:])))

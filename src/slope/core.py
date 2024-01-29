@@ -982,7 +982,6 @@ class Program:
                 prefix = "y" if outb in self.outs else "z"
                 idx = sum([1 if v.name[0] == prefix else 0 for v in self.env.values()])
                 self.env[outb] = ProgramEnvVar(f"{prefix}{idx}", outb.symval)
-
         self.curr_repr = repr(self)
 
     def pprint_shape(self, symval, scalar_as_empty_array=False):

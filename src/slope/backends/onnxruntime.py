@@ -216,8 +216,7 @@ class ONNXRuntimeBackend(Backend):
             fn_defs[name] = op_codegen_out.code_lines
         in_names = ", ".join(i.name for i in in_vals)
         out_names = ", ".join(o.name for o in out_vals)
-        sig = annotate_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
-        impl_code = f"{out_names} = {name}({in_names}) {sig}"
+        impl_code = f"{out_names} = {name}({in_names})"
         return impl_code
 
     def compile(self, codegen_out):
@@ -365,7 +364,7 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
 
 @backend.set_impl(operator_set.cast)
 def cast_impl(self, x, y, *, dtype):
-    f"{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({x.name})"
+    return f"{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({x.name})"
 
 
 @backend.set_impl(backend.operator_set.stop_gradient)
@@ -445,12 +444,12 @@ def maximum_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    return f"{y.name} = Matmul({x.name}, {w.name})"
+    return f"{y.name} = MatMul({x.name}, {w.name})"
 
 
-@backend.set_impl(backend.operator_set.where)
-def where_impl(self, x, w, u, y):
-    return f"""{y.name} = "Where"(%{x.name}, %{w.name}, %{u.name})"""
+# @backend.set_impl(backend.operator_set.where)
+# def where_impl(self, x, w, u, y):
+#     return f"""{y.name} = "Where"(%{x.name}, %{w.name}, %{u.name})"""
 
 
 @backend.set_impl(backend.operator_set.gather_nd)
@@ -482,12 +481,12 @@ def sum_impl(self, x, y, *, dim, keepdim):
 @backend.set_impl(operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
     return f"""{y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-{y.name} = ReduceMax<keepdims={int(keepdim)}> ({x}, {y.name}_dim)
+{y.name} = ReduceMax<keepdims={int(keepdim)}> ({x.name}, {y.name}_dim)
 """
 
 
 @backend.set_impl(operator_set.arange)
-def arange_impl(self, y, *, start, stop, stride, dtype):
+def arange_impl(self, y, *, start, stop, stride, dtype, device):
     return f"""
 {y.name}_start = Constant <value_int = {start}> ()
 {y.name}_limit = Constant <value_int = {stop}> ()
@@ -495,7 +494,7 @@ def arange_impl(self, y, *, start, stop, stride, dtype):
 {f'''
 {y.name}_range = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
 {y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_range)
-''' if dtype is not Tensor.int64 else
+''' if dtype is not dtypes.int64 else
 f'''
 {y.name} = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
 '''
@@ -506,7 +505,7 @@ f'''
 # {y.name}_range = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
 # {f'{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_range)'}
 @backend.set_impl(operator_set.full)
-def full_impl(self, y, *, shape, fill_value, dtype):
+def full_impl(self, y, *, shape, fill_value, dtype, device):
     if dtype is not dtypes.bool:
         if dtypes.is_float(dtype):
             fill_value = float(fill_value)
@@ -570,7 +569,7 @@ def random_normal_impl(self, y, *, shape, dtype, device):
 def expand_impl(self, x, y, *, shape):
     return f"""
 {y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name} = Expand ({x}, {y.name}_shape)
+{y.name} = Expand ({x.name}, {y.name}_shape)
 """
 
 
@@ -579,12 +578,12 @@ def reshape_impl(self, x, y, *, shape):
     if len(shape) > 0:
         return f"""
 {y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name} = Reshape({x}, {y.name}_shape)
+{y.name} = Reshape({x.name}, {y.name}_shape)
 """
     else:  # scalar case
         f"""
         {y.name}_shape = Constant <value = int64[1] {1} >()
-        {y.name}_reshape = Reshape({x}, {y.name}_shape)
+        {y.name}_reshape = Reshape({x.name}, {y.name}_shape)
         {y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
         {y.name} = Squeeze ({y.name}_reshape, {y.name}_squeeze_dim)"""
 
@@ -596,11 +595,11 @@ def pad_impl(self, x, y, *, padding, mode, value):
     #     return f"""
     # {y.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
     # {y.name}_constant_value =  Constant <value = {value} >()
-    # {y.name} = Pad({x}, {y.name}_padding, {y.name}_constant_value)
+    # {y.name} = Pad({x.name}, {y.name}_padding, {y.name}_constant_value)
     # """
     return f"""
 {y.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
-{y.name} = Pad({x}, {y.name}_padding)
+{y.name} = Pad({x.name}, {y.name}_padding)
 """
 
 
@@ -611,29 +610,32 @@ def slice_impl(self, x, y, *, starts, limits, strides):
 {y.name}_ends = Constant <value = int64[{len(limits)}]  {{ {repr(list(limits))[1:-1]} }}>()
 {y.name}_dim = Constant <value = int64[{len(strides)}]  {{ {repr(list(range(len(starts))))[1:-1]} }}>()
 {y.name}_steps = Constant <value = int64[{len(strides)}]  {{ {repr(list(strides))[1:-1]} }}>()
-{y.name} = Slice({x}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
+{y.name} = Slice({x.name}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
 """
 
 
 @backend.set_impl(operator_set.cat)
-def cat_impl(self, y, *xs, dim):
-    return f"{y.name} = Concat< axis={dim}>({','.join(xs)})"
+def cat_impl(self, *xs, dim):
+    xs, y = xs[:-1], xs[-1]
+    return f"{y.name} = Concat< axis={dim}>({','.join([x.name for x in xs])})"
 
 
 @backend.set_impl(operator_set.permute)
 def permute_impl(self, x, y, *, perm):
-    return f"{y.name} = Transpose<perm={repr(list(perm))}>({x})"
+    return f"{y.name} = Transpose<perm={repr(list(perm))}>({x.name})"
 
 
 @backend.set_impl(operator_set.flip)
 def flip_impl(self, x, y, *, dim):
     return f"""
 {y.name}_starts = Constant <value = int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))} }}>()
-{y.name}_ends = Constant <value = int64[{len(dim)}]  {{ {", ".join(["-1"] * len(dim))} }}>()
+{y.name}_ends = Constant <value = int64[{len(dim)}]  {{ {", ".join([str(x.symval.shape[d]) for d in dim])} }}>()
 {y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(list(dim))[1:-1]} }}>()
-{y.name}_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["-1"] * len(dim))} }}>()
-{y.name} = Slice({x}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
+{y.name}_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["1"] * len(dim))} }}>()
+{y.name} = Slice({x.name}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
 """
+
+
 
 
 @backend.set_impl(operator_set.conv)
@@ -642,4 +644,4 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
     pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
     strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
     group_attr = f"group={groups}"
-    return f"""{y.name} = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x}, {w})"""
+    return f"""{y.name} = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x.name}, {w.name})"""

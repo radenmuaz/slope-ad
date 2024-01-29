@@ -13,9 +13,9 @@ class Result(NamedTuple):
     gL_y: Tensor
 
 
-class TestGrad(unittest.TestCase):
+class TestOperators(unittest.TestCase):
     @staticmethod
-    def run_program(f, *args, **kwargs):
+    def run_ad_fns(f, *args, **kwargs):
         args_dot = [slope.ones_like(x) for x in args]
         y, f_lin = slope.linearize(f, *args, **kwargs)
         y_dot = f_lin(*args_dot)

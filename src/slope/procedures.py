@@ -54,9 +54,9 @@ def eye(dim: int, **kwargs):
 @procedure_set.register()
 def where(x, trueval, falseval):
     if not isinstance(trueval, Tensor):
-        trueval = slope.full(trueval, device=x.device)
+        trueval = slope.full((), trueval, device=x.device)
     if not isinstance(falseval, Tensor):
-        falseval = slope.full(falseval, device=x.device)
+        falseval = slope.full((), falseval, device=x.device)
     cond = x != x.zeros_like()
     if not any(val.dtype is dtypes.bool for val in (trueval, falseval)):
         cond = cond.cast(trueval.dtype)

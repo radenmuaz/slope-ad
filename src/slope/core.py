@@ -255,6 +255,7 @@ class Tensor:
         return self.dtype in (
             dtypes.int8,
             dtypes.uint8,
+            dtypes.uint64,
             dtypes.int32,
             dtypes.int64,
         )
@@ -393,15 +394,11 @@ class SymbolicTensor(Tensor):
     def device(self):
         return self._device
 
-    @classmethod
-    def like(cls, maybe_tensor, **but):
-        shape = but.get("shape", maybe_tensor.shape)
-        dtype = but.get("dtype", maybe_tensor.dtype)
-        device = but.get("device", maybe_tensor.device)
-        return cls(shape, dtype, device)
-
-    def override(self, **but):
-        return self.like(self, **but)
+    def like(self, **but):
+        shape = but.get("shape", self.shape)
+        dtype = but.get("dtype", self.dtype)
+        device = but.get("device", self.device)
+        return SymbolicTensor(shape, dtype, device)
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
@@ -533,7 +530,7 @@ class UnaryOperator(Operator):
         return [self(x, **params)], [x_bdim]
 
     def typecheck(self, x, **params):
-        return [x.override()]
+        return [x.like()]
 
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -595,25 +592,25 @@ class BinaryOperator(Operator):
             return [symx]
         shape_delta = len(symx.shape) - len(symy.shape)
         if shape_delta > 0:
-            symy = symy.override(shape=(1,) * shape_delta + symy.shape)
+            symy = symy.like(shape=(1,) * shape_delta + symy.shape)
         elif shape_delta < 0:
             x = x.reshape((1,) * -shape_delta + symx.shape)
-            symx = symx.override(shape=(1,) * -shape_delta + symx.shape)
+            symx = symx.like(shape=(1,) * -shape_delta + symx.shape)
         if symx == symy:
             return [symx]
         else:
             shape_ret = tuple([max(x, w) for x, w in zip(symx.shape, symy.shape)])
             if symx.shape != shape_ret:
-                symx = symx.override(shape=shape_ret)
+                symx = symx.like(shape=shape_ret)
             if symy.shape != shape_ret:
-                symy = symx.override(shape=shape_ret)
+                symy = symx.like(shape=shape_ret)
             if symx != symy:
                 raise TypeError
             return [symx]
 
     def jvp(self, primals, tangents, **params):
-        (x,), (x_dot,) = primals, tangents
-        return [self(x, **params)], [self(x_dot, **params)]
+        (x, w), (x_dot, w_dot) = primals, tangents
+        return [self(x, w, **params)], [self(x_dot, w_dot, **params)]
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
@@ -644,7 +641,7 @@ class ReduceOperator(Operator):
             new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
         else:
             new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
-        return [x.override(shape=tuple(new_shape))]
+        return [x.like(shape=tuple(new_shape))]
 
 
 class InitOperator(Operator):
@@ -699,6 +696,13 @@ class ProcedureSet:
         return wrap
 
 
+class CodegenOut(NamedTuple):
+    code_lines: List[str]
+    fn_defs: Dict[str, List[str]]
+    in_binders: List["ProgramEnvVar"]
+    outs: List["ProgramEnvVar"]
+
+
 class Backend:
     LOG_LRU = int(os.environ.get("LOG_LRU", 0))
     LOG_JIT = int(os.environ.get("LOG_JIT", 0))
@@ -712,15 +716,9 @@ class Backend:
         self,
         operator_set: OperatorSet,
         procedure_set: ProcedureSet,
-        dtype_map: dict,
-        device_map: dict,
     ):
         self.operator_set = operator_set
         self.procedure_set = procedure_set
-        self.dtype_map = dtype_map
-        self.dtype_map_inv = {v: k for k, v in self.dtype_map.items()}
-        self.device_map = device_map
-        self.device_map_inv = {v: k for k, v in self.device_map.items()}
         self.node_types = dict()
         self.impls = dict()
         self.register_node(tuple, lambda t: (None, t), lambda _, xs: tuple(xs), "tuple")
@@ -831,7 +829,7 @@ class Backend:
         typecheck_program(program)
         consts = [x.val for x in hashed_consts]
         in_symvals = [v.symval for v in program.in_binders[len(consts) :]]
-        codegen_out = self.codegen(program, consts + in_symvals, fn_name="main")
+        codegen_out: CodegenOut = self.codegen(program, consts + in_symvals, fn_name="main")
         fn, code = self.compile(codegen_out)
         compiled = JitObject(program, codegen_out, fn, code, consts)
         return compiled
@@ -927,6 +925,30 @@ class ProgramEnvVar(NamedTuple):
     name: str
     symval: SymbolicTensor
     is_const: bool = False
+
+    @property
+    def shape(self):
+        return self.symval.shape
+
+    @property
+    def dtype(self):
+        return self.symval.dtype
+
+    @property
+    def device(self):
+        return self.symval.device
+
+    @property
+    def ndim(self):
+        return self.symval.ndim
+
+    def numpy(self):
+        return self.symval.numpy()
+
+    def __repr__(self):
+        return f"<ProgramEnvVar: name={self.name}, symval={self.symval}>"
+
+    str_short = __repr__
 
 
 class Program:
@@ -1174,12 +1196,12 @@ class Leaf:
 
 
 class JitObject:
-    def __init__(self, program, codegen_out, fn, code, consts):
+    def __init__(self, program: Program, codegen_out: CodegenOut, fn, code: str, consts: List[Any]):
         super().__init__()
         self.program = program
         self.code = code
         self.codegen_out = codegen_out
-        self.fn = fn
+        self.fn: Callable = fn
         self.consts = consts
 
     def __call__(self, *args, **params):
@@ -1199,7 +1221,7 @@ class JitObject:
 
 
 class JitOp(MetaOperator):
-    def meta_impl(self, *args, program, **_):
+    def meta_impl(self, *args, program: Program, **_):
         hashed_program = Hashed(program)
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
@@ -1211,7 +1233,7 @@ class JitOp(MetaOperator):
     def reorg_args(self, args, params):
         return args, params
 
-    def typecheck(self, *in_types, program):
+    def typecheck(self, *in_types, program: Program):
         program_type = typecheck_program(program)
         if not all(t1 == t2 for t1, t2 in zip(program_type.in_types, in_types)):
             ret = "Type mismatch program.in_types vs in_types:\n"
@@ -1220,7 +1242,7 @@ class JitOp(MetaOperator):
             raise TypeError(ret)
         return program_type.out_types
 
-    def vmap(self, dim_size, vals_in, dims_in, program):
+    def vmap(self, dim_size, vals_in, dims_in, program: Program):
         program, consts = vmap_program(program, dim_size, tuple(dims_in))
         outs = self(*consts, *vals_in, program=program)
         if not isinstance(outs, tuple):
@@ -1402,7 +1424,7 @@ class VMapTraceTensor(TraceTensor):
         else:
             shape = list(symval.shape)
             del shape[self.vmap_dim]
-            return symval.override(shape=tuple(shape))
+            return symval.like(shape=tuple(shape))
 
     def full_lower(self):
         if self.vmap_dim is None:
@@ -2097,7 +2119,7 @@ def vmap_program(program: Program, dim_size, dims_in) -> tuple[Program, list[Any
         else:
             shape = list(symval.shape)
             shape.insert(batch_dim, axis_size)
-            return symval.override(shape=tuple(shape))
+            return symval.like(shape=tuple(shape))
 
     vmap_traceable = vmap(program_as_fun(program), tuple(dims_in))
     in_symvals = [unmapped_symval(dim_size, d, v.symval) for v, d in zip(program.in_binders, dims_in)]

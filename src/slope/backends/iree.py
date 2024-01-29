@@ -3,32 +3,28 @@ import slope.core
 from slope.core import (
     Backend,
     Operator,
+    Instruction,
+    Program,
     MetaOperator,
     OperatorSet,
     ProcedureSet,
     Tensor,
     TensorBuffer,
     SymbolicTensor,
-    list_zip,
     list_map,
     dtypes,
     devices,
+    DType,
+    Device,
+    CodegenOut,
 )
 
 import math
 import numpy as np
 from typing import (
-    Tuple,
     List,
-    Dict,
     Any,
-    Optional,
-    Sequence,
-    Union,
-    Iterator,
-    NamedTuple,
 )
-from collections import defaultdict
 import iree.compiler
 import iree.runtime
 import os
@@ -47,12 +43,41 @@ def as_mlir_shape(symval):
         return f"tensor<{xdtype}>"
 
 
-def as_mlir_sig(in_symvals, out_symval):
-    typing_code = f"({','.join(as_mlir_shape(t) for t in in_symvals)}) -> {as_mlir_shape(out_symval)}"
-    return typing_code
+def as_mlir_sig(in_symvals, out_symvals):
+    if isinstance(in_symvals, SymbolicTensor):
+        in_symvals = (in_symvals,)
+    if isinstance(out_symvals, SymbolicTensor):
+        out_symvals = (out_symvals,)
+    in_sig = f"({','.join(as_mlir_shape(t) for t in in_symvals)})"
+    out_sig = f"({','.join(as_mlir_shape(t) for t in out_symvals)})"
+    sig = f"{in_sig} -> {out_sig}"
+    return sig
 
 
 class IREEBackend(Backend):
+    dtype_map = {
+        dtypes.float32: np.dtypes.Float32DType(),
+        dtypes.uint8: np.dtypes.UInt8DType(),
+        dtypes.int8: np.dtypes.Int8DType(),
+        dtypes.bool: np.dtypes.BoolDType(),
+        dtypes.int32: np.dtypes.Int32DType(),
+        dtypes.int64: np.dtypes.Int64DType(),
+        dtypes.uint64: np.dtypes.UInt64DType(),
+        dtypes.float16: np.dtypes.Float16DType(),
+    }
+    device_map = {
+        devices.cpu: "local-task",
+        devices.cuda0: "cuda",
+    }
+
+    target_map = {
+        devices.cpu: "llvm-cpu",
+        devices.cuda0: "cuda",
+    }
+
+    dtype_map_inv = {v: k for k, v in dtype_map.items()}
+    device_map_inv = {v: k for k, v in device_map.items()}
+
     def from_numpy(self, val, dtype=None, device=None):
         dtype = dtype or self.DEFAULT_DTYPE
         device = device or self.DEFAULT_DEVICE
@@ -61,7 +86,7 @@ class IREEBackend(Backend):
         val = iree.runtime.asdevicearray(iree_device, np_val)
         return Tensor(TensorBuffer(val))
 
-    def numpy_of(self, tensor, memmap=False):
+    def numpy_of(self, tensor: Tensor, memmap=False):
         if not memmap:
             return tensor.buf.val.to_host()
         with tempfile.NamedTemporaryFile() as arr_file:
@@ -69,14 +94,119 @@ class IREEBackend(Backend):
             arr[:] = tensor.buf.val.to_host()
             return arr
 
-    def device_of(self, tensor):
+    def device_of(self, tensor: Tensor):
         return self.device_map_inv[str(tensor.buf.val._device)]
 
-    def shape_of(self, tensor):
+    def shape_of(self, tensor: Tensor):
         return tuple(tensor.buf.val.shape)
 
-    def dtype_of(self, tensor):
+    def dtype_of(self, tensor: Tensor):
         return self.dtype_map_inv[tensor.buf.val.dtype]
+
+    def codegen(self, program: Program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
+        if fn_name == "main":
+            assert not hasattr(self, "fn_count")
+            self.fn_count = 0
+
+        def indent(code):
+            spaces = " " * (len(code) - len(code.lstrip()))
+            spaces += " " * 4
+            return "\n".join([spaces + line for line in code.strip().split("\n")])
+
+        # codegen is recursive if jit-of-jit happens
+        body_code_lines = []
+
+        for instruction in program.instructions:
+            if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
+                continue
+            in_vals = list_map(lambda x: program.env[x], instruction.inputs)
+            out_vals = list_map(lambda z: program.env[z], instruction.out_binders)
+            if isinstance(instruction.op, MetaOperator):
+                impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
+            else:
+                if instruction.op in self.impls.keys():
+                    impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
+                else:
+                    # No impl is defined, fallback to procedure
+                    impl_code = self.codegen_impl_as_procedure(args, instruction, fn_defs, in_vals, out_vals)
+
+            for impl_code_line in impl_code.split("\n"):  # handle multi-line code
+                body_code_lines += [indent(impl_code_line)]
+
+        in_binders = list_map(lambda x: program.env[x], program.in_binders)
+        fn_args_str = ", ".join([f"%{i.name}: {as_mlir_shape(i.symval)}" for i in in_binders])
+
+        outs = list_map(lambda x: program.env[x], program.outs)
+        out_str = ", ".join([f"%{o.name}" for o in outs])
+        out_type_str = ", ".join([f"{as_mlir_shape(o.symval)}" for o in outs])
+
+        head_code_line = [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
+        tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()')]
+        model_code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
+
+        functions_code_lines = []
+        for fn_def_code_lines in fn_defs.values():
+            functions_code_lines += fn_def_code_lines
+        code_lines = model_code_lines + functions_code_lines
+        slope.core.dblog(
+            f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
+            enable=slope.LOG_JIT,
+        )
+
+        if fn_name == "main":
+            del self.fn_count
+        assert len(outs) == len(program.outs)
+        return CodegenOut(
+            code_lines=code_lines,
+            fn_defs=fn_defs,
+            in_binders=in_binders,
+            outs=outs,
+        )
+
+    def codegen_impl_as_procedure(self, args, instruction: Instruction, fn_defs, in_vals, out_vals):
+        op: Operator = instruction.op
+        op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
+        op_procedure = getattr(self.procedure_set, op_name)
+        symvals_in = tuple(inp.symval for inp in instruction.inputs)
+        params = instruction.params
+        op_program, consts, _ = slope.core.make_program(
+            op_procedure,
+            *symvals_in,
+            static_args=tuple(params.items()),
+            name=op.name,
+        )
+        name = op.get_jit_name(tuple(symvals_in), params)
+        if name not in fn_defs.keys():
+            op_codegen_out: CodegenOut = self.codegen(
+                op_program,
+                args,
+                fn_name=name,
+                fn_defs=fn_defs,
+            )
+            fn_defs = {**fn_defs, **op_codegen_out.fn_defs}
+            fn_defs[name] = op_codegen_out.code_lines
+        in_names = ", ".join(i.name for i in in_vals)
+        out_names = ", ".join(o.name for o in out_vals)
+        sig = as_mlir_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
+        impl_code = f"{out_names} = func.call @{name}({in_names}) {sig}"
+        return impl_code
+
+    def compile(self, codegen_out):
+        code_lines = codegen_out.code_lines
+        code = "\n".join(code_lines)
+        instance = iree.runtime.VmInstance()
+        device = codegen_out.outs[0].device
+        iree_device = iree.runtime.get_device(self.device_map[device])
+        hal_module = iree.runtime.create_hal_module(instance, iree_device)
+        binary = iree.compiler.compile_str(
+            code,
+            target_backends=(self.target_map[device],),
+        )
+        m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
+        context = iree.runtime.VmContext(instance, modules=[hal_module, m])
+        f = m.lookup_function("main")
+        finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
+        return finv, code
 
     def export(self, jit_object, output_path, *args, **kwargs):
         # iree.compiler.core.DEFAULT_TESTING_BACKENDS
@@ -85,11 +215,10 @@ class IREEBackend(Backend):
             target_backends = (target_backends,)
         os.makedirs(output_path, exist_ok=True)
 
-        code_lines = jit_object.codegen_out["code_lines"][:]
-        in_binders = jit_object.codegen_out["in_binders"]
-        outs = jit_object.codegen_out["outs"]
+        code_lines = jit_object.codegen_out.code_lines[:]
+        in_binders = jit_object.codegen_out.in_binders
+        outs = jit_object.codegen_out.outs
         num_consts = jit_object.program.num_consts
-        consts = dict()
         with tempfile.NamedTemporaryFile(mode="w+") as f:
             for i in range(num_consts):
                 const_pattern = f"%{in_binders[i].name}: {as_mlir_shape(in_binders[i].symval)}"
@@ -104,7 +233,7 @@ class IREEBackend(Backend):
                 )
             f.writelines("\n".join(code_lines[2:]))
             f.flush()
-            binary = iree.compiler.compile_file(
+            iree.compiler.compile_file(
                 f.name, target_backends=target_backends, output_file=os.path.join(output_path, "model.vmfb")
             )
 
@@ -155,128 +284,8 @@ if __name__ == "__main__":
             f.write(module_code)
             slope.dblog(module_code, enable=slope.LOG_JIT)
 
-    def compile(self, codegen_out):
-        code_lines = codegen_out["code_lines"]
-        code = "\n".join(code_lines)
-        instance = iree.runtime.VmInstance()
-        iree_device = iree.runtime.get_device("local-task")
-        hal_module = iree.runtime.create_hal_module(instance, iree_device)
-        binary = iree.compiler.compile_str(
-            code,
-            target_backends=("llvm-cpu",),
-        )
-        m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
-        context = iree.runtime.VmContext(instance, modules=[hal_module, m])
-        f = m.lookup_function("main")
-        finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
-        return finv, code
 
-    def codegen(self, program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
-        if fn_name == "main":
-            assert not hasattr(self, "fn_count")
-            self.fn_count = 0
-
-        def indent(code, amount):
-            spaces = " " * (len(code) - len(code.lstrip()))
-            spaces += " " * amount
-            return "\n".join([spaces + line for line in code.strip().split("\n")])
-
-        # codegen is recursive if jit-of-jit happens
-        il1 = 4  # indent length
-        body_code_lines = []
-
-        for instruction in program.instructions:
-            if len(instruction.out_binders) == 0:  # skip codegen for function returns nothing
-                continue
-            in_vals = list_map(lambda x: program.env[x], instruction.inputs)
-            out_vals = list_map(lambda z: program.env[z], instruction.out_binders)
-            if isinstance(instruction.op, MetaOperator):
-                impl_code, fn_defs = self.impls[instruction.op](args, instruction, fn_defs, in_vals, out_vals)
-            else:
-                if instruction.op in self.impls.keys():
-                    impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
-                else:
-                    # No impl is defined, fallback to procedure
-                    op = instruction.op
-                    op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
-                    op_procedure = getattr(self.procedure_set, op_name)
-                    symvals_in = tuple(inp.symval for inp in instruction.inputs)
-                    params = instruction.params
-                    op_program, consts, _ = slope.core.make_program(
-                        op_procedure,
-                        *symvals_in,
-                        static_args=tuple(params.items()),
-                        name=op.name,
-                    )
-                    name = op.get_jit_name(tuple(symvals_in), params)
-                    if name not in fn_defs.keys():
-                        op_codegen_out = self.codegen(
-                            op_program,
-                            args,
-                            fn_name=name,
-                            fn_defs=fn_defs,
-                        )
-                        fn_defs = {**fn_defs, **op_codegen_out["fn_defs"]}
-                        fn_defs[name] = op_codegen_out["code_lines"]
-                    in_names = ", ".join(i.name for i in in_vals)
-                    out_names = ", ".join(o.name for o in out_vals)
-                    sig = as_mlir_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
-                    impl_code = f"{out_names} = func.call @{name}({in_names}) {sig}"
-            for impl_code_line in impl_code.split("\n"):  # handle multi-line code
-                body_code_lines += [indent(impl_code_line, il1)]
-
-        # inb_consts = [v for v in env.values() if "c" in v.name]
-        # const_type_strs = [f"{self.dtype_map[c['type'].dtype]}[{repr(c['type'].shape)[1:-1]}] {c['name']}" for c in inb_consts]
-
-        in_binders = list_map(lambda x: program.env[x], program.in_binders)
-        fn_args_str = ", ".join([f"%{i.name}: {as_mlir_shape(i.symval)}" for i in in_binders])
-
-        outs = list_map(lambda x: program.env[x], program.outs)  # TODO: input that is output should has identity op
-        out_str = ", ".join([f"%{o.name}" for o in outs])
-        out_type_str = ", ".join([f"{as_mlir_shape(o.symval)}" for o in outs])
-
-        head_code_line = [f"func.func @{fn_name} ({fn_args_str}) -> ({out_type_str})"]
-        tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()', il1)]
-        model_code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
-
-        functions_code_lines = []
-        for op, fn_def_code_lines in fn_defs.items():
-            functions_code_lines += fn_def_code_lines
-        code_lines = model_code_lines + functions_code_lines
-        slope.core.dblog(
-            f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
-            enable=slope.LOG_JIT,
-        )
-
-        if fn_name == "main":
-            del self.fn_count
-        assert len(outs) == len(program.outs)
-        return dict(
-            code_lines=code_lines,
-            fn_defs=fn_defs,
-            in_binders=in_binders,
-            outs=outs,
-        )
-
-
-backend = IREEBackend(
-    operator_set,
-    procedure_set,
-    {
-        dtypes.float32: np.dtypes.Float32DType(),
-        dtypes.uint8: np.dtypes.UInt8DType(),
-        dtypes.int8: np.dtypes.Int8DType(),
-        dtypes.bool: np.dtypes.BoolDType(),
-        dtypes.int32: np.dtypes.Int32DType(),
-        dtypes.int64: np.dtypes.Int64DType(),
-        dtypes.uint64: np.dtypes.UInt64DType(),
-        dtypes.float16: np.dtypes.Float16DType(),
-    },
-    {
-        devices.cpu: "local-task",
-        devices.cuda0: "cuda:0",
-    },
-)
+backend = IREEBackend(operator_set, procedure_set)
 
 
 @backend.set_impl(backend.operator_set.jit_op)
@@ -290,12 +299,12 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
             fn_name=jit_name,
             fn_defs=fn_defs,
         )
-        fn_defs[jit_name] = jit_codegen_out["code_lines"]
-        fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
+        fn_defs[jit_name] = jit_codegen_out.code_lines
+        fn_defs = {**fn_defs, **jit_codegen_out.fn_defs}
     args_str = ", ".join(i.name for i in in_vals)
     sig = as_mlir_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
-    ret = f"{', '.join(o['name'] for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"
-    return ret, fn_defs
+    impl_code = f"{', '.join(o.name for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"
+    return impl_code, fn_defs
 
 
 @backend.set_impl(backend.operator_set.cast)
@@ -483,13 +492,13 @@ def max_impl(self, x, y, *, dim, keepdim):
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
     if stride == 1 and start == 0:
         return f"""%{y.name} = "stablehlo.iota"() {{iota_dimension = 0 : i64}} : {as_mlir_sig((), y.symval)}"""
-    one_symval = y.symval.override(shape=(1,))
+    one_symval = y.symval.like(shape=(1,))
     return f"""
 %{y.name}_scale_ = stablehlo.constant dense<{stride}> : {as_mlir_shape(one_symval)}
 %{y.name}_scale = "stablehlo.broadcast_in_dim"(%{y.name}_scale_) {{
         broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
         }} : {as_mlir_sig(( one_symval,), y.symval)}
-%{y.name}_shift_ = stablehlo.constant dense<{start}> : {as_mlir_shape(y.symval.override(shape=(1,)))}
+%{y.name}_shift_ = stablehlo.constant dense<{start}> : {as_mlir_shape(y.symval.like(shape=(1,)))}
 %{y.name}_shift = "stablehlo.broadcast_in_dim"(%{y.name}_shift_) {{
         broadcast_dimensions = dense<{repr(list(range(y.symval.ndim)))}>: tensor<{y.symval.ndim}xi64>
         }} : {as_mlir_sig(( one_symval,), y.symval)}
@@ -511,11 +520,11 @@ def full_impl(self, y, *, shape, fill_value, dtype, device):
 def random_uniform_impl(self, y, *, shape, dtype, device):
     zero = "0." if dtypes.is_float(y.symval.dtype) else "0"
     one = "1." if dtypes.is_float(y.symval.dtype) else "1"
-    a_type = b_type = y.symval.override(shape=())
+    a_type = b_type = y.symval.like(shape=())
     is_scalar = shape == ()
     shape_val = f'dense<{repr(list(shape)) if not is_scalar else "[1]"}'
-    shape_type = y.symval.override(shape=(1,) if is_scalar else (len(shape),), dtype=dtypes.int64)
-    y_out_type = y.symval if not is_scalar else y.symval.override(shape=(1,))
+    shape_type = y.symval.like(shape=(1,) if is_scalar else (len(shape),), dtype=dtypes.int64)
+    y_out_type = y.symval if not is_scalar else y.symval.like(shape=(1,))
     return f"""%{y.name}_a = stablehlo.constant dense<{zero}> : {as_mlir_shape(a_type)}
 %{y.name}_b = stablehlo.constant dense<{one}> : {as_mlir_shape(b_type)}
 %{y.name}_shape = stablehlo.constant {shape_val}> : {as_mlir_shape(shape_type)}
@@ -542,11 +551,11 @@ def random_normal_impl(self, y, *, shape, dtype, device):
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {as_mlir_sig((y_out_type,), y.symval)}' if is_scalar else ''}"""
 
 
-@backend.set_impl(backend.operator_set.rng_bits)
-def rng_bits_impl(self, x, y, *, shape, dtype, device):
-    return f"""%{y.name}_, %{y.name} =  "stablehlo.rng_bit_generator"(%{x.name}) {{
-  rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>
-}} : ({as_mlir_shape(x.symval)}) -> ({as_mlir_shape(x.symval)}, {as_mlir_shape(y.symval)})"""
+# @backend.set_impl(backend.operator_set.rng_bits)
+# def rng_bits_impl(self, x, y, *, shape, dtype, device):
+#     return f"""%{y.name}_, %{y.name} =  "stablehlo.rng_bit_generator"(%{x.name}) {{
+#   rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>
+# }} : ({as_mlir_shape(x.symval)}) -> ({as_mlir_shape(x.symval)}, {as_mlir_shape(y.symval)})"""
 
 
 @backend.set_impl(backend.operator_set.expand)
@@ -631,13 +640,13 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 """
 
 
-@backend.set_impl(backend.operator_set.where)
-def where_impl(self, x, w, u, y):
-    return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}"""
+# @backend.set_impl(backend.operator_set.where)
+# def where_impl(self, x, w, u, y):
+    # return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {as_mlir_sig((x.symval,w.symval,u.symval), y.symval)}"""
 
 
 @backend.set_impl(backend.operator_set.gather_nd)
-def gather_nd_impl(self, x, w, y, batch_dims):
+def gather_nd_impl(self, x, w, y, *, batch_dims):
     operand_shape = list(x.symval.shape)
     indices_shape = list(w.symval.shape)
     r = x.symval.ndim

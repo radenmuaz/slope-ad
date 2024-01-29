@@ -13,7 +13,7 @@ class Result(NamedTuple):
     gL_y: Tensor
 
 
-class TestGrad(unittest.TestCase):
+class TestNN(unittest.TestCase):
     @staticmethod
     def run_ad_fns(f, *args, **kwargs):
         args_dot = [slope.ones_like(x) for x in args]

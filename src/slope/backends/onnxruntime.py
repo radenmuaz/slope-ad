@@ -57,13 +57,15 @@ def annotate_sig(in_symvals, out_symvals):
 
 class ONNXRuntimeBackend(Backend):
     sess_options = onnxruntime.SessionOptions()
+    # Disable this flags, easily get nan
+    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+
+    # Other flags
     # sess_options.log_severity_level = 3
     # sess_options.use_deterministic_compute = True
     # sess_options.intra_op_num_threads = 4
-    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-
+    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
     dtype_map = {
         slope.core.dtypes.float32: "float",
         dtypes.uint8: "uint8",
@@ -627,12 +629,16 @@ def permute_impl(self, x, y, *, perm):
 
 @backend.set_impl(operator_set.flip)
 def flip_impl(self, x, y, *, dim):
-    return f"""
-{y.name}_starts = Constant <value = int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))} }}>()
-{y.name}_ends = Constant <value = int64[{len(dim)}]  {{ {", ".join([str(x.symval.shape[d]) for d in dim])} }}>()
+    padding = [0, 0] * x.symval.ndim
+    for d in dim:
+        padding[d] = 1
+    return f"""{x.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+{x.name}_ = Pad({x.name}, {x.name}_padding)
+{y.name}_starts = Constant <value = int64[{len(dim)}]  {{ {", ".join([str(x.symval.shape[d]) for d in dim])} }}>()
+{y.name}_ends = Constant <value = int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))} }}>()
 {y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(list(dim))[1:-1]} }}>()
-{y.name}_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["1"] * len(dim))} }}>()
-{y.name} = Slice({x.name}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
+{y.name}_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["-1"] * len(dim))} }}>()
+{y.name} = Slice({x.name}_, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
 """
 
 
@@ -640,8 +646,41 @@ def flip_impl(self, x, y, *, dim):
 
 @backend.set_impl(operator_set.conv)
 def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
+    padding = padding[0::2] + padding[1::2]
     dilations_attr = f"dilations=[{repr(list(dilation))[1:-1]}]"
     pads_attr = f"pads=[{repr(list(padding))[1:-1]}]"
     strides_attr = f"strides=[{repr(list(stride))[1:-1]}]"
     group_attr = f"group={groups}"
     return f"""{y.name} = Conv<{dilations_attr}, {pads_attr}, {strides_attr}, {group_attr}>({x.name}, {w.name})"""
+
+
+# ---- conv_shape__lp_100_cm_64_cm_15_cm_15_rp__dtype_float32_shape__lp_32_cm_64_cm_3_cm_3_rp__dtype_float32_groups_1_stride__lp_1_cm_1_rp__dilation__lp_1_cm_1_rp__padding__lp_1_cm_2_cm_1_cm_2_rp__ codegen:
+
+# func.func @main (%x0: tensor<100x64x15x15xf32>, %x1: tensor<32x64x3x3xf32>) -> (tensor<100x32x16x16xf32>)
+# {
+#     %y0 = "stablehlo.convolution"(%x0, %x1) {
+#       window_strides = dense<[1, 1]> : tensor<2xi64>,
+#       padding = dense<[[1, 2], [1, 2]]> : tensor<2x2xi64>,
+#       lhs_dilation = dense<1> : tensor<2xi64>,
+#       rhs_dilation = dense<[1, 1]> : tensor<2xi64>,
+#       window_reversal = dense<false> : tensor<2xi1>,
+#       dimension_numbers = #stablehlo.conv<[b, f, 0, 1]x[o, i, 0, 1]->[b, f, 0, 1]>,
+#       feature_group_count = 1 : i64,
+#       batch_group_count = 1 : i64,
+#       precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
+#     }  : (tensor<100x64x15x15xf32>,tensor<32x64x3x3xf32>) -> (tensor<100x32x16x16xf32>)
+    
+#     "func.return"(%y0): (tensor<100x32x16x16xf32>) -> ()
+# }
+
+# ===========
+
+# (100, 64, 15, 15) (32, 64, 3, 3) (100, 32, 16, 16)
+
+# ---- conv_shape__lp_100_cm_64_cm_15_cm_15_rp__dtype_float32_shape__lp_32_cm_64_cm_3_cm_3_rp__dtype_float32_groups_1_stride__lp_1_cm_1_rp__dilation__lp_1_cm_1_rp__padding__lp_1_cm_2_cm_1_cm_2_rp__ codegen:
+
+# <ir_version: 7, opset_import: ["" : 18, "slope":1]>
+# main (float[100, 64, 15, 15] x0, float[32, 64, 3, 3] x1) => (float[100, 32, 16, 16] y0)
+# {
+#     y0 = Conv<dilations=[1, 1], pads=[1, 2, 1, 2], strides=[1, 1], group=1>(x0, x1)
+# }

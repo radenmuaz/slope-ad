@@ -364,7 +364,7 @@ class Tensor:
         return self.numel() * self.element_size()
 
     def __repr__(self):
-        return f"<Tensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}, val=\n{self.numpy()}\n>"
+        return f"<Tensor: val=\n{self.numpy()}\nshape={self.shape}, dtype={self.dtype.name}, device={self.device.format_code}>"
 
 
 class SymbolicTensor(Tensor):

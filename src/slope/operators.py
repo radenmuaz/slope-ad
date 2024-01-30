@@ -806,12 +806,11 @@ class Conv(GeneralReduceOperator):
             assert len(padding) == 2 * len(D) or len(padding) == len(
                 D
             ), f"{2*len(D)=} or {len(D)=}, but {len(padding)=} for {x.shape=}"
-        padding = (
+        padding = tuple(
             [padding] * 2 * len(D)
             if isinstance(padding, int)
             else (padding if len(padding) == 2 * len(D) else [p for p in padding for _ in range(2)])
         )
-        padding = tuple(padding)
         if isinstance(stride, int):
             stride = (stride,) * len(D)
         if isinstance(dilation, int):
@@ -962,8 +961,9 @@ class GatherND(GeneralReduceOperator):
         return [self(x, w, batch_dims)], [self(x_dot, w_dot, batch_dims)]
 
     def T(self, cotangents, x, w):
+        assert type(w) is UndefPrimal
         (gL_y,) = cotangents
-        return [x.scatter(w, gL_y), None]
+        return [x.scatter_nd(w, gL_y), None]
 
 
 @operator_set.register("scatter_nd")
@@ -987,20 +987,18 @@ class ScatterND(GeneralReduceOperator):
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
     def jvp(self, primals, tangents):
-        (x, w), (x_dot, w_dot) = primals, tangents
-        return [x @ w], [(x_dot @ w) + (x @ w_dot)]
-
-    def jvp(self, primals, tangents):
         (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
         return [self(x, w, u)], [self(x_dot, w_dot, u_dot)]
 
     def T(self, cotangents, x, w, u):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
         (gL_y,) = cotangents
-        if type(x) is UndefPrimal:
-            return [gL_y.gather(u), None]
+        if type(u) is UndefPrimal:
+            return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
         elif type(w) is UndefPrimal:
-            return [self, None]
+            raise [x.zeros_like(), None, u.zeros_like()]
+        else:
+            raise [x.zeros_like(), w.zeros_like(), None]
 
 
 # @operator_set.register("rng_bits")

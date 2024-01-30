@@ -9,7 +9,7 @@ import numpy as np
 from lib.datasets.cifar10 import get_cifar10
 from lib.models.cv.resnet_cifar import resnet
 
-# @slope.jit
+@slope.jit
 def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
         x, y = batch

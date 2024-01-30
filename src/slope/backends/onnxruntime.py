@@ -456,7 +456,12 @@ def matmul_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
-    return f"{y.name} = GatherND({x.name}, {w.name}, {y.name}) {{batch_dims={batch_dims}}}"
+    return (f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
+if w.symval.dtype is dtypes.int64 else
+f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
+{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name}_)
+"""
+)
 
 
 @backend.set_impl(backend.operator_set.scatter_nd)
@@ -467,10 +472,13 @@ def scatter_nd_impl(
     u,
     y,
 ):
-    return f"{y.name} = ScatterND({x.name}, {w.name}, {y.name})"
+    return (f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
+if w.symval.dtype is dtypes.int64 else
+f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
+{y.name} = ScatterND({x.name}, {w.name}_, {u.name})
+"""
+            )
 
-
-###
 
 
 @backend.set_impl(operator_set.sum)

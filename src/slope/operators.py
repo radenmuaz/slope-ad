@@ -716,7 +716,7 @@ class Arange(InitOperator):
         if stride is None:
             stride = 1
         if dtype is None:
-            dtype = dtypes.int32
+            dtype = dtypes.int64
         if device is None:
             device = slope.core.backend.DEFAULT_DEVICE
         if "f" in dtype.mlir:

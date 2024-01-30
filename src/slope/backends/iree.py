@@ -670,7 +670,7 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
             if slice_sizes[i] == 1 and operand_shape[i] == indices_shape[i]
         ]
 
-        y_reshape = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
+        y_reshape = y.symval.like(shape=y.symval.shape + (1,))
     elif indices_shape[-1] < r:
         slice_sizes = [*[1] * (r - 1), *operand_shape[-1:]]
         start_index_map = [i for i, s in enumerate(slice_sizes) if s == 1 and i < q]
@@ -681,35 +681,56 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
                 collapsed_slice_dims += [i]
 
         if len(collapsed_slice_dims) != len(start_index_map):
-            y_reshape = SymbolicTensor(y.symval.shape + (1,), y.symval.dtype, y.symval.device)
+            y_reshape = y.symval.like(shape=y.symval.shape + (1,))
 
     else:
         raise ValueError
     w_fixed = (
         w.symval
         if w_arange is None
-        else SymbolicTensor(
-            tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)), w.symval.dtype, w.symval.device
-        )
+        else w.symval.like(shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)),
+                           dtype=dtypes.int32)
     )
-    y_fixed = y.symval if y_reshape is None else y_reshape
-    y_affix = "" if y_reshape is None else "_"
-    w_affix = "" if w_arange is None else "_"
-    return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
+    # return f'%{y.name} = "stablehlo.convert"(%{x.name}) : {annotate_sig((x.symval,), y.symval)}'
+
+    if w.symval.dtype is dtypes.int32:
+        w_affix = "" if w_arange is None else "_"
+        y_fixed = y.symval if y_reshape is None else y_reshape
+        y_affix = "" if y_reshape is None else "_"
+        return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
 %{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {annotate_sig((w_arange, w.symval), w_fixed)} '''
     if w_arange is not None else ''}
 %{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
-  dimension_numbers = #stablehlo.gather<
-  offset_dims = {offset_dims},
-  collapsed_slice_dims = {collapsed_slice_dims},
-  start_index_map = {start_index_map},
-  index_vector_dim = {index_vector_dim}>,
-  slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
-  indices_are_sorted = false
+dimension_numbers = #stablehlo.gather<
+offset_dims = {offset_dims},
+collapsed_slice_dims = {collapsed_slice_dims},
+start_index_map = {start_index_map},
+index_vector_dim = {index_vector_dim}>,
+slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
+indices_are_sorted = false
 }} : {annotate_sig((x.symval, w_fixed), y_fixed)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {annotate_sig((y_fixed,), y.symval)}' 
- if y_reshape is not None else ''}
-"""
+if y_reshape is not None else ''}"""
+    else:
+        w_fixed_, w_fixed= w_fixed, w_fixed.like(dtype=slope.int32)
+        w_affix = "" if w_arange is None else "__"
+        y_fixed = y.symval if y_reshape is None else y_reshape
+        y_affix = "" if y_reshape is None else "_"
+        return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
+%{w.name}__ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {annotate_sig((w_arange, w.symval), w_fixed_)} '''
+    if w_arange is not None else ''}
+%{w.name}_ = "stablehlo.convert"(%{w.name}{w_affix}) : {annotate_sig((w_fixed_,), w_fixed)}
+%{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}_) {{
+dimension_numbers = #stablehlo.gather<
+offset_dims = {offset_dims},
+collapsed_slice_dims = {collapsed_slice_dims},
+start_index_map = {start_index_map},
+index_vector_dim = {index_vector_dim}>,
+slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
+indices_are_sorted = false
+}} : {annotate_sig((x.symval, w_fixed), y_fixed)}
+{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {annotate_sig((y_fixed,), y.symval)}' 
+if y_reshape is not None else ''}"""
 
 
 @backend.set_impl(backend.operator_set.scatter_nd)

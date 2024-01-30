@@ -2,7 +2,8 @@ import slope
 
 print('#1')
 x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
-w = slope.tensor([[1,0],[0,1]], dtype=slope.int32)
+w = slope.tensor([[1,0],[0,1]], dtype=slope.int64)
+# w = slope.tensor([[1,0],[0,1]], dtype=slope.int32)
 print(f"{x=}")
 print(f"{w=}")
 # y = x.gather_nd(w,0)

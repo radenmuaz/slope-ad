@@ -969,7 +969,11 @@ class GatherND(GeneralReduceOperator):
             return [None, None]
         else:
             # return [None, None]
-            return [slope.zeros(x.shape, x.dtype, x.device).scatter_nd(w, gL_y), None]
+            x_zeros = slope.zeros(x.shape, x.dtype, x.device)
+            # if gL_y.ndim < x_zeros.ndim:
+            #     breakpoint()
+                # gL_y = gL_y[None].expand(x.shape)
+            return [x_zeros.scatter_nd(w, gL_y), None]
 
 
 @operator_set.register("scatter_nd")

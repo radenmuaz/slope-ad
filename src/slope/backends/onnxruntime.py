@@ -344,24 +344,6 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     impl_code = f"{', '.join(o.name for o in out_vals)} = slope.{jit_name}({args_str})"
     return impl_code, fn_defs
 
-
-# @backend.set_impl(slope.core.jit_op)
-# def jit_op_impl(self, program, args, instruction, in_vals, fn_defs):
-#     jit_program = instruction.params["program"]
-#     jit_name = f"{program.name}"
-#     jit_codegen_out = self.codegen(
-#         jit_program,
-#         args,
-#         fn_name=jit_name,
-#         fn_defs=fn_defs,
-#     )
-#     assert jit_name not in fn_defs.keys()
-#     fn_defs[jit_name] = jit_codegen_out["code_lines"]
-#     fn_defs = {**fn_defs, **jit_codegen_out["fn_defs"]}
-#     args_str = ", ".join(in_vals)
-#     rhs = f"slope.{jit_name}({args_str})"
-#     return rhs, fn_defs
-
 ### Operator Impls
 
 
@@ -458,10 +440,10 @@ def matmul_impl(self, x, w, y):
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
     return (f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
-if w.symval.dtype is dtypes.int64 else
-f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
-{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name}_)
-"""
+# if w.symval.dtype is dtypes.int64 else
+# f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
+# {y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name}_)
+# """
 )
 
 
@@ -474,10 +456,10 @@ def scatter_nd_impl(
     y,
 ):
     return (f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
-if w.symval.dtype is dtypes.int64 else
-f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
-{y.name} = ScatterND({x.name}, {w.name}_, {u.name})
-"""
+# if w.symval.dtype is dtypes.int64 else
+# f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
+# {y.name} = ScatterND({x.name}, {w.name}_, {u.name})
+# """
             )
 
 

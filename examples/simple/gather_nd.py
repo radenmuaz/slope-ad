@@ -5,8 +5,18 @@ x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)
 w = slope.tensor([[1,0],[0,1]], dtype=slope.int32)
 print(f"{x=}")
 print(f"{w=}")
-y = x.gather_nd(w,0)
-print(f"{y=}")
+# y = x.gather_nd(w,0)
+# print(f"{y=}")
+
+@slope.jit
+def f(x, w):
+    y = x.gather_nd(w,0)
+    y = y.sum()
+    return y
+
+gL_x = slope.grad(f)(x,w)
+print(gL_x)
+
 
 # print('\n#2')
 # x = slope.tensor([[0.,1.],[2.,3.]], dtype=slope.float32)

@@ -933,8 +933,8 @@ class Conv(GeneralReduceOperator):
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):
-        if w.dtype is not dtypes.int32:
-            w = w.cast(dtypes.int32)
+        # if w.dtype is not dtypes.int32:
+        #     w = w.cast(dtypes.int32)
         return (x, w), dict(batch_dims=batch_dims)
 
     def typecheck(self, x, w, *, batch_dims: int):
@@ -949,23 +949,27 @@ class GatherND(GeneralReduceOperator):
         bx = x.shape[b:]
         bw = w.shape[b:]
         shape = bx[:b] + bw[: len(bw) - 1] + bx[bw[-1] :]
-        return [SymbolicTensor(shape, x.dtype, x.device)]
+        return [x.symval.like(shape=shape)]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
         (x, w), (x_bdim, w_bdim) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
-        u = slope.core.VMapTrace.move_vmap_dim(u, dim_size, w_bdim, 0)
         return [self(x, w, **params)], [x_bdim, w_bdim]
 
     def jvp(self, primals, tangents, *, batch_dims):
-        (x, w), (x_dot, w_dot) = primals, tangents
-        return [self(x, w, batch_dims)], [self(x_dot, w_dot, batch_dims)]
+        (x, w), (x_dot, _) = primals, tangents
+        return [self(x, w, batch_dims=batch_dims)], [self(x_dot, w, batch_dims=batch_dims)]
 
-    def T(self, cotangents, x, w):
-        assert type(w) is UndefPrimal
+    def T(self, cotangents, x, w, *, batch_dims: int):
+        # return [None, None]
         (gL_y,) = cotangents
-        return [x.scatter_nd(w, gL_y), None]
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+        if type(w) is UndefPrimal:
+            return [None, None]
+        else:
+            # return [None, None]
+            return [slope.zeros(x.shape, x.dtype, x.device).scatter_nd(w, gL_y), None]
 
 
 @operator_set.register("scatter_nd")

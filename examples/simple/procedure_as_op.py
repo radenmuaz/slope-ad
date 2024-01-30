@@ -1,11 +1,15 @@
 import slope
 
+# procedures are basically functions accessible by Tensor.procedure syntax
 @slope.core.backend.procedure_set.register()
 def my_relu(x):
     w = slope.zeros_like(x)
     y = x.maximum(w)
     return y
 
+# To override a procedure gradient rule, define a new operator with the same name as procedure
+# the impl will default to tracing procedure as a Program,
+# not need to define backend-specific impl code.
 @slope.backend.operator_set.register("my_relu")
 class MyReLU(slope.core.UnaryOperator):
     def jvp(self, primals, tangents):

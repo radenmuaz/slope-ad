@@ -1,36 +1,33 @@
 import slope
 
 @slope.core.backend.procedure_set.register()
-def relu(x):
+def my_relu(x):
     w = slope.zeros_like(x)
     y = x.maximum(w)
     return y
-relu = slope.core.Operator.unary("relu")
-slope.M().backend.operator_set.register(relu)
 
-@relu.set_method
-def jvp(self, primals, tangents):
-    def _balanced_eq(x, z, y):
-        xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
-        yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
-        return xz / yz
+@slope.backend.operator_set.register("my_relu")
+class MyReLU(slope.core.UnaryOperator):
+    def jvp(self, primals, tangents):
+        def _balanced_eq(x, z, y):
+            xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
+            yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
+            return xz / yz
 
-    (x,), (x_dot,) = primals, tangents
-    y = x.relu()
-    w = slope.zeros_like(x)
-    w_dot  = slope.ones_like(x)
-    y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
-    return [y], [y_dot]
+        (x,), (x_dot,) = primals, tangents
+        y = x.my_relu()
+        w = slope.zeros_like(x)
+        w_dot  = slope.ones_like(x)
+        y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
+        return [y], [y_dot]
 
-@relu.set_method
-def T(self, cotangents, x):
-    (gL_y,) = cotangents
-    return [gL_y, None]
+    def T(self, cotangents, x):
+        (gL_y,) = cotangents
+        return [gL_y, None]
 
 @slope.jit
 def f(x):
-    y = x.relu()
-    # y = y + 10
+    y = x.my_relu()
     y = y.sum()
 
     return y

@@ -128,7 +128,7 @@ class IREEBackend(Backend):
                     impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
                 else:
                     # No impl is defined, fallback to procedure
-                    impl_code = self.codegen_impl_as_procedure(args, instruction, fn_defs, in_vals, out_vals)
+                    impl_code, fn_defs = self.codegen_impl_as_procedure(args, instruction, fn_defs, in_vals, out_vals)
 
             for impl_code_line in impl_code.split("\n"):  # handle multi-line code
                 body_code_lines += [indent(impl_code_line)]
@@ -165,7 +165,7 @@ class IREEBackend(Backend):
 
     def codegen_impl_as_procedure(self, args, instruction: Instruction, fn_defs, in_vals, out_vals):
         op: Operator = instruction.op
-        op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
+        op_name = {v: k for (k, v) in vars(self.operator_set).items()}[op]
         op_procedure = getattr(self.procedure_set, op_name)
         symvals_in = tuple(inp.symval for inp in instruction.inputs)
         params = instruction.params
@@ -175,7 +175,7 @@ class IREEBackend(Backend):
             static_args=tuple(params.items()),
             name=op.name,
         )
-        name = op.get_jit_name(tuple(symvals_in), params)
+        name = slope.core.jit.get_jit_name(tuple(symvals_in), params)
         if name not in fn_defs.keys():
             op_codegen_out: CodegenOut = self.codegen(
                 op_program,
@@ -185,11 +185,11 @@ class IREEBackend(Backend):
             )
             fn_defs = {**fn_defs, **op_codegen_out.fn_defs}
             fn_defs[name] = op_codegen_out.code_lines
-        in_names = ", ".join(i.name for i in in_vals)
-        out_names = ", ".join(o.name for o in out_vals)
+        in_names = ", ".join(f"%{i.name}" for i in in_vals)
+        out_names = ", ".join(f"%{o.name}" for o in out_vals)
         sig = annotate_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
-        impl_code = f"{out_names} = func.call @{name}({in_names}) {sig}"
-        return impl_code
+        impl_code = f"{out_names} = func.call @{name}({in_names}) : {sig}"
+        return impl_code, fn_defs
 
     def compile(self, codegen_out):
         code_lines = codegen_out.code_lines
@@ -691,36 +691,13 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
         else w.symval.like(shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)),
                            dtype=dtypes.int32)
     )
-    # return f'%{y.name} = "stablehlo.convert"(%{x.name}) : {annotate_sig((x.symval,), y.symval)}'
-
-    if w.symval.dtype is dtypes.int32:
-        w_affix = "" if w_arange is None else "_"
-        y_fixed = y.symval if y_reshape is None else y_reshape
-        y_affix = "" if y_reshape is None else "_"
-        return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
-%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {annotate_sig((w_arange, w.symval), w_fixed)} '''
-    if w_arange is not None else ''}
-%{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
-dimension_numbers = #stablehlo.gather<
-offset_dims = {offset_dims},
-collapsed_slice_dims = {collapsed_slice_dims},
-start_index_map = {start_index_map},
-index_vector_dim = {index_vector_dim}>,
-slice_sizes = dense<{slice_sizes}> : tensor<{len(slice_sizes)}xi64>,
-indices_are_sorted = false
-}} : {annotate_sig((x.symval, w_fixed), y_fixed)}
-{f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {annotate_sig((y_fixed,), y.symval)}' 
-if y_reshape is not None else ''}"""
-    else:
-        w_fixed_, w_fixed= w_fixed, w_fixed.like(dtype=slope.int32)
-        w_affix = "" if w_arange is None else "__"
-        y_fixed = y.symval if y_reshape is None else y_reshape
-        y_affix = "" if y_reshape is None else "_"
-        return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
-%{w.name}__ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {annotate_sig((w_arange, w.symval), w_fixed_)} '''
-    if w_arange is not None else ''}
-%{w.name}_ = "stablehlo.convert"(%{w.name}{w_affix}) : {annotate_sig((w_fixed_,), w_fixed)}
-%{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}_) {{
+    w_affix = "" if w_arange is None else "_"
+    y_fixed = y.symval if y_reshape is None else y_reshape
+    y_affix = "" if y_reshape is None else "_"
+    return f"""{f'''%{w.name}_i = "stablehlo.iota"() {{ iota_dimension = 0 : i64}} : {annotate_sig((), w_arange)}
+%{w.name}_ = "stablehlo.concatenate"(%{w.name}_i, %{w.name}) {{ dimension = {b} : i64}} : {annotate_sig((w_arange, w.symval), w_fixed)}'''
+    if w_arange is not None else ''
+}%{y.name}{y_affix} = "stablehlo.gather"(%{x.name}, %{w.name}{w_affix}) {{
 dimension_numbers = #stablehlo.gather<
 offset_dims = {offset_dims},
 collapsed_slice_dims = {collapsed_slice_dims},

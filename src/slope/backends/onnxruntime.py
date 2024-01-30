@@ -152,25 +152,26 @@ class ONNXRuntimeBackend(Backend):
                     impl_code = self.impls[instruction.op](*in_vals, *out_vals, **instruction.params)
                 else:
                     # No impl is defined, fallback to procedure
-                    impl_code = self.codegen_impl_as_procedure(args, instruction, fn_defs, in_vals, out_vals)
+                    impl_code, fn_defs = self.codegen_impl_as_procedure(args, instruction, fn_defs, in_vals, out_vals)
 
             for impl_code_line in impl_code.split("\n"):  # handle multi-line code
                 body_code_lines += [indent(impl_code_line)]
 
         in_binders = list_map(lambda x: program.env[x], program.in_binders)
         arg_type_strs = [
-            f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}" for inb in in_binders
-        ]
+                f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}" for inb in in_binders
+            ] if fn_name == "main" else [f"{inb.name}" for inb in in_binders]
         fn_args_str = ", ".join(arg_type_strs)
 
         outs = list_map(lambda x: program.env[x], program.outs)
         out_type_strs = [
             f"{self.dtype_map[out.symval.dtype]}[{repr(list(out.symval.shape))[1:-1]}] {out.name}" for out in outs
-        ]
+        ] if fn_name == "main" else [f"{out.name}" for out in outs]
         out_type_str = ", ".join(out_type_strs)
 
         head_code_lines = []
-        head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
+        if fn_name == "main":
+            head_code_lines += ['<ir_version: 7, opset_import: ["" : 18, "slope":1]>']
         head_code_lines += [f"{fn_name} ({fn_args_str}) => ({out_type_str})"]
         model_code_lines = head_code_lines + ["{"] + body_code_lines + ["}"]
 
@@ -196,7 +197,7 @@ class ONNXRuntimeBackend(Backend):
 
     def codegen_impl_as_procedure(self, args, instruction: Instruction, fn_defs, in_vals, out_vals):
         op: Operator = instruction.op
-        op_name = {v: k for k, v in vars(self.operator_set.items())}[op]
+        op_name = {v: k for k, v in vars(self.operator_set).items()}[op]
         op_procedure = getattr(self.procedure_set, op_name)
         symvals_in = tuple(inp.symval for inp in instruction.inputs)
         params = instruction.params
@@ -206,7 +207,7 @@ class ONNXRuntimeBackend(Backend):
             static_args=tuple(params.items()),
             name=op.name,
         )
-        name = op.get_jit_name(tuple(symvals_in), params)
+        name = slope.core.jit.get_jit_name(tuple(symvals_in), params)
         if name not in fn_defs.keys():
             op_codegen_out: CodegenOut = self.codegen(
                 op_program,
@@ -218,8 +219,8 @@ class ONNXRuntimeBackend(Backend):
             fn_defs[name] = op_codegen_out.code_lines
         in_names = ", ".join(i.name for i in in_vals)
         out_names = ", ".join(o.name for o in out_vals)
-        impl_code = f"{out_names} = {name}({in_names})"
-        return impl_code
+        impl_code = f"{out_names} = slope.{name}({in_names})"
+        return impl_code, fn_defs
 
     def compile(self, codegen_out):
         code_lines = codegen_out.code_lines

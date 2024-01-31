@@ -458,7 +458,7 @@ def scatter_nd_impl(
     u,
     y,
 ):
-    return f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
+    return f'{y.name} = ScatterND<reduction="add">({x.name}, {w.name}, {u.name})'
     
 #     if w.symval.dtype is dtypes.int64:
 #         return f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"

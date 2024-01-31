@@ -55,7 +55,7 @@ def annotate_sig(in_symvals, out_symvals):
 
 
 class IREEBackend(Backend):
-    dtype_for_indices = dtypes.int64
+    dtype_for_indices = dtypes.int32
     dtype_map = {
         dtypes.float32: np.dtypes.Float32DType(),
         dtypes.uint8: np.dtypes.UInt8DType(),
@@ -718,10 +718,22 @@ def scatter_nd_impl(self, x, w, u, y):
 
     r = x.symval.ndim
     q = w.symval.ndim
-    index_vector_dim = q - 1
-    update_window_dims = list(range(1, u.symval.ndim))
-    inserted_window_dims = [0]
-    scatter_dims_to_operand_dims = [0]
+    s = u.symval.ndim
+    # index_vector_dim = q - 1
+    # update_window_dims = list(range(index_vector_dim, r))
+    # inserted_window_dims = [0] 
+    # scatter_dims_to_operand_dims = [0]
+    if s <= r:
+        index_vector_dim =  q-1
+        update_window_dims = list(range(index_vector_dim, r))
+        inserted_window_dims = [0] 
+        scatter_dims_to_operand_dims = [0]
+    else:
+     if s <= r:
+        index_vector_dim = (q - 1) if s <= r else (q-1-(r-1))
+        update_window_dims = list(range(index_vector_dim, r))
+        inserted_window_dims = list(range(r))
+        scatter_dims_to_operand_dims = list(range(r))
 
     return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):
@@ -737,3 +749,9 @@ def scatter_nd_impl(self, x, w, u, y):
   unique_indices = false
 }} : {annotate_sig((x.symval, w.symval, u.symval), y.symval)}
 """
+    #   update_window_dims = [1, 2],
+    #   inserted_window_dims = [0],
+    #   scatter_dims_to_operand_dims = [0],
+    #   index_vector_dim = 1>,
+    #   indices_are_sorted = false,
+    #   unique_indices = false

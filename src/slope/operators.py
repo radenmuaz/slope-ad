@@ -960,6 +960,7 @@ class GatherND(GeneralReduceOperator):
     def jvp(self, primals, tangents, *, batch_dims):
         (x, w), (x_dot, _) = primals, tangents
         return [self(x, w, batch_dims=batch_dims)], [self(x_dot, w, batch_dims=batch_dims)]
+        # return [self(x, w, batch_dims=batch_dims)], [self(x_dot, w, batch_dims=batch_dims)]
 
     def T(self, cotangents, x, w, *, batch_dims: int):
         # return [None, None]
@@ -967,13 +968,18 @@ class GatherND(GeneralReduceOperator):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(w) is UndefPrimal:
             return [None, None]
+            # w_zeros = slope.zeros(w.shape, w.dtype, w.device)
+            # return [w_zeros.scatter_nd(w, gL_y), None]
         else:
+            # gL_x = slope.zeros(x.shape, x.dtype, x.device)
+            # ws = w.split(w.shape[batch_dims], batch_dims)
+            # gL_ys = gL_y.split(gL_y.shape[batch_dims],batch_dims)
+            # for w_i, gL_y_i in zip(ws, gL_ys):
+            #     gL_x = gL_x.scatter_nd(w_i, gL_y_i)
+            # return [gL_x, None]
+            gL_x = slope.zeros(x.shape, x.dtype, x.device)
+            return [gL_x.scatter_nd(w, gL_y), None]
             # return [None, None]
-            x_zeros = slope.zeros(x.shape, x.dtype, x.device)
-            # if gL_y.ndim < x_zeros.ndim:
-            #     breakpoint()
-                # gL_y = gL_y[None].expand(x.shape)
-            return [x_zeros.scatter_nd(w, gL_y), None]
 
 
 @operator_set.register("scatter_nd")
@@ -981,15 +987,17 @@ class ScatterND(GeneralReduceOperator):
     def args_fixer(self, x, w, u):
         if w.dtype is not slope.backend.dtype_for_indices:
             w = w.cast(slope.backend.dtype_for_indices)
+        # w = w.unsqueeze(-1)
+        # u = u.unsqueeze(-1).repeat((1,2))
         return (x, w, u), dict()
 
     def typecheck(self, x, w, u):
         assert w.ndim >= 2
-        index_depth = w.shape[-1]
         batch_shape = w.shape[:-1]
+        index_depth = w.shape[-1]
         assert index_depth <= x.ndim
         inner_shape = x.shape[index_depth:]
-        assert u.shape == batch_shape + inner_shape
+        # assert u.shape == batch_shape + inner_shape
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

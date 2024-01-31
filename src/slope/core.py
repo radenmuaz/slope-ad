@@ -711,7 +711,7 @@ class Backend:
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     DEFAULT_DEVICE = devices.name_idx_device_map[os.environ.get("DEFAULT_DEVICE", "cpu:0")]
     DEFAULT_DTYPE = dtypes.name_dtype_map[os.environ.get("DEFAULT_DTYPE", "float32")]
-
+    dtype_for_indices: DType = None # need to override
     def __init__(
         self,
         operator_set: OperatorSet,

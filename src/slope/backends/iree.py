@@ -55,6 +55,7 @@ def annotate_sig(in_symvals, out_symvals):
 
 
 class IREEBackend(Backend):
+    dtype_for_indices = dtypes.int64
     dtype_map = {
         dtypes.float32: np.dtypes.Float32DType(),
         dtypes.uint8: np.dtypes.UInt8DType(),

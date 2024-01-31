@@ -933,8 +933,8 @@ class Conv(GeneralReduceOperator):
 @operator_set.register("gather_nd")
 class GatherND(GeneralReduceOperator):
     def args_fixer(self, x, w, *, batch_dims: int = 0):
-        # if w.dtype is not dtypes.int32:
-        #     w = w.cast(dtypes.int32)
+        if w.dtype is not slope.backend.dtype_for_indices:
+            w = w.cast(slope.backend.dtype_for_indices)
         return (x, w), dict(batch_dims=batch_dims)
 
     def typecheck(self, x, w, *, batch_dims: int):
@@ -979,6 +979,8 @@ class GatherND(GeneralReduceOperator):
 @operator_set.register("scatter_nd")
 class ScatterND(GeneralReduceOperator):
     def args_fixer(self, x, w, u):
+        if w.dtype is not slope.backend.dtype_for_indices:
+            w = w.cast(slope.backend.dtype_for_indices)
         return (x, w, u), dict()
 
     def typecheck(self, x, w, u):

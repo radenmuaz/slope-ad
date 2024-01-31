@@ -33,7 +33,7 @@ from slope.procedures import procedure_set
 import onnx
 import onnxruntime
 import tempfile
-
+import random
 
 def annotate_shape(symval):
     xdtype = symval.dtype.mlir
@@ -56,16 +56,7 @@ def annotate_sig(in_symvals, out_symvals):
 
 
 class ONNXRuntimeBackend(Backend):
-    sess_options = onnxruntime.SessionOptions()
-    # Disable this flags, easily get nan
-    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
-
-    # Other flags
-    # sess_options.log_severity_level = 3
-    # sess_options.use_deterministic_compute = True
-    # sess_options.intra_op_num_threads = 4
-    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+    dtype_for_indices = dtypes.int64
     dtype_map = {
         slope.core.dtypes.float32: "float",
         dtypes.uint8: "uint8",
@@ -99,6 +90,17 @@ class ONNXRuntimeBackend(Backend):
 
     dtype_map_inv = {v: k for k, v in dtype_map.items()}
     device_map_inv = {v: k for k, v in device_map.items()}
+
+    sess_options = onnxruntime.SessionOptions()
+    # Disable this flags, easily get nan
+    sess_options.execution_mode = onnxruntime.ExecutionMode.ORT_PARALLEL
+    # Other flags
+    # sess_options.log_severity_level = 3
+    # sess_options.use_deterministic_compute = True
+    # sess_options.intra_op_num_threads = 4
+    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
+    
 
     def from_numpy(self, val, dtype=None, device=None):
         dtype = dtype or self.DEFAULT_DTYPE
@@ -439,12 +441,13 @@ def matmul_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
-    return (f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
+    return f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
+#     return (f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
 # if w.symval.dtype is dtypes.int64 else
 # f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
 # {y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name}_)
 # """
-)
+# )
 
 
 @backend.set_impl(backend.operator_set.scatter_nd)
@@ -455,12 +458,16 @@ def scatter_nd_impl(
     u,
     y,
 ):
-    return (f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
-# if w.symval.dtype is dtypes.int64 else
-# f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
-# {y.name} = ScatterND({x.name}, {w.name}_, {u.name})
+    return f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
+    
+#     if w.symval.dtype is dtypes.int64:
+#         return f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
+#     else:
+#         name = f"{w.name}_{random.randrange(100)}"
+#         return f"""{name} = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
+# {y.name} = ScatterND({x.name}, {name}_, {u.name})
 # """
-            )
+            
 
 
 

@@ -723,17 +723,24 @@ def scatter_nd_impl(self, x, w, u, y):
     # update_window_dims = list(range(index_vector_dim, r))
     # inserted_window_dims = [0] 
     # scatter_dims_to_operand_dims = [0]
-    if s <= r:
-        index_vector_dim =  (q-1-(r-1))
-        update_window_dims = list(range(index_vector_dim, r))
-        inserted_window_dims = [0] 
-        scatter_dims_to_operand_dims = [0]
-    else:
-     if s <= r:
-        index_vector_dim = (q - 1) if s <= r else (q-1-(r-1))
-        update_window_dims = list(range(index_vector_dim, r))
-        inserted_window_dims = list(range(r))
-        scatter_dims_to_operand_dims = list(range(r))
+
+    index_vector_dim = q - 1
+    update_window_dims = list(range(index_vector_dim, r)) if q <= s else []
+    # update_window_dims = []
+    inserted_window_dims = list(range(r+1-s))
+    scatter_dims_to_operand_dims = list(range(r+1-s))
+    
+    # if s <= r:
+    #     index_vector_dim = 1
+    #     update_window_dims = list(range(index_vector_dim, r))
+    #     inserted_window_dims = list(range(r))
+    #     scatter_dims_to_operand_dims = list(range(r))
+    # else:
+    #     index_vector_dim = q - 1
+    #     update_window_dims = list(range(index_vector_dim, r))
+    #     inserted_window_dims = [0] 
+    #     scatter_dims_to_operand_dims = [0]
+        
 
     return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):

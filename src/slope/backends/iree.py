@@ -724,7 +724,7 @@ def scatter_nd_impl(self, x, w, u, y):
     # inserted_window_dims = [0] 
     # scatter_dims_to_operand_dims = [0]
     if s <= r:
-        index_vector_dim =  q-1
+        index_vector_dim =  (q-1-(r-1))
         update_window_dims = list(range(index_vector_dim, r))
         inserted_window_dims = [0] 
         scatter_dims_to_operand_dims = [0]

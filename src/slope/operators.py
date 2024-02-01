@@ -993,18 +993,19 @@ class ScatterND(GeneralReduceOperator):
 
     def typecheck(self, x, w, u):
         assert w.ndim >= 2
-        batch_shape = w.shape[:-1]
         index_depth = w.shape[-1]
         assert index_depth <= x.ndim
-        inner_shape = x.shape[index_depth:]
+        # batch_shape = w.shape[:-1]
+        # inner_shape = x.shape[index_depth:]
         # assert u.shape == batch_shape + inner_shape
         return [x]
 
     def vmap(self, dim_size, vals_in, dims_in, **params):
-        (x, w), (x_bdim, w_bdim) = vals_in, dims_in
+        (x, w, u), (x_bdim, w_bdim, u_bdim) = vals_in, dims_in
         x = slope.core.VMapTrace.move_vmap_dim(x, dim_size, x_bdim, 0)
         w = slope.core.VMapTrace.move_vmap_dim(w, dim_size, w_bdim, 0)
-        return [self(x, w, **params)], [x_bdim, w_bdim]
+        u = slope.core.VMapTrace.move_vmap_dim(w, dim_size, u_bdim, 0)
+        return [self(x, w, u, **params)], [x_bdim, w_bdim, u_bdim]
 
     def jvp(self, primals, tangents):
         (x, w, u), (x_dot, w_dot, u_dot) = primals, tangents
@@ -1014,11 +1015,12 @@ class ScatterND(GeneralReduceOperator):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
         (gL_y,) = cotangents
         if type(u) is UndefPrimal:
-            return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
+            return [gL_y, None, None]
+            # return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
         elif type(w) is UndefPrimal:
-            raise [x.zeros_like(), None, u.zeros_like()]
+            return [gL_y, None, None]
         else:
-            raise [x.zeros_like(), w.zeros_like(), None]
+            return [None, None, None]
 
 
 # @operator_set.register("rng_bits")

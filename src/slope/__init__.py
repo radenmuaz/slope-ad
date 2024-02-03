@@ -4,9 +4,9 @@ import importlib
 import numpy as np
 
 np.set_printoptions(precision=5, threshold=1000, edgeitems=5, linewidth=120)
-# SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
+SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
 # SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "onnxruntime")
-SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
+# SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
 try:
     core.set_backend(SLOPE_BACKEND)
 

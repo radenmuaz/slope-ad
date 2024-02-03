@@ -296,48 +296,6 @@ def getitem(x, indices) -> Tensor:
                 i = i[None]
             ret = ret.gather_nd(i)
     return ret
-    ## impl like tinygrad tensor __getitem__:
-    # if type_dim[Tensor]:
-    # # calculate dim of current ret by subtracting dims collapsed and adding dims injected up until tensor_dim
-    # def calc_dim(tensor_dim: int) -> int:
-    #     return (
-    #         tensor_dim
-    #         - sum_(1 for d in dims_collapsed if tensor_dim >= d)
-    #         + sum_(1 for d in type_dim[None] if tensor_dim >= d)
-    #     )
-
-    # # track tensor_dim and tensor_index using a dict
-    # # calc_dim to get dim and use that to normalize the negative tensor indices
-    # idx: Dict[int, Tensor] = {
-    #     (dim := calc_dim(td)): (t < 0).where(t.full_like(ret.shape[dim]), t.zeros_like()) + t
-    #     for td, t in zip(type_dim[Tensor], tensor_index)
-    # }
-    # # compute sum_dim, arange, and idx
-    # max_idx_dim, first_dim, last_dim = max_(i.ndim for i in idx.values()), min_(idx.keys()), max_(idx.keys())
-    # sum_dim = tuple(d if n == 0 else d + max_idx_dim - n for n, d in enumerate(idx.keys()))
-    # arange = [
-    #     slope.arange(ret.shape[d], device=x.device).reshape(
-    #         ret.shape[d : d + 1] + (1,) * (ret.ndim + max_idx_dim - n - sd - 1)
-    #     )
-    #     for n, (sd, d) in enumerate(zip(sum_dim, idx.keys()))
-    # ]  # noqa: E501
-    # reshaped_idx = [
-    #     i.reshape(i.shape + (1,) * (ret.ndim - first_dim - (n or 1))) for n, i in enumerate(idx.values())
-    # ]
-    # ret_ = ret
-    # ret = ret.reshape(ret.shape[: first_dim + 1] + (1,) * max_idx_dim + ret.shape[first_dim + 1 :])
-
-    # for a, i, sd in zip(arange, reshaped_idx, sum_dim):
-    #     ret = (a == i).cast(ret.dtype).mul(ret).sum(sd)
-
-    # # special permute case
-    # if first_dim != 0 and len(idx) != 1 and tuple(idx.keys()) != tuple(range(first_dim, last_dim + 1)):
-    #     ret_dims = list(range(ret.ndim))
-    #     ret = ret.permute(
-    #         ret_dims[first_dim : first_dim + max_idx_dim]
-    #         + ret_dims[:first_dim]
-    #         + ret_dims[first_dim + max_idx_dim :]
-    #     )
 
 
 @procedure_set.register()
@@ -362,34 +320,52 @@ def pad2d(x, padding: Union[List[int], Tuple[int, ...]], value: float = 0):
 
 
 @procedure_set.register()
-def gather(x, idx, dim: int):
-    assert idx.ndim == x.ndim, "x.ndim must equal idx.ndim"
-    assert all(s >= i for s, i in zip(x.shape, idx.shape)), "all dim of idx.shape must be smaller than x.shape"
-    if dim < 0:
-        dim += x.ndim
-    idx = idx.transpose(ax=dim, aw=0).expand_dims(-1)
-    permarg = list(range(x.ndim))
-    permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    )
-    return (
-        (
-            (
-                idx
-                == slope.arange(
-                    x.shape[dim],
-                    dtype=slope.int32,
-                    requires_grad=False,
-                    device=x.device,
-                )
-            )
-            * x.permute(*permarg)
-            .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
-            .expand_dims(0)
+def gather_nd(x, w, batch_dims=0):
+    def gather(x, w, dim: int):
+        assert w.ndim == x.ndim, "x.ndim must equal w.ndim"
+        assert all(s >= i for s, i in zip(x.shape, w.shape)), "all dim of idx.shape must be smaller than x.shape"
+        if dim < 0:
+            dim += x.ndim
+        w = w.transpose(ax=dim, aw=0).expand_dims(-1)
+        permarg = list(range(x.ndim))
+        permarg = (
+            permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
+            if dim != 0
+            else permarg[1:] + [permarg[0]]
         )
-        .sum(-1)
-        .transpose(ax=0, aw=dim)
+        return (
+            (
+                (
+                    w
+                    == slope.arange(
+                        x.shape[dim],
+                        dtype=w.dtype,
+                        device=w.device,
+                    )
+                ).cast(x.dtype)
+                * x.permute(*permarg)
+                .padslice(tuple([*[(0, sh) for sh in w.shape[1:-1]], (0, x.shape[dim])]))
+                .expand_dims(0)
+            )
+            .sum(-1)
+            .transpose(ax=0, aw=dim)
+        )
+
+    def _gather_nd_single(x_, w_):
+        return gather(x_, w_.transpose(-1, 0), 0)
+
+    assert batch_dims == 0
+    gather_nd_ = (
+        functools.reduce(lambda g, f: f(g), [slope.vmap] * int(batch_dims), _gather_nd_single)
+        if batch_dims > 0
+        else _gather_nd_single
     )
+    return gather_nd_(x, w)
+
+
+@procedure_set.register()
+def scatter_nd(params, indices, updtes):
+    raise NotImplementedError
 
 
 @procedure_set.register()
@@ -640,7 +616,7 @@ def conv_transpose(x, w, groups=1, stride=1, dilation=1, padding=0, output_paddi
     make_pair = lambda x, cnt=2: (x,) * cnt if isinstance(x, int) else x
     flatten_seq = lambda l: [item for sublist in l for item in sublist]
     D, trailing = w.shape[2:], tuple(range(3, len(w.shape) + 1))
-    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:]))) # (1, 64, 64, 3, 3)
+    w = w.reshape(((groups, w.shape[0] // groups, w.shape[1], *w.shape[2:])))  # (1, 64, 64, 3, 3)
     w = w.permute((0, 2, 1, *trailing))
     w = w.flip(trailing)
     stride = make_pair(stride, len(D))
@@ -692,7 +668,7 @@ def layernorm(x, dim=-1, eps: float = 1e-5) -> Tensor:
 def dropout(x, p, training=False) -> Tensor:
     if not training or p == 0:
         return x
-    mask = (slope.rand(*x.shape, requires_grad=False, device=x.device) >= p).cast(slope.bool)
+    mask = (slope.rand(*x.shape, device=x.device) >= p).cast(slope.bool)
     return x * mask * (1 / (1.0 - p))
 
 
@@ -706,9 +682,7 @@ def scaled_dot_product_attention(
     is_causal: bool = False,
 ) -> Tensor:
     if is_causal:
-        attn_mask = (
-            slope.ones(x.shape[-2], key.shape[-2], requires_grad=False, device=x.device).tril(0).cast(slope.bool)
-        )
+        attn_mask = slope.ones(x.shape[-2], key.shape[-2], device=x.device).tril(0).cast(slope.bool)
     if attn_mask is not None and attn_mask.dtype == slope.bool:
         attn_mask = (attn_mask == 0).where(-float("inf"), attn_mask)
     return (x @ key.transpose(-2, -1) / math.sqrt(x.shape[-1]) + attn_mask).softmax(-1).dropout(dropout_p) @ value
@@ -724,13 +698,20 @@ def binary_cross_entropy_with_logits(x, y: Tensor) -> Tensor:
     return (x.maximum(0) - y * x + (1 + x.abs().__neg__().exp()).log()).mean()
 
 
+# @procedure_set.register()
+# def cross_entropy(x, y, ignore_index=-1) -> Tensor:
+#     loss_mask = (y != ignore_index).reshape(-1, 1)
+#     y_counter = slope.arange(x.shape[-1], dtype=slope.int32)[None, ..., None]
+#     y_oh = (y_counter == y[..., None, None]).where(-1.0, 0.0).squeeze(-1)
+#     y = y * loss_mask
+#     return (x.log_softmax(-1) * y_oh).sum()  / loss_mask.sum()
+
+
 @procedure_set.register()
-def cross_entropy(x, y, ignore_index=-1) -> Tensor:
-    # loss_mask = (y != ignore_index).reshape(-1, 1)
+def cross_entropy(x, y) -> Tensor:
     y_counter = slope.arange(x.shape[-1], dtype=slope.int32)[None, ..., None]
     y_oh = (y_counter == y[..., None, None]).where(-1.0, 0.0).squeeze(-1)
-    # y = y * loss_mask
-    return (x.log_softmax(-1) * y_oh).sum()  # / loss_mask.sum()
+    return (x.log_softmax(-1) * y_oh).sum()
 
 
 @procedure_set.register()
@@ -747,22 +728,6 @@ def log_softmax(x, dim=-1):
     logsumexp_x = x.exp().sum(dim, keepdim=True).log()
     return x - logsumexp_x
 
-
-# @procedure_set.register()
-# def gather_nd(
-#     params,
-#     indices,
-#     batch_dims=0):
-#     def _gather_nd_single(params, indices):
-#         idx = indices.moveaxis(-1, 0)
-#         return params[idx]
-#     assert batch_dims > 0, ('Negative `batch_dims` is currently unsupported.')
-#     assert batch_dims == 0
-#     gather_nd_ = functools.reduce(
-#         lambda g, f: f(g), [slope.vmap] * int(batch_dims),
-#         _gather_nd_single
-#         ) if batch_dims > 0 else _gather_nd_single
-#     return gather_nd_(params, indices)
 
 # TODO:
 

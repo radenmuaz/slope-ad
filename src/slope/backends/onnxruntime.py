@@ -15,17 +15,14 @@ from slope.core import (
     devices,
     DType,
     Device,
-    CodegenOut,
+    CodegenOutput,
 )
 
-import math
 import numpy as np
 from typing import (
     List,
     Any,
 )
-import iree.compiler
-import iree.runtime
 import os
 
 from slope.operators import operator_set
@@ -35,13 +32,9 @@ import onnxruntime
 import tempfile
 import random
 
+
 def annotate_shape(symval):
-    xdtype = symval.dtype.mlir
-    if len(symval.shape) > 0:
-        xshape = f"{'x'.join((repr(i) for i in symval.shape))}"
-        return f"tensor<{xshape}x{xdtype}>"
-    else:
-        return f"tensor<{xdtype}>"
+    return f"{symval.shape}, {symval.dtype.name}"
 
 
 def annotate_sig(in_symvals, out_symvals):
@@ -55,7 +48,7 @@ def annotate_sig(in_symvals, out_symvals):
     return sig
 
 
-class ONNXRuntimeBackend(Backend):
+class ONNXRuntimeBackendackend(Backend):
     dtype_for_indices = dtypes.int64
     dtype_map = {
         slope.core.dtypes.float32: "float",
@@ -100,7 +93,6 @@ class ONNXRuntimeBackend(Backend):
     # sess_options.intra_op_num_threads = 4
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
-    
 
     def from_numpy(self, val, dtype=None, device=None):
         dtype = dtype or self.DEFAULT_DTYPE
@@ -110,7 +102,7 @@ class ONNXRuntimeBackend(Backend):
         np_val = np.array(val, dtype=dtype.numpy)
         val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
         return Tensor(TensorBuffer(val))
-    
+
     def numpy_of(self, tensor: Tensor, memmap=False):
         if not memmap:
             return tensor.buf.val.numpy()
@@ -121,7 +113,7 @@ class ONNXRuntimeBackend(Backend):
 
     def shape_of(self, tensor):
         return tuple(tensor.buf.val.shape())
-    
+
     def dtype_of(self, tensor: Tensor):
         dtype_str = tensor.buf.val.data_type().replace("tensor(", "").replace(")", "")
         return self.dtype_map_inv[dtype_str]
@@ -160,15 +152,22 @@ class ONNXRuntimeBackend(Backend):
                 body_code_lines += [indent(impl_code_line)]
 
         in_binders = list_map(lambda x: program.env[x], program.in_binders)
-        arg_type_strs = [
-                f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}" for inb in in_binders
-            ] if fn_name == "main" else [f"{inb.name}" for inb in in_binders]
+        arg_type_strs = (
+            [
+                f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}"
+                for inb in in_binders
+            ]
+            if fn_name == "main"
+            else [f"{inb.name}" for inb in in_binders]
+        )
         fn_args_str = ", ".join(arg_type_strs)
 
         outs = list_map(lambda x: program.env[x], program.outs)
-        out_type_strs = [
-            f"{self.dtype_map[out.symval.dtype]}[{repr(list(out.symval.shape))[1:-1]}] {out.name}" for out in outs
-        ] if fn_name == "main" else [f"{out.name}" for out in outs]
+        out_type_strs = (
+            [f"{self.dtype_map[out.symval.dtype]}[{repr(list(out.symval.shape))[1:-1]}] {out.name}" for out in outs]
+            if fn_name == "main"
+            else [f"{out.name}" for out in outs]
+        )
         out_type_str = ", ".join(out_type_strs)
 
         head_code_lines = []
@@ -190,7 +189,7 @@ class ONNXRuntimeBackend(Backend):
         if fn_name == "main":
             del self.fn_count
         assert len(outs) == len(program.outs)
-        return CodegenOut(
+        return CodegenOutput(
             code_lines=code_lines,
             fn_defs=fn_defs,
             in_binders=in_binders,
@@ -211,24 +210,24 @@ class ONNXRuntimeBackend(Backend):
         )
         name = slope.core.jit.get_jit_name(tuple(symvals_in), params)
         if name not in fn_defs.keys():
-            op_codegen_out: CodegenOut = self.codegen(
+            op_codegen_output: CodegenOutput = self.codegen(
                 op_program,
                 args,
                 fn_name=name,
                 fn_defs=fn_defs,
             )
-            fn_defs = {**fn_defs, **op_codegen_out.fn_defs}
-            fn_defs[name] = op_codegen_out.code_lines
+            fn_defs = {**fn_defs, **op_codegen_output.fn_defs}
+            fn_defs[name] = op_codegen_output.code_lines
         in_names = ", ".join(i.name for i in in_vals)
         out_names = ", ".join(o.name for o in out_vals)
         impl_code = f"{out_names} = slope.{name}({in_names})"
         return impl_code, fn_defs
 
-    def compile(self, codegen_out):
-        code_lines = codegen_out.code_lines
+    def compile(self, codegen_output):
+        code_lines = codegen_output.code_lines
         code = "\n".join(code_lines)
         model = onnx.parser.parse_model(code)
-        device = codegen_out.outs[0].device
+        device = codegen_output.outs[0].device
         target = self.target_map[device]
         session = onnxruntime.InferenceSession(
             model.SerializeToString(),
@@ -238,7 +237,7 @@ class ONNXRuntimeBackend(Backend):
 
         def fn(*args):
             io_binding = session.io_binding()
-            for a, in_binder in zip(args, codegen_out.in_binders):
+            for a, in_binder in zip(args, codegen_output.in_binders):
                 io_binding.bind_input(
                     name=in_binder.name,
                     device_type=a.device_name(),
@@ -247,7 +246,7 @@ class ONNXRuntimeBackend(Backend):
                     shape=a.shape(),
                     buffer_ptr=a.data_ptr(),
                 )
-            for out in codegen_out.outs:
+            for out in codegen_output.outs:
                 io_binding.bind_output(out.name, self.device_map[device])
             run_options = onnxruntime.RunOptions()
             run_options.log_severity_level = 3
@@ -257,13 +256,13 @@ class ONNXRuntimeBackend(Backend):
 
         return fn, code
 
-    def export(self, jit_object: slope.core.JitObject, output_path, *args, **kwargs):
-        code = jit_object.code
+    def export(self, jit_output: slope.core.JitOutput, output_path, export_params, input_names, output_names, **kwargs):
+        code = jit_output.code
         model = onnx.parser.parse_model(code)
         os.makedirs(output_path, exist_ok=True)
-        in_binders = jit_object.codegen_out["in_binders"]
-        outs = jit_object.codegen_out["outs"]
-        num_consts = jit_object.program.num_consts
+        in_binders = jit_output.codegen_output["in_binders"]
+        outs = jit_output.codegen_output["outs"]
+        num_consts = jit_output.program.num_consts
         for i in range(num_consts):
             const_array = in_binders[i]["type"].numpy()
             const_name = in_binders[i].name
@@ -334,17 +333,18 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
     jit_name = f"{jit_program.name}"
     if jit_name not in fn_defs.keys():
-        jit_codegen_out = self.codegen(
+        jit_codegen_output = self.codegen(
             jit_program,
             args,
             fn_name=jit_name,
             fn_defs=fn_defs,
         )
-        fn_defs[jit_name] = jit_codegen_out.code_lines
-        fn_defs = {**fn_defs, **jit_codegen_out.fn_defs}
+        fn_defs[jit_name] = jit_codegen_output.code_lines
+        fn_defs = {**fn_defs, **jit_codegen_output.fn_defs}
     args_str = ", ".join(i.name for i in in_vals)
     impl_code = f"{', '.join(o.name for o in out_vals)} = slope.{jit_name}({args_str})"
     return impl_code, fn_defs
+
 
 ### Operator Impls
 
@@ -442,6 +442,8 @@ def matmul_impl(self, x, w, y):
 @backend.set_impl(backend.operator_set.gather_nd)
 def gather_nd_impl(self, x, w, y, *, batch_dims):
     return f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
+
+
 #     return (f"{y.name} = GatherND<batch_dims={batch_dims}>({x.name}, {w.name})"
 # if w.symval.dtype is dtypes.int64 else
 # f"""{w.name}_ = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
@@ -459,7 +461,8 @@ def scatter_nd_impl(
     y,
 ):
     return f'{y.name} = ScatterND<reduction="add">({x.name}, {w.name}, {u.name})'
-    
+
+
 #     if w.symval.dtype is dtypes.int64:
 #         return f"{y.name} = ScatterND({x.name}, {w.name}, {u.name})"
 #     else:
@@ -467,8 +470,6 @@ def scatter_nd_impl(
 #         return f"""{name} = Cast<to={self.onnx_dtype_enum_map[dtypes.int64]}>({w.name})
 # {y.name} = ScatterND({x.name}, {name}_, {u.name})
 # """
-            
-
 
 
 @backend.set_impl(operator_set.sum)
@@ -640,8 +641,6 @@ def flip_impl(self, x, y, *, dim):
 """
 
 
-
-
 @backend.set_impl(operator_set.conv)
 def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
     padding = padding[0::2] + padding[1::2]
@@ -667,7 +666,7 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 #       batch_group_count = 1 : i64,
 #       precision_config = [#stablehlo<precision DEFAULT>, #stablehlo<precision DEFAULT>]
 #     }  : (tensor<100x64x15x15xf32>,tensor<32x64x3x3xf32>) -> (tensor<100x32x16x16xf32>)
-    
+
 #     "func.return"(%y0): (tensor<100x32x16x16xf32>) -> ()
 # }
 

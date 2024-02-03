@@ -10,6 +10,8 @@ from tqdm import tqdm
 from lib.datasets.mnist import get_mnist
 
 import numpy as np
+
+
 def loss_fn(model, batch):
     x, y_onehot = batch
     preds = model(x)
@@ -36,8 +38,9 @@ def test_all(model, x, y):
     # y_hat = np.argmax(out.numpy() ,-1)
     # corrects = (y_hat == y.numpy()).astype(np.float32)
     # accuracy = np.mean(corrects)
-    
+
     return accuracy
+
 
 class Net(nn.Module):
     def __init__(self, in_dim, hid_dim, out_dim, act=nn.ReLU()):

@@ -2,15 +2,18 @@ import slope
 
 from slope import jit, jvp, grad
 
+
 def f(x):
     z = x * 2.0
     y = g(z)
     return y
 
+
 def g(x):
     z = x.cos()
     y = z * 2.0
     return y
+
 
 x = slope.tensor(3.0)
 x_dot = slope.tensor(1.0)

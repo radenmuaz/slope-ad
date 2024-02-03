@@ -55,7 +55,7 @@ A decorated function with `slope.jit` is an instance object of `slope.core.Machi
 It has several utility methods for printing the generated backend code and exporting the function
 
 ```python
-f_jitobj = f.get_jit_object(x)
+f_jitobj = f.jit_program(x)
 print(f_jitobj.code)
 f_jitobj.export('./f_export_folder') # see the folder of what are exported.
 ```

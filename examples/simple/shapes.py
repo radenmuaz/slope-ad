@@ -1,6 +1,7 @@
 import slope
 
-# Pad 
+
+# Pad
 def f(x):
     out = x
     out = out.pad(1, 0)
@@ -29,6 +30,7 @@ g_out = slope.grad(f)(x)
 print(g_out)
 
 # Sum
+
 
 @slope.jit
 def f(x):

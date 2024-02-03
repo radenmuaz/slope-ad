@@ -1,6 +1,6 @@
 import slope
 
-XDIMS = (1,4)
+XDIMS = (1, 4)
 x1 = slope.ones(XDIMS)
 x2 = slope.randn(XDIMS)
 x3 = slope.rand(XDIMS)

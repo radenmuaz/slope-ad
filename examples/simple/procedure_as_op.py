@@ -1,11 +1,13 @@
 import slope
 
+
 # procedures are basically functions accessible by Tensor.procedure syntax
 @slope.core.backend.procedure_set.register()
 def my_relu(x):
     w = slope.zeros_like(x)
     y = x.maximum(w)
     return y
+
 
 # To override a procedure gradient rule, define a new operator with the same name as procedure
 # the impl will default to tracing procedure as a Program,
@@ -21,13 +23,14 @@ class MyReLU(slope.core.UnaryOperator):
         (x,), (x_dot,) = primals, tangents
         y = x.my_relu()
         w = slope.zeros_like(x)
-        w_dot  = slope.ones_like(x)
+        w_dot = slope.ones_like(x)
         y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
         return [y], [y_dot]
 
     def T(self, cotangents, x):
         (gL_y,) = cotangents
         return [gL_y, None]
+
 
 @slope.jit
 def f(x):
@@ -36,7 +39,8 @@ def f(x):
 
     return y
 
-x1 = slope.tensor([1., 2., -1., 0.])
+
+x1 = slope.tensor([1.0, 2.0, -1.0, 0.0])
 print(f"{x1=}")
 y1 = f(x1)
 print(f"{y1=}")

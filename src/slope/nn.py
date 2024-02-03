@@ -134,6 +134,10 @@ class Module:
             set_nested_attr(mod, tensor_attr, tensor)
         return mod
 
+    def export(self, *args, **kwargs):
+        f_jitobj = slope.jit(self.__call__).jit_program(*args, **kwargs)
+        return
+
 
 slope.core.backend.register_node(Module, Module.flatten, Module.unflatten, "Module")
 

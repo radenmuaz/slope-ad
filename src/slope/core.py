@@ -33,7 +33,7 @@ import inspect
 from functools import partial, lru_cache
 import mmap
 import traceback
-
+import importlib
 
 # =================================
 #   Utils
@@ -587,7 +587,7 @@ class BinaryOperator(Operator):
         symx = SymbolicTensor.like(x, dtype=dtypes.bool if self.boolean_output else x.dtype)
         symy = SymbolicTensor.like(y, dtype=dtypes.bool if self.boolean_output else y.dtype)
         if x.dtype != y.dtype:
-            raise TypeError
+            raise TypeError(f"x.dtype ({x.dtype}) != y.dtype ({y.dtype})")
         if symx == symy:
             return [symx]
         shape_delta = len(symx.shape) - len(symy.shape)
@@ -605,7 +605,7 @@ class BinaryOperator(Operator):
             if symy.shape != shape_ret:
                 symy = symx.like(shape=shape_ret)
             if symx != symy:
-                raise TypeError
+                raise TypeError(f"symx ({symx}) != symy ({symy})")
             return [symx]
 
     def jvp(self, primals, tangents, **params):
@@ -696,7 +696,7 @@ class ProcedureSet:
         return wrap
 
 
-class CodegenOut(NamedTuple):
+class CodegenOutput(NamedTuple):
     code_lines: List[str]
     fn_defs: Dict[str, List[str]]
     in_binders: List["ProgramEnvVar"]
@@ -711,7 +711,8 @@ class Backend:
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     DEFAULT_DEVICE = devices.name_idx_device_map[os.environ.get("DEFAULT_DEVICE", "cpu:0")]
     DEFAULT_DTYPE = dtypes.name_dtype_map[os.environ.get("DEFAULT_DTYPE", "float32")]
-    dtype_for_indices: DType = None # need to override
+    dtype_for_indices: DType = None  # need to override
+
     def __init__(
         self,
         operator_set: OperatorSet,
@@ -820,7 +821,7 @@ class Backend:
         raise NotImplementedError
 
     @lru_cache_verbose()
-    def gen_jit_object(
+    def jit_program(
         self,
         hashed_program: Hashed,
         hashed_consts: Tuple[Hashed, ...],
@@ -829,10 +830,10 @@ class Backend:
         typecheck_program(program)
         consts = [x.val for x in hashed_consts]
         in_symvals = [v.symval for v in program.in_binders[len(consts) :]]
-        codegen_out: CodegenOut = self.codegen(program, consts + in_symvals, fn_name="main")
-        fn, code = self.compile(codegen_out)
-        compiled = JitObject(program, codegen_out, fn, code, consts)
-        return compiled
+        codegen_output: CodegenOutput = self.codegen(program, consts + in_symvals, fn_name="main")
+        fn, code = self.compile(codegen_output)
+        jit_output = JitOutput(program, codegen_output, fn, code, consts)
+        return jit_output
 
     def codegen(self, program: "Program", args: Tuple, in_symvals: Tuple, name: str):
         "Returns compiler IR from the Program"
@@ -842,7 +843,7 @@ class Backend:
         "Compiles compiler IR to a Python callable function"
         raise NotImplementedError
 
-    def export(self, jit_object, output_path, *args, **params):
+    def export(self, jit_output, *args, **params):
         raise NotImplementedError
 
     def load(self, path, single_key="_tensor"):
@@ -1194,12 +1195,12 @@ class Leaf:
 # =================================
 
 
-class JitObject:
-    def __init__(self, program: Program, codegen_out: CodegenOut, fn, code: str, consts: List[Any]):
+class JitOutput:
+    def __init__(self, program: Program, codegen_output: CodegenOutput, fn, code: str, consts: List[Any]):
         super().__init__()
         self.program = program
         self.code = code
-        self.codegen_out = codegen_out
+        self.codegen_output = codegen_output
         self.fn: Callable = fn
         self.consts = consts
 
@@ -1215,9 +1216,6 @@ class JitObject:
             raise
         return [backend.tensor(TensorBuffer(o)) for o in outs]
 
-    def export(self, output_path, *args, **params):
-        return backend.export(self, output_path, *args, **params)
-
 
 class JitOp(MetaOperator):
     def meta_impl(self, *args, program: Program, **_):
@@ -1225,8 +1223,8 @@ class JitOp(MetaOperator):
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
         hashed_consts = tuple(map(Hashed, consts))
-        jit_object = backend.gen_jit_object(hashed_program, hashed_consts)
-        ret = jit_object(*consts, *args)
+        jit_output = backend.jit_program(hashed_program, hashed_consts)
+        ret = jit_output(*consts, *args)
         return ret
 
     def reorg_args(self, args, params):
@@ -1736,9 +1734,11 @@ class UndefBackend:
 backend = UndefBackend()
 
 
-def set_backend(init_backend):
+def set_backend(name, where="slope.backends"):
     global backend
-    backend = init_backend
+    backend = importlib.import_module(f"{where}.{name}").backend
+    import slope.nn
+
     dblog(f"slope backend is {backend}", enable=backend.LOG_INIT)
 
 
@@ -2631,12 +2631,24 @@ class jit:
         outs = bind(backend.jit_op, *consts, *args, program=program)
         return tree_unflatten(out_tree, outs)
 
-    def get_jit_object(self, *args, **static_args):
+    def get_jit_output(self, *args, **static_args):
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
         hashed_program = Hashed(program)
         num_consts = program.num_consts
         consts, args = args[:num_consts], args[num_consts:]
         hashed_consts = tuple(map(Hashed, consts))
-        jit_object = backend.gen_jit_object(hashed_program, hashed_consts)
-        return jit_object
+        jit_output = backend.jit_program(hashed_program, hashed_consts)
+        return jit_output
+
+    def export(self, args, output_path, export_params=True, input_names=None, output_names=None, **kwargs):
+        if isinstance(args, Tensor):
+            args, static_args = (args,), dict()
+        elif not isinstance(args[-1], dict):
+            assert all(isinstance(a, Tensor) for a in args)
+            static_args = dict()
+        else:
+            args, static_args = args[:-1], args[-1]
+        assert isinstance(args, (tuple, list)) and isinstance(static_args, dict)
+        jit_output = self.get_jit_output(*args, **static_args)
+        backend.export(jit_output, output_path, export_params, input_names, output_names, **kwargs)

@@ -374,9 +374,20 @@ class Reshape(ShapeOperator):
         return [z.reshape(x.symval.shape)]
 
 
-@operator_set.register("permute")
+@operator_set.register("permute", variadic_inputs=True)
 class Permute(ShapeOperator):
+    def args_fixer(self, x, *args, **kwargs):
+        if "perm" in kwargs.keys():
+            perm = kwargs["perm"]
+        elif isinstance(args[0], (tuple, list)):
+            perm = args[0]
+        else:
+            perm = args
+        perm = tuple(perm)
+        return (x,), dict(perm=perm)
+
     def typecheck(self, x: SymbolicTensor, *, perm: Sequence[int]) -> List[SymbolicTensor]:
+        assert tuple(sorted(perm)) == tuple(range(x.ndim))
         shape = [x.shape[i] for i in perm]
         return [SymbolicTensor(shape, x.dtype, x.device)]
 

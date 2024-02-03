@@ -2,6 +2,8 @@ import math
 import slope
 from slope import nn
 from functools import partial
+
+
 def conv3x3(in_planes, out_planes, stride=1):
     "3x3 convolution with padding"
     return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
@@ -37,7 +39,6 @@ class BasicBlock(nn.Module):
         out = self.relu(out)
 
         return out
-
 
 
 def downsample_basic_block(x, planes):

@@ -1,7 +1,7 @@
 import slope
 
-x1 = slope.tensor([1.])
-x2 = slope.tensor([2.])
+x1 = slope.tensor([1.0])
+x2 = slope.tensor([2.0])
 # x1 = x2 = slope.full((), 1.)
 
 y1 = x1 + x2

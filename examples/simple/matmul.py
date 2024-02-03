@@ -9,8 +9,10 @@ w = slope.ones(WDIMS)
 w_dot = slope.ones(WDIMS)
 print(f"{x.shape=}, {w.shape=}")
 
+
 def f(x, w):
     return x @ w
+
 
 y = f(x, w)
 y_vmap = slope.vmap(f)(x, w)

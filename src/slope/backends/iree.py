@@ -16,7 +16,7 @@ from slope.core import (
     devices,
     DType,
     Device,
-    CodegenOut,
+    CodegenOutput,
 )
 
 import math
@@ -157,7 +157,7 @@ class IREEBackend(Backend):
         if fn_name == "main":
             del self.fn_count
         assert len(outs) == len(program.outs)
-        return CodegenOut(
+        return CodegenOutput(
             code_lines=code_lines,
             fn_defs=fn_defs,
             in_binders=in_binders,
@@ -178,25 +178,25 @@ class IREEBackend(Backend):
         )
         name = slope.core.jit.get_jit_name(tuple(symvals_in), params)
         if name not in fn_defs.keys():
-            op_codegen_out: CodegenOut = self.codegen(
+            op_codegen_output: CodegenOutput = self.codegen(
                 op_program,
                 args,
                 fn_name=name,
                 fn_defs=fn_defs,
             )
-            fn_defs = {**fn_defs, **op_codegen_out.fn_defs}
-            fn_defs[name] = op_codegen_out.code_lines
+            fn_defs = {**fn_defs, **op_codegen_output.fn_defs}
+            fn_defs[name] = op_codegen_output.code_lines
         in_names = ", ".join(f"%{i.name}" for i in in_vals)
         out_names = ", ".join(f"%{o.name}" for o in out_vals)
         sig = annotate_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
         impl_code = f"{out_names} = func.call @{name}({in_names}) : {sig}"
         return impl_code, fn_defs
 
-    def compile(self, codegen_out):
-        code_lines = codegen_out.code_lines
+    def compile(self, codegen_output):
+        code_lines = codegen_output.code_lines
         code = "\n".join(code_lines)
         instance = iree.runtime.VmInstance()
-        device = codegen_out.outs[0].device
+        device = codegen_output.outs[0].device
         iree_device = iree.runtime.get_device(self.device_map[device])
         hal_module = iree.runtime.create_hal_module(instance, iree_device)
         binary = iree.compiler.compile_str(
@@ -209,17 +209,17 @@ class IREEBackend(Backend):
         finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
         return finv, code
 
-    def export(self, jit_object, output_path, *args, **kwargs):
+    def export(self, jit_output, output_path, export_params, input_names, output_names, **kwargs):
         # iree.compiler.core.DEFAULT_TESTING_BACKENDS
         target_backends = kwargs.get("target_backends", "llvm-cpu")
         if isinstance(target_backends, str):
             target_backends = (target_backends,)
         os.makedirs(output_path, exist_ok=True)
 
-        code_lines = jit_object.codegen_out.code_lines[:]
-        in_binders = jit_object.codegen_out.in_binders
-        outs = jit_object.codegen_out.outs
-        num_consts = jit_object.program.num_consts
+        code_lines = jit_output.codegen_output.code_lines[:]
+        in_binders = jit_output.codegen_output.in_binders
+        outs = jit_output.codegen_output.outs
+        num_consts = jit_output.program.num_consts
         with tempfile.NamedTemporaryFile(mode="w+") as f:
             for i in range(num_consts):
                 const_pattern = f"%{in_binders[i].name}: {annotate_shape(in_binders[i].symval)}"
@@ -294,14 +294,14 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
     jit_program = instruction.params["program"]
     jit_name = f"{jit_program.name}"
     if jit_name not in fn_defs.keys():
-        jit_codegen_out = self.codegen(
+        jit_codegen_output = self.codegen(
             jit_program,
             args,
             fn_name=jit_name,
             fn_defs=fn_defs,
         )
-        fn_defs[jit_name] = jit_codegen_out.code_lines
-        fn_defs = {**fn_defs, **jit_codegen_out.fn_defs}
+        fn_defs[jit_name] = jit_codegen_output.code_lines
+        fn_defs = {**fn_defs, **jit_codegen_output.fn_defs}
     args_str = ", ".join(i.name for i in in_vals)
     sig = annotate_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
     impl_code = f"{', '.join(o.name for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"
@@ -643,7 +643,7 @@ def conv_impl(self, x, w, y, *, groups, stride, dilation, padding):
 
 # @backend.set_impl(backend.operator_set.where)
 # def where_impl(self, x, w, u, y):
-    # return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {annotate_sig((x.symval,w.symval,u.symval), y.symval)}"""
+# return f"""%{y.name} = "stablehlo.select"(%{x.name}, %{w.name}, %{u.name}) : {annotate_sig((x.symval,w.symval,u.symval), y.symval)}"""
 
 
 @backend.set_impl(backend.operator_set.gather_nd)
@@ -689,8 +689,9 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     w_fixed = (
         w.symval
         if w_arange is None
-        else w.symval.like(shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)),
-                           dtype=dtypes.int32)
+        else w.symval.like(
+            shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)), dtype=dtypes.int32
+        )
     )
     w_affix = "" if w_arange is None else "_"
     y_fixed = y.symval if y_reshape is None else y_reshape
@@ -721,15 +722,15 @@ def scatter_nd_impl(self, x, w, u, y):
     s = u.symval.ndim
     # index_vector_dim = q - 1
     # update_window_dims = list(range(index_vector_dim, r))
-    # inserted_window_dims = [0] 
+    # inserted_window_dims = [0]
     # scatter_dims_to_operand_dims = [0]
 
     index_vector_dim = q - 1
     update_window_dims = list(range(index_vector_dim, r)) if q <= s else []
     # update_window_dims = []
-    inserted_window_dims = list(range(r+1-s))
-    scatter_dims_to_operand_dims = list(range(r+1-s))
-    
+    inserted_window_dims = list(range(r + 1 - s))
+    scatter_dims_to_operand_dims = list(range(r + 1 - s))
+
     # if s <= r:
     #     index_vector_dim = 1
     #     update_window_dims = list(range(index_vector_dim, r))
@@ -738,9 +739,8 @@ def scatter_nd_impl(self, x, w, u, y):
     # else:
     #     index_vector_dim = q - 1
     #     update_window_dims = list(range(index_vector_dim, r))
-    #     inserted_window_dims = [0] 
+    #     inserted_window_dims = [0]
     #     scatter_dims_to_operand_dims = [0]
-        
 
     return f"""%{y.name} = "stablehlo.scatter"(%{x.name}, %{w.name}, %{u.name}) ({{
   ^bb0(%arg0: {y_mlir_type}, %arg1: {y_mlir_type}):

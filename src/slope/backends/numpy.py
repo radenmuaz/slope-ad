@@ -73,7 +73,7 @@ class NumpyBackend(Backend):
 
     def from_numpy(self, val, dtype=None, device=None):
         dtype = dtype or self.DEFAULT_DTYPE
-        return Tensor(TensorBuffer(np.array(val, dtype=dtype.numpy)))
+        return Tensor(TensorBuffer(np.array(val, dtype=self.dtype_map[dtype])))
 
     def numpy_of(self, tensor: Tensor, memmap=False):
         if not memmap:
@@ -214,7 +214,7 @@ class NumpyBackend(Backend):
             input_name = in_binders[i].name
             input_shape = in_binders[i]["type"].shape
             dtype = in_binders[i]["type"].dtype
-            input_dtype = self.dtype_map(dtype)
+            input_dtype = f"{'np.' if dtype is not dtypes.bool else ''}{self.dtype_map(dtype)}"
             test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
 
         module_path = os.path.join(output_path, "__init__.py")
@@ -281,7 +281,7 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
 
 @backend.set_impl(operator_set.cast)
 def cast_impl(self, x, y, *, dtype):
-    return f"{y.name} = {x.name}.astype(np.{self.dtype_map[dtype]})"
+    return f"{y.name} = {x.name}.astype({'np.' if dtype is not dtypes.bool else ''}{self.dtype_map[dtype]})"
 
 
 @backend.set_impl(backend.operator_set.stop_gradient)
@@ -311,7 +311,7 @@ def sin_impl(self, x, y):
 
 @backend.set_impl(backend.operator_set.invert)
 def invert_impl(self, x, y):
-    return f"{y.name} = ~{x.name})"
+    return f"{y.name} = ~{x.name}"
 
 
 @backend.set_impl(backend.operator_set.add)
@@ -326,7 +326,7 @@ def sub_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.mul)
 def mul_impl(self, x, w, y):
-    return f"{y.name} ={x.name} * {w.name}"
+    return f"{y.name} = {x.name} * {w.name}"
 
 
 @backend.set_impl(backend.operator_set.div)
@@ -381,23 +381,23 @@ def max_impl(self, x, y, *, dim, keepdim):
 
 @backend.set_impl(operator_set.arange)
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
-    return f"{y.name} = np.arange({start}, {stop}, {stride}, dtype=np.{self.dtype_map[dtype]})"
+    return f"{y.name} = np.arange({start}, {stop}, {stride}, dtype={'np.' if dtype is not dtypes.bool else ''}{self.dtype_map[dtype]})"
 
 
 @backend.set_impl(operator_set.full)
 def full_impl(self, y, *, shape, fill_value, dtype, device):
-    return f"{y.name} = np.full({shape}, {fill_value}, np.{self.dtype_map[dtype]})"
+    return f"{y.name} = np.full({shape}, {fill_value}, dtype={'np.' if dtype is not dtypes.bool else ''}{self.dtype_map[dtype]})"
 
 
 @backend.set_impl(operator_set.random_uniform)
 def random_uniform_impl(self, y, *, shape, dtype, device):
     if len(shape) > 0:
-        return f"{y.name} = {'np.array(' if shape == () else ''}np.random.uniform(low=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype=np.{self.dtype_map[dtype]})"
+        return f"{y.name} = {'np.array(' if shape == () else ''}np.random.uniform(low=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={'np.' if dtype is not dtypes.bool else ''}{self.dtype_map[dtype]})"
 
 
 @backend.set_impl(operator_set.random_normal)
 def random_normal_impl(self, y, *, shape, dtype, device):
-    return f"{y.name} = {'np.array(' if shape == () else ''}np.random.normal(low=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype=np.{self.dtype_map[dtype]})"
+    return f"{y.name} = {'np.array(' if shape == () else ''}np.random.normal(loc=np.zeros(shape={shape})){')' if shape == () else ''}.astype(dtype={'np.' if dtype is not dtypes.bool else ''}{self.dtype_map[dtype]})"
 
 
 @backend.set_impl(operator_set.pad)

@@ -461,6 +461,8 @@ def sum_impl(self, x, y, *, dim, keepdim):
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
 }} : {annotate_sig((x.symval, y_init_type), y_out_type)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {annotate_sig((y_out_type,), y.symval)}' if keepdim else ''}"""
+
+
 #   dimensions = array<i64: {repr(list(dim))[1:-1]}>
 
 

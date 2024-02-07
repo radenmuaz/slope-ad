@@ -545,7 +545,7 @@ class Flip(ShapeOperator):
         if dim is None:
             dim = tuple(range((x.ndim)))
         # elif len(dim) == 0:
-            # dim = tuple(range((x.ndim)))
+        # dim = tuple(range((x.ndim)))
         elif type(dim) is int:
             dim = (dim,)
         elif type(dim) is list:

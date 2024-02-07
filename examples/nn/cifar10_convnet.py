@@ -60,7 +60,8 @@ if __name__ == "__main__":
     test_batch_size = 100
     train_images, train_labels, test_images, test_labels = get_cifar10()
 
-    model = resnet(depth=8)
+    # model = resnet(depth=8)
+    model = resnet(depth=20)
     # optimizer = nn.AdamW(model, lr=0.05)#,weight_decay=1e-5)
     optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-5)
     # optimizer = nn.SGD(model, lr=0., momentum=0., weight_decay=0)

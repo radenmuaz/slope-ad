@@ -73,7 +73,7 @@ class ONNXRuntimeBackend(Backend):
 
     device_map = {
         devices.cpu: "cpu:0",
-        devices.metal: "cpu:0",
+        devices.metal: "cpu:1",
         devices.cuda0: "cuda:0",
     }
 
@@ -122,7 +122,8 @@ class ONNXRuntimeBackend(Backend):
 
     def device_of(self, tensor: Tensor):
         # TODO: get device idx
-        return self.device_map_inv[f"{tensor.buf.val.device_name()}:0"]
+        idx = 0 if self.DEFAULT_DEVICE is not devices.metal else 1
+        return self.device_map_inv[f"{tensor.buf.val.device_name()}:{idx}"]
 
     def codegen(self, program: Program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
         if fn_name == "main":

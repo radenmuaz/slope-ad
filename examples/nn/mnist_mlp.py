@@ -17,7 +17,6 @@ def loss_fn(model, batch):
     preds = model(x)
     return -(preds.log_softmax(-1) * y_onehot).sum()
 
-
 value_and_gloss_fn = slope.value_and_grad(loss_fn)
 
 
@@ -34,11 +33,6 @@ def test_all(model, x, y):
     y_hat = out.argmax(-1)
     corrects = (y_hat == y).cast(slope.float32)
     accuracy = corrects.mean()
-
-    # y_hat = np.argmax(out.numpy() ,-1)
-    # corrects = (y_hat == y.numpy()).astype(np.float32)
-    # accuracy = np.mean(corrects)
-
     return accuracy
 
 
@@ -55,6 +49,7 @@ class Net(nn.Module):
         x = self.act(x)
         x = self.linear2(x)
         return x
+
 
 
 if __name__ == "__main__":

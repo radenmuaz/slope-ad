@@ -48,7 +48,7 @@ def annotate_sig(in_symvals, out_symvals):
     return sig
 
 
-class ONNXRuntimeBackendackend(Backend):
+class ONNXRuntimeBackend(Backend):
     dtype_for_indices = dtypes.int64
     dtype_map = {
         slope.core.dtypes.float32: "float",
@@ -72,12 +72,14 @@ class ONNXRuntimeBackendackend(Backend):
     }
 
     device_map = {
-        devices.cpu: "cpu",
+        devices.cpu: "cpu:0",
+        devices.metal: "cpu:0",
         devices.cuda0: "cuda:0",
     }
 
     target_map = {
         devices.cpu: "CPUExecutionProvider",
+        devices.metal: "CoreMLExecutionProvider",
         devices.cuda0: "CUDAExecutionProvider",
     }
 
@@ -98,9 +100,9 @@ class ONNXRuntimeBackendackend(Backend):
         dtype = dtype or self.DEFAULT_DTYPE
         device = device or self.DEFAULT_DEVICE
         onnx_device = self.device_map[device]
-        device_type, device_id = onnx_device.split(":") if ":" in onnx_device else (onnx_device, 0)
+        device_type, device_id = onnx_device.split(":")
         np_val = np.array(val, dtype=dtype.numpy)
-        val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=device_id)
+        val = onnxruntime.OrtValue.ortvalue_from_numpy(np_val, device_type=device_type, device_id=int(device_id))
         return Tensor(TensorBuffer(val))
 
     def numpy_of(self, tensor: Tensor, memmap=False):
@@ -119,7 +121,8 @@ class ONNXRuntimeBackendackend(Backend):
         return self.dtype_map_inv[dtype_str]
 
     def device_of(self, tensor: Tensor):
-        return self.device_map_inv[tensor.buf.val.device_name()]
+        # TODO: get device idx
+        return self.device_map_inv[f"{tensor.buf.val.device_name()}:0"]
 
     def codegen(self, program: Program, args, *, fn_name: str = "main", fn_defs=dict()) -> List[Any]:
         if fn_name == "main":
@@ -247,7 +250,8 @@ class ONNXRuntimeBackendackend(Backend):
                     buffer_ptr=a.data_ptr(),
                 )
             for out in codegen_output.outs:
-                io_binding.bind_output(out.name, self.device_map[device])
+                device_type, device_id = self.device_map[out.device].split(":")
+                io_binding.bind_output(out.name, device_type, int(device_id))
             run_options = onnxruntime.RunOptions()
             run_options.log_severity_level = 3
             session.run_with_iobinding(io_binding, run_options)

@@ -68,12 +68,14 @@ class IREEBackend(Backend):
     }
     device_map = {
         devices.cpu: "local-task",
-        devices.cuda0: "cuda",
+        devices.cuda: "cuda",
+        devices.metal: "metal",
     }
 
     target_map = {
         devices.cpu: "llvm-cpu",
-        devices.cuda0: "cuda",
+        devices.cuda: "cuda",
+        devices.metal: "metal",
     }
 
     dtype_map_inv = {v: k for k, v in dtype_map.items()}
@@ -202,11 +204,13 @@ class IREEBackend(Backend):
         binary = iree.compiler.compile_str(
             code,
             target_backends=(self.target_map[device],),
+            # optimize=False,
+            # extra_args=["--aarch64-use-aa"]
         )
         m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
         context = iree.runtime.VmContext(instance, modules=[hal_module, m])
         f = m.lookup_function("main")
-        finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
+        finv = iree.runtime.FunctionInvoker(context, iree_device, f)
         return finv, code
 
     def export(self, jit_output, output_path, export_params, input_names, output_names, **kwargs):
@@ -453,15 +457,17 @@ def sum_impl(self, x, y, *, dim, keepdim):
     %0 = "stablehlo.add"(%arg0, %arg1) : {annotate_sig((y_init_type, y_init_type), y_init_type)}
     "stablehlo.return"(%0) : ({y_mlir_type}) -> ()
 }}) {{
+
   dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
 }} : {annotate_sig((x.symval, y_init_type), y_out_type)}
 {f'%{y.name} = "stablehlo.reshape"(%{y.name}_) : {annotate_sig((y_out_type,), y.symval)}' if keepdim else ''}"""
+#   dimensions = array<i64: {repr(list(dim))[1:-1]}>
 
 
 @backend.set_impl(backend.operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
     min_val = {
-        dtypes.float32: "1.E-38",
+        dtypes.float32: "-1.E-38",
         dtypes.int8: "-128",
         dtypes.int32: "-65536",
     }[x.symval.dtype]
@@ -562,7 +568,7 @@ def random_normal_impl(self, y, *, shape, dtype, device):
 @backend.set_impl(backend.operator_set.expand)
 def expand_impl(self, x, y, *, shape):
     return f"""%{y.name} = "stablehlo.broadcast_in_dim"(%{x.name}) {{
-        broadcast_dimensions = dense<{repr(list(range(len(shape))))}>: tensor<{len(shape)}xi64>
+        broadcast_dimensions = array<i64: {repr(list(range(len(shape))))[1:-1]}>
         }} : {annotate_sig(( x.symval,), y.symval)}
 """
 
@@ -580,9 +586,9 @@ def pad_impl(self, x, y, *, padding, mode, value):
     hi = padding[1::2][::-1]
     return f"""%{y.name}_value = stablehlo.constant dense<{value}> : {annotate_shape(value_type)}
 %{y.name} = "stablehlo.pad"(%{x.name}, %{y.name}_value) {{
-  edge_padding_low = dense<{repr(list(lo))}> : tensor<{len(lo)}xi64>,
-  edge_padding_high = dense<{repr(list(hi))}> : tensor<{len(hi)}xi64>,
-  interior_padding = dense<{repr([0]*len(lo))}> : tensor<{len(lo)}xi64>
+  edge_padding_low = array<i64: {repr(list(lo))[1:-1]}>,
+  edge_padding_high = array<i64: {repr(list(hi))[1:-1]}>,
+  interior_padding = array<i64: {repr([0]*len(lo))[1:-1]}>
 }} : {annotate_sig((x.symval, value_type), y.symval)}
 """
 
@@ -590,9 +596,9 @@ def pad_impl(self, x, y, *, padding, mode, value):
 @backend.set_impl(backend.operator_set.slice)
 def slice_impl(self, x, y, *, starts, limits, strides):
     return f"""%{y.name} = "stablehlo.slice"(%{x.name}) {{
-  start_indices = dense<{repr(list(starts))}> : tensor<{len(starts)}xi64>,
-  limit_indices = dense<{repr(list(limits))}> : tensor<{len(limits)}xi64>,
-  strides = dense<{repr(list(strides))}> : tensor<{len(strides)}xi64>
+  start_indices = array<i64: {repr(list(starts))[1:-1]}>,
+  limit_indices = array<i64: {repr(list(limits))[1:-1]}>,
+  strides = array<i64: {repr(list(strides))[1:-1]}>
 }} : {annotate_sig((x.symval,), y.symval)}
 """
 
@@ -608,14 +614,14 @@ def cat_impl(self, *xs, dim):
 @backend.set_impl(backend.operator_set.permute)
 def permute_impl(self, x, y, *, perm):
     return f"""%{y.name} = "stablehlo.transpose"(%{x.name}) {{
-  permutation = dense<{repr(list(perm))}> : tensor<{len(perm)}xi64>
+  permutation =  array<i64: {repr(list(perm))[1:-1]}>
 }} : {annotate_sig((x.symval,), y.symval)}"""
 
 
 @backend.set_impl(backend.operator_set.flip)
 def flip_impl(self, x, y, *, dim):
     return f"""%{y.name} = "stablehlo.reverse"(%{x.name}) {{
-  dimensions = dense<{repr(list(dim))}> : tensor<{len(dim)}xi64>
+  dimensions =  array<i64: {repr(list(dim))[1:-1]}>
 }}  : {annotate_sig((x.symval,), y.symval)}
 """
 

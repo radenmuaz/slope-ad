@@ -220,15 +220,12 @@ class Device(NamedTuple):
 
 
 class devices:
-    cpu0: Final[Device] = Device("cpu", 0)
+    cpu: Final[Device] = Device("cpu", 0)
+    metal: Final[Device] = Device("metal", 0)
     cuda0: Final[Device] = Device("cuda", 0)
-    cuda1: Final[Device] = Device("cuda", 1)
-    cuda2: Final[Device] = Device("cuda", 2)
-    cuda3: Final[Device] = Device("cuda", 3)
     # TODO: programmatically define this class attrs to support other setup
-    cpu = cpu0
     cuda = cuda0
-    all_devices = (cpu0, cuda0, cuda1, cuda2, cuda3)
+    all_devices = (cpu, metal, cuda0)
     name_idx_device_map = {f"{k.name}:{k.idx}": k for k in all_devices}
     name_idx_device_map_inv = {v: k for k, v in name_idx_device_map.items()}
 

@@ -84,10 +84,8 @@ if __name__ == "__main__":
             loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             loss_numpy = float(loss.numpy())
             total_loss += loss_numpy
-            y_hat, y = np.argmax(logits.numpy(), -1), batch[1].numpy()
-            true_positives += float(np.sum(y_hat == y).astype(np.float32))
-            # y_hat, y =  logits.argmax(-1), batch[1]
-            # true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
+            y_hat, y =  logits.argmax(-1), batch[1]
+            true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             train_loss = total_loss / (i + 1)
             train_acc = true_positives / (train_batch_size * (i + 1))
             msg = (
@@ -96,9 +94,7 @@ if __name__ == "__main__":
                 f"loss: {train_loss:.4f}, acc: {train_acc:.4f}"
             )
             pbar.set_description(msg)
-        print(msg)
-
-            # if i == 5:break
+        print(msg, 'Time taken: {:02}:{:05.2f}'.format(*divmod(pbar.format_dict['elapsed'], 60)))
 
         total_loss = 0.0
         true_positives = 0.0
@@ -109,10 +105,8 @@ if __name__ == "__main__":
             ) = test_step(model, batch)
             loss_numpy = float(loss.numpy())
             total_loss += loss_numpy
-            y_hat, y = np.argmax(logits.numpy(), -1), batch[1].numpy()
-            true_positives += float(np.sum(y_hat == y).astype(np.float32))
-            # y_hat, y =  logits.argmax(-1), batch[1]
-            # true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
+            y_hat, y =  logits.argmax(-1), batch[1]
+            true_positives += float((y_hat == y).cast(slope.float32).sum().numpy())
             test_loss = total_loss / (i + 1)
             test_acc = true_positives / (test_batch_size * (i + 1))
             msg = (
@@ -120,10 +114,10 @@ if __name__ == "__main__":
             )
             pbar.set_description(msg)
             # if i == 5:break
-        if test_acc > best_acc:
-            print(f"Best accuracy {test_acc:.2f} at epoch {epoch}")
-            best_acc = test_acc
         print(msg)
+        if test_acc > best_acc:
+            print(f"  Best accuracy {test_acc:.2f} at epoch {epoch}\n")
+            best_acc = test_acc
 
 # def test_all(model, x, y):
 #     out = model(x)

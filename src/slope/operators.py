@@ -906,6 +906,7 @@ class Conv(GeneralReduceOperator):
                 .transpose(0, 1)
             )
             if gL_w.shape != w.shape:
+                print(gL_w.shape, w.shape)
                 starts = (0,) * len(gL_w.shape)
                 ends = (gL_w.shape[0], gL_w.shape[1]) + w.shape[2:]
                 gL_w = gL_w.slice(starts, ends)

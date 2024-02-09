@@ -399,13 +399,12 @@ class Linear(Module):
 
     def __call__(self, x):
         return x.linear(self.weight, self.bias)
-    
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.shape[1])
-        self.weight = slope.rand_like(self.weight)*2*stdv - stdv
-        if self.bias is not None:
-            self.bias = slope.rand_like(self.bias)*2*stdv - stdv
 
+    def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.weight.shape[1])
+        self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv
+        if self.bias is not None:
+            self.bias = slope.rand_like(self.bias) * 2 * stdv - stdv
 
 
 class Sequential(Module):
@@ -462,7 +461,7 @@ class ConvNd(Module):
         self.dilation = dilation
         self.groups = groups
         self.dims = dims
-        self.weight =  slope.zeros(out_channels, in_channels, *(kernel_size,) * dims)
+        self.weight = slope.zeros(out_channels, in_channels, *(kernel_size,) * dims)
         self.bias = slope.zeros(out_channels) if bias else None
         self.reset_parameters()
 
@@ -474,17 +473,16 @@ class ConvNd(Module):
             dilation=self.dilation,
             padding=self.padding,
         )
-    
+
     def reset_parameters(self):
         # n = self.in_channels
         # for k in self.kernel_size:
         #     n *= k
-        n = self.in_channels *  (self.kernel_size ** self.dims)
-        stdv = 1. / math.sqrt(n)
-        self.weight = slope.rand_like(self.weight)*2*stdv - stdv
+        n = self.in_channels * (self.kernel_size**self.dims)
+        stdv = 1.0 / math.sqrt(n)
+        self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv
         if self.bias is not None:
-            self.bias = slope.rand_like(self.bias)*2*stdv - stdv
-        
+            self.bias = slope.rand_like(self.bias) * 2 * stdv - stdv
 
 
 class Conv1d(ConvNd):
@@ -611,8 +609,8 @@ class BatchNorm(Module):
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
                 self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
-                # mean = self.running_mean
-                # invstd = (self.running_var + self.eps).rsqrt()
+                mean = self.running_mean
+                invstd = (self.running_var + self.eps).rsqrt()
         else:
             mean = self.running_mean
             invstd = (self.running_var + self.eps).rsqrt()

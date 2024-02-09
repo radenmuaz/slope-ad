@@ -55,6 +55,7 @@ def rand_like(y):
 def randn_like(y):
     return slope.randn(shape=y.shape, dtype=y.dtype)
 
+
 @procedure_set.register()
 def eye(dim: int, **kwargs):
     return slope.ones((dim, 1)).pad((0, dim, 0, 0)).flatten().padslice(((0, dim * dim),)).reshape(dim, dim)

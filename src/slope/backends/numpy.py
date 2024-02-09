@@ -127,8 +127,9 @@ class NumpyBackend(Backend):
         fn_args_str = ", ".join(arg_type_strs)
 
         functions_code_lines = []
-        for fn_def_code_lines in fn_defs.values():
-            functions_code_lines += [indent(line) for line in fn_def_code_lines]
+        if fn_name == "main":
+            for fn_def_code_lines in fn_defs.values():
+                functions_code_lines += [indent(line) for line in fn_def_code_lines]
 
         outs = list_map(lambda x: program.env[x], program.outs)
         out_type_strs = [f"{out.name}" for out in outs]

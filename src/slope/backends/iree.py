@@ -147,10 +147,13 @@ class IREEBackend(Backend):
         tail_code_line = [indent(f'"func.return"({out_str}): ({out_type_str}) -> ()')]
         model_code_lines = head_code_line + ["{"] + body_code_lines + tail_code_line + ["}"]
 
-        functions_code_lines = []
-        for fn_def_code_lines in fn_defs.values():
-            functions_code_lines += fn_def_code_lines
-        code_lines = model_code_lines + functions_code_lines
+        code_lines = model_code_lines
+        if fn_name == "main":
+            functions_code_lines = []
+            for fn_def_code_lines in fn_defs.values():
+                functions_code_lines += fn_def_code_lines
+            code_lines += functions_code_lines
+
         slope.core.dblog(
             f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
             enable=slope.LOG_JIT,
@@ -180,6 +183,8 @@ class IREEBackend(Backend):
         )
         name = slope.core.jit.get_jit_name(tuple(symvals_in), params)
         if name not in fn_defs.keys():
+            # if name == "jit_shape__lp_50_cm_3_cm_32_cm_32_rp__dtype_float32_shape__lp_16_cm_3_cm_3_cm_3_rp__dtype_float32_groups_1_stride__lp_1_cm_1_rp__dilation__lp_1_cm_1_rp__padding__lp_1_cm_1_cm_1_cm_1_rp__":
+            #     breakpoint()
             op_codegen_output: CodegenOutput = self.codegen(
                 op_program,
                 args,
@@ -212,7 +217,7 @@ class IREEBackend(Backend):
         f = m.lookup_function("main")
         # finv = iree.runtime.FunctionInvoker(context, iree_device, f)
         finv = iree.runtime.FunctionInvoker(context, iree_device, f, tracer=None)
-         
+
         return finv, code
 
     def export(self, jit_output, output_path, export_params, input_names, output_names, **kwargs):
@@ -306,8 +311,14 @@ def jit_op_impl(self, args, instruction, fn_defs, in_vals, out_vals):
             fn_name=jit_name,
             fn_defs=fn_defs,
         )
-        fn_defs[jit_name] = jit_codegen_output.code_lines
+        if (
+            jit_name
+            == "@jit_shape__lp_50_cm_3_cm_32_cm_32_rp__dtype_float32_shape__lp_16_cm_3_cm_3_cm_3_rp__dtype_float32_groups_1_stride__lp_1_cm_1_rp__dilation__lp_1_cm_1_rp__padding__lp_1_cm_1_cm_1_cm_1_rp__@jit_shape__lp_50_cm_3_cm_32_cm_32_rp__dtype_float32_shape__lp_16_cm_3_cm_3_cm_3_rp__dtype_float32_groups_1_stride__lp_1_cm_1_rp__dilation__lp_1_cm_1_rp__padding__lp_1_cm_1_cm_1_cm_1_rp__"
+        ):
+            breakpoint()
         fn_defs = {**fn_defs, **jit_codegen_output.fn_defs}
+        fn_defs[jit_name] = jit_codegen_output.code_lines
+
     args_str = ", ".join(i.name for i in in_vals)
     sig = annotate_sig(tuple(i.symval for i in in_vals), out_vals[0].symval)
     impl_code = f"{', '.join(o.name for o in out_vals)} = func.call @{jit_name}({args_str}) {sig}"

@@ -392,12 +392,20 @@ class Embedding(Module):
 
 
 class Linear(Module):
-    def __init__(self, in_features, out_features, bias=False, W_init=glorot_normal()):
-        self.weight = W_init((out_features, in_features))
-        self.bias = Tensor.zeros(out_features) if bias else None
+    def __init__(self, in_features, out_features, bias=False):
+        self.weight = slope.zeros(out_features, in_features)
+        self.bias = slope.zeros(out_features) if bias else None
+        self.reset_parameters()
 
     def __call__(self, x):
         return x.linear(self.weight, self.bias)
+    
+    def reset_parameters(self):
+        stdv = 1. / math.sqrt(self.weight.shape[1])
+        self.weight = slope.rand_like(self.weight)*2*stdv - stdv
+        if self.bias is not None:
+            self.bias = slope.rand_like(self.bias)*2*stdv - stdv
+
 
 
 class Sequential(Module):
@@ -444,8 +452,6 @@ class ConvNd(Module):
         dilation=1,
         groups=1,
         bias=True,
-        # W_init=glorot_normal(),
-        W_init=lambda shape: slope.randn(shape) * (math.sqrt(2.0 / (shape[0] * math.prod(shape[2:])))),
         dims=2,
     ):
         self.in_channels = in_channels
@@ -456,8 +462,9 @@ class ConvNd(Module):
         self.dilation = dilation
         self.groups = groups
         self.dims = dims
-        self.weight = W_init((out_channels, in_channels, *(kernel_size,) * dims))
+        self.weight =  slope.zeros(out_channels, in_channels, *(kernel_size,) * dims)
         self.bias = slope.zeros(out_channels) if bias else None
+        self.reset_parameters()
 
     def __call__(self, x):
         return x.conv(
@@ -467,6 +474,17 @@ class ConvNd(Module):
             dilation=self.dilation,
             padding=self.padding,
         )
+    
+    def reset_parameters(self):
+        # n = self.in_channels
+        # for k in self.kernel_size:
+        #     n *= k
+        n = self.in_channels *  (self.kernel_size ** self.dims)
+        stdv = 1. / math.sqrt(n)
+        self.weight = slope.rand_like(self.weight)*2*stdv - stdv
+        if self.bias is not None:
+            self.bias = slope.rand_like(self.bias)*2*stdv - stdv
+        
 
 
 class Conv1d(ConvNd):
@@ -480,7 +498,6 @@ class Conv1d(ConvNd):
         dilation=1,
         groups=1,
         bias=True,
-        W_init=glorot_normal(),
     ):
         super().__init__(
             in_channels,
@@ -491,7 +508,6 @@ class Conv1d(ConvNd):
             dilation,
             groups,
             bias,
-            W_init,
             dims=1,
         )
 
@@ -507,7 +523,6 @@ class Conv2d(ConvNd):
         dilation=1,
         groups=1,
         bias=True,
-        W_init=glorot_normal(),
     ):
         super().__init__(
             in_channels,
@@ -518,7 +533,6 @@ class Conv2d(ConvNd):
             dilation,
             groups,
             bias,
-            W_init,
             dims=2,
         )
 
@@ -569,7 +583,7 @@ class ConvNdTranspose(Module):
 
 
 class BatchNorm(Module):
-    def __init__(self, num_features: int, eps=1e-6, affine=True, momentum=0.1):
+    def __init__(self, num_features: int, eps=1e-5, affine=True, momentum=0.1):
         self.eps = eps
         self.momentum = momentum
 
@@ -581,9 +595,11 @@ class BatchNorm(Module):
         self.num_batches_tracked = slope.zeros(1)
 
     def __call__(self, x, training=True, track_running_stats=True):
+        # training, track_running_stats = True, False
         if training:
-            broadcast_shape = (1, -1) + (1,) * len(x.shape[2:])
-            reduce_dim = (0,) + tuple(2 + i for i in range(len(x.shape[2:])))
+            D = len(x.shape[2:])
+            broadcast_shape = (1, -1) + (1,) * D
+            reduce_dim = (0,) + tuple(2 + i for i in range(D))
             xsg = x.stop_gradient()
             mean = xsg.mean(reduce_dim)
             z = xsg - mean.reshape(broadcast_shape)

@@ -706,7 +706,10 @@ class Backend:
     LOG_TREE = int(os.environ.get("LOG_TREE", 0))
     LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
-    DEFAULT_DEVICE = devices.name_idx_device_map[os.environ.get("DEFAULT_DEVICE", "cpu:0")]
+    device_var = os.environ.get("DEFAULT_DEVICE", "cpu:0")
+    if device_var[-1] == ":":
+        device_var += ":0"
+    DEFAULT_DEVICE = devices.name_idx_device_map[device_var]
     DEFAULT_DTYPE = dtypes.name_dtype_map[os.environ.get("DEFAULT_DTYPE", "float32")]
     dtype_for_indices: DType = None  # need to override
 

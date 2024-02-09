@@ -36,13 +36,18 @@ def get_dataloader(images, labels, batch_size, shuffle=False):
     N = images.shape[0]
     perm = np.random.permutation(N) if shuffle else np.arange(N)
 
-    mean = slope.tensor([0.4913997551666284, 0.48215855929893703, 0.4465309133731618], dtype=slope.float32)[
+    mean = slope.tensor([0.4914, 0.4822, 0.4465], dtype=slope.float32)[
         None, ..., None, None
     ]
-    std = slope.tensor([0.24703225141799082, 0.24348516474564, 0.26158783926049628], dtype=slope.float32)[
+    std = slope.tensor([0.2023, 0.1994, 0.2010], dtype=slope.float32)[
         None, ..., None, None
     ]
-
+    # mean = slope.tensor([0.4913997551666284, 0.48215855929893703, 0.4465309133731618], dtype=slope.float32)[
+    #     None, ..., None, None
+    # ]
+    # std = slope.tensor([0.24703225141799082, 0.24348516474564, 0.26158783926049628], dtype=slope.float32)[
+    #     None, ..., None, None
+    # ]
     def data_iter():
         for i in range(N // batch_size):
             batch_idx = perm[i * batch_size : (i + 1) * batch_size]
@@ -55,16 +60,14 @@ def get_dataloader(images, labels, batch_size, shuffle=False):
 
 
 if __name__ == "__main__":
-    nepochs = 100
-    train_batch_size = 100  # TODO: must be multiple of dataset
-    test_batch_size = 100
+    nepochs = 40
+    train_batch_size = 50  # TODO: must be multiple of dataset
+    test_batch_size = 50
     train_images, train_labels, test_images, test_labels = get_cifar10()
 
-    # model = resnet(depth=8)
-    model = resnet(depth=20)
+    model = resnet(depth=8)
     # optimizer = nn.AdamW(model, lr=0.05)#,weight_decay=1e-5)
-    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-5)
-    # optimizer = nn.SGD(model, lr=0., momentum=0., weight_decay=0)
+    optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
 
     train_dataloader, ntrain_batches = get_dataloader(train_images, train_labels, train_batch_size, shuffle=True)
     test_dataloader, ntest_batches = get_dataloader(test_images, test_labels, test_batch_size, shuffle=False)
@@ -74,8 +77,8 @@ if __name__ == "__main__":
     for epoch in range(nepochs):
         total_loss = 0.0
         true_positives = 0.0
-        print(f"\n{model.bn1.running_mean=}")
-        print(f"{model.bn1.running_var=}\n")
+        # print(f"\n{model.bn1.running_mean=}")
+        # print(f"{model.bn1.running_var=}\n")
 
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()), total=ntrain_batches, leave=False)):
             loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
@@ -93,6 +96,7 @@ if __name__ == "__main__":
                 f"loss: {train_loss:.4f}, acc: {train_acc:.4f}"
             )
             pbar.set_description(msg)
+        print(msg)
 
             # if i == 5:break
 
@@ -119,6 +123,7 @@ if __name__ == "__main__":
         if test_acc > best_acc:
             print(f"Best accuracy {test_acc:.2f} at epoch {epoch}")
             best_acc = test_acc
+        print(msg)
 
 # def test_all(model, x, y):
 #     out = model(x)

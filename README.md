@@ -36,10 +36,12 @@ Or you can just copy `src/slope` to your projects.
 
 # Quickstart
 
+There are many examples in [examples/](examples/) folder.
+
 We start by running MNIST classifier training, [examples/nn/mnist_mlp.py](examples/nn/mnist_mlp.py)
 
 ```sh
-python example/mnist_mlp.py
+python examples/nn/mnist_mlp.py
 ```
 
 ```sh
@@ -50,8 +52,9 @@ Epoch 2 in 2.15 sec
 Test set accuracy 0.97
 ```
 
-By setting the `SLOPE_BACKEND` flag, we change the backend to either `iree` (default), `onnxruntime` and `numpy`
-We can also set `LOG_JIT=1` to verbose print the backend output
+
+By setting the `SLOPE_BACKEND` flag, we change the backend to either `iree` (default), `onnxruntime` and `numpy`.
+We can also set `LOG_JIT=1` to verbose print the backend output.
 
 ```sh
 LOG_JIT=1 SLOPE_BACKEND=onnxruntime python examples/nn/mnist_mlp.py

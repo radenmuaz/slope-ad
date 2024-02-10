@@ -210,6 +210,19 @@ for i in range(10):
 
 ```
 
+```
+0 102.412125
+1 88.60157
+2 78.322815
+3 70.644066
+4 64.883766
+5 60.54294
+6 57.25553
+7 54.75257
+8 52.83598
+9 51.359528
+```
+
 # Contributing
 
 Fork this repo and hack, and maybe do a PR, too many things need to be done (see Roadmap)

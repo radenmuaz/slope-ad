@@ -147,24 +147,27 @@ slope.core.backend.register_node(Module, Module.flatten, Module.unflatten, "Modu
 
 
 class Optimizer(Module):
-    def __init__(self, params, lr: float):
+    def __init__(self, params, lr: float, filter_fn=None):
         self.params_treedef = slope.tree_flatten(params)[1]
         self.state = Module()
         self.hp = Module()
         self.hp.lr = slope.full((), lr)
-        self.iters = slope.zeros(())
-        # self.iters = slope.ones(())
+        self.iters = slope.zeros((), dtype=slope.int32)
+        self.filter_fn = filter_fn
+        # TODO: pass a fn to tree_map to get tree binary mask of update/no-update params
 
     def step(self, p, g, *state_attrs):
         return p, state_attrs
 
-    def __call__(self, params, g_params):
+    def __call__(self, params, g_params, nan_to_zero=False):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
-        # g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
+        if nan_to_zero:
+            g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
         params_out, state = step_out_T
-        # params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
+        if nan_to_zero:
+            params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
         self.state = state
         self.iters = self.iters + 1
 
@@ -237,6 +240,115 @@ class Adam(Optimizer):
 
 AdamW = Adam
 
+# class LRScheduler(Module):
+#     def __init__(self, optim):
+#         self.optim_treedef = slope.tree_flatten(optim)[1]
+#         self.iters = slope.zeros(())
+    
+#     def step(self, lr):
+#         return (lr,)
+#         raise NotImplementedError
+    
+#     def __call__(self, optim):
+#         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, optim.hp.lr, out_leaf=True)
+#         step_out_T = slope.tree_transpose(self.optim_treedef, leaf0_treedef, step_out)
+#         optim_out = step_out_T
+#         self.iters = self.iters + 1
+#         return (optim_out, self)
+    
+class LRScheduler(Module):
+    def __init__(self):
+        self.iters = slope.zeros((), dtype=slope.int32)
+    
+    def get_lr(self, lr):
+        raise NotImplementedError
+    
+    def __call__(self, optim):
+        optim.hp.lr = self.get_lr(optim.hp.lr)
+        self.iters = self.iters + 1
+        return (optim, self)
+
+class MultiStepLR(LRScheduler):
+    def __init__(self, milestones: List[int], gamma=0.1):
+        super().__init__()
+        self.milestones = slope.tensor(milestones, dtype=slope.int32)
+        self.gamma = slope.tensor(gamma, dtype=slope.float32)
+
+    def get_lr(self, lr) -> Tensor:
+        do_step = ((self.iters == self.milestones).cast(slope.float32).sum() > 0)
+        lr_out =  slope.where(do_step, lr * self.gamma, lr)
+        return lr_out
+
+# class MultiStepLR(LR_Scheduler):
+#   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
+#     super().__init__(optimizer)
+#     self.milestones = milestones
+#     self.gamma = gamma
+
+#   def get_lr(self) -> Tensor:
+#     if self.epoch_counter.numpy()[0] not in self.milestones:
+#       return self.optimizer.lr
+#     return self.optimizer.lr * self.gamma
+
+# class ReduceLROnPlateau(LR_Scheduler):
+#   def __init__(self, optimizer: Optimizer, mode="min", factor=0.1, patience=10, threshold=1e-4, threshold_mode="rel"):
+#     assert mode in ["min", "max"] and threshold_mode in ["rel", "abs"]
+#     super().__init__(optimizer)
+#     self.mode, self.factor, self.patience, self.threshold, self.threshold_mode = mode, factor, patience, threshold, threshold_mode
+#     self.best = float('inf') if mode == "min" else float('-inf')
+#     self.bad_epoch = 0
+
+#     if mode == "min": self.threshold *= -1
+
+#   def is_better(self, current: float) -> bool:
+#     dynamic_threshold = self.best*(1+self.threshold) if self.threshold_mode == "rel" else self.best+self.threshold
+#     if self.mode == "min":
+#       return current < dynamic_threshold
+#     return current > dynamic_threshold
+
+#   def step(self, current: float) -> None:
+#     self.epoch_counter.assign(self.epoch_counter + 1).realize()
+#     if self.is_better(current):
+#       self.bad_epoch = 0
+#       self.best = current
+#     else:
+#       self.bad_epoch += 1
+
+#     if self.bad_epoch > self.patience:
+#       self.optimizer.lr *= self.factor
+#       self.bad_epoch = 0
+
+# class CosineAnnealingLR(LR_Scheduler):
+#   def __init__(self, optimizer: Optimizer, T_max: int, eta_min=0):
+#     super().__init__(optimizer)
+#     self.T_max = T_max
+#     self.eta_min = eta_min
+#     self.eta_max = optimizer.lr.numpy()[0]
+
+#   def get_lr(self) -> Tensor:
+#     return Tensor([self.eta_min + 0.5 * (self.eta_max - self.eta_min) * (1 + math.cos((self.epoch_counter.numpy()[0]/self.T_max) * math.pi))], device=self.optimizer.device)
+
+# class OneCycleLR(LR_Scheduler):
+#   def __init__(self, optimizer: Optimizer, max_lr: float, div_factor: float, final_div_factor: float, total_steps: int, pct_start: float,
+#                anneal_strategy: str = 'linear', cycle_momentum: bool = False):
+#     super().__init__(optimizer)
+#     self.initial_lr = max_lr / div_factor
+#     self.max_lr = max_lr
+#     self.min_lr = self.initial_lr / final_div_factor
+#     self.total_steps = total_steps
+#     self.pct_start = pct_start
+#     assert anneal_strategy == 'linear', 'only linear annealing supported'
+#     assert not cycle_momentum, 'cycle momentum not supported'
+#     self.optimizer.lr.assign(self.get_lr()).realize() # update the initial LR
+
+#   @staticmethod
+#   def _annealing_linear(start: float, end: float, pct: Tensor) -> Tensor: return (pct*(end-start)+start)
+
+#   def get_lr(self) -> Tensor:
+#     return (self.epoch_counter < self.total_steps*self.pct_start).where(
+#       self._annealing_linear(self.initial_lr, self.max_lr, self.epoch_counter/(self.total_steps*self.pct_start)),
+#       self._annealing_linear(self.max_lr, self.min_lr, (self.epoch_counter-(self.total_steps*self.pct_start))/(self.total_steps*(1-self.pct_start)))
+#     )
 
 # ====================
 # Init
@@ -600,7 +712,7 @@ class BatchNorm(Module):
 
         self.running_mean = slope.zeros(num_features)
         self.running_var = slope.ones(num_features)
-        self.num_batches_tracked = slope.zeros(1)
+        # self.num_batches_tracked = slope.zeros((), dtype=slope.int32)
 
     def __call__(self, x, training=True, track_running_stats=True):
         if training:
@@ -616,7 +728,7 @@ class BatchNorm(Module):
                 z_ratio = (z_numel / (z_numel - z.shape[1])) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
                 self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
-                self.num_batches_tracked = self.num_batches_tracked + 1
+                # self.num_batches_tracked = self.num_batches_tracked + 1
         else:
             mean = self.running_mean
             invstd = (self.running_var + self.eps).rsqrt()

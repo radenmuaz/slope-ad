@@ -566,6 +566,23 @@ class BinaryOperator(Operator):
             x = w._trace.pure(x)
         elif type(w) is Tensor and isinstance(x, TraceTensor):
             w = x._trace.pure(w)
+        # TODO: https://jax.readthedocs.io/en/latest/type_promotion.html
+        if x.dtype != w.dtype:
+            # {int, bool} -> float
+            if dtypes.is_float(x.dtype) ^ dtypes.is_float(w.dtype):
+                if dtypes.is_float(w.dtype):
+                    x = x.cast(w.dtype)
+                elif dtypes.is_float(x.dtype):
+                    w = w.cast(x.dtype)
+            # bool -> int
+            elif dtypes.is_int(x.dtype) ^ dtypes.is_int(w.dtype):
+                if dtypes.is_int(w.dtype):
+                    x = x.cast(w.dtype)
+                elif dtypes.is_int(x.dtype):
+                    w = w.cast(x.dtype)
+            else: # TODO: fine-grained type promotions
+                raise NotImplementedError("No other type promotion rules")
+
         return (x, w), params
 
     def vmap(self, dim_size, vals_in, dims_in, **params):

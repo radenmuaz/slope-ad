@@ -211,16 +211,16 @@ class IREEBackend(Backend):
         binary = iree.compiler.compile_str(
             code,
             target_backends=(self.target_map[device],),
-            optimize=False,
-            extra_args=[
-                "--cost-kind=latency",
-                "--iree-codegen-llvmcpu-enable-transform-dialect-jit",
-                "--iree-llvmcpu-loop-interleaving",
-                "--iree-llvmcpu-loop-unrolling",
-                "--iree-llvmcpu-loop-vectorization",
-                "--iree-llvmcpu-target-cpu=host",
-                "--iree-llvmcpu-target-cpu-features=host"
-                ]
+            # optimize=False,
+            # extra_args=[
+            #     "--cost-kind=latency",
+            #     "--iree-codegen-llvmcpu-enable-transform-dialect-jit",
+            #     "--iree-llvmcpu-loop-interleaving",
+            #     "--iree-llvmcpu-loop-unrolling",
+            #     "--iree-llvmcpu-loop-vectorization",
+            #     "--iree-llvmcpu-target-cpu=host",
+            #     "--iree-llvmcpu-target-cpu-features=host"
+            #     ]
         )
         m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
         context = iree.runtime.VmContext(instance, modules=[hal_module, m])

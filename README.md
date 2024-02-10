@@ -2,18 +2,25 @@
 
 # Slope
 
-Slope is a small automatic differentation (AD) engine, focused on machine learning (ML), supports forward-mode, reverse-mode, and higher-order AD.
-Syntax is similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
+Slope is a small automatic differentation (AD) engine, focused on machine learning (ML),
 
-The backend is interchangeable, currently supports compiling to:
-1. StableHLO MLIR IREE
-2. ONNX Runtime
-3. NumPy
+## Features
 
-Slope aims to be a hackable thin ML middleware -- you can go up and use Slope as building blocks to write NN modules, classes, trainer, self-attention, etc. yet you can go down to define new operators, backends and extend the core in `src/slope/{core.py, operators.py, procedures.py, nn.py, backends}`
+1. Forward-mode, reverse-mode, and higher-order AD.
+2. Interchangeable backends, currently supports compiling to:
+    - [IREE](https://iree.dev/) (StableHLO MLIR)
+    - [ONNX Runtime](https://onnxruntime.ai/) (ONNX)
+    - NumPy
+3. Syntax is similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
+4. Small (?)
+  - <3000 lines of core code [slope/core.py](./src/slope/core.py), which supports higher-order derivatives and just-in-time compilation.
+  - Operator set defined in [slope/operators.py](./src/slope/operators.py): `add, mul, matmul, max` and so on.
+  - Composite operators "procedures" [slope/procedures.py](./src/slope/procedures.py): 
+  - Add new backends, see [slope/backends](./src/slope/backends)
+  - NN module [slope/nn.py](./src/slope/nn.py)
 
 ### What works
-- cuda and metal on iree and onnxruntime backend
+- CUDA and Metal on IREE backend and ONNXRuntime backend
 - MNIST training on MLP [code](examples/nn/mnist_mlp.py)
 - CIFAR-10 training on ResNet [code](examples/nn/mnist_mlp.py)
 

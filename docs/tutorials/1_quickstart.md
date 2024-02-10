@@ -1,34 +1,40 @@
-# Quickstart
+# Slope internals tutorial
 
-Slope is an automatic diffentation (AD) library, where the Tensor semantics feel like pytorch, but AD semantics feels like JAX (maybe also functorch)
+## Slope has familiar Pytorch-like syntax
 
-# Slope have familiar Pytorch-like syntax
-
-Most of the things you aer familiar in Pytorch works in Slope, probably.
+Most of the things familiar in Pytorch works in Slope, probably.
 
 ```python
 import slope
-x = torch.ones(2, 5)
-w = torch.arange(15).reshape(5,3)
-b = torch.tensor([1., 2., 3.], dtype=slope.float32)
-y = x @ w
+x = slope.ones(2, 5)
+w = slope.arange(15, dtype=slope.float32).reshape(5,3)
+b = slope.tensor([1., 2., 3.], dtype=slope.float32)
+y = x @ w + b
 print(y)
 ```
 
+## Every operations are compiled with slope.jit
+
+
+Actually when these lines are run, each operation calls jitted as individual programs eagerly.
+Try running this on terminal:
+```sh
+LOG_JIT=1 python -c "import slope; print(slope.ones(3)*2)"
 ```
 
+```sh
+...
+---- full_shape__lp__rp__fill_value_2_dt_0_dtype_<DType:float32>_device_<Device:'cpu:0'>_ codegen:
+
+func.func @main () -> (tensor<f32>)
+{
+    %y0 = "stablehlo.constant"() { value = dense<2.0> : tensor<f32> } : () -> (tensor<f32>)
+    "func.return"(%y0): (tensor<f32>) -> ()
+}
+... # plenty of outputs
+....
 ```
 
-# Every operations are compiled with slope.jit
-
-
-Actually these lines when run, are jitted as individual programs eagerly
-
-```python
-
-x = torch.full((1,), 2.)
-x = x + 1
-```
 
 To prevent eager jit, write code in function and use slope.jit.
 Then call the function
@@ -37,66 +43,88 @@ Then call the function
 def f(x):
     y = x * x
     return y
-# Also works if prefer not using @slope.jit decorator
-#f = slope.jit(f)
+# Alternative way to jit
+# f = slope.jit(f)
 
-# Then call the jitted function
 x = slope.full((1,), 2.)
 y = f(x)
+print(y)
 ```
 
-```
-
-```
-
-# Reveal contents of jitted function
-
-A decorated function with `slope.jit` is an instance object of `slope.core.Machine.jit`,
-It has several utility methods for printing the generated backend code and exporting the function
-
+To see the actual code:
 ```python
-f_jitobj = f.jit_program(x)
-print(f_jitobj.code)
-f_jitobj.export('./f_export_folder') # see the folder of what are exported.
+jit_object = f.lower(x)
+# slope Program intermediate representation
+print(jit_object.program)
+# backend code
+print(jit_object.code)
+```
+```sh
+def f(x0): # [1, f32] -> [1, f32]
+    y0 = slope.mul(x0, x0) # ([1, f32], [1, f32]) -> [1, f32]
+    return y0
+```
+```sh
+
+func.func @main (%x0: tensor<1xf32>) -> (tensor<1xf32>)
+{
+    %y0 = "stablehlo.multiply"(%x0, %x0) : (tensor<1xf32>,tensor<1xf32>) -> (tensor<1xf32>)
+    "func.return"(%y0): (tensor<1xf32>) -> ()
+}
 ```
 
 # Derivatives and gradients
 
-Slope has several AD functions, like `slope.jvp` `slope.jvp` and `slope.grad`
+Slope has several AD functions, like `slope.jvp` `slope.vjp` and `slope.grad`
 
 To do the usual backprop things:
 ```python
-def model_foward(x, w):
+def f(x, w):
     y = x @ w
     return y
-
-def loss_fn(y_hat, y):
+def loss_fn(x, w, y):
+    y_hat = f(x,w)
     return ((y_hat - y)**2).sum()
-gloss_fn = slope.grad(loss_fn, argnums=(0, 1))
+gloss_fn = slope.value_and_grad(loss_fn, argnums=(1,))
 
 @slope.jit
 def train_step(x, w, y, lr):
-    y_hat = model_forward(x, w, b)
-    loss, (gw,) = gloss_fn(y_hat, y)
+    loss, gw = gloss_fn(x, w, y)
     w = w - lr * gw
-    return w
+    return loss, w
 
 N = 50
-x = torch.randn(N, 2)
-y = torch.randn(N, 1)
-w = torch.randn(1, 5)
-w0 = w
-lr = torch.tensor([0.001])
+x = slope.randn(N, 2)
+y = slope.randn(N, 1)
+w = slope.randn(2, 1)
+lr = slope.tensor([0.001])
 for i in range(10):
-    w = train_step(x, w, y, lr)
+    loss, w = train_step(x, w, y, lr)
+    print(i, loss.numpy())
 
 ```
 
-# That's about it
+```
+0 102.412125
+1 88.60157
+2 78.322815
+3 70.644066
+4 64.883766
+5 60.54294
+6 57.25553
+7 54.75257
+8 52.83598
+9 51.359528
+```
 
-Check out examples in `examples/simple` for more short snippets.
+# Contributing
 
-`slope/nn.py` provides example nn.Module system like in Pytorch, but with usage API like JAX
-MNIST classifier example is in `example/mnist_mlp.py`
+Fork this repo and hack, and maybe do a PR, too many things need to be done (see Roadmap)
+Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 
-You are encourage to read the source, starting from `slope/__init__.py`, `slope/core.py` and `slope/backends/numpy_backend.py`
+# Roadmap
+- iree backend currently has fixed seed random, implement threefry and JAX-like random
+- make things fast
+- llama (gpt) training
+- whisper inference
+- core tests, operators tests on all Trace types

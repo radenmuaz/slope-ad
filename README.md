@@ -1,10 +1,6 @@
-```
-   /|s
-  / |l
- /  |o
-/___|p 
- slope
-```
+![some bing AI image](assets/logo.jpeg =200x200)
+
+# Slope
 
 Slope is a small automatic differentation (AD) engine, focused on machine learning (ML), supports forward-mode, reverse-mode, and higher-order AD.
 Syntax is similar to Pytorch, functional API is similar to (JAX)[https://github.com/google/jax], tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).

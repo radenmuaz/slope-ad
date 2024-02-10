@@ -30,6 +30,9 @@ from slope.operators import operator_set
 from slope.procedures import procedure_set
 import tempfile
 import importlib
+import pygments
+from pygments.lexers.python import PythonLexer
+from pygments.formatters import Terminal256Formatter
 
 
 def annotate_shape(symval):
@@ -137,10 +140,9 @@ class NumpyBackend(Backend):
         head_code_line = [f"def {fn_name}({fn_args_str}): # ({out_type_str})"]
         return_line = [indent(f"return {out_type_str}")]
         code_lines = head_code_line + functions_code_lines + body_code_lines + return_line
-        slope.dblog(
-            f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
-            enable=slope.LOG_JIT,
-        )
+        if slope.LOG_JIT:
+            formatted_code = pygments.highlight("\n".join(code_lines), PythonLexer(), Terminal256Formatter())
+            slope.core.dblog(f"\n---- {program.name} codegen:\n\n" + formatted_code + "\n\n===============\n")
 
         if fn_name == "main":
             del self.fn_count

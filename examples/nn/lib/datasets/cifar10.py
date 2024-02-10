@@ -35,9 +35,7 @@ def get_cifar10():
         return images, labels
 
     tt = tarfile.open(save_path, mode="r:gz")
-    db_list_train = [
-        pickle.load(tt.extractfile(f"cifar-10-batches-py/data_batch_{i}"), encoding="bytes") for i in range(1, 6)
-    ]
+    db_list_train = [pickle.load(tt.extractfile(f"cifar-10-batches-py/data_batch_{i}"), encoding="bytes") for i in range(1, 6)]
     db_list_test = [pickle.load(tt.extractfile("cifar-10-batches-py/test_batch"), encoding="bytes")]
     train_images, train_labels = get_split(db_list_train)
     test_images, test_labels = get_split(db_list_test)

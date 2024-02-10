@@ -32,6 +32,9 @@ import os
 from slope.operators import operator_set
 from slope.procedures import procedure_set
 import tempfile
+import pygments
+from pygments.lexers.jvm import JavaLexer
+from pygments.formatters import Terminal256Formatter
 
 
 def annotate_shape(symval):
@@ -154,10 +157,9 @@ class IREEBackend(Backend):
                 functions_code_lines += fn_def_code_lines
             code_lines += functions_code_lines
 
-        slope.core.dblog(
-            f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
-            enable=slope.LOG_JIT,
-        )
+        if slope.LOG_JIT:
+            formatted_code = pygments.highlight("\n".join(code_lines), JavaLexer(), Terminal256Formatter())
+            slope.core.dblog(f"\n---- {program.name} codegen:\n\n" + formatted_code + "\n\n===============\n")
 
         if fn_name == "main":
             del self.fn_count
@@ -209,8 +211,16 @@ class IREEBackend(Backend):
         binary = iree.compiler.compile_str(
             code,
             target_backends=(self.target_map[device],),
-            # optimize=False,
-            # extra_args=["--aarch64-use-aa"]
+            optimize=False,
+            extra_args=[
+                "--cost-kind=latency",
+                "--iree-codegen-llvmcpu-enable-transform-dialect-jit",
+                "--iree-llvmcpu-loop-interleaving",
+                "--iree-llvmcpu-loop-unrolling",
+                "--iree-llvmcpu-loop-vectorization",
+                "--iree-llvmcpu-target-cpu=host",
+                "--iree-llvmcpu-target-cpu-features=host"
+                ]
         )
         m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
         context = iree.runtime.VmContext(instance, modules=[hal_module, m])
@@ -245,9 +255,7 @@ class IREEBackend(Backend):
                 )
             f.writelines("\n".join(code_lines[2:]))
             f.flush()
-            iree.compiler.compile_file(
-                f.name, target_backends=target_backends, output_file=os.path.join(output_path, "model.vmfb")
-            )
+            iree.compiler.compile_file(f.name, target_backends=target_backends, output_file=os.path.join(output_path, "model.vmfb"))
 
         input_arg_names = [ib.name for ib in in_binders[num_consts:]]
         input_arg_names_str = ", ".join(input_arg_names)
@@ -386,13 +394,7 @@ def pow_impl(self, x, w, y):
 
 
 def get_compare_type(dtype):
-    return (
-        "FLOAT"
-        if dtypes.is_float(dtype)
-        else "SIGNED"
-        if dtypes.is_int(dtype) and dtype is not dtypes.uint8
-        else "UNSIGNED"
-    )
+    return "FLOAT" if dtypes.is_float(dtype) else "SIGNED" if dtypes.is_int(dtype) and dtype is not dtypes.uint8 else "UNSIGNED"
 
 
 @backend.set_impl(backend.operator_set.equal)
@@ -429,11 +431,7 @@ def maximum_impl(self, x, w, y):
 
 @backend.set_impl(backend.operator_set.matmul)
 def matmul_impl(self, x, w, y):
-    x_bdims = (
-        []
-        if (w.symval.ndim <= 2 or x.symval.ndim == 1)
-        else list(range(x.symval.ndim - (2 if x.symval.ndim > 2 else 1)))
-    )
+    x_bdims = [] if (w.symval.ndim <= 2 or x.symval.ndim == 1) else list(range(x.symval.ndim - (2 if x.symval.ndim > 2 else 1)))
     w_bdims = [] if (w.symval.ndim == 1 or x.symval.ndim <= 2) else list(range(w.symval.ndim - 2))
     x_cdim = 0 if x.symval.ndim == 1 else x.symval.ndim - 1
     w_cdim = 0 if w.symval.ndim == 1 else w.symval.ndim - 2
@@ -531,7 +529,9 @@ def full_impl(self, y, *, shape, fill_value, dtype, device):
     fill_value = float(fill_value) if "f" in dtype.mlir else int(fill_value)
     fill_value = repr(fill_value)
     fill_value = fill_value.replace("e", "E") if "." in fill_value else fill_value.replace("e", ".E")
-    return f'%{y.name} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {annotate_shape(y.symval)} }} : {annotate_sig((), y.symval)}'
+    return (
+        f'%{y.name} = "stablehlo.constant"() {{ value = dense<{fill_value}> : {annotate_shape(y.symval)} }} : {annotate_sig((), y.symval)}'
+    )
 
 
 @backend.set_impl(backend.operator_set.random_uniform)
@@ -683,9 +683,7 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
         if b != 0:
             start_index_map = start_index_map[b:] + start_index_map[:b]
         collapsed_slice_dims = [
-            i
-            for i in range(1 - b, len(slice_sizes) - b)
-            if slice_sizes[i] == 1 and operand_shape[i] == indices_shape[i]
+            i for i in range(1 - b, len(slice_sizes) - b) if slice_sizes[i] == 1 and operand_shape[i] == indices_shape[i]
         ]
 
         y_reshape = y.symval.like(shape=y.symval.shape + (1,))
@@ -706,9 +704,7 @@ def gather_nd_impl(self, x, w, y, *, batch_dims):
     w_fixed = (
         w.symval
         if w_arange is None
-        else w.symval.like(
-            shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)), dtype=dtypes.int32
-        )
+        else w.symval.like(shape=tuple(d + b if i == b else d for i, d in enumerate(w.symval.shape)), dtype=dtypes.int32)
     )
     w_affix = "" if w_arange is None else "_"
     y_fixed = y.symval if y_reshape is None else y_reshape

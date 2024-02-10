@@ -261,12 +261,8 @@ compiler.set_impl(operator_set.pow)(lambda self, x, w: f"ret = np.power({x}, {w}
 compiler.set_impl(operator_set.invert)(lambda self, x: f"ret = np.invert({x})")
 compiler.set_impl(operator_set.equal)(lambda self, x, w: f"ret = np.equal({x}, {w})")
 compiler.set_impl(operator_set.maximum)(lambda self, x, w: f"ret = np.maximum({x}, {w})")
-compiler.set_impl(operator_set.sum)(
-    lambda self, x, *, dim, keepdim: f"ret = np.sum({x}, axis={dim}, keepdims={keepdim})"
-)
-compiler.set_impl(operator_set.max)(
-    lambda self, x, *, dim, keepdim: f"ret = np.max({x}, axis={dim}, keepdims={keepdim})"
-)
+compiler.set_impl(operator_set.sum)(lambda self, x, *, dim, keepdim: f"ret = np.sum({x}, axis={dim}, keepdims={keepdim})")
+compiler.set_impl(operator_set.max)(lambda self, x, *, dim, keepdim: f"ret = np.max({x}, axis={dim}, keepdims={keepdim})")
 compiler.set_impl(operator_set.arange)(
     lambda self, *, start, stop, stride, dtype: f"ret = np.arange(start={start}, stop={stop}, step={stride}, dtype={dtype})"
 )
@@ -437,9 +433,7 @@ def argmax(x, dim=None, keepdim=False):
         return math.prod(x.shape) - idx.max() - 1
     dim = dim + len(x.shape) if dim < 0 else dim
     m = (x == x.max(dim=dim, keepdim=True)).cast(slope.int32)
-    idx = m * slope.arange(x.shape[dim] - 1, -1, -1, dtype=slope.int32).reshape(
-        (x.shape[dim], *[1] * (x.ndim - dim - 1))
-    )
+    idx = m * slope.arange(x.shape[dim] - 1, -1, -1, dtype=slope.int32).reshape((x.shape[dim], *[1] * (x.ndim - dim - 1)))
     ret = x.shape[dim] - idx.max(dim=dim, keepdim=keepdim) - 1
     return ret
 
@@ -457,9 +451,7 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(
-        0
-    ).expand(r, c)
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= Tensor.arange(-k, c - k, **kwargs).unsqueeze(0).expand(r, c)
 
 
 @procedure_set.register()
@@ -561,17 +553,11 @@ def getitem(self, val):
 
     valid_slices = [v for v in orig_slices if v is not None]
     valid_slices = [
-        v
-        if isinstance(v, slice_py)
-        else slice_py(y_ := normalize_int(v, i, dim_sz), y_ + 1)
-        if isinstance(v, int)
-        else slice_py(None)
+        v if isinstance(v, slice_py) else slice_py(y_ := normalize_int(v, i, dim_sz), y_ + 1) if isinstance(v, int) else slice_py(None)
         for i, (v, dim_sz) in enumerate(zip(valid_slices, self.shape))
     ]
 
-    start, stop, strides = (
-        zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
-    )
+    start, stop, strides = zip(*y) if (y := [s.indices(dim_sz) for s, dim_sz in zip(valid_slices, self.shape)]) else ((), (), ())
     new_slice = tuple((s, e) if st > 0 else (e + 1, s + 1) for s, e, st in zip(start, stop, strides))
     sliced_tensor = self.padslice(new_slice).flip(dim=tuple([i for i, s in enumerate(strides) if s < 0]))
     new_shape = sliced_tensor.shape
@@ -689,9 +675,7 @@ def gather(x, idx, dim: int):
         dim += x.ndim
     idx = idx.transpose(ax=dim, aw=0).expand_dims(-1)
     permarg = list(range(x.ndim))
-    permarg = (
-        permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
-    )
+    permarg = permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
     return (
         (
             (
@@ -703,9 +687,7 @@ def gather(x, idx, dim: int):
                     device=x.device,
                 )
             )
-            * x.permute(*permarg)
-            .padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])]))
-            .expand_dims(0)
+            * x.permute(*permarg).padslice(tuple([*[(0, sh) for sh in idx.shape[1:-1]], (0, x.shape[dim])])).expand_dims(0)
         )
         .sum(-1)
         .transpose(ax=0, aw=dim)

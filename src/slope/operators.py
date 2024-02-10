@@ -480,12 +480,7 @@ class Slice(ShapeOperator):
 
     def typecheck(self, x: SymbolicTensor, *, starts, limits, strides=None) -> List[SymbolicTensor]:
         if strides is None or tuple(strides) == (1,) * len(x.shape):
-            shape = tuple(
-                [
-                    limit if type(start) is int and start == 0 else limit - start
-                    for start, limit in list_zip(starts, limits)
-                ]
-            )
+            shape = tuple([limit if type(start) is int and start == 0 else limit - start for start, limit in list_zip(starts, limits)])
             return [SymbolicTensor(shape, x.dtype, x.device)]
         else:
             # TODO: compute strided shape without numpy
@@ -636,10 +631,7 @@ class Cat(ShapeOperator):
         for i, l in enumerate(limits):
             l[dim] = limit_points[i]
 
-        return [
-            z.slice(tuple(start), tuple(limit)) if type(o) is UndefPrimal else None
-            for o, start, limit in zip(xs, starts, limits)
-        ]
+        return [z.slice(tuple(start), tuple(limit)) if type(o) is UndefPrimal else None for o, start, limit in zip(xs, starts, limits)]
 
 
 # -----------------------
@@ -732,9 +724,9 @@ class Arange(InitOperator):
             dtype = dtypes.int64
         if device is None:
             device = slope.core.backend.DEFAULT_DEVICE
-        if "f" in dtype.mlir:
+        if dtypes.is_float(dtype):
             start, stop, stride = float(start), float(stop), float(stride)
-        elif "i" in dtype.mlir:
+        elif dtypes.is_int(dtype):
             start, stop, stride = int(start), int(stop), int(stride)
         return (), dict(start=start, stop=stop, stride=stride, dtype=dtype, device=device)
 
@@ -816,9 +808,7 @@ class Conv(GeneralReduceOperator):
         (bsz, cin_x), (cout, cin_w), D = x.shape[:2], w.shape[:2], w.shape[2:]
         assert groups * cin_x == cin_w, "input and weight input channel dim mismatch"
         if isinstance(padding, (tuple, list)):
-            assert len(padding) == 2 * len(D) or len(padding) == len(
-                D
-            ), f"{2*len(D)=} or {len(D)=}, but {len(padding)=} for {x.shape=}"
+            assert len(padding) == 2 * len(D) or len(padding) == len(D), f"{2*len(D)=} or {len(D)=}, but {len(padding)=} for {x.shape=}"
         padding = tuple(
             [padding] * 2 * len(D)
             if isinstance(padding, int)

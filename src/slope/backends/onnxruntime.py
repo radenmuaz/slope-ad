@@ -30,7 +30,9 @@ from slope.procedures import procedure_set
 import onnx
 import onnxruntime
 import tempfile
-import random
+import pygments
+from pygments.lexers.jvm import JavaLexer
+from pygments.formatters import Terminal256Formatter
 
 
 def annotate_shape(symval):
@@ -93,6 +95,7 @@ class ONNXRuntimeBackend(Backend):
     # sess_options.log_severity_level = 3
     # sess_options.use_deterministic_compute = True
     # sess_options.intra_op_num_threads = 4
+    sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
 
@@ -157,10 +160,7 @@ class ONNXRuntimeBackend(Backend):
 
         in_binders = list_map(lambda x: program.env[x], program.in_binders)
         arg_type_strs = (
-            [
-                f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}"
-                for inb in in_binders
-            ]
+            [f"{self.dtype_map[inb.symval.dtype]}[{repr(list(inb.symval.shape))[1:-1]}] {inb.name}" for inb in in_binders]
             if fn_name == "main"
             else [f"{inb.name}" for inb in in_binders]
         )
@@ -185,10 +185,9 @@ class ONNXRuntimeBackend(Backend):
         for fn_def_code_lines in fn_defs.values():
             functions_code_lines += [functions_head_def] + fn_def_code_lines
         code_lines = model_code_lines + functions_code_lines
-        slope.dblog(
-            f"\n---- {program.name} codegen:\n\n" + "\n".join(code_lines) + "\n\n===============\n",
-            enable=slope.LOG_JIT,
-        )
+        if slope.LOG_JIT:
+            formatted_code = pygments.highlight("\n".join(code_lines), JavaLexer(), Terminal256Formatter())
+            slope.core.dblog(f"\n---- {program.name} codegen:\n\n" + formatted_code + "\n\n===============\n")
 
         if fn_name == "main":
             del self.fn_count

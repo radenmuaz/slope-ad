@@ -175,10 +175,10 @@ class GD(Optimizer):
     def __init__(self, params, lr=0.001):
         super().__init__(params, lr)
 
-    def step(self, p, g, *state_attrs):
+    def step(self, p, g, *_):
         lr = self.hp.lr
         p = p - lr * g
-        return p, state_attrs
+        return p, ()
 
 
 class SGD(Optimizer):
@@ -399,8 +399,14 @@ class Linear(Module):
 
     def __call__(self, x):
         return x.linear(self.weight, self.bias)
-
+    
     def reset_parameters(self):
+        stdv = 1.0 / math.sqrt(self.weight.shape[1])
+        self.weight = slope.tensor(np.random.uniform(-stdv, stdv, self.weight.shape), self.weight.dtype)
+        if self.bias is not None:
+            self.bias = slope.tensor(np.random.uniform(-stdv, stdv, self.bias.shape), self.bias.dtype)
+
+    def reset_parameters_(self):
         stdv = 1.0 / math.sqrt(self.weight.shape[1])
         self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv
         if self.bias is not None:
@@ -473,11 +479,15 @@ class ConvNd(Module):
             dilation=self.dilation,
             padding=self.padding,
         )
-
+    
     def reset_parameters(self):
-        # n = self.in_channels
-        # for k in self.kernel_size:
-        #     n *= k
+        n = self.in_channels * (self.kernel_size**self.dims)
+        stdv = 1.0 / math.sqrt(n)
+        self.weight = slope.tensor(np.random.uniform(-stdv, stdv, self.weight.shape), self.weight.dtype)
+        if self.bias is not None:
+            self.bias = slope.tensor(np.random.uniform(-stdv, stdv, self.bias.shape), self.bias.dtype)
+
+    def reset_parameters_(self):
         n = self.in_channels * (self.kernel_size**self.dims)
         stdv = 1.0 / math.sqrt(n)
         self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv
@@ -593,24 +603,20 @@ class BatchNorm(Module):
         self.num_batches_tracked = slope.zeros(1)
 
     def __call__(self, x, training=True, track_running_stats=True):
-        # training, track_running_stats = True, False
         if training:
             D = len(x.shape[2:])
             broadcast_shape = (1, -1) + (1,) * D
             reduce_dim = (0,) + tuple(2 + i for i in range(D))
-            xsg = x.stop_gradient()
-            mean = xsg.mean(reduce_dim)
-            z = xsg - mean.reshape(broadcast_shape)
+            mean = x.mean(reduce_dim)
+            z = x - mean.reshape(broadcast_shape)
             var = (z * z).mean(reduce_dim)
             invstd = (var + self.eps).rsqrt()
             if track_running_stats:
                 z_numel = math.prod(z.shape)
-                z_ratio = z_numel / (z_numel - z.shape[1]) if z_numel != z.shape[1] else 1
+                z_ratio = (z_numel / (z_numel - z.shape[1])) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
                 self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
                 self.num_batches_tracked = self.num_batches_tracked + 1
-                mean = self.running_mean
-                invstd = (self.running_var + self.eps).rsqrt()
         else:
             mean = self.running_mean
             invstd = (self.running_var + self.eps).rsqrt()

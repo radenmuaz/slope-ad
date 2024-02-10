@@ -18,10 +18,12 @@ classifiers = [
 ]
 dependencies = [
   "numpy",
-  "iree-compiler",
-  "iree-runtime",
+  "iree-compiler==20231113.707",
+  "iree-runtime==20231113.707",
   "onnx",
   "onnxruntime",
+  "pygments",
+  "sympy"
 ]
 
 [project.urls]

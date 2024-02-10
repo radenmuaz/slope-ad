@@ -17,6 +17,7 @@ def loss_fn(model, batch):
     preds = model(x)
     return -(preds.log_softmax(-1) * y_onehot).sum()
 
+
 value_and_gloss_fn = slope.value_and_grad(loss_fn)
 
 
@@ -49,7 +50,6 @@ class Net(nn.Module):
         x = self.act(x)
         x = self.linear2(x)
         return x
-
 
 
 if __name__ == "__main__":

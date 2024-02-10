@@ -157,9 +157,7 @@ def log2(x):
 @procedure_set.register()
 @staticmethod
 def _tri(r: int, c: int, k: int = 0, **kwargs) -> Tensor:
-    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= slope.arange(-k, c - k, **kwargs).unsqueeze(0).expand(
-        r, c
-    )
+    return slope.arange(r, **kwargs).unsqueeze(1).expand(r, c) <= slope.arange(-k, c - k, **kwargs).unsqueeze(0).expand(r, c)
 
 
 @procedure_set.register()
@@ -338,11 +336,7 @@ def gather_nd(x, w, batch_dims=0):
             dim += x.ndim
         w = w.transpose(ax=dim, aw=0).expand_dims(-1)
         permarg = list(range(x.ndim))
-        permarg = (
-            permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]]
-            if dim != 0
-            else permarg[1:] + [permarg[0]]
-        )
+        permarg = permarg[1:dim] + [permarg[0]] + permarg[dim + 1 :] + [permarg[dim]] if dim != 0 else permarg[1:] + [permarg[0]]
         return (
             (
                 (
@@ -353,9 +347,7 @@ def gather_nd(x, w, batch_dims=0):
                         device=w.device,
                     )
                 ).cast(x.dtype)
-                * x.permute(*permarg)
-                .padslice(tuple([*[(0, sh) for sh in w.shape[1:-1]], (0, x.shape[dim])]))
-                .expand_dims(0)
+                * x.permute(*permarg).padslice(tuple([*[(0, sh) for sh in w.shape[1:-1]], (0, x.shape[dim])])).expand_dims(0)
             )
             .sum(-1)
             .transpose(ax=0, aw=dim)
@@ -366,9 +358,7 @@ def gather_nd(x, w, batch_dims=0):
 
     assert batch_dims == 0
     gather_nd_ = (
-        functools.reduce(lambda g, f: f(g), [slope.vmap] * int(batch_dims), _gather_nd_single)
-        if batch_dims > 0
-        else _gather_nd_single
+        functools.reduce(lambda g, f: f(g), [slope.vmap] * int(batch_dims), _gather_nd_single) if batch_dims > 0 else _gather_nd_single
     )
     return gather_nd_(x, w)
 

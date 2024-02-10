@@ -4,33 +4,25 @@ import slope
 # procedures are basically functions accessible by Tensor.procedure syntax
 @slope.core.backend.procedure_set.register()
 def my_relu(x):
-    w = slope.zeros_like(x)
-    y = x.maximum(w)
+    y = x.maximum(slope.zeros_like(x))
     return y
 
 
 # To override a procedure gradient rule, define a new operator with the same name as procedure
-# the impl will default to tracing procedure as a Program,
-# not need to define backend-specific impl code.
-@slope.backend.operator_set.register("my_relu")
-class MyReLU(slope.core.UnaryOperator):
-    def jvp(self, primals, tangents):
-        def _balanced_eq(x, z, y):
-            xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
-            yz = (y == z).where(slope.full_like(z, 2), slope.ones_like(z))
-            return xz / yz
+# the impl will default to tracing procedure as a Program if not defined.
 
+@slope.backend.operator_set.register("my_relu")
+class ReLUOp(slope.core.UnaryOperator):
+    def jvp(self, primals, tangents):
         (x,), (x_dot,) = primals, tangents
         y = x.my_relu()
-        w = slope.zeros_like(x)
-        w_dot = slope.ones_like(x)
-        y_dot = x_dot * _balanced_eq(x, y, w) + w_dot * _balanced_eq(w, y, x)
+        y_dot = x_dot * (x == y).where(slope.ones_like(x), slope.zeros_like(x))
         return [y], [y_dot]
 
     def T(self, cotangents, x):
         (gL_y,) = cotangents
-        return [gL_y, None]
-
+        gL_x = (x.my_relu() > x.zeros_like()).cast(gL_y.dtype) * gL_y
+        return [gL_x]
 
 @slope.jit
 def f(x):

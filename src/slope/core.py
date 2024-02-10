@@ -23,7 +23,7 @@ from typing import (
 )
 import weakref
 import types
-from contextlib import contextmanager
+from contextlib import contextmanager, ContextDecorator
 import itertools
 import weakref
 import operator as operator_py
@@ -34,10 +34,19 @@ from functools import partial, lru_cache
 import mmap
 import traceback
 import importlib
+import time
 
 # =================================
 #   Utils
 # =================================
+
+
+class Timing(ContextDecorator):
+  def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
+  def __enter__(self): self.st = time.perf_counter_ns()
+  def __exit__(self, *exc):
+    self.et = time.perf_counter_ns() - self.st
+    if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
 
 def dblog(*msg, enable=True):
@@ -112,11 +121,7 @@ def lru_cache_verbose(
                 f"{fn.__name__}.{cache_info} {args.__hash__()}",
                 enable=backend.LOG_LRU,
             )
-            tb = (
-                "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace("\n    ", ":\t")
-                + "-" * 20
-                + "\n"
-            )
+            tb = "".join(traceback.format_list(traceback.extract_stack())[tb_start:tb_end]).replace("\n    ", ":\t") + "-" * 20 + "\n"
             dblog(f"{tb}", enable=backend.LOG_LRU)
 
             return result
@@ -461,9 +466,7 @@ class Operator:
 
     def reorg_args(self, args, params):
         sig = inspect.signature(self.typecheck)
-        args_strs = [
-            k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"
-        ]
+        args_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD and k != "self"]
         params_strs = [k for k, v in sig.parameters.items() if v.kind == inspect.Parameter.KEYWORD_ONLY and k != "self"]
 
         if args:
@@ -1216,7 +1219,6 @@ class JitOutput:
             raise
         return [backend.tensor(TensorBuffer(o)) for o in outs]
 
-
 class JitOp(MetaOperator):
     def meta_impl(self, *args, program: Program, **_):
         hashed_program = Hashed(program)
@@ -1226,6 +1228,7 @@ class JitOp(MetaOperator):
         jit_output = backend.jit_program(hashed_program, hashed_consts)
         ret = jit_output(*consts, *args)
         return ret
+
 
     def reorg_args(self, args, params):
         return args, params
@@ -1341,6 +1344,7 @@ class RunTrace(Trace):
             ret = op.meta_impl(*args, **params)
         else:
             fn = self.get_fn(op, *tuple(SymbolicTensor.like(a) for a in args), **params)
+            # with Timing(f"RUN {op}"):ret = jit(
             ret = jit(
                 fn,
                 static_argnames=("params",),
@@ -1803,6 +1807,9 @@ def tree_unflatten(treedef: TreeDef, xs: Tuple[Any]) -> Any:
 
     dblog(f"unflattening {treedef}", enable=backend.LOG_TREE)
     return _tree_unflatten(treedef, iter(xs))
+    # with Timing(f"\nTREE:\n{treedef}"):
+    #     ret = _tree_unflatten(treedef, iter(xs))
+    # return ret
 
 
 def tree_transpose(
@@ -1992,10 +1999,7 @@ def vmap_flat(f, in_dim, out_dim, dim_size, *args):
         outs = f(*tracers_in)
         tracers_out = [full_raise(trace, out) for out in outs]
         vals_out, y_vmap_dims = unzip2((t.val, t.vmap_dim) for t in tracers_out)
-    ret = [
-        VMapTrace.move_vmap_dim(val_out, dim_size, bdim, out_dim)
-        for val_out, bdim, out_dim in zip(vals_out, y_vmap_dims, out_dim)
-    ]
+    ret = [VMapTrace.move_vmap_dim(val_out, dim_size, bdim, out_dim) for val_out, bdim, out_dim in zip(vals_out, y_vmap_dims, out_dim)]
     return ret
 
 
@@ -2267,9 +2271,7 @@ def typecheck_partial_run_program(program, in_unknowns, out_unknowns, program1, 
 
 
 def linearize_flat(f, *primals_in, has_aux):
-    pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(SymbolicTensor.like(get_symval(x))) for x in primals_in
-    ]
+    pvals_in = [make_known_pval(x) for x in primals_in] + [make_unknown_pval(SymbolicTensor.like(get_symval(x))) for x in primals_in]
 
     def f_jvp(*primals_tangents_in):
         jvp_ret = jvp(f, *split_half(primals_tangents_in), has_aux=has_aux)
@@ -2403,9 +2405,7 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
 
 
 def vjp_flat(f, *primals_in, has_aux=False, **static_args):
-    pvals_in = [make_known_pval(x) for x in primals_in] + [
-        make_unknown_pval(SymbolicTensor.like(get_symval(x))) for x in primals_in
-    ]
+    pvals_in = [make_known_pval(x) for x in primals_in] + [make_unknown_pval(SymbolicTensor.like(get_symval(x))) for x in primals_in]
     _, tangent_pvals_in = split_half(pvals_in)
 
     def f_jvp(*primals_tangents_in):
@@ -2604,9 +2604,7 @@ class jit:
                 if len(args) > len(args_strs):
                     assert static_args_strs
                     args, rest = args[: len(args_strs)], args[len(args_strs) :]
-                    new_static_args = {
-                        k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args
-                    }
+                    new_static_args = {k: rest_arg for k, rest_arg in zip(static_args_strs, rest) if k not in static_args}
                     static_args = {**new_static_args, **static_args}
             else:
                 args = tuple([static_args[k] if k in static_args else arg for k, arg in zip(args_strs, args)])
@@ -2628,6 +2626,7 @@ class jit:
     def __call__(self, *args, **static_args):
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
+        # with Timing(f"JIT {self}"): outs = bind(backend.jit_op, *consts, *args, program=program)
         outs = bind(backend.jit_op, *consts, *args, program=program)
         return tree_unflatten(out_tree, outs)
 

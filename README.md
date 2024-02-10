@@ -36,14 +36,13 @@ Or you can just copy `src/slope` to your projects.
 
 # Quickstart
 
-Tensor operation semantics feel like pytorch, but AD semantics like JAX (or functorch)
-
-Check out examples in `examples/simple` for short snippets.
-
-MNIST classifier example is in `example/mnist_mlp.py`
+We start by running MNIST classifier training, [examples/nn/mnist_mlp.py](examples/nn/mnist_mlp.py)
 
 ```sh
 python example/mnist_mlp.py
+```
+
+```sh
 Starting training...
 ...
 Train epoch: 2, batch: 299/300, loss: 12.51: 100%|██████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 139.36it/s]
@@ -51,27 +50,14 @@ Epoch 2 in 2.15 sec
 Test set accuracy 0.97
 ```
 
-## Environment flags
-put this before the command to set
+By setting the `SLOPE_BACKEND` flag, we change the backend to either `iree` (default), `onnxruntime` and `numpy`
+We can also set `LOG_JIT=1` to verbose print the backend output
 
-```
-# prints the jitted code
-LOG_JIT=1 
-
-# set device
-DEFAULT_DEVICE=cpu:0 
-DEFAULT_DEVICE=cuda:0 
-DEFAULT_DEVICE=metal:0 
-
-# set backend
-SLOPE_BACKEND=iree # iree backend (default)
-SLOPE_BACKEND=onnxruntime # onnxruntime backend
-SLOPE_BACKEND=numpy # numpy backend (extremely SLOW)
-```
-
-Example:
 ```sh
 LOG_JIT=1 SLOPE_BACKEND=onnxruntime python examples/nn/mnist_mlp.py
+```
+
+```sh
 ...
 
 ---- train_step codegen:
@@ -97,6 +83,24 @@ main (float[100, 784] x0, float[10, 100] x1, float[200, 28, 28] x2, float[200, 1
 Train epoch: 0, batch: 58/300, loss: 71.23:  20%|██████████████▎                                                          | 59/300 [00:01<00:04, 55.45it/s]
 ```
 
+
+### Environment flags
+put this before the command to set
+
+```
+# prints the jitted code
+LOG_JIT=1 
+
+# set device
+DEFAULT_DEVICE=cpu:0 
+DEFAULT_DEVICE=cuda:0 
+DEFAULT_DEVICE=metal:0 
+
+# set backend
+SLOPE_BACKEND=iree # iree backend (default)
+SLOPE_BACKEND=onnxruntime # onnxruntime backend
+SLOPE_BACKEND=numpy # numpy backend (extremely SLOW)
+```
 # Slope internals tutorial
 
 ## Slope has familiar Pytorch-like syntax

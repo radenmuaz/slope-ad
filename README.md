@@ -229,6 +229,7 @@ Fork this repo and hack, and maybe do a PR, too many things need to be done (see
 Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 
 # Roadmap
+- iree backend currently has fixed seed random, implement threefry and JAX-like random
 - make things fast
 - llama (gpt) training
 - whisper inference

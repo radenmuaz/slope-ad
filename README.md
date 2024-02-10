@@ -6,20 +6,18 @@
  slope
 ```
 
-Slope is a small automatic differentation (AD) engine, focused on machine learning (ML).
-Currently it uses IREE and StableHLO MLIR as backend.
+Slope is a small automatic differentation (AD) engine, focused on machine learning (ML), supports forward-mode, reverse-mode, and higher-order AD.
+Syntax is similar to Pytorch, functional API is similar to (JAX)[https://github.com/google/jax], tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
 
-This project is in very early stage.
-
-It is written to be educational and hackable, yet does things end-to-end, from training to deployment.
-- Tensor API like Pytorch, 
-- Higher-order derivatives, stateless functional API and pytrees like JAX
-- Operator decompositions and easily add new backend like tinygrad.
+The backend is interchangeable, currently supports compiling to:
+1. StableHLO MLIR IREE
+2. ONNX Runtime
+3. NumPy
 
 Slope aims to be a hackable thin ML middleware -- you can go up and use Slope as building blocks to write NN modules, classes, trainer, self-attention, etc. yet you can go down to define new operators, backends and extend the core in `src/slope/{core.py, operators.py, procedures.py, nn.py, backends}`
 
 ### What works
-- cuda and metal backend (onnxruntime)
+- cuda and metal on iree and onnxruntime backend
 - MNIST training on MLP [code](examples/nn/mnist_mlp.py)
 - CIFAR-10 training on ResNet [code](examples/nn/mnist_mlp.py)
 
@@ -28,7 +26,8 @@ Slope aims to be a hackable thin ML middleware -- you can go up and use Slope as
 - Symbolic shape inference 
 - Dynamic shape jit
 - Optimizer filter frozen params
-- 
+- vmap vjp and jvp to compute jacobian and hessian
+
 # Install
 
 ```

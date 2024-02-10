@@ -1,3 +1,12 @@
+'''
+# run with different backends
+SLOPE_BACKEND=iree python examples/nn/mnist_mlp.py
+SLOPE_BACKEND=onnxruntime python examples/nn/mnist_mlp.py
+
+# print backend code
+LOG_JIT=1 SLOPE_BACKEND=iree python examples/nn/mnist_mlp.py
+'''
+
 import slope
 import slope.nn as nn
 

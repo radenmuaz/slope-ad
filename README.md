@@ -16,16 +16,24 @@ It is written to be educational and hackable, yet does things end-to-end, from t
 - Higher-order derivatives, stateless functional API and pytrees like JAX
 - Operator decompositions and easily add new backend like tinygrad.
 
-Slope aims to be some sort of ML *middleware* -- you can go up and use Slope as building blocks to write NN modules, classes, trainer, self-attention, etc. yet you can go down to define new operators, backends and extend the core in `src/slope/{core.py, operators.py, procedures.py, nn.py, backends}`
+Slope aims to be a hackable thin ML middleware -- you can go up and use Slope as building blocks to write NN modules, classes, trainer, self-attention, etc. yet you can go down to define new operators, backends and extend the core in `src/slope/{core.py, operators.py, procedures.py, nn.py, backends}`
 
+### What works
+- cuda and metal backend (onnxruntime)
+- MNIST training on MLP [code](examples/nn/mnist_mlp.py)
+- CIFAR-10 training on ResNet [code](examples/nn/mnist_mlp.py)
+
+
+### To-dos:
+- Symbolic shape inference 
+- Dynamic shape jit
+- Optimizer filter frozen params
+- 
 # Install
 
-NOTE: For Mac user you must use Python 3.11 because it is minimum version for latest IREE wheel for Mac.
-
-Install dependencies, clone this repo then install editable
 ```
-pip install iree-compiler iree-runtime
-https://github.com/radenmuaz/slope
+git clone https://github.com/radenmuaz/slope
+cd slope
 pip install -e .
 ```
 
@@ -39,8 +47,8 @@ Check out examples in `examples/simple` for short snippets.
 
 MNIST classifier example is in `example/mnist_mlp.py`
 
-```
-python example/mnist_mlp.p
+```sh
+python example/mnist_mlp.py
 Starting training...
 ...
 Train epoch: 2, batch: 299/300, loss: 12.51: 100%|██████████████████████████████████████████████████████████████████████| 300/300 [00:02<00:00, 139.36it/s]
@@ -48,12 +56,55 @@ Epoch 2 in 2.15 sec
 Test set accuracy 0.97
 ```
 
-CIFAR10 resnet classifier example is in `example/cifar10_convnet.py`
+## Environment flags
+put this before the command to set
 
-`src/slope/nn.py` provides nn.Module system like in Pytorch, but with usage API like JAX
-You are encouraged to read the source, `__init__.py`, `core.py`, `operators.py`, `procedures.py` and `backends/iree.py`
+```
+# prints the jitted code
+LOG_JIT=1 
 
-# Slope has familiar Pytorch-like syntax
+# set device
+DEFAULT_DEVICE=cpu:0 
+DEFAULT_DEVICE=cuda:0 
+DEFAULT_DEVICE=metal:0 
+
+# set backend
+SLOPE_BACKEND=iree # iree backend (default)
+SLOPE_BACKEND=onnxruntime # onnxruntime backend
+SLOPE_BACKEND=numpy # numpy backend (extremely SLOW)
+```
+
+Example:
+```sh
+LOG_JIT=1 SLOPE_BACKEND=onnxruntime python examples/nn/mnist_mlp.py
+...
+
+---- train_step codegen:
+
+<ir_version: 7, opset_import: ["" : 18, "slope":1]>
+main (float[100, 784] x0, float[10, 100] x1, float[200, 28, 28] x2, float[200, 10] x3, int32[] x4, float[100, 784] x5, float[10, 100] x6, float[] x7) => (float[] y0, float[100, 784] y2, float[10, 100] y4, int32[] y5, float[100, 784] y1, float[10, 100] y3, float[] x7)
+{
+    
+    z0_shape = Constant <value = int64[2] { 200, 784 } >()
+    z0 = Reshape(x2, z0_shape)
+...
+    y4 = Sub(x1, z164)
+    z165_fill_value = Constant < value = int32[1] { 1 }>()
+    z165_squeeze_dim = Constant <value = int64[1] {0}> ()
+    z165 = Squeeze (z165_fill_value, z165_squeeze_dim)
+    
+    y5 = Add(x4, z165)
+}
+...
+
+===============
+
+Train epoch: 0, batch: 58/300, loss: 71.23:  20%|██████████████▎                                                          | 59/300 [00:01<00:04, 55.45it/s]
+```
+
+# Slope internals tutorial
+
+## Slope has familiar Pytorch-like syntax
 
 Most of the things familiar in Pytorch works in Slope, probably.
 
@@ -66,7 +117,7 @@ y = x @ w + b
 print(y)
 ```
 
-# Every operations are compiled with slope.jit
+## Every operations are compiled with slope.jit
 
 
 Actually when these lines are run, each operation calls jitted as individual programs eagerly.
@@ -91,16 +142,13 @@ x = slope.full((1,), 2.)
 y = f(x)
 ```
 
-TODO: Besides eager and jit, make async eager like Pytorch.
-
-# Reveal contents of jitted function
-
-A decorated function with `slope.jit` is an instance object of `slope.core.jit`,
-It has several utility methods for printing the generated backend code and exporting the function
-
+To see the actual code:
 ```python
-f_jitobj = f.jit_program(x)
-print(f_jitobj.code)
+jit_object = f.lower(x)
+# slope Program intermediate representation
+print(jit_object.program)
+# backend code
+print(jit_object.code)
 ```
 
 # Derivatives and gradients
@@ -140,11 +188,7 @@ Fork this repo and hack, and maybe do a PR, too many things need to be done (see
 Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 
 # Roadmap
-- cuda
-- onnxruntime backend
-- numpy backend
-- scatter gather ops
-- gpt2 training
+- make things fast
+- llama (gpt) training
 - whisper inference
-- passing state random sampling threefry
 - core tests, operators tests on all Trace types

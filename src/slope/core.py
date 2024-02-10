@@ -2647,7 +2647,7 @@ class jit:
         outs = bind(backend.jit_op, *consts, *args, program=program)
         return tree_unflatten(out_tree, outs)
 
-    def get_jit_output(self, *args, **static_args):
+    def lower(self, *args, **static_args):
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
         hashed_program = Hashed(program)
@@ -2666,5 +2666,5 @@ class jit:
         else:
             args, static_args = args[:-1], args[-1]
         assert isinstance(args, (tuple, list)) and isinstance(static_args, dict)
-        jit_output = self.get_jit_output(*args, **static_args)
+        jit_output = self.lower(*args, **static_args)
         backend.export(jit_output, output_path, export_params, input_names, output_names, **kwargs)

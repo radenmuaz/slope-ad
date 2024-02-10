@@ -163,9 +163,27 @@ class Optimizer(Module):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         if nan_to_zero:
             g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
-        step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
+        if self.filter_fn is None:
+            step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
+        # TODO: only update for params updatable True
+        else:
+            raise NotImplementedError
+            def where_step(params, *args):
+                def noop(p, *_):
+                    return (p, ())
+
+                return slope.where(
+                    self.filter_fn,
+                    self.step(params, *args),
+                    noop(p)
+                )
+            step_out, (leaf0, leaf0_treedef) = slope.tree_map(where_step, params, *(g_params, *state_attrs), out_leaf=True)
+
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
         params_out, state = step_out_T
+        # params_out, *state_attrs_out = step_out_T
+        # for n, a  in zip(state_names, state_attrs_out):
+        #     setattr(self.state, n, a)
         if nan_to_zero:
             params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
         self.state = state
@@ -512,13 +530,13 @@ class Linear(Module):
     def __call__(self, x):
         return x.linear(self.weight, self.bias)
     
-    def reset_parameters(self):
+    def reset_parameters_(self):
         stdv = 1.0 / math.sqrt(self.weight.shape[1])
         self.weight = slope.tensor(np.random.uniform(-stdv, stdv, self.weight.shape), self.weight.dtype)
         if self.bias is not None:
             self.bias = slope.tensor(np.random.uniform(-stdv, stdv, self.bias.shape), self.bias.dtype)
 
-    def reset_parameters_(self):
+    def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.weight.shape[1])
         self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv
         if self.bias is not None:
@@ -592,14 +610,14 @@ class ConvNd(Module):
             padding=self.padding,
         )
     
-    def reset_parameters(self):
+    def reset_parameters_(self):
         n = self.in_channels * (self.kernel_size**self.dims)
         stdv = 1.0 / math.sqrt(n)
         self.weight = slope.tensor(np.random.uniform(-stdv, stdv, self.weight.shape), self.weight.dtype)
         if self.bias is not None:
             self.bias = slope.tensor(np.random.uniform(-stdv, stdv, self.bias.shape), self.bias.dtype)
 
-    def reset_parameters_(self):
+    def reset_parameters(self):
         n = self.in_channels * (self.kernel_size**self.dims)
         stdv = 1.0 / math.sqrt(n)
         self.weight = slope.rand_like(self.weight) * 2 * stdv - stdv

@@ -9,7 +9,7 @@ import numpy as np
 from lib.datasets.cifar10 import get_cifar10
 from lib.models.cv.resnet_cifar import resnet
 
-
+np.random.seed(12345)
 @slope.jit
 def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
@@ -59,7 +59,7 @@ if __name__ == "__main__":
     test_batch_size = 100
     train_images, train_labels, test_images, test_labels = get_cifar10()
 
-    model = resnet(depth=8)
+    model = resnet(depth=20)
     # optimizer = nn.AdamW(model, lr=1e-1,weight_decay=1e-5)
     optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
 

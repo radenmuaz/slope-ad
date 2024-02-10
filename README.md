@@ -206,7 +206,7 @@ w = slope.randn(2, 1)
 lr = slope.tensor([0.001])
 for i in range(10):
     loss, w = train_step(x, w, y, lr)
-    print(i, loss, w)
+    print(i, loss.numpy())
 
 ```
 

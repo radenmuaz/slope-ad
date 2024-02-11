@@ -127,9 +127,9 @@ put this before the command to set
 LOG_JIT=1 
 
 # set device
-DEFAULT_DEVICE=cpu:0 
-DEFAULT_DEVICE=cuda:0 
-DEFAULT_DEVICE=metal:0 
+DEFAULT_DEVICE=cpu
+DEFAULT_DEVICE=cuda
+DEFAULT_DEVICE=metal
 
 # set backend
 SLOPE_BACKEND=iree # iree backend (default)

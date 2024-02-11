@@ -2,11 +2,27 @@
 
 # Slope
 
-Slope is a small automatic differentation (AD) engine, focused on machine learning (ML),
+Slope is a small automatic differentation (AD) engine, focused on machine learning (ML)
+Tensor semantics are similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
 
+Example:
+```python
+import slope
+
+def f(x):
+    y = x * 2.0
+    return y.sum()
+
+x = slope.tensor([1.,2.,3.])
+gf_x = slope.grad(f)(x)
+print(f"{gf_x=}")
+```
+```
+gf_x=<Tensor: val=
+[2. 2. 2.]
+shape=(3,), dtype=float32, device='cpu:0'>
+```
 ## Features
-
-tl;dr Tensor semantics are similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
 
 1. Forward-mode, reverse-mode, and higher-order AD.
 
@@ -137,8 +153,7 @@ print(y)
 
 ## Every operations are compiled with slope.jit
 
-
-Actually when these lines are run, each operation calls jitted as individual programs eagerly.
+Operation calls are jitted as individual programs eagerly.
 Try running this on terminal:
 ```sh
 LOG_JIT=1 python -c "import slope; print(slope.ones(3)*2)"

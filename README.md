@@ -26,14 +26,14 @@ shape=(3,), dtype=float32, device='cpu:0'>
 
 1. Forward-mode, reverse-mode, and higher-order AD.
 
-2. Just-in-time compilation, with interchangeable backends running on CPU, CUDA, Metal:
+2. Just-in-time compilation, with interchangeable backends, supporting CPU, CUDA and Metal:
     - [IREE](https://iree.dev/) (StableHLO MLIR)
     - [ONNX Runtime](https://onnxruntime.ai/) (ONNX)
     - NumPy (CPU-only)
 
-3. Training and inference; examples
+3. Training and inference, examples:
     - [MLP on MNIST](examples/nn/mnist_mlp.py)
-    - ([ResNet on CIFAR-10](examples/nn/mnist_mlp.py))
+    - [ResNet on CIFAR-10](examples/nn/mnist_mlp.py)
     - [Export jitted function](examples/simple/export.py)
 
 4. Small (?)

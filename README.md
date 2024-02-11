@@ -15,11 +15,10 @@ tl;dr Tensor semantics are similar to Pytorch, functional API is similar to [JAX
     - [ONNX Runtime](https://onnxruntime.ai/) (ONNX)
     - NumPy (CPU-only)
 
-3. Training and inference
-    - Examples include:
-        - [MLP on MNIST](examples/nn/mnist_mlp.py)
-        - ([ResNet on CIFAR-10](examples/nn/mnist_mlp.py))
-        - [Export jitted function](examples/simple/export.py)
+3. Training and inference; examples
+    - [MLP on MNIST](examples/nn/mnist_mlp.py)
+    - ([ResNet on CIFAR-10](examples/nn/mnist_mlp.py))
+    - [Export jitted function](examples/simple/export.py)
 
 4. Small (?)
     - <3000 lines of core code [slope/core.py](./src/slope/core.py), after run with `black src --line-length 140`
@@ -35,7 +34,7 @@ tl;dr Tensor semantics are similar to Pytorch, functional API is similar to [JAX
     - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py)
         - Procedures are functions containing calls to operators, exposed as `Tensor.procedure_name(*args)` syntax
         - Useful for simple definitions like `cos(x)` as `sin(pi/2 - x)`, and big functions`conv_transpose` and `avgpool2d`.
-    - An operator can be directly implemented as code translation to backend, or _fallback_ to a procedure, i.e. function calls to other existing operators -- there is `conv` procedure in case the backend has no implementation for it.
+    - An operator can be directly implemented as code translation to backend, or _fallback_ to a procedure, e.g. there is `conv` procedure in case the backend has no implementation for it.
 
 6. Extensible
     - Add new backend by defining implementation translations [slope/backends](./src/slope/backends)

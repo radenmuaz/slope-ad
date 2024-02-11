@@ -6,30 +6,40 @@ Slope is a small automatic differentation (AD) engine, focused on machine learni
 
 ## Features
 
+tl;dr Tensor semantics are similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
+
 1. Forward-mode, reverse-mode, and higher-order AD.
-2. Interchangeable backends, currently supports compiling to:
+
+2. Just-in-time compilation, with interchangeable backends running on CPU, CUDA, Metal:
     - [IREE](https://iree.dev/) (StableHLO MLIR)
     - [ONNX Runtime](https://onnxruntime.ai/) (ONNX)
-    - NumPy
-3. Syntax is similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
+    - NumPy (CPU-only)
+
+3. Training and inference
+    - Examples include:
+        - [MLP on MNIST](examples/nn/mnist_mlp.py)
+        - ([ResNet on CIFAR-10](examples/nn/mnist_mlp.py))
+        - [Export jitted function](examples/simple/export.py)
+
 4. Small (?)
-  - <3000 lines of core code [slope/core.py](./src/slope/core.py), which supports higher-order derivatives and just-in-time compilation.
-  - Operator set defined in [slope/operators.py](./src/slope/operators.py): `add, mul, matmul, max` and so on.
-  - Composite operators "procedures" [slope/procedures.py](./src/slope/procedures.py): 
-  - Add new backends, see [slope/backends](./src/slope/backends)
-  - NN module [slope/nn.py](./src/slope/nn.py)
+    - <3000 lines of core code [slope/core.py](./src/slope/core.py), after run with `black src --line-length 140`
 
-### What works
-- CUDA and Metal on IREE backend and ONNXRuntime backend
-- MNIST training on MLP [code](examples/nn/mnist_mlp.py)
-- CIFAR-10 training on ResNet [code](examples/nn/mnist_mlp.py)
+5. Operators and procedures system
+    - 33 core operators defined in [slope/operators.py](./src/slope/operators.py)
+        - Unary: `exp log sin sqrt invert cast stop_gradient`
+        - Binary: `add mul sub div pow equal less greater maximum`
+        - Reduce: `sum max`
+        - Shape: `reshape expand permute slice pad flip cat`
+        - Init: `full arange random_normal random_uniform`
+        - GeneralReduce: `matmul conv gather_nd scatter_nd`
+    - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py)
+        - Procedures are functions containing calls to operators, exposed as `Tensor.procedure_name(*args)` syntax
+        - Useful for simple definitions like `cos(x)` as `sin(pi/2 - x)`, and big functions`conv_transpose` and `avgpool2d`.
+    - An operator can be directly implemented as code translation to backend, or _fallback_ to a procedure, i.e. function calls to other existing operators -- there is `conv` procedure in case the backend has no implementation for it.
 
-
-### To-dos:
-- Symbolic shape inference 
-- Dynamic shape jit
-- Optimizer filter frozen params
-- vmap vjp and jvp to compute jacobian and hessian
+6. Extensible
+    - Add new backend by defining implementation translations [slope/backends](./src/slope/backends)
+    - NN module [slope/nn.py](./src/slope/nn.py)
 
 # Install
 
@@ -236,6 +246,11 @@ Fork this repo and hack, and maybe do a PR, too many things need to be done (see
 Idk everything is flaky and I am still experimenting and doing many API changes, maybe later I will open a new github repo.
 
 # Roadmap
+
+- Symbolic shape inference 
+- Dynamic shape jit
+- Optimizer filter frozen params
+- vmap vjp and jvp to compute jacobian and hessian
 - iree backend currently has fixed seed random, implement threefry and JAX-like random
 - make things fast
 - llama (gpt) training

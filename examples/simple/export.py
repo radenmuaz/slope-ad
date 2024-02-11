@@ -12,5 +12,5 @@ def f(x):
 
 
 # print(f(x,))
-f_jitobj = f.jit_program(x)
+f_jitobj = f.lower(x)
 f_jitobj.export("/tmp/f", x)

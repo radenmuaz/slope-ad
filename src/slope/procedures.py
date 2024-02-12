@@ -314,6 +314,8 @@ def padslice(x, arg: Sequence[Optional[Tuple[int, int]]], value: float = 0):
     # some dim are pad, some are sliced
     arg_ = tuple([a if a is not None else (0, s) for s, a in zip(x.shape, arg)])
     padding = tuple([(max(0, -p[0]), max(0, p[1] - x.shape[i])) for i, p in enumerate(arg_)])
+    if len(padding)==0:
+        breakpoint()
     x = x.pad(flatten_seq(padding)[::-1], value=value)  # flatten
     starts, limits, strides = tuple(zip(*[(p[0] + padding[i][0], p[1] + padding[i][0], 1) for i, p in enumerate(arg_)]))
     x = x.slice(starts, limits, strides)

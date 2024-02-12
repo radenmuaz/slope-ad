@@ -675,9 +675,15 @@ class BinaryOperator(Operator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x), NullCotangent(x)]
         if self.boolean_output:
-            gL_y = gL_y.cast(x.dtype)
-        return [gL_y, NullCotangent(w)]
+            return [NullCotangent(x), NullCotangent(x)]
+            # gL_y = gL_y.cast(x.dtype)
+        if type(x) is UndefPrimal:
+            return [gL_y, NullCotangent(w)]
+        elif type(w) is UndefPrimal:
+            return [NullCotangent(x), gL_y]
 
 
 class ReduceOperator(Operator):
@@ -1583,6 +1589,7 @@ class ProgramTrace(Trace):
         if tracer is None:
             tracer = self.builder.new_tracer(self, get_symval(val))
             self.builder.add_const(tracer, val)
+        # print(self.builder.const_tracers)
         return tracer
 
     def run_op(self, op, tracers, params):
@@ -1649,7 +1656,9 @@ class ProgramBuilder:
             name,
         )
         typecheck_program(program)
+        # program_type = typecheck_program(program); program_ = program
         program, constvals = self._inline_literals(program, constvals)
+        # if len(program.instructions) > 300: breakpoint()
         return program, constvals
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
@@ -1782,7 +1791,7 @@ class PartialRunTrace(Trace):
     def run_op(self, op, tracers, params):
         is_knowns = tuple(t.pval.is_known for t in tracers)
 
-        if all(is_knowns):  # and op in backend.impls.keys():
+        if all(is_knowns):
             return bind(op, *list_map(full_lower, tracers), **params)
         return op.partial_run(self, tracers, **params)
 
@@ -2172,6 +2181,8 @@ def make_program(f: Callable, *symvals_in: SymbolicTensor, static_args, name) ->
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val for out in outs]
             program, consts = builder.build(tracers_in, tracers_out, static_args, name)
+            # if len(builder.instructions) > 300:
+            #     breakpoint()
 
     return program, consts, out_tree_store()
 
@@ -2468,7 +2479,8 @@ def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
 
 def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     pvals_in = [make_known_pval(x) for x in primals_in] + [make_unknown_pval(SymbolicTensor.like(get_symval(x))) for x in primals_in]
-    _, tangent_pvals_in = split_half(pvals_in)
+    primal_pvals_in, tangent_pvals_in = split_half(pvals_in)
+    del primal_pvals_in
 
     def f_jvp(*primals_tangents_in):
         jvp_ret = jvp(
@@ -2483,17 +2495,22 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
         else:
             (primals_out, tangents_out) = jvp_ret
         return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
+    # with new_main_trace(ProgramTrace, builder) as main:
+    # if isinstance(trace_stack[-1], ProgramTrace):
+    print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
 
     partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
     if has_aux:
         program, pvals_out, consts, aux = partial_run_flat_ret
     else:
         program, pvals_out, consts = partial_run_flat_ret
-
-    primal_pvals, _ = split_half(pvals_out)
+    print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
+    primal_pvals, tangent_pvals = split_half(pvals_out)
+    del tangent_pvals
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [UndefPrimal(p.symval) for p in tangent_pvals_in]
+    transpose_inputs = consts + [UndefPrimal(t.symval) for t in tangent_pvals_in]
+    # print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
     f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
@@ -2520,9 +2537,7 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
 class NullCotangent(NamedTuple):
     symval: SymbolicTensor
 
-
-# NullCotangent = None
-def backward_pass(program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
+def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
 
@@ -2534,8 +2549,8 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any], **ot
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        # return ct_env.pop(v, NullCotangent(v.symval))
-        return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
+        return ct_env.pop(v, NullCotangent(v.symval))
+        # return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
 
     def write_cotangent(x: Atom, ct: Any):
         if type(x) is Var and not isinstance(ct, NullCotangent):
@@ -2547,13 +2562,10 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any], **ot
         primals_in = list_map(read_primal, instruction.inputs)
         cotangents_in = list_map(read_cotangent, instruction.out_binders)
         inp, params = primals_in, instruction.params
-        inp, params = instruction.op.reorg_args(inp, params)
-        inp, params = instruction.op.args_fixer(*inp, **params)
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
-
     return ret
 
 
@@ -2561,6 +2573,7 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any], **ot
 def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
     symvals_in, symvals_out = typecheck_program(program)
     traceable = partial(backward_pass, program)
+    ()
     args = [UndefPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,

@@ -51,7 +51,7 @@ operator_set = OperatorSet()
 class StopGradient(UnaryOperator):
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
-        return [x], [slope.zeros_like(x_dot)]
+        return [x], [NullCotangent(x_dot)]
 
     def T(self, cotangents, x):
         return [NullCotangent(x)]

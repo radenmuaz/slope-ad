@@ -14,6 +14,7 @@ from slope.core import (
     UndefPrimal,
     list_zip,
     dtypes,
+    NullCotangent,
 )
 
 import math
@@ -53,7 +54,7 @@ class StopGradient(UnaryOperator):
         return [x], [slope.zeros_like(x_dot)]
 
     def T(self, cotangents, x):
-        return [None]
+        return [NullCotangent(x)]
 
 
 @operator_set.register("cast", aliases=["astype"])
@@ -167,9 +168,9 @@ class Mul(BinaryOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [gL_y * w, None]
+            return [gL_y * w, NullCotangent(w)]
         elif type(w) is UndefPrimal:
-            return [None, x * gL_y]
+            return [NullCotangent(x), x * gL_y]
 
 
 @operator_set.register("div")
@@ -180,7 +181,7 @@ class Div(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        return [gL_y / w, None]
+        return [gL_y / w, NullCotangent(w)]
 
 
 @operator_set.register("pow")
@@ -196,10 +197,10 @@ class Pow(BinaryOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), None]
+            return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), NullCotangent(w)]
         elif type(w) is UndefPrimal:
             return [
-                None,
+                NullCotangent(x),
                 gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))),
             ]
 
@@ -219,7 +220,11 @@ class Maximum(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        return [gL_y, None]
+        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
+        if type(x) is UndefPrimal:
+            return [gL_y, NullCotangent(w)]
+        elif type(w) is UndefPrimal:
+            return [NullCotangent(x), gL_y]
 
 
 @operator_set.register("equal")
@@ -325,8 +330,8 @@ class Expand(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
-        # if gL_y is None:
-        #     return [None]
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x)]
         gL_x = gL_y
         if x.symval.shape == gL_x.shape:
             return [gL_x]
@@ -372,8 +377,10 @@ class Reshape(ShapeOperator):
         return [x.reshape(shape)], [x_dot.reshape(shape)]
 
     def T(self, cotangents, x, *, shape):
-        (z,) = cotangents
-        return [z.reshape(x.symval.shape)]
+        (gL_y,) = cotangents
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x)]
+        return [gL_y.reshape(x.symval.shape)]
 
 
 @operator_set.register("permute", variadic_inputs=True)
@@ -453,24 +460,26 @@ class Pad(ShapeOperator):
         return [x.pad(padding, mode, value)], [x_dot.pad(padding, mode, value)]
 
     def T(self, cotangents, x, *, padding, mode, value):
-        (z,) = cotangents
+        (gL_y,) = cotangents
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x)]
         lo, hi = padding[0::2], padding[1::2]
         interior = [0] * (len(padding) // 2)
 
         if isinstance(x, UndefPrimal):
-            unpadded = z.slice(
+            unpadded = gL_y.slice(
                 lo,
-                tuple(s - h for s, h in list_zip(z.shape, hi)),
+                tuple(s - h for s, h in list_zip(gL_y.shape, hi)),
                 tuple([1] * len(interior)),
             )
-            res = unpadded.slice(
+            gL_x = unpadded.slice(
                 tuple([0] * len(lo)),
                 unpadded.shape,
                 tuple(r + 1 for r in interior),
             )
         else:
-            res = None
-        return [res]
+            gL_x = NullCotangent
+        return [gL_x]
 
 
 @operator_set.register("slice")
@@ -502,7 +511,9 @@ class Slice(ShapeOperator):
 
     def T(self, cotangents, x, *, starts, limits, strides=None):
         # TODO: compute tuple arithmetic without numpy
-        (z,) = cotangents
+        (gL_y,) = cotangents
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x)]
         x_shape = x.symval.shape
         assert isinstance(x, UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
@@ -518,7 +529,7 @@ class Slice(ShapeOperator):
                     np.where(
                         np.array(x.shape) == 0,
                         0,
-                        np.add(1, np.multiply(np.subtract(t.shape, 1), strides)),
+                        np.add(1, np.multiply(np.subtract(gL_y.shape, 1), strides)),
                     )
                 ),
             )
@@ -531,7 +542,7 @@ class Slice(ShapeOperator):
         for l, h in zip(reversed(lo), reversed(hi)):
             padding += [l, h]
         padding = tuple(padding)
-        res = z.pad(padding)
+        res = gL_y.pad(padding)
         assert res.shape == x_shape, f"{res.shape=} {x_shape=}"
         return [res]
 
@@ -563,8 +574,10 @@ class Flip(ShapeOperator):
         return [x.flip(dim)], [x_dot.flip(dim)]
 
     def T(self, cotangents, x, *, dim):
-        (z,) = cotangents
-        return [z.flip(dim)]
+        (gL_y,) = cotangents
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x)]
+        return [gL_y.flip(dim)]
 
 
 @operator_set.register("cat", variadic_inputs=True, aliases=["concatenate"])
@@ -619,21 +632,24 @@ class Cat(ShapeOperator):
         return [self(*primals, dim=dim)], [self(*tangents, dim=dim)]
 
     def T(self, cotangents, *xs, dim=0):
-        (z,) = cotangents
-        x_shapes = [o.symval.shape if type(o) is UndefPrimal else o.shape for o in xs]
-        if type(z) is None:
-            return [None if type(o) is UndefPrimal else None for o in xs]
+        (gL_y,) = cotangents
+        x_shapes = [x.symval.shape if isinstance(x, UndefPrimal) else x.shape for x in xs]
+        if isinstance(gL_y, NullCotangent):
+            return [NullCotangent(x) for x in xs]
         else:  # TODO: replace numpy with pure Python
             limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
-            starts = np.zeros((len(xs), z.ndim), dtype=int).tolist()
-            limits = np.tile(z.shape, (len(xs), 1)).tolist()
+            starts = np.zeros((len(xs), gL_y.ndim), dtype=int).tolist()
+            limits = np.tile(gL_y.shape, (len(xs), 1)).tolist()
 
         for i, s in enumerate(starts[1:]):
             s[dim] = limit_points[:-1][i]
         for i, l in enumerate(limits):
             l[dim] = limit_points[i]
 
-        return [z.slice(tuple(start), tuple(limit)) if type(o) is UndefPrimal else None for o, start, limit in zip(xs, starts, limits)]
+        return [
+            gL_y.slice(tuple(start), tuple(limit)) if isinstance(x, UndefPrimal) else NullCotangent(x)
+            for x, start, limit in zip(xs, starts, limits)
+        ]
 
 
 # -----------------------
@@ -798,9 +814,9 @@ class Matmul(GeneralReduceOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(x) is UndefPrimal:
-            return [gL_y @ w.transpose(-1, -2), None]
+            return [gL_y @ w.transpose(-1, -2), NullCotangent(w)]
         elif type(w) is UndefPrimal:
-            return [None, x.transpose(-1, -2) @ gL_y]
+            return [NullCotangent(x), x.transpose(-1, -2) @ gL_y]
 
 
 @operator_set.register("conv")
@@ -884,7 +900,7 @@ class Conv(GeneralReduceOperator):
                 output_padding=stride[0] - dilation[0],
             )
             assert gL_x.shape == x.shape
-            return [gL_x, None]
+            return [gL_x, NullCotangent(w)]
         elif type(w) is UndefPrimal:
             gL_w = (
                 x.transpose(0, 1)
@@ -902,7 +918,7 @@ class Conv(GeneralReduceOperator):
                 ends = (gL_w.shape[0], gL_w.shape[1]) + w.shape[2:]
                 gL_w = gL_w.slice(starts, ends)
             assert gL_w.shape == w.shape
-            return [None, gL_w]
+            return [NullCotangent(x), gL_w]
 
 
 # @operator_set.register("where")
@@ -969,10 +985,10 @@ class GatherND(GeneralReduceOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
         if type(w) is UndefPrimal:
-            return [None, None]
+            return [NullCotangent(w), NullCotangent(w)]
         else:
             gL_x = slope.zeros(x.shape, x.dtype, x.device)
-            return [gL_x.scatter_nd(w, gL_y), None]
+            return [gL_x.scatter_nd(w, gL_y), NullCotangent(w)]
 
 
 @operator_set.register("scatter_nd")
@@ -1006,12 +1022,12 @@ class ScatterND(GeneralReduceOperator):
         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
         (gL_y,) = cotangents
         if type(u) is UndefPrimal:
-            return [gL_y, None, None]
+            return [gL_y, NullCotangent(w), NullCotangent(w)]
             # return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
         elif type(w) is UndefPrimal:
-            return [gL_y, None, None]
+            return [gL_y, NullCotangent(w), NullCotangent(w)]
         else:
-            return [None, None, None]
+            return [NullCotangent(w), NullCotangent(w), NullCotangent(w)]
 
 
 # @operator_set.register("rng_bits")

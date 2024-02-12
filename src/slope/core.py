@@ -37,37 +37,61 @@ import importlib
 import time
 import cProfile
 import pstats
+
 # =================================
 #   Utils
 # =================================
 
 
 class Timing(ContextDecorator):
-  def __init__(self, prefix="", on_exit=None, enabled=True): self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
-  def __enter__(self): self.st = time.perf_counter_ns()
-  def __exit__(self, *exc):
-    self.et = time.perf_counter_ns() - self.st
-    if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
+    def __init__(self, prefix="", on_exit=None, enabled=True):
+        self.prefix, self.on_exit, self.enabled = prefix, on_exit, enabled
 
-def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
-def _format_fcn(fcn): return f"{fcn[0]}:{fcn[1]}:{fcn[2]}"
+    def __enter__(self):
+        self.st = time.perf_counter_ns()
+
+    def __exit__(self, *exc):
+        self.et = time.perf_counter_ns() - self.st
+        if self.enabled:
+            print(f"{self.prefix}{self.et*1e-6:6.2f} ms" + (self.on_exit(self.et) if self.on_exit else ""))
+
+
+def colored(st, color: Optional[str], background=False):
+    return (
+        f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m"
+        if color is not None
+        else st
+    )  # replace the termcolor library with one line  # noqa: E501
+
+
+def _format_fcn(fcn):
+    return f"{fcn[0]}:{fcn[1]}:{fcn[2]}"
+
+
 class Profiling(ContextDecorator):
-  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
-    self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
-  def __enter__(self):
-    self.pr = cProfile.Profile()
-    if self.enabled: self.pr.enable()
-  def __exit__(self, *exc):
-    if self.enabled:
-      self.pr.disable()
-      if self.fn: self.pr.dump_stats(self.fn)
-      stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
-      for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
-        (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
-        scallers = sorted(callers.items(), key=lambda x: -x[1][2])
-        print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
-              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
-              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
+    def __init__(self, enabled=True, sort="cumtime", frac=0.2, fn=None, ts=1):
+        self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3 / ts
+
+    def __enter__(self):
+        self.pr = cProfile.Profile()
+        if self.enabled:
+            self.pr.enable()
+
+    def __exit__(self, *exc):
+        if self.enabled:
+            self.pr.disable()
+            if self.fn:
+                self.pr.dump_stats(self.fn)
+            stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
+            for fcn in stats.fcn_list[0 : int(len(stats.fcn_list) * self.frac)]:  # type: ignore[attr-defined]
+                (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]  # type: ignore[attr-defined]
+                scallers = sorted(callers.items(), key=lambda x: -x[1][2])
+                print(
+                    f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
+                    colored(_format_fcn(fcn), "yellow") + " " * (50 - len(_format_fcn(fcn))),
+                    colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else "",
+                )
+
 
 def dblog(*msg, enable=True):
     if enable:
@@ -600,7 +624,7 @@ class BinaryOperator(Operator):
                     x = x.cast(w.dtype)
                 elif dtypes.is_int(x.dtype):
                     w = w.cast(x.dtype)
-            else: # TODO: fine-grained type promotions
+            else:  # TODO: fine-grained type promotions
                 raise NotImplementedError("No other type promotion rules")
 
         return (x, w), params
@@ -653,7 +677,7 @@ class BinaryOperator(Operator):
         (gL_y,) = cotangents
         if self.boolean_output:
             gL_y = gL_y.cast(x.dtype)
-        return [gL_y, None]
+        return [gL_y, NullCotangent(w)]
 
 
 class ReduceOperator(Operator):
@@ -690,11 +714,12 @@ class InitOperator(Operator):
 
     def jvp(self, primals, tangents, **params):
         y = self(**params)
-        y_dot = y.ones_like()
+        y_dot = NullCotangent(y.symval)
+        # y_dot = y.ones_like()
         return [y], [y_dot]
 
     def T(self, cotangents, **params):
-        return [None]
+        return [NullCotangent(cotangents[0])]
 
 
 class ShapeOperator(Operator):
@@ -1256,6 +1281,7 @@ class JitOutput:
             raise
         return [backend.tensor(TensorBuffer(o)) for o in outs]
 
+
 class JitOp(MetaOperator):
     def meta_impl(self, *args, program: Program, **_):
         hashed_program = Hashed(program)
@@ -1265,7 +1291,6 @@ class JitOp(MetaOperator):
         jit_output = backend.jit_program(hashed_program, hashed_consts)
         ret = jit_output(*consts, *args)
         return ret
-
 
     def reorg_args(self, args, params):
         return args, params
@@ -2469,7 +2494,7 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(p.symval) for p in tangent_pvals_in]
-    f_vjp_flat = lambda *cotangents: run_program_transposed(program, transpose_inputs, cotangents)
+    f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
 
@@ -2492,7 +2517,12 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
     return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
 
 
-def run_program_transposed(program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
+class NullCotangent(NamedTuple):
+    symval: SymbolicTensor
+
+
+# NullCotangent = None
+def backward_pass(program: Program, args: List[Any], cotangents: List[Any], **others) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
 
@@ -2504,12 +2534,12 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, None)
-        # return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
+        # return ct_env.pop(v, NullCotangent(v.symval))
+        return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
 
-    def write_cotangent(x: Atom, val: Any):
-        if type(x) is Var and val is not None:
-            ct_env[x] = ct_env[x] + val if x in ct_env else val
+    def write_cotangent(x: Atom, ct: Any):
+        if type(x) is Var and not isinstance(ct, NullCotangent):
+            ct_env[x] = (ct_env[x] + ct) if x in ct_env else ct
 
     list_map(write_primal, program.in_binders, args)
     list_map(write_cotangent, program.outs, cotangents)
@@ -2519,10 +2549,8 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
         inp, params = primals_in, instruction.params
         inp, params = instruction.op.reorg_args(inp, params)
         inp, params = instruction.op.args_fixer(*inp, **params)
-        print(instruction)#, inp, params)
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
-    breakpoint()
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
 
@@ -2532,7 +2560,7 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
 @lru_cache_verbose()
 def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tuple[Program, list[Any]]:
     symvals_in, symvals_out = typecheck_program(program)
-    traceable = partial(run_program_transposed, program)
+    traceable = partial(backward_pass, program)
     args = [UndefPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,

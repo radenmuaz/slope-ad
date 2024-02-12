@@ -218,7 +218,7 @@ class IREEBackend(Backend):
                 # "--iree-opt-const-expr-hoisting",
                 # "--iree-opt-data-tiling",
                 # "--iree-opt-numeric-precision-reduction"
-                ]
+            ],
         )
         m = iree.runtime.VmModule.from_flatbuffer(instance, binary)
         context = iree.runtime.VmContext(instance, modules=[hal_module, m])

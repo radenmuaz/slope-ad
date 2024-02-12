@@ -162,21 +162,19 @@ class Optimizer(Module):
     def __call__(self, params, g_params, nan_to_zero=False):
         state_names, state_attrs = zip(*self.state.get_modules(with_name=True).items())
         if nan_to_zero:
-            g_params = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0.0, x), g_params)
+            g_params = slope.tree_map(lambda x: (x == slope.tensor([float("nan")])).where(0.0, x), g_params)
         if self.filter_fn is None:
             step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, params, *(g_params, *state_attrs), out_leaf=True)
         # TODO: only update for params updatable True
         else:
             raise NotImplementedError
+
             def where_step(params, *args):
                 def noop(p, *_):
                     return (p, ())
 
-                return slope.where(
-                    self.filter_fn,
-                    self.step(params, *args),
-                    noop(p)
-                )
+                return slope.where(self.filter_fn, self.step(params, *args), noop(p))
+
             step_out, (leaf0, leaf0_treedef) = slope.tree_map(where_step, params, *(g_params, *state_attrs), out_leaf=True)
 
         step_out_T = slope.tree_transpose(self.params_treedef, leaf0_treedef, step_out)
@@ -185,7 +183,7 @@ class Optimizer(Module):
         # for n, a  in zip(state_names, state_attrs_out):
         #     setattr(self.state, n, a)
         if nan_to_zero:
-            params_out = slope.tree_map(lambda x: (x==slope.tensor([float('nan')])).where(0., x), params_out)
+            params_out = slope.tree_map(lambda x: (x == slope.tensor([float("nan")])).where(0.0, x), params_out)
         self.state = state
         self.iters = self.iters + 1
 
@@ -262,29 +260,31 @@ AdamW = Adam
 #     def __init__(self, optim):
 #         self.optim_treedef = slope.tree_flatten(optim)[1]
 #         self.iters = slope.zeros(())
-    
+
 #     def step(self, lr):
 #         return (lr,)
 #         raise NotImplementedError
-    
+
 #     def __call__(self, optim):
 #         step_out, (leaf0, leaf0_treedef) = slope.tree_map(self.step, optim.hp.lr, out_leaf=True)
 #         step_out_T = slope.tree_transpose(self.optim_treedef, leaf0_treedef, step_out)
 #         optim_out = step_out_T
 #         self.iters = self.iters + 1
 #         return (optim_out, self)
-    
+
+
 class LRScheduler(Module):
     def __init__(self):
         self.iters = slope.zeros((), dtype=slope.int32)
-    
+
     def get_lr(self, lr):
         raise NotImplementedError
-    
+
     def __call__(self, optim):
         optim.hp.lr = self.get_lr(optim.hp.lr)
         self.iters = self.iters + 1
         return (optim, self)
+
 
 class MultiStepLR(LRScheduler):
     def __init__(self, milestones: List[int], gamma=0.1):
@@ -293,9 +293,10 @@ class MultiStepLR(LRScheduler):
         self.gamma = slope.tensor(gamma, dtype=slope.float32)
 
     def get_lr(self, lr) -> Tensor:
-        do_step = ((self.iters == self.milestones).cast(slope.float32).sum() > 0)
-        lr_out =  slope.where(do_step, lr * self.gamma, lr)
+        do_step = (self.iters == self.milestones).cast(slope.float32).sum() > 0
+        lr_out = slope.where(do_step, lr * self.gamma, lr)
         return lr_out
+
 
 # class MultiStepLR(LR_Scheduler):
 #   def __init__(self, optimizer: Optimizer, milestones: List[int], gamma=0.1):
@@ -529,7 +530,7 @@ class Linear(Module):
 
     def __call__(self, x):
         return x.linear(self.weight, self.bias)
-    
+
     def reset_parameters_(self):
         stdv = 1.0 / math.sqrt(self.weight.shape[1])
         self.weight = slope.tensor(np.random.uniform(-stdv, stdv, self.weight.shape), self.weight.dtype)
@@ -609,7 +610,7 @@ class ConvNd(Module):
             dilation=self.dilation,
             padding=self.padding,
         )
-    
+
     def reset_parameters_(self):
         n = self.in_channels * (self.kernel_size**self.dims)
         stdv = 1.0 / math.sqrt(n)

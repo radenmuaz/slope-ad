@@ -1,11 +1,11 @@
-'''
+"""
 # run with different backends
 SLOPE_BACKEND=iree python examples/nn/cifar10_convnet.py
 SLOPE_BACKEND=onnxruntime python examples/nn/cifar10_convnet.py
 
 # print backend code
 LOG_JIT=1 SLOPE_BACKEND=iree python examples/nn/cifar10_convnet.py
-'''
+"""
 
 import slope
 import slope.nn as nn
@@ -19,11 +19,14 @@ from lib.datasets.cifar10 import get_cifar10
 from lib.models.cv.resnet_cifar import resnet
 
 np.random.seed(12345)
+
+
 @slope.jit
 def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
         x, y = batch
         logits, model = model(x, training=True)
+        logits = model(x, training=False)
         loss = logits.cross_entropy(y) / x.size(0)
 
         return loss, (model, logits)
@@ -85,8 +88,9 @@ if __name__ == "__main__":
         total_loss = 0.0
         true_positives = 0.0
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()), total=ntrain_batches, leave=False)):
-        #   with slope.core.Timing("RUN "):
-            with slope.core.Timing("RUN "): loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
+            #   with slope.core.Timing("RUN "):
+            with slope.core.Timing("RUN "):
+                loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             # loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             loss_numpy = float(loss.numpy())
             total_loss += loss_numpy

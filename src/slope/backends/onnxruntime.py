@@ -504,9 +504,9 @@ f'''{y.name} = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
 def full_impl(self, y, *, shape, fill_value, dtype, device):
     if dtype is not dtypes.bool:
         if dtypes.is_float(dtype):
-            fill_value=float(fill_value)
+            fill_value = float(fill_value)
         elif dtypes.is_int(dtype):
-            fill_value=int(fill_value)
+            fill_value = int(fill_value)
 
         if len(shape) > 0:
             return f"""{y.name}_fill_value=Constant<value={self.dtype_map[dtype]}[1] {{ {fill_value} }}>()

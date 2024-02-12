@@ -35,7 +35,8 @@ import mmap
 import traceback
 import importlib
 import time
-
+import cProfile
+import pstats
 # =================================
 #   Utils
 # =================================
@@ -48,6 +49,25 @@ class Timing(ContextDecorator):
     self.et = time.perf_counter_ns() - self.st
     if self.enabled: print(f"{self.prefix}{self.et*1e-6:6.2f} ms"+(self.on_exit(self.et) if self.on_exit else ""))
 
+def colored(st, color:Optional[str], background=False): return f"\u001b[{10*background+60*(color.upper() == color)+30+['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'].index(color.lower())}m{st}\u001b[0m" if color is not None else st  # replace the termcolor library with one line  # noqa: E501
+def _format_fcn(fcn): return f"{fcn[0]}:{fcn[1]}:{fcn[2]}"
+class Profiling(ContextDecorator):
+  def __init__(self, enabled=True, sort='cumtime', frac=0.2, fn=None, ts=1):
+    self.enabled, self.sort, self.frac, self.fn, self.time_scale = enabled, sort, frac, fn, 1e3/ts
+  def __enter__(self):
+    self.pr = cProfile.Profile()
+    if self.enabled: self.pr.enable()
+  def __exit__(self, *exc):
+    if self.enabled:
+      self.pr.disable()
+      if self.fn: self.pr.dump_stats(self.fn)
+      stats = pstats.Stats(self.pr).strip_dirs().sort_stats(self.sort)
+      for fcn in stats.fcn_list[0:int(len(stats.fcn_list)*self.frac)]:    # type: ignore[attr-defined]
+        (_primitive_calls, num_calls, tottime, cumtime, callers) = stats.stats[fcn]    # type: ignore[attr-defined]
+        scallers = sorted(callers.items(), key=lambda x: -x[1][2])
+        print(f"n:{num_calls:8d}  tm:{tottime*self.time_scale:7.2f}ms  tot:{cumtime*self.time_scale:7.2f}ms",
+              colored(_format_fcn(fcn), "yellow") + " "*(50-len(_format_fcn(fcn))),
+              colored(f"<- {(scallers[0][1][2]/tottime)*100:3.0f}% {_format_fcn(scallers[0][0])}", "BLACK") if len(scallers) else '')
 
 def dblog(*msg, enable=True):
     if enable:
@@ -2484,7 +2504,8 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
+        return ct_env.pop(v, None)
+        # return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
 
     def write_cotangent(x: Atom, val: Any):
         if type(x) is Var and val is not None:
@@ -2498,8 +2519,10 @@ def run_program_transposed(program: Program, args: List[Any], cotangents: List[A
         inp, params = primals_in, instruction.params
         inp, params = instruction.op.reorg_args(inp, params)
         inp, params = instruction.op.args_fixer(*inp, **params)
+        print(instruction)#, inp, params)
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
+    breakpoint()
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
 

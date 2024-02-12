@@ -205,7 +205,7 @@ class Pow(BinaryOperator):
 
 
 @operator_set.register("maximum")
-class Maximuum(BinaryOperator):
+class Maximum(BinaryOperator):
     def jvp(self, primals, tangents):
         def _balanced_eq(x, z, y):
             xz = (x == z).where(slope.ones_like(z), slope.zeros_like(z))
@@ -325,6 +325,8 @@ class Expand(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
+        # if gL_y is None:
+        #     return [None]
         gL_x = gL_y
         if x.symval.shape == gL_x.shape:
             return [gL_x]

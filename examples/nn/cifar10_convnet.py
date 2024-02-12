@@ -85,11 +85,9 @@ if __name__ == "__main__":
         total_loss = 0.0
         true_positives = 0.0
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()), total=ntrain_batches, leave=False)):
-            loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
-            # if i % 10 == 0:
-            #     with slope.core.Timing("RUN "): loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
-            # else:
-            #     loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
+        #   with slope.core.Timing("RUN "):
+            with slope.core.Timing("RUN "): loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
+            # loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             loss_numpy = float(loss.numpy())
             total_loss += loss_numpy
             y_hat, y = logits.argmax(-1), batch[1]

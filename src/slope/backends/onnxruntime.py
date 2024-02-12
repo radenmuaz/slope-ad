@@ -94,7 +94,7 @@ class ONNXRuntimeBackend(Backend):
     # Other flags
     # sess_options.log_severity_level = 3
     # sess_options.use_deterministic_compute = True
-    # sess_options.intra_op_num_threads = 4
+    # sess_options.intra_op_num_threads = 1
     sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
     # sess_options.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
@@ -322,8 +322,7 @@ if __name__ == "__main__":
         print(out)
         print(f"dtype: {{out.dtype}}")
         print(f"shape: {{out.shape}}")
-        print()
-"""
+        print()"""
         with open(module_path, "w") as f:
             f.write(module_code)
             slope.dblog(module_code, enable=slope.LOG_JIT)
@@ -478,33 +477,25 @@ def scatter_nd_impl(
 
 @backend.set_impl(operator_set.sum)
 def sum_impl(self, x, y, *, dim, keepdim):
-    return f"""{y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-{y.name} = ReduceSum<keepdims={int(keepdim)}> ({x.name}, {y.name}_dim)
-"""
+    return f"""{y.name}_dim = Constant<value=int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
+{y.name} = ReduceSum<keepdims={int(keepdim)}> ({x.name}, {y.name}_dim)"""
 
 
 @backend.set_impl(operator_set.max)
 def max_impl(self, x, y, *, dim, keepdim):
-    return f"""{y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
-{y.name} = ReduceMax<keepdims={int(keepdim)}> ({x.name}, {y.name}_dim)
-"""
+    return f"""{y.name}_dim = Constant<value=int64[{len(dim)}]  {{ {repr(dim)[1:(-1 if len(dim) > 1 else -2)]} }} >()
+{y.name} = ReduceMax<keepdims={int(keepdim)}> ({x.name}, {y.name}_dim)"""
 
 
 @backend.set_impl(operator_set.arange)
 def arange_impl(self, y, *, start, stop, stride, dtype, device):
-    return f"""
-{y.name}_start = Constant <value_int = {start}> ()
-{y.name}_limit = Constant <value_int = {stop}> ()
-{y.name}_delta = Constant <value_int = {stride}> ()
-{f'''
-{y.name}_range = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
-{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_range)
-''' if dtype is not dtypes.int64 else
-f'''
-{y.name} = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
-'''
-}
-"""
+    return f"""{y.name}_start = Constant<value_int={start}> ()
+{y.name}_limit = Constant<value_int={stop}> ()
+{y.name}_delta = Constant<value_int={stride}> ()
+{f'''{y.name}_range = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
+{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_range)''' if dtype is not dtypes.int64 else
+f'''{y.name} = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
+'''}"""
 
 
 # {y.name}_range = Range({y.name}_start, {y.name}_limit, {y.name}_delta)
@@ -513,84 +504,69 @@ f'''
 def full_impl(self, y, *, shape, fill_value, dtype, device):
     if dtype is not dtypes.bool:
         if dtypes.is_float(dtype):
-            fill_value = float(fill_value)
+            fill_value=float(fill_value)
         elif dtypes.is_int(dtype):
-            fill_value = int(fill_value)
+            fill_value=int(fill_value)
 
         if len(shape) > 0:
-            return f"""{y.name}_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-{y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name} = Expand ({y.name}_fill_value, {y.name}_shape)
-"""
+            return f"""{y.name}_fill_value=Constant<value={self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+{y.name}_shape = Constant<value=int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+{y.name} = Expand({y.name}_fill_value, {y.name}_shape)"""
         else:  # scalar case
-            return f"""{y.name}_fill_value = Constant < value = {self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
-{y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-{y.name} = Squeeze ({y.name}_fill_value, {y.name}_squeeze_dim)
-"""
+            return f"""{y.name}_fill_value=Constant<value={self.dtype_map[dtype]}[1] {{ {fill_value} }}>()
+{y.name}_squeeze_dim = Constant<value=int64[1] {{0}}> ()
+{y.name} = Squeeze ({y.name}_fill_value, {y.name}_squeeze_dim)"""
     else:
         if len(shape) > 0:
-            return f"""{y.name}_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
-{y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name}_expand = Expand ({y.name}_fill_value, {y.name}_shape)
-{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_expand)
-"""
+            return f"""{y.name}_fill_value=Constant<value=int64[1] {{{int(fill_value)}}}>()
+{y.name}_shape = Constant<value=int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+{y.name}_expand = Expand({y.name}_fill_value, {y.name}_shape)
+{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_expand)"""
         else:  # scalar case
-            return f"""{y.name}_fill_value = Constant < value = int64[1] {{ {int(fill_value)} }}>()
-{y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
+            return f"""{y.name}_fill_value=Constant<value=int64[1] {{{int(fill_value)}}}>()
+{y.name}_squeeze_dim = Constant<value=int64[1] {{0}}> ()
 {y.name}_squeeze = Squeeze ({y.name}_fill_value, {y.name}_squeeze_dim)
-{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_squeeze)
-"""
+{y.name} = Cast<to={self.onnx_dtype_enum_map[dtype]}>({y.name}_squeeze)"""
 
 
 @backend.set_impl(operator_set.random_uniform)
 def random_uniform_impl(self, y, *, shape, dtype, device):
     if len(shape) > 0:
-        return f"""
-{y.name} = RandomUniform<dtype={self.onnx_dtype_enum_map[dtype]},shape={repr(list(shape))}>()
-"""
+        return f"""{y.name} = RandomUniform<dtype={self.onnx_dtype_enum_map[dtype]},shape={repr(list(shape))}>()"""
     else:  # scalar case
         return f"""
 {y.name}_rand = RandomUniform<dtype={self.onnx_dtype_enum_map[dtype]}, shape=[1]>()
-{y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-{y.name} = Squeeze ({y.name}_rand, {y.name}_squeeze_dim)
-"""
+{y.name}_squeeze_dim = Constant<value=int64[1] {{0}}> ()
+{y.name} = Squeeze ({y.name}_rand, {y.name}_squeeze_dim)"""
 
 
 @backend.set_impl(operator_set.random_normal)
 def random_normal_impl(self, y, *, shape, dtype, device):
     if len(shape) > 0:
-        return f"""
-{y.name} = RandomNormal<dtype={self.onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}>()
-"""
+        return f"""{y.name} = RandomNormal<dtype={self.onnx_dtype_enum_map[dtype]}, shape={repr(list(shape))}>()"""
     else:  # scalar case
         return f"""
 {y.name}_randn = RandomNormal<dtype={self.onnx_dtype_enum_map[dtype]}, shape=[1]>()
-{y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-{y.name} = Squeeze ({y.name}_randn, {y.name}_squeeze_dim)
-"""
+{y.name}_squeeze_dim = Constant<value=int64[1] {{0}}> ()
+{y.name} = Squeeze ({y.name}_randn, {y.name}_squeeze_dim)"""
 
 
 @backend.set_impl(operator_set.expand)
 def expand_impl(self, x, y, *, shape):
-    return f"""
-{y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name} = Expand ({x.name}, {y.name}_shape)
-"""
+    return f"""{y.name}_shape = Constant<value=int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+{y.name} = Expand({x.name}, {y.name}_shape)"""
 
 
 @backend.set_impl(operator_set.reshape)
 def reshape_impl(self, x, y, *, shape):
     if len(shape) > 0:
-        return f"""
-{y.name}_shape = Constant <value = int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
-{y.name} = Reshape({x.name}, {y.name}_shape)
-"""
+        return f"""{y.name}_shape = Constant<value=int64[{len(shape)}] {{ {repr(list(shape))[1:-1]} }} >()
+{y.name} = Reshape({x.name}, {y.name}_shape)"""
     else:  # scalar case
-        f"""
-        {y.name}_shape = Constant <value = int64[1] {1} >()
-        {y.name}_reshape = Reshape({x.name}, {y.name}_shape)
-        {y.name}_squeeze_dim = Constant <value = int64[1] {{0}}> ()
-        {y.name} = Squeeze ({y.name}_reshape, {y.name}_squeeze_dim)"""
+        f"""{y.name}_shape = Constant<value=int64[1] {1} >()
+{y.name}_reshape = Reshape({x.name}, {y.name}_shape)
+{y.name}_squeeze_dim = Constant<value=int64[1] {{0}}> ()
+{y.name} = Squeeze ({y.name}_reshape, {y.name}_squeeze_dim)"""
 
 
 @backend.set_impl(operator_set.pad)
@@ -598,25 +574,21 @@ def pad_impl(self, x, y, *, padding, mode, value):
     padding = padding[::-1]
     padding = padding[0::2] + padding[1::2]
     #     return f"""
-    # {y.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
-    # {y.name}_constant_value =  Constant <value = {value} >()
+    # {y.name}_padding = Constant<value=int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+    # {y.name}_constant_value= Constant<value={value} >()
     # {y.name} = Pad({x.name}, {y.name}_padding, {y.name}_constant_value)
     # """
-    return f"""
-{y.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
-{y.name} = Pad({x.name}, {y.name}_padding)
-"""
+    return f"""{y.name}_padding = Constant<value=int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+{y.name} = Pad({x.name}, {y.name}_padding)"""
 
 
 @backend.set_impl(operator_set.slice)
 def slice_impl(self, x, y, *, starts, limits, strides):
-    return f"""
-{y.name}_starts = Constant <value = int64[{len(starts)}]  {{ {repr(list(starts))[1:-1]} }}>()
-{y.name}_ends = Constant <value = int64[{len(limits)}]  {{ {repr(list(limits))[1:-1]} }}>()
-{y.name}_dim = Constant <value = int64[{len(strides)}]  {{ {repr(list(range(len(starts))))[1:-1]} }}>()
-{y.name}_steps = Constant <value = int64[{len(strides)}]  {{ {repr(list(strides))[1:-1]} }}>()
-{y.name} = Slice({x.name}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
-"""
+    return f"""{y.name}_starts = Constant<value=int64[{len(starts)}]  {{ {repr(list(starts))[1:-1]} }}>()
+{y.name}_ends = Constant<value=int64[{len(limits)}]  {{ {repr(list(limits))[1:-1]} }}>()
+{y.name}_dim = Constant<value=int64[{len(strides)}]  {{ {repr(list(range(len(starts))))[1:-1]} }}>()
+{y.name}_steps = Constant<value=int64[{len(strides)}]  {{ {repr(list(strides))[1:-1]} }}>()
+{y.name} = Slice({x.name}, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)"""
 
 
 @backend.set_impl(operator_set.cat)
@@ -635,14 +607,13 @@ def flip_impl(self, x, y, *, dim):
     padding = [0, 0] * x.symval.ndim
     for d in dim:
         padding[d] = 1
-    return f"""{x.name}_padding = Constant <value = int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
+    return f"""{x.name}_padding = Constant<value=int64[{len(padding)}]  {{ {repr(list(padding))[1:-1]} }}>()
 {x.name}_ = Pad({x.name}, {x.name}_padding)
-{y.name}_starts = Constant <value = int64[{len(dim)}]  {{ {", ".join([str(x.symval.shape[d]) for d in dim])} }}>()
-{y.name}_ends = Constant <value = int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))} }}>()
-{y.name}_dim = Constant <value = int64[{len(dim)}]  {{ {repr(list(dim))[1:-1]} }}>()
-{y.name}_steps = Constant <value = int64[{len(dim)}] {{ {", ".join(["-1"] * len(dim))} }}>()
-{y.name} = Slice({x.name}_, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)
-"""
+{y.name}_starts = Constant<value=int64[{len(dim)}]  {{ {", ".join([str(x.symval.shape[d]) for d in dim])}}}>()
+{y.name}_ends = Constant<value=int64[{len(dim)}] {{ {", ".join(["0"] * len(dim))}}}>()
+{y.name}_dim = Constant<value=int64[{len(dim)}]  {{ {repr(list(dim))[1:-1]} }}>()
+{y.name}_steps = Constant<value=int64[{len(dim)}] {{ {", ".join(["-1"] * len(dim))}}}>()
+{y.name} = Slice({x.name}_, {y.name}_starts, {y.name}_ends, {y.name}_dim, {y.name}_steps)"""
 
 
 @backend.set_impl(operator_set.conv)

@@ -9,8 +9,8 @@ x = slope.randn(N, 3, 32, 32)
 optimizer = slope.nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
 
 def train_loss_fn(model, x, y):
-    # logits, model = model(x, training=True)
-    logits = model(x, training=False)
+    logits, model = model(x, training=True)
+    # logits = model(x, training=False)
     loss = logits.cross_entropy(y) / x.size(0)
     return loss, ()#(model, logits)
     # return loss, (model, logits)

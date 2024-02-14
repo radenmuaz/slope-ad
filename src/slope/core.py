@@ -426,7 +426,7 @@ class SymbolicTensor(Tensor):
 
     @property
     def val(self):
-        raise RuntimeError(f"this.val should not be accessed, as\n{trace_stack[-1]=}, ")
+        raise RuntimeError(f"SymbolicTensor actually has no val, from {trace_stack[-1]=}, ")
 
     @property
     def shape(self):
@@ -2405,7 +2405,7 @@ def tracers_to_program(
     processed_instructions: Set[int] = set()
     instructions: List[Instruction] = []
     for t in toposort(tracers_out, tracer_parents):
-    # for t in filtered_toposort(tracers_out, tracer_parents):
+        # for t in filtered_toposort(tracers_out, tracer_parents):
         if isinstance(t.draft, LambdaBindingDraft):
             assert id(t) in set(list_map(id, tracers_in))
         elif isinstance(t.draft, ConstDraft):
@@ -2430,6 +2430,7 @@ def tracers_to_program(
     program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
     typecheck_program(program)
     return program, constvals
+
 
 def filtered_toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
     def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -2466,7 +2467,6 @@ def filtered_toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]])
     sorted_nodes = sorted_nodes[::-1]
     # check_toposort(sorted_nodes, parents)
     return sorted_nodes
-   
 
 
 def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -2607,6 +2607,8 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
+    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
+    ret = [backend.zeros(r.symval.shape, r.symval.dtype) if isinstance(r, NullCotangent) else r for r in ret]
     return ret
 
 

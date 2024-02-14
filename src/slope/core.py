@@ -2607,7 +2607,6 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
-    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
     ret = [backend.zeros(r.symval.shape, r.symval.dtype) if isinstance(r, NullCotangent) else r for r in ret]
     return ret
 

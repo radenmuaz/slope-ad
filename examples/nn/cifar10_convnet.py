@@ -25,7 +25,7 @@ np.random.seed(12345)
 def train_step(model, batch, optimizer):
     def train_loss_fn(model, batch):
         x, y = batch
-        logits, model = model(x, training=True)
+        # logits, model = model(x, training=True)
         logits = model(x, training=False)
         loss = logits.cross_entropy(y) / x.size(0)
 

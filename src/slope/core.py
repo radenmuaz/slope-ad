@@ -1656,9 +1656,7 @@ class ProgramBuilder:
             name,
         )
         typecheck_program(program)
-        # program_type = typecheck_program(program); program_ = program
         program, constvals = self._inline_literals(program, constvals)
-        # if len(program.instructions) > 300: breakpoint()
         return program, constvals
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
@@ -2181,8 +2179,6 @@ def make_program(f: Callable, *symvals_in: SymbolicTensor, static_args, name) ->
             outs = f(*tracers_in, **{k: v for k, v in static_args})
             tracers_out = [full_raise(trace, out) if isinstance(out, ProgramTraceTensor) else out.val for out in outs]
             program, consts = builder.build(tracers_in, tracers_out, static_args, name)
-            # if len(builder.instructions) > 300:
-            #     breakpoint()
 
     return program, consts, out_tree_store()
 
@@ -2409,6 +2405,7 @@ def tracers_to_program(
     processed_instructions: Set[int] = set()
     instructions: List[Instruction] = []
     for t in toposort(tracers_out, tracer_parents):
+    # for t in filtered_toposort(tracers_out, tracer_parents):
         if isinstance(t.draft, LambdaBindingDraft):
             assert id(t) in set(list_map(id, tracers_in))
         elif isinstance(t.draft, ConstDraft):
@@ -2428,141 +2425,48 @@ def tracers_to_program(
 
     constvars, constvals = unzip2(constvar_to_val.items())
     in_binders = constvars + [tracer_to_var[id(t)] for t in tracers_in]
+    # out_vars = [tracer_to_var[id(t)] for t in tracers_out if id(t) in tracer_to_var]
     out_vars = [tracer_to_var[id(t)] for t in tracers_out]
     program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
     typecheck_program(program)
     return program, constvals
 
+def filtered_toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
+    def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
+        seen = set()
+        for node in nodes:
+            assert all(id(parent) in seen for parent in parents(node))
+            seen.add(id(node))
 
-# def toposort(end_nodes):
-#     if not end_nodes:
-#         return []
-#     end_nodes = _remove_duplicates(end_nodes)
+    def remove_duplicates(lst):
+        seen = set()
+        return [x for x in lst if id(x) not in seen and not seen.add(id(x))]
 
-#     child_counts = {}
-#     stack = list(end_nodes)
-#     while stack:
-#         node = stack.pop()
-#         if id(node) in child_counts:
-#             child_counts[id(node)] += 1
-#         else:
-#             child_counts[id(node)] = 1
-#             stack.extend(node.parents)
-#     for node in end_nodes:
-#         child_counts[id(node)] -= 1
+    if not out_nodes:
+        return []
+    out_nodes = remove_duplicates(out_nodes)
 
-#     sorted_nodes = []
-#     childless_nodes = [node for node in end_nodes if child_counts[id(node)] == 0]
-#     assert childless_nodes
-#     while childless_nodes:
-#         node = childless_nodes.pop()
-#         sorted_nodes.append(node)
-#         for parent in node.parents:
-#             if child_counts[id(parent)] == 1:
-#                 childless_nodes.append(parent)
-#             else:
-#                 child_counts[id(parent)] -= 1
-#     sorted_nodes = sorted_nodes[::-1]
+    child_counts = {}
+    stack = list(out_nodes)
+    connected_nodes = set(out_nodes)
+    while stack:
+        node = stack.pop()
+        if id(node) in child_counts:
+            child_counts[id(node)] += 1
+        else:
+            child_counts[id(node)] = 1
+            parents_list = parents(node)
+            stack.extend(parents_list)
+            connected_nodes.update(parents_list)
+    for node in out_nodes:
+        child_counts[id(node)] -= 1
 
-#     check_toposort(sorted_nodes)
-#     return sorted_nodes
+    sorted_nodes = [node for node in connected_nodes if child_counts.get(id(node), 0) == 0]
 
-
-# def check_toposort(nodes):
-#     visited = set()
-#     for node in nodes:
-#         assert all(id(parent) in visited for parent in node.parents)
-#         visited.add(id(node))
-
-
-# def _remove_duplicates(node_list):
-#     seen = set()
-#     out = []
-#     for n in node_list:
-#         if id(n) not in seen:
-#             seen.add(id(n))
-#             out.append(n)
-#     return out
-
-
-# def tracers_to_jaxpr(
-#     in_tracers: Sequence[JaxprTracer], out_tracers: Sequence[JaxprTracer]
-# ) -> Tuple[Jaxpr, Tuple[Any, ...], Tuple[Any, ...]]:
-#     """Constructs Jaxpr given tracers for inputs and outputs.
-
-#     Params:
-#       in_tracers: the tracers that were created for the function inputs
-#       out_tracers: the tracers that were output by the function.
-
-#     Returns: a triple of a `Jaxpr`, a list of constant values corresponding to
-#       the `constvars` in the returned Jaxps, and a list of environment values.
-#       The vars for the environment values have been prepended to the Jaxpr's
-#       `invars`.
-#     """
-#     gensym = core.gensym()
-
-#     t_to_var: Dict[TracerId, Var] = {}
-#     consts: Dict[Var, Any] = {}
-#     env: Dict[Var, JaxprTracer] = {}
-#     constid_to_var: Dict[ConstId, Var] = {}  # for deduplication
-
-#     def get_atom(t: JaxprTracer) -> Atom:
-#         return t.recipe if type(t.recipe) is Literal else t_to_var[id(t)]
-
-#     def newvar(t: Optional[JaxprTracer]) -> Var:
-#         assert t is not None
-#         var = gensym(type_substitute(t.aval))
-#         var_ = t_to_var.setdefault(id(t), var)
-#         assert var is var_
-#         return var
-
-#     def type_substitute(aval: AbstractValue) -> AbstractValue:
-#         if isinstance(aval, DShapedArray):
-#             # Replace any Tracers in aval.shape with Vars or Literal values
-#             shape = [get_atom(d) if type(d) is JaxprTracer else d for d in aval.shape]
-#             shape = [d.val if type(d) is Literal else d for d in shape]
-#             aval = aval.update(shape=tuple(shape))
-#         return aval
-
-#     processed_eqn_ids = set()
-#     eqns: List[core.JaxprEqn] = []
-#     for t in toposort([*in_tracers, *out_tracers]):
-#         r = t.recipe
-#         if isinstance(r, JaxprEqnRecipe):
-#             # TODO broadcast_in_dim can create a new tracer, not present in parents
-#             if r.eqn_id not in processed_eqn_ids:
-#                 in_atoms = map(get_atom, r.in_tracers)
-#                 outvars = [DropVar(type_substitute(a)) if rf() is None else newvar(rf()) for a, rf in zip(r.out_avals, r.out_tracer_refs)]
-#                 eqns.append(new_jaxpr_eqn(in_atoms, outvars, r.primitive, r.params, r.effects, r.source_info))
-#                 processed_eqn_ids.add(r.eqn_id)
-#         elif isinstance(r, LambdaBinding):
-#             if not any(t is in_tracer for in_tracer in in_tracers):
-#                 raise core.escaped_tracer_error(t, f"Tracer not in input tracers: {t}")
-#             newvar(t)
-#         elif isinstance(r, ConstVar):
-#             var = constid_to_var.get(id(r.val))
-#             if var is None:
-#                 var = constid_to_var[id(r.val)] = newvar(t)
-#                 consts[var] = r.val
-#             t_to_var[id(t)] = var
-#         elif isinstance(r, FreeVar):
-#             env[newvar(t)] = r.val  # type: ignore
-#         elif isinstance(r, Literal):
-#             pass
-#         elif r is None:
-#             assert False
-#         else:
-#             raise TypeError(r)
-
-#     env_vars, env_vals = unzip2(env.items())
-#     invars = [*env_vars, *map(get_atom, in_tracers)]
-#     const_vars, const_vals = unzip2(consts.items())
-#     outvars = map(get_atom, out_tracers)  # type: ignore[arg-type]
-#     jaxpr_effects = make_jaxpr_effects(const_vars, invars, outvars, eqns)
-#     jaxpr = Jaxpr(const_vars, invars, outvars, eqns, jaxpr_effects)  # type: ignore[list-item,arg-type]
-#     config.jax_enable_checks and core.check_jaxpr(jaxpr)
-#     # del getvar  # needed to avoid cyclic-reference closure, apparently!
-#     return jaxpr, const_vals, env_vals
+    sorted_nodes = sorted_nodes[::-1]
+    # check_toposort(sorted_nodes, parents)
+    return sorted_nodes
+   
 
 
 def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -2640,7 +2544,7 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     else:
         program, pvals_out, consts = partial_run_flat_ret
 
-    # print('CHECK',trace_stack[-1].global_data.instructions.__len__()); breakpoint()
+    # print("CHECK", trace_stack[-1].global_data.instructions.__len__()); breakpoint()
 
     primal_pvals, tangent_pvals = split_half(pvals_out)
     del tangent_pvals

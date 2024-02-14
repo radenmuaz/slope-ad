@@ -131,6 +131,20 @@ class Invert(UnaryOperator):
         return [~gL_y]
 
 
+@operator_set.register("relu")
+class ReLUOp(slope.core.UnaryOperator):
+    def jvp(self, primals, tangents):
+        (x,), (x_dot,) = primals, tangents
+        y = x.relu()
+        y_dot = x_dot * (x == y).where(slope.ones_like(x), slope.zeros_like(x))
+        return [y], [y_dot]
+
+    def T(self, cotangents, x):
+        (gL_y,) = cotangents
+        gL_x = (x.relu() > x.zeros_like()).cast(gL_y.dtype) * gL_y
+        return [gL_x]
+
+
 # -----------------------
 # Binary
 # -----------------------

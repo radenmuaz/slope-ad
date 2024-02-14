@@ -2434,6 +2434,137 @@ def tracers_to_program(
     return program, constvals
 
 
+# def toposort(end_nodes):
+#     if not end_nodes:
+#         return []
+#     end_nodes = _remove_duplicates(end_nodes)
+
+#     child_counts = {}
+#     stack = list(end_nodes)
+#     while stack:
+#         node = stack.pop()
+#         if id(node) in child_counts:
+#             child_counts[id(node)] += 1
+#         else:
+#             child_counts[id(node)] = 1
+#             stack.extend(node.parents)
+#     for node in end_nodes:
+#         child_counts[id(node)] -= 1
+
+#     sorted_nodes = []
+#     childless_nodes = [node for node in end_nodes if child_counts[id(node)] == 0]
+#     assert childless_nodes
+#     while childless_nodes:
+#         node = childless_nodes.pop()
+#         sorted_nodes.append(node)
+#         for parent in node.parents:
+#             if child_counts[id(parent)] == 1:
+#                 childless_nodes.append(parent)
+#             else:
+#                 child_counts[id(parent)] -= 1
+#     sorted_nodes = sorted_nodes[::-1]
+
+#     check_toposort(sorted_nodes)
+#     return sorted_nodes
+
+
+# def check_toposort(nodes):
+#     visited = set()
+#     for node in nodes:
+#         assert all(id(parent) in visited for parent in node.parents)
+#         visited.add(id(node))
+
+
+# def _remove_duplicates(node_list):
+#     seen = set()
+#     out = []
+#     for n in node_list:
+#         if id(n) not in seen:
+#             seen.add(id(n))
+#             out.append(n)
+#     return out
+
+
+# def tracers_to_jaxpr(
+#     in_tracers: Sequence[JaxprTracer], out_tracers: Sequence[JaxprTracer]
+# ) -> Tuple[Jaxpr, Tuple[Any, ...], Tuple[Any, ...]]:
+#     """Constructs Jaxpr given tracers for inputs and outputs.
+
+#     Params:
+#       in_tracers: the tracers that were created for the function inputs
+#       out_tracers: the tracers that were output by the function.
+
+#     Returns: a triple of a `Jaxpr`, a list of constant values corresponding to
+#       the `constvars` in the returned Jaxps, and a list of environment values.
+#       The vars for the environment values have been prepended to the Jaxpr's
+#       `invars`.
+#     """
+#     gensym = core.gensym()
+
+#     t_to_var: Dict[TracerId, Var] = {}
+#     consts: Dict[Var, Any] = {}
+#     env: Dict[Var, JaxprTracer] = {}
+#     constid_to_var: Dict[ConstId, Var] = {}  # for deduplication
+
+#     def get_atom(t: JaxprTracer) -> Atom:
+#         return t.recipe if type(t.recipe) is Literal else t_to_var[id(t)]
+
+#     def newvar(t: Optional[JaxprTracer]) -> Var:
+#         assert t is not None
+#         var = gensym(type_substitute(t.aval))
+#         var_ = t_to_var.setdefault(id(t), var)
+#         assert var is var_
+#         return var
+
+#     def type_substitute(aval: AbstractValue) -> AbstractValue:
+#         if isinstance(aval, DShapedArray):
+#             # Replace any Tracers in aval.shape with Vars or Literal values
+#             shape = [get_atom(d) if type(d) is JaxprTracer else d for d in aval.shape]
+#             shape = [d.val if type(d) is Literal else d for d in shape]
+#             aval = aval.update(shape=tuple(shape))
+#         return aval
+
+#     processed_eqn_ids = set()
+#     eqns: List[core.JaxprEqn] = []
+#     for t in toposort([*in_tracers, *out_tracers]):
+#         r = t.recipe
+#         if isinstance(r, JaxprEqnRecipe):
+#             # TODO broadcast_in_dim can create a new tracer, not present in parents
+#             if r.eqn_id not in processed_eqn_ids:
+#                 in_atoms = map(get_atom, r.in_tracers)
+#                 outvars = [DropVar(type_substitute(a)) if rf() is None else newvar(rf()) for a, rf in zip(r.out_avals, r.out_tracer_refs)]
+#                 eqns.append(new_jaxpr_eqn(in_atoms, outvars, r.primitive, r.params, r.effects, r.source_info))
+#                 processed_eqn_ids.add(r.eqn_id)
+#         elif isinstance(r, LambdaBinding):
+#             if not any(t is in_tracer for in_tracer in in_tracers):
+#                 raise core.escaped_tracer_error(t, f"Tracer not in input tracers: {t}")
+#             newvar(t)
+#         elif isinstance(r, ConstVar):
+#             var = constid_to_var.get(id(r.val))
+#             if var is None:
+#                 var = constid_to_var[id(r.val)] = newvar(t)
+#                 consts[var] = r.val
+#             t_to_var[id(t)] = var
+#         elif isinstance(r, FreeVar):
+#             env[newvar(t)] = r.val  # type: ignore
+#         elif isinstance(r, Literal):
+#             pass
+#         elif r is None:
+#             assert False
+#         else:
+#             raise TypeError(r)
+
+#     env_vars, env_vals = unzip2(env.items())
+#     invars = [*env_vars, *map(get_atom, in_tracers)]
+#     const_vars, const_vals = unzip2(consts.items())
+#     outvars = map(get_atom, out_tracers)  # type: ignore[arg-type]
+#     jaxpr_effects = make_jaxpr_effects(const_vars, invars, outvars, eqns)
+#     jaxpr = Jaxpr(const_vars, invars, outvars, eqns, jaxpr_effects)  # type: ignore[list-item,arg-type]
+#     config.jax_enable_checks and core.check_jaxpr(jaxpr)
+#     # del getvar  # needed to avoid cyclic-reference closure, apparently!
+#     return jaxpr, const_vals, env_vals
+
+
 def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
     def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
         seen = set()
@@ -2495,22 +2626,27 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
         else:
             (primals_out, tangents_out) = jvp_ret
         return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
-    # with new_main_trace(ProgramTrace, builder) as main:
-    # if isinstance(trace_stack[-1], ProgramTrace):
-    print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
 
+    # if trace_stack[-1].trace_type is ProgramTrace:
+    #     builder = ProgramBuilder()
+    #     with new_main_trace(ProgramTrace, builder) as main:
+    #         with stash_trace(main):
+    #             partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
+    # else:
+    #     partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
     partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
     if has_aux:
         program, pvals_out, consts, aux = partial_run_flat_ret
     else:
         program, pvals_out, consts = partial_run_flat_ret
-    print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
+
+    # print('CHECK',trace_stack[-1].global_data.instructions.__len__()); breakpoint()
+
     primal_pvals, tangent_pvals = split_half(pvals_out)
     del tangent_pvals
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(t.symval) for t in tangent_pvals_in]
-    # print(trace_stack[-1].global_data.instructions.__len__()); breakpoint()
     f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
@@ -2536,6 +2672,7 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
 
 class NullCotangent(NamedTuple):
     symval: SymbolicTensor
+
 
 def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
     primal_env: Dict[Var, Any] = {}

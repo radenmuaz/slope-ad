@@ -261,6 +261,7 @@ Idk everything is flaky and I am still experimenting and doing many API changes,
 
 # Roadmap
 
+- Docs
 - Symbolic shape inference 
 - Dynamic shape jit
 - Optimizer filter frozen params

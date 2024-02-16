@@ -344,8 +344,6 @@ class Expand(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x)]
         gL_x = gL_y
         if x.symval.shape == gL_x.shape:
             return [gL_x]
@@ -392,8 +390,6 @@ class Reshape(ShapeOperator):
 
     def T(self, cotangents, x, *, shape):
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x)]
         return [gL_y.reshape(x.symval.shape)]
 
 
@@ -475,24 +471,21 @@ class Pad(ShapeOperator):
 
     def T(self, cotangents, x, *, padding, mode, value):
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x)]
         lo, hi = padding[0::2], padding[1::2]
         interior = [0] * (len(padding) // 2)
 
-        if isinstance(x, UndefPrimal):
-            unpadded = gL_y.slice(
-                lo,
-                tuple(s - h for s, h in list_zip(gL_y.shape, hi)),
-                tuple([1] * len(interior)),
-            )
-            gL_x = unpadded.slice(
-                tuple([0] * len(lo)),
-                unpadded.shape,
-                tuple(r + 1 for r in interior),
-            )
-        else:
-            gL_x = NullCotangent
+        unpadded = gL_y.slice(
+            lo,
+            tuple(s - h for s, h in list_zip(gL_y.shape, hi)),
+            tuple([1] * len(interior)),
+        )
+        gL_x = unpadded.slice(
+            tuple([0] * len(lo)),
+            unpadded.shape,
+            tuple(r + 1 for r in interior),
+        )
+        # else:
+        #     gL_x = NullCotangent()
         return [gL_x]
 
 
@@ -524,10 +517,7 @@ class Slice(ShapeOperator):
         return [x.slice(starts, limits, strides)], [x_dot.slice(starts, limits, strides)]
 
     def T(self, cotangents, x, *, starts, limits, strides=None):
-        # TODO: compute tuple arithmetic without numpy
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x)]
         x_shape = x.symval.shape
         assert isinstance(x, UndefPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
@@ -589,8 +579,6 @@ class Flip(ShapeOperator):
 
     def T(self, cotangents, x, *, dim):
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x)]
         return [gL_y.flip(dim)]
 
 
@@ -648,12 +636,9 @@ class Cat(ShapeOperator):
     def T(self, cotangents, *xs, dim=0):
         (gL_y,) = cotangents
         x_shapes = [x.symval.shape if isinstance(x, UndefPrimal) else x.shape for x in xs]
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x) for x in xs]
-        else:  # TODO: replace numpy with pure Python
-            limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
-            starts = np.zeros((len(xs), gL_y.ndim), dtype=int).tolist()
-            limits = np.tile(gL_y.shape, (len(xs), 1)).tolist()
+        limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
+        starts = np.zeros((len(xs), gL_y.ndim), dtype=int).tolist()
+        limits = np.tile(gL_y.shape, (len(xs), 1)).tolist()
 
         for i, s in enumerate(starts[1:]):
             s[dim] = limit_points[:-1][i]

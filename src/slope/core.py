@@ -687,11 +687,8 @@ class BinaryOperator(Operator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        if isinstance(gL_y, NullCotangent):
-            return [NullCotangent(x), NullCotangent(x)]
         if self.boolean_output:
-            return [NullCotangent(x), NullCotangent(x)]
-            # gL_y = gL_y.cast(x.dtype)
+            gL_y = gL_y.cast(x.dtype)
         if isinstance(x, UndefPrimal):
             return [gL_y, NullCotangent(w)]
         elif type(w) is UndefPrimal:
@@ -2591,7 +2588,6 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
 class NullCotangent(NamedTuple):
     symval: SymbolicTensor
 
-
 def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
     ct_env: Dict[Var, Any] = {}
@@ -2604,8 +2600,7 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
-        return ct_env.pop(v, NullCotangent(v.symval))
-        # return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
+        return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
 
     def write_cotangent(x: Atom, ct: Any):
         if type(x) is Var and not isinstance(ct, NullCotangent):
@@ -2621,7 +2616,6 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
     ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if isinstance(x, UndefPrimal)]
-    ret = [backend.zeros(r.symval.shape, r.symval.dtype) if isinstance(r, NullCotangent) else r for r in ret]
     return ret
 
 

@@ -2555,11 +2555,13 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     transpose_inputs = consts + [UndefinedPrimal(t.symval) for t in tangent_pvals_in]
 
     def f_vjp_flat(*cotangents):
+        # return backward_pass(program, transpose_inputs, cotangents)
         undef_primals = tuple(isinstance(x, UndefinedPrimal) for x in transpose_inputs)
         transposed_program, new_consts = transpose_program(program, undef_primals)
         residuals, _ = partition_list(undef_primals, transpose_inputs)
         outs = run_program(transposed_program, (*new_consts, *residuals, *cotangents))
         return outs
+
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
 
@@ -2583,6 +2585,7 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
 
 
 NullCotangent = None
+
 
 def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
     primal_env: Dict[Var, Any] = {}

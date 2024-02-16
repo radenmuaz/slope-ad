@@ -20,5 +20,6 @@ with slope.core.Timing(f"RUN: "): slope.jit(train_loss_fn)(model, x, y)
 grad_fn = slope.jit(slope.value_and_grad(train_loss_fn, has_aux=True))
 grad_fn(model, x, y)
 with slope.core.Timing(f"GRAD: "): grad_fn(model, x, y)
+with slope.core.Profiling(f"GRAD: "): grad_fn(model, x, y)
 
 # with slope.core.Profiling(): loss, logits, model, optimizer, gmodel = train_step(model, (x, y), optimizer)

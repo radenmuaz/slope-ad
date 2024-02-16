@@ -135,14 +135,26 @@ def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
     return lst[:n], lst[n:]
 
 
+# def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
+#     assert len(bs) == len(l)
+#     lists = lst1, lst2 = [], []
+#     for b, x in list_zip(bs, l):
+#         lst = lists[int(b)]
+#         lst += [x]
+#     breakpoint()
+#     return lst1, lst2
+
+
+def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
+    assert 0 <= n <= len(lst)
+    return lst[:n], lst[n:]
+
+
 def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
     assert len(bs) == len(l)
-    lst1: List[Any] = []
-    lst2: List[Any] = []
-    lists = lst1, lst2
-    for b, x in list_zip(bs, l):
-        lst = lists[int(b)]
-        lst += [x]
+    lists = lst1, lst2 = [], []
+    for b, x in zip(bs, l):
+        lists[b].append(x)
     return lst1, lst2
 
 
@@ -585,7 +597,7 @@ class BinaryOperator(Operator):
     boolean_output = False
 
     def args_fixer(self, x, w, **params):
-        if type(x) is UndefPrimal or type(w) is UndefPrimal:
+        if isinstance(x, UndefPrimal) or type(w) is UndefPrimal:
             assert x.shape == w.shape
             return (x, w), params
 
@@ -680,7 +692,7 @@ class BinaryOperator(Operator):
         if self.boolean_output:
             return [NullCotangent(x), NullCotangent(x)]
             # gL_y = gL_y.cast(x.dtype)
-        if type(x) is UndefPrimal:
+        if isinstance(x, UndefPrimal):
             return [gL_y, NullCotangent(w)]
         elif type(w) is UndefPrimal:
             return [NullCotangent(x), gL_y]
@@ -776,6 +788,7 @@ class Backend:
     LOG_JIT = int(os.environ.get("LOG_JIT", 0))
     LOG_TREE = int(os.environ.get("LOG_TREE", 0))
     LOG_BACKEND = int(os.environ.get("LOG_BACKEND", 0))
+    LOG_PROGRAM = int(os.environ.get("LOG_PROGRAM", 0))
     LOG_INIT = int(os.environ.get("LOG_INIT", 1))
     device_var = os.environ.get("DEFAULT_DEVICE", "cpu:0")
     if device_var[-2] != ":":
@@ -1035,8 +1048,9 @@ class Program:
         indent_amount=4,
     ):
         self.in_binders: Any = in_binders
-        self.instructions: Tuple[Instruction] = instructions
         self.outs: Any = outs
+        self.instructions = self.prune_instructions(instructions, outs)
+        # self.instructions = instructions
         self.num_consts: int = num_consts
         self.static_args = static_args
         self.name: str = name
@@ -1164,6 +1178,43 @@ class Program:
 
         fn_defs[program.name] = code_lines
         return fn_defs
+
+    @staticmethod
+    def prune_instructions(instructions, outs):
+        graph = dict()
+        for instruction in instructions:
+            parent_nodes, child_nodes = instruction.out_binders, instruction.inputs
+            for parent in parent_nodes:
+                if parent not in graph:
+                    graph[parent] = set()
+                for child in child_nodes:
+                    graph[parent].add(child)
+        visited_from_terminal = set()
+
+        def dfs(node, visited):
+            visited.add(node)
+            if node in graph:
+                for neighbor in graph[node]:
+                    if neighbor not in visited:
+                        dfs(neighbor, visited)
+
+        for terminal_node in outs:
+            dfs(terminal_node, visited_from_terminal)
+        unreachable_nodes = set(graph.keys()) - visited_from_terminal
+
+        instructions_to_prune = []
+        for instruction in instructions:
+            parent_nodes, child_nodes = instruction.out_binders, instruction.inputs
+            if any(node in unreachable_nodes for node in parent_nodes) or any(node in unreachable_nodes for node in child_nodes):
+                instructions_to_prune += [instruction]
+        new_instructions = [inst for inst in instructions if inst not in instructions_to_prune]
+        if backend.LOG_PROGRAM:
+            LI = len(instructions)
+            LNI = len(new_instructions)
+            DIFF = LI - LNI
+            UN = len(unreachable_nodes)
+            dblog(f"Before: {LI}\tAfter: {LNI}\tDiff vs Unreachables: {DIFF} == {UN} = {DIFF==UN}")
+        return new_instructions
 
 
 class ProgramType(NamedTuple):
@@ -1331,7 +1382,7 @@ class JitOp(MetaOperator):
         return primals_out, tangents_out
 
     def T(self, cotangents, *invals, program):
-        undef_primals = [type(x) is UndefPrimal for x in invals]
+        undef_primals = [isinstance(x, UndefPrimal) for x in invals]
         transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
 
         residuals, _ = partition_list(undef_primals, invals)
@@ -1657,6 +1708,8 @@ class ProgramBuilder:
         )
         typecheck_program(program)
         program, constvals = self._inline_literals(program, constvals)
+        typecheck_program(program)
+        # dblog(program, enable=backend.LOG_PROGRAM)
         return program, constvals
 
     def _inline_literals(self, program: Program, consts: List[Any]) -> Tuple[Program, List[Any]]:
@@ -1665,6 +1718,7 @@ class ProgramBuilder:
         new_const_binders, lit_binders = partition_list(scalars, const_binders)
         new_consts, lit_vals = partition_list(scalars, consts)
         literals = dict(list_zip(lit_binders, list_map(Lit, lit_vals)))
+        new_outs = [literals.get(x, x) for x in program.outs]
         new_instructions = [
             Instruction(
                 instruction.op,
@@ -1674,7 +1728,6 @@ class ProgramBuilder:
             )
             for instruction in program.instructions
         ]
-        new_outs = [literals.get(x, x) for x in program.outs]
         new_program = Program(
             new_const_binders + other_binders,
             new_instructions,
@@ -1683,7 +1736,6 @@ class ProgramBuilder:
             program.static_args,
             program.name,
         )
-        typecheck_program(new_program)
         return new_program, tuple(new_consts)
 
     def get_current_scope_info(self):
@@ -2405,7 +2457,6 @@ def tracers_to_program(
     processed_instructions: Set[int] = set()
     instructions: List[Instruction] = []
     for t in toposort(tracers_out, tracer_parents):
-        # for t in filtered_toposort(tracers_out, tracer_parents):
         if isinstance(t.draft, LambdaBindingDraft):
             assert id(t) in set(list_map(id, tracers_in))
         elif isinstance(t.draft, ConstDraft):
@@ -2430,43 +2481,6 @@ def tracers_to_program(
     program = Program(tuple(in_binders), tuple(instructions), tuple(out_vars))
     typecheck_program(program)
     return program, constvals
-
-
-def filtered_toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
-    def check_toposort(nodes: List[Any], parents: Callable[[Any], List[Any]]):
-        seen = set()
-        for node in nodes:
-            assert all(id(parent) in seen for parent in parents(node))
-            seen.add(id(node))
-
-    def remove_duplicates(lst):
-        seen = set()
-        return [x for x in lst if id(x) not in seen and not seen.add(id(x))]
-
-    if not out_nodes:
-        return []
-    out_nodes = remove_duplicates(out_nodes)
-
-    child_counts = {}
-    stack = list(out_nodes)
-    connected_nodes = set(out_nodes)
-    while stack:
-        node = stack.pop()
-        if id(node) in child_counts:
-            child_counts[id(node)] += 1
-        else:
-            child_counts[id(node)] = 1
-            parents_list = parents(node)
-            stack.extend(parents_list)
-            connected_nodes.update(parents_list)
-    for node in out_nodes:
-        child_counts[id(node)] -= 1
-
-    sorted_nodes = [node for node in connected_nodes if child_counts.get(id(node), 0) == 0]
-
-    sorted_nodes = sorted_nodes[::-1]
-    # check_toposort(sorted_nodes, parents)
-    return sorted_nodes
 
 
 def toposort(out_nodes: List[Any], parents: Callable[[Any], List[Any]]):
@@ -2531,27 +2545,27 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
             (primals_out, tangents_out) = jvp_ret
         return ([*primals_out, *tangents_out], aux) if has_aux else [*primals_out, *tangents_out]
 
-    # if trace_stack[-1].trace_type is ProgramTrace:
-    #     builder = ProgramBuilder()
-    #     with new_main_trace(ProgramTrace, builder) as main:
-    #         with stash_trace(main):
-    #             partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
-    # else:
-    #     partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
     partial_run_flat_ret = partial_run_flat(f_jvp, pvals_in, has_aux, "vjp")
     if has_aux:
         program, pvals_out, consts, aux = partial_run_flat_ret
     else:
         program, pvals_out, consts = partial_run_flat_ret
 
-    # print("CHECK", trace_stack[-1].global_data.instructions.__len__()); breakpoint()
-
     primal_pvals, tangent_pvals = split_half(pvals_out)
     del tangent_pvals
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
     transpose_inputs = consts + [UndefPrimal(t.symval) for t in tangent_pvals_in]
-    f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
+
+    def f_vjp_flat(*cotangents):
+        undef_primals = tuple(isinstance(x, UndefPrimal) for x in transpose_inputs)
+        transposed_program, new_consts = transpose_program(program, undef_primals)
+        residuals, _ = partition_list(undef_primals, transpose_inputs)
+        outs = run_program(transposed_program, (*new_consts, *residuals, *cotangents))
+        return outs
+
+    # f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
+    # print(f"CHECK2\np={len(program.instructions)}\nb={len(trace_stack[-1].global_data.instructions)}"); breakpoint()
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
 
@@ -2606,7 +2620,7 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
-    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if type(x) is UndefPrimal]
+    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if isinstance(x, UndefPrimal)]
     ret = [backend.zeros(r.symval.shape, r.symval.dtype) if isinstance(r, NullCotangent) else r for r in ret]
     return ret
 

@@ -11,7 +11,7 @@ from slope.core import (
     OperatorSet,
     Tensor,
     SymbolicTensor,
-    UndefPrimal,
+    UndefinedPrimal,
     list_zip,
     dtypes,
     NullCotangent,
@@ -180,10 +180,10 @@ class Mul(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(x) is UndefPrimal:
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
+        if type(x) is UndefinedPrimal:
             return [gL_y * w, NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [NullCotangent(x), x * gL_y]
 
 
@@ -209,10 +209,10 @@ class Pow(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(x) is UndefPrimal:
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
+        if type(x) is UndefinedPrimal:
             return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [
                 NullCotangent(x),
                 gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))),
@@ -234,10 +234,10 @@ class Maximum(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(x) is UndefPrimal:
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
+        if type(x) is UndefinedPrimal:
             return [gL_y, NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [NullCotangent(x), gL_y]
 
 
@@ -519,7 +519,7 @@ class Slice(ShapeOperator):
     def T(self, cotangents, x, *, starts, limits, strides=None):
         (gL_y,) = cotangents
         x_shape = x.symval.shape
-        assert isinstance(x, UndefPrimal)
+        assert isinstance(x, UndefinedPrimal)
         if strides is None or np.all(np.equal(strides, 1)):
             lo, hi, interior = (
                 starts,
@@ -635,7 +635,7 @@ class Cat(ShapeOperator):
 
     def T(self, cotangents, *xs, dim=0):
         (gL_y,) = cotangents
-        x_shapes = [x.symval.shape if isinstance(x, UndefPrimal) else x.shape for x in xs]
+        x_shapes = [x.symval.shape if isinstance(x, UndefinedPrimal) else x.shape for x in xs]
         limit_points = np.cumsum([shape[dim] for shape in x_shapes]).tolist()
         starts = np.zeros((len(xs), gL_y.ndim), dtype=int).tolist()
         limits = np.tile(gL_y.shape, (len(xs), 1)).tolist()
@@ -646,7 +646,7 @@ class Cat(ShapeOperator):
             l[dim] = limit_points[i]
 
         return [
-            gL_y.slice(tuple(start), tuple(limit)) if isinstance(x, UndefPrimal) else NullCotangent(x)
+            gL_y.slice(tuple(start), tuple(limit)) if isinstance(x, UndefinedPrimal) else NullCotangent(x)
             for x, start, limit in zip(xs, starts, limits)
         ]
 
@@ -811,10 +811,10 @@ class Matmul(GeneralReduceOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(x) is UndefPrimal:
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
+        if type(x) is UndefinedPrimal:
             return [gL_y @ w.transpose(-1, -2), NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [NullCotangent(x), x.transpose(-1, -2) @ gL_y]
 
 
@@ -889,7 +889,7 @@ class Conv(GeneralReduceOperator):
 
     def T(self, cotangents, x, w, *, groups, stride, dilation, padding):
         (gL_y,) = cotangents
-        if type(x) is UndefPrimal:
+        if type(x) is UndefinedPrimal:
             gL_x = gL_y.conv_transpose(
                 w,
                 groups=groups,
@@ -900,7 +900,7 @@ class Conv(GeneralReduceOperator):
             )
             assert gL_x.shape == x.shape
             return [gL_x, NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             gL_w = (
                 x.transpose(0, 1)
                 .conv(
@@ -940,13 +940,13 @@ class Conv(GeneralReduceOperator):
 #         return [self(x, w, u)], [self(x_dot, w_dot, u_dot)]
 
 #     def T(self, cotangents, x, w, u):
-#         assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
+#         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal) ^ (type(u) is UndefinedPrimal)
 #         (gL_y,) = cotangents
-#         if type(x) is UndefPrimal:
+#         if type(x) is UndefinedPrimal:
 #             return [None, None, None]
-#         elif type(w) is UndefPrimal:
+#         elif type(w) is UndefinedPrimal:
 #             return [None, self(x, gL_y, gL_y.zeros_like()), None]
-#         elif type(u) is UndefPrimal:
+#         elif type(u) is UndefinedPrimal:
 #             return [None, None, self(x, gL_y.zeros_like(), gL_y)]
 
 
@@ -982,8 +982,8 @@ class GatherND(GeneralReduceOperator):
 
     def T(self, cotangents, x, w, *, batch_dims: int):
         (gL_y,) = cotangents
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal)
-        if type(w) is UndefPrimal:
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
+        if type(w) is UndefinedPrimal:
             return [NullCotangent(w), NullCotangent(w)]
         else:
             gL_x = slope.zeros(x.shape, x.dtype, x.device)
@@ -1018,12 +1018,12 @@ class ScatterND(GeneralReduceOperator):
         return [self(x, w, u)], [self(x_dot, w_dot, u_dot)]
 
     def T(self, cotangents, x, w, u):
-        assert (type(x) is UndefPrimal) ^ (type(w) is UndefPrimal) ^ (type(u) is UndefPrimal)
+        assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal) ^ (type(u) is UndefinedPrimal)
         (gL_y,) = cotangents
-        if type(u) is UndefPrimal:
+        if type(u) is UndefinedPrimal:
             return [gL_y, NullCotangent(w), NullCotangent(w)]
             # return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [gL_y, NullCotangent(w), NullCotangent(w)]
         else:
             return [NullCotangent(w), NullCotangent(w), NullCotangent(w)]

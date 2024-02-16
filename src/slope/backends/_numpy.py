@@ -8,7 +8,7 @@ from slope.core import (
     Tensor,
     TensorBuffer,
     SymbolicTensor,
-    UndefPrimal,
+    UndefinedPrimal,
     list_zip,
     list_map,
 )

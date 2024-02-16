@@ -597,7 +597,7 @@ class BinaryOperator(Operator):
     boolean_output = False
 
     def args_fixer(self, x, w, **params):
-        if isinstance(x, UndefPrimal) or type(w) is UndefPrimal:
+        if isinstance(x, UndefinedPrimal) or type(w) is UndefinedPrimal:
             assert x.shape == w.shape
             return (x, w), params
 
@@ -689,9 +689,9 @@ class BinaryOperator(Operator):
         (gL_y,) = cotangents
         if self.boolean_output:
             gL_y = gL_y.cast(x.dtype)
-        if isinstance(x, UndefPrimal):
+        if isinstance(x, UndefinedPrimal):
             return [gL_y, NullCotangent(w)]
-        elif type(w) is UndefPrimal:
+        elif type(w) is UndefinedPrimal:
             return [NullCotangent(x), gL_y]
 
 
@@ -812,10 +812,10 @@ class Backend:
             "dict",
         )
         self.register_node(
-            UndefPrimal,
+            UndefinedPrimal,
             lambda u: (u.symval, ()),
-            lambda symval, _: UndefPrimal(symval),
-            "UndefPrimal",
+            lambda symval, _: UndefinedPrimal(symval),
+            "UndefinedPrimal",
         )
 
     def set_impl(self, op: Union[types.LambdaType, types.FunctionType]):
@@ -1379,7 +1379,7 @@ class JitOp(MetaOperator):
         return primals_out, tangents_out
 
     def T(self, cotangents, *invals, program):
-        undef_primals = [isinstance(x, UndefPrimal) for x in invals]
+        undef_primals = [isinstance(x, UndefinedPrimal) for x in invals]
         transposed_program, new_consts = transpose_program(program, tuple(undef_primals))
 
         residuals, _ = partition_list(undef_primals, invals)
@@ -1754,7 +1754,7 @@ class ProgramBuilder:
         }
 
 
-class UndefPrimal(NamedTuple):
+class UndefinedPrimal(NamedTuple):
     symval: SymbolicTensor
 
     @property
@@ -1774,7 +1774,7 @@ class UndefPrimal(NamedTuple):
         return self.symval.ndim
 
     def __repr__(self):
-        return f"<UndefPrimal: symval={self.symval}>"
+        return f"<UndefinedPrimal: symval={self.symval}>"
 
     str_short = __repr__
 
@@ -2552,17 +2552,14 @@ def vjp_flat(f, *primals_in, has_aux=False, **static_args):
     del tangent_pvals
     assert all(pval.is_known for pval in primal_pvals)
     primals_out_flat = [pval.const for pval in primal_pvals]
-    transpose_inputs = consts + [UndefPrimal(t.symval) for t in tangent_pvals_in]
+    transpose_inputs = consts + [UndefinedPrimal(t.symval) for t in tangent_pvals_in]
 
     def f_vjp_flat(*cotangents):
-        undef_primals = tuple(isinstance(x, UndefPrimal) for x in transpose_inputs)
+        undef_primals = tuple(isinstance(x, UndefinedPrimal) for x in transpose_inputs)
         transposed_program, new_consts = transpose_program(program, undef_primals)
         residuals, _ = partition_list(undef_primals, transpose_inputs)
         outs = run_program(transposed_program, (*new_consts, *residuals, *cotangents))
         return outs
-
-    # f_vjp_flat = lambda *cotangents: backward_pass(program, transpose_inputs, cotangents)
-    # print(f"CHECK2\np={len(program.instructions)}\nb={len(trace_stack[-1].global_data.instructions)}"); breakpoint()
     return (primals_out_flat, f_vjp_flat, aux) if has_aux else (primals_out_flat, f_vjp_flat)
 
 
@@ -2593,10 +2590,10 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
     ct_env: Dict[Var, Any] = {}
 
     def read_primal(x: Atom) -> Any:
-        return primal_env.get(x, UndefPrimal(x.symval)) if type(x) is Var else x.val
+        return primal_env.get(x, UndefinedPrimal(x.symval)) if type(x) is Var else x.val
 
     def write_primal(v: Var, val: Any) -> None:
-        if type(val) is not UndefPrimal:
+        if type(val) is not UndefinedPrimal:
             primal_env[v] = val
 
     def read_cotangent(v: Var) -> Any:
@@ -2615,7 +2612,7 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         cotangents_out = instruction.op.T(cotangents_in, *inp, **params)
         list_map(write_cotangent, instruction.inputs, cotangents_out)
 
-    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if isinstance(x, UndefPrimal)]
+    ret = [read_cotangent(v) for v, x in list_zip(program.in_binders, args) if isinstance(x, UndefinedPrimal)]
     return ret
 
 
@@ -2624,7 +2621,7 @@ def transpose_program(program: Program, undef_primals: tuple[bool, ...]) -> tupl
     symvals_in, symvals_out = typecheck_program(program)
     traceable = partial(backward_pass, program)
     ()
-    args = [UndefPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
+    args = [UndefinedPrimal(a) if u else a for a, u in zip(symvals_in, undef_primals)]
     trans_program, consts, _ = make_program(
         traceable,
         tuple(args),

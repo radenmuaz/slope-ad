@@ -33,7 +33,7 @@ shape=(3,), dtype=float32, device='cpu:0'>
 
 3. Training and inference, examples:
     - [MLP on MNIST](examples/nn/mnist_mlp.py)
-    - [ResNet on CIFAR-10](examples/nn/mnist_mlp.py)
+    - [ResNet on CIFAR-10](examples/nn/cifar_resnet.py)
     - [Export jitted function](examples/simple/export.py)
 
 4. Small (?)

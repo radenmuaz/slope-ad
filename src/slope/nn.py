@@ -731,7 +731,7 @@ class BatchNorm(Module):
 
         self.running_mean = slope.zeros(num_features)
         self.running_var = slope.ones(num_features)
-        # self.num_batches_tracked = slope.zeros((), dtype=slope.int32)
+        self.num_batches_tracked = slope.zeros((), dtype=slope.int32)
 
     def __call__(self, x, training=True, track_running_stats=True):
         if training:
@@ -747,7 +747,7 @@ class BatchNorm(Module):
                 z_ratio = (z_numel / (z_numel - z.shape[1])) if z_numel != z.shape[1] else 1
                 self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean
                 self.running_var = (1 - self.momentum) * self.running_var + self.momentum * z_ratio * var
-                # self.num_batches_tracked = self.num_batches_tracked + 1
+                self.num_batches_tracked = self.num_batches_tracked + 1
         else:
             mean = self.running_mean
             invstd = (self.running_var + self.eps).rsqrt()

@@ -72,12 +72,10 @@ if __name__ == "__main__":
     train_images, train_labels, test_images, test_labels = get_cifar10()
 
     model = resnet(depth=20)
-    # optimizer = nn.AdamW(model, lr=1e-1,weight_decay=1e-5)
     optimizer = nn.SGD(model, lr=0.1, momentum=0.9, weight_decay=1e-4)
 
     train_dataloader, ntrain_batches = get_dataloader(train_images, train_labels, train_batch_size, shuffle=True)
     test_dataloader, ntest_batches = get_dataloader(test_images, test_labels, test_batch_size, shuffle=False)
-    # scheduler = nn.MultiStepLR(milestones=[80*ntrain_batches, 120*ntrain_batches], gamma=0.1)
 
     print("\nStarting training...")
     best_acc = 0.0
@@ -88,8 +86,8 @@ if __name__ == "__main__":
         total_loss = 0.0
         true_positives = 0.0
         for i, batch in (pbar := tqdm(enumerate(train_dataloader()), total=ntrain_batches, leave=False)):
-            with slope.core.Timing("RUN "): loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
-            # loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
+            # with slope.core.Timing("RUN "): loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
+            loss, logits, model, optimizer, gmodel = train_step(model, batch, optimizer)
             loss_numpy = float(loss.numpy())
             total_loss += loss_numpy
             y_hat, y = logits.argmax(-1), batch[1]

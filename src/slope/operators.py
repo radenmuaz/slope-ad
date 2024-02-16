@@ -54,7 +54,7 @@ class StopGradient(UnaryOperator):
         return [x], [NullCotangent(x_dot)]
 
     def T(self, cotangents, x):
-        return [NullCotangent(x)]
+        return [NullCotangent]
 
 
 @operator_set.register("cast", aliases=["astype"])
@@ -182,9 +182,9 @@ class Mul(BinaryOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
         if type(x) is UndefinedPrimal:
-            return [gL_y * w, NullCotangent(w)]
+            return [gL_y * w, NullCotangent]
         elif type(w) is UndefinedPrimal:
-            return [NullCotangent(x), x * gL_y]
+            return [NullCotangent, x * gL_y]
 
 
 @operator_set.register("div")
@@ -195,7 +195,7 @@ class Div(BinaryOperator):
 
     def T(self, cotangents, x, w):
         (gL_y,) = cotangents
-        return [gL_y / w, NullCotangent(w)]
+        return [gL_y / w, NullCotangent]
 
 
 @operator_set.register("pow")
@@ -211,10 +211,10 @@ class Pow(BinaryOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
         if type(x) is UndefinedPrimal:
-            return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), NullCotangent(w)]
+            return [(gL_y * (w * (x ** (w - slope.ones_like(w))))), NullCotangent]
         elif type(w) is UndefinedPrimal:
             return [
-                NullCotangent(x),
+                NullCotangent,
                 gL_y * ((x**w) * (x.log() if x != 0.0 else slope.zeros_like(x))),
             ]
 
@@ -236,9 +236,9 @@ class Maximum(BinaryOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
         if type(x) is UndefinedPrimal:
-            return [gL_y, NullCotangent(w)]
+            return [gL_y, NullCotangent]
         elif type(w) is UndefinedPrimal:
-            return [NullCotangent(x), gL_y]
+            return [NullCotangent, gL_y]
 
 
 @operator_set.register("equal")
@@ -646,7 +646,7 @@ class Cat(ShapeOperator):
             l[dim] = limit_points[i]
 
         return [
-            gL_y.slice(tuple(start), tuple(limit)) if isinstance(x, UndefinedPrimal) else NullCotangent(x)
+            gL_y.slice(tuple(start), tuple(limit)) if isinstance(x, UndefinedPrimal) else NullCotangent
             for x, start, limit in zip(xs, starts, limits)
         ]
 
@@ -813,9 +813,9 @@ class Matmul(GeneralReduceOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
         if type(x) is UndefinedPrimal:
-            return [gL_y @ w.transpose(-1, -2), NullCotangent(w)]
+            return [gL_y @ w.transpose(-1, -2), NullCotangent]
         elif type(w) is UndefinedPrimal:
-            return [NullCotangent(x), x.transpose(-1, -2) @ gL_y]
+            return [NullCotangent, x.transpose(-1, -2) @ gL_y]
 
 
 @operator_set.register("conv")
@@ -899,7 +899,7 @@ class Conv(GeneralReduceOperator):
                 output_padding=stride[0] - dilation[0],
             )
             assert gL_x.shape == x.shape
-            return [gL_x, NullCotangent(w)]
+            return [gL_x, NullCotangent]
         elif type(w) is UndefinedPrimal:
             gL_w = (
                 x.transpose(0, 1)
@@ -917,7 +917,7 @@ class Conv(GeneralReduceOperator):
                 ends = (gL_w.shape[0], gL_w.shape[1]) + w.shape[2:]
                 gL_w = gL_w.slice(starts, ends)
             assert gL_w.shape == w.shape
-            return [NullCotangent(x), gL_w]
+            return [NullCotangent, gL_w]
 
 
 # @operator_set.register("where")
@@ -984,10 +984,10 @@ class GatherND(GeneralReduceOperator):
         (gL_y,) = cotangents
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal)
         if type(w) is UndefinedPrimal:
-            return [NullCotangent(w), NullCotangent(w)]
+            return [NullCotangent, NullCotangent]
         else:
             gL_x = slope.zeros(x.shape, x.dtype, x.device)
-            return [gL_x.scatter_nd(w, gL_y), NullCotangent(w)]
+            return [gL_x.scatter_nd(w, gL_y), NullCotangent]
 
 
 @operator_set.register("scatter_nd")
@@ -1021,12 +1021,12 @@ class ScatterND(GeneralReduceOperator):
         assert (type(x) is UndefinedPrimal) ^ (type(w) is UndefinedPrimal) ^ (type(u) is UndefinedPrimal)
         (gL_y,) = cotangents
         if type(u) is UndefinedPrimal:
-            return [gL_y, NullCotangent(w), NullCotangent(w)]
+            return [gL_y, NullCotangent, NullCotangent]
             # return [self(x.zeros_like(), w, gL_y), w.zeros_like(), None]
         elif type(w) is UndefinedPrimal:
-            return [gL_y, NullCotangent(w), NullCotangent(w)]
+            return [gL_y, NullCotangent, NullCotangent]
         else:
-            return [NullCotangent(w), NullCotangent(w), NullCotangent(w)]
+            return [NullCotangent, NullCotangent, NullCotangent]
 
 
 # @operator_set.register("rng_bits")

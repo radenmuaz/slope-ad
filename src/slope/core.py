@@ -690,9 +690,9 @@ class BinaryOperator(Operator):
         if self.boolean_output:
             gL_y = gL_y.cast(x.dtype)
         if isinstance(x, UndefinedPrimal):
-            return [gL_y, NullCotangent(w)]
+            return [gL_y, NullCotangent]
         elif type(w) is UndefinedPrimal:
-            return [NullCotangent(x), gL_y]
+            return [NullCotangent, gL_y]
 
 
 class ReduceOperator(Operator):
@@ -2582,8 +2582,7 @@ def vjp(f, *primals_in, has_aux=False, **static_args):
     return (primals_out, f_vjp, aux) if has_aux else (primals_out, f_vjp)
 
 
-class NullCotangent(NamedTuple):
-    symval: SymbolicTensor
+NullCotangent = None
 
 def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> List[Any]:
     primal_env: Dict[Var, Any] = {}
@@ -2600,7 +2599,7 @@ def backward_pass(program: Program, args: List[Any], cotangents: List[Any]) -> L
         return ct_env.pop(v, backend.zeros(v.symval.shape, v.symval.dtype))
 
     def write_cotangent(x: Atom, ct: Any):
-        if type(x) is Var and not isinstance(ct, NullCotangent):
+        if type(x) is Var and ct is not NullCotangent:
             ct_env[x] = (ct_env[x] + ct) if x in ct_env else ct
 
     list_map(write_primal, program.in_binders, args)

@@ -2,8 +2,8 @@ import os
 from slope import core
 import importlib
 import numpy as np
-__all__ = []
-__docformat__ = []
+__all__ = ["core"]
+__docformat__ = "..."
 np.set_printoptions(precision=5, threshold=1000, edgeitems=5, linewidth=120)
 # SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "onnxruntime")

@@ -22,6 +22,19 @@ gf_x=<Tensor: val=
 [2. 2. 2.]
 shape=(3,), dtype=float32, device='cpu:0'>
 ```
+
+
+# Install
+
+```
+git clone https://github.com/radenmuaz/slope
+cd slope
+pip install -e .
+```
+
+Or you can just copy `src/slope` to your projects.
+
+
 ## Features
 
 1. Forward-mode, reverse-mode, and higher-order AD.
@@ -55,16 +68,6 @@ shape=(3,), dtype=float32, device='cpu:0'>
 6. Extensible
     - Add new backend by defining implementation translations [slope/backends](./src/slope/backends)
     - NN module [slope/nn.py](./src/slope/nn.py)
-
-# Install
-
-```
-git clone https://github.com/radenmuaz/slope
-cd slope
-pip install -e .
-```
-
-Or you can just copy `src/slope` to your projects.
 
 # Quickstart
 

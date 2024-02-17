@@ -61,8 +61,10 @@ Or you can just copy `src/slope` to your projects.
         - Init: `full arange random_normal random_uniform`
         - GeneralReduce: `matmul conv gather_nd scatter_nd`
     - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py)
-        - Procedures are functions containing calls to operators, exposed as `Tensor.procedure_name(*args)` syntax
-        - Useful for simple definitions like `cos(x)` as `sin(pi/2 - x)`, and big functions`conv_transpose` and `avgpool2d`.
+        - Procedures are functions containing calls to operators, exposed with `Tensor.procedure_name(*args)` syntax.
+        - Useful for definitions like:
+          - `x.cos()`, where `def cos(x): return (math.pi/2 - x).sin()`
+          - `x.conv_transpose(w)`: where `def conv_transpose(x, w): ...` is a very long function.
     - An operator can be directly implemented as code translation to backend, or _fallback_ to a procedure, e.g. there is `conv` procedure in case the backend has no implementation for it.
 
 6. Extensible

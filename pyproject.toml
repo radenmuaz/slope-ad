@@ -23,7 +23,8 @@ dependencies = [
   "onnx",
   "onnxruntime",
   "pygments",
-  "sympy"
+  "sympy",
+  "pdoc"
 ]
 
 [project.urls]

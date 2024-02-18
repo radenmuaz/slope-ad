@@ -40,9 +40,9 @@ Or you can just copy `src/slope` to your projects.
 1. Forward-mode, reverse-mode, and higher-order AD.
 
 2. Just-in-time compilation, with interchangeable backends, supporting CPU, CUDA and Metal:
+    - [ONNX Runtime](https://onnxruntime.ai/) (ONNX graph); this is the default backend
     - [IREE](https://iree.dev/) (StableHLO MLIR)
-    - [ONNX Runtime](https://onnxruntime.ai/) (ONNX)
-    - NumPy (CPU-only)
+    - NumPy (Python code)
 
 3. Training and inference, examples:
     - [MLP on MNIST](examples/nn/mnist_mlp.py)

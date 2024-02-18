@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "slope-ad"
-version = "0.1"
+version = "0.1.2"
 authors = [
   { name="Raden Muaz", email="raden.m.muaz@gmail.com" },
 ]

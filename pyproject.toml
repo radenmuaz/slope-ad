@@ -27,6 +27,8 @@ dependencies = [
   "pdoc",
   "mkdocs"
 ]
+[tool.hatch.build.targets.wheel]
+      packages = ["src/slope"]
 
 [project.urls]
 Homepage = "https://github.com/radenmuaz/slope"

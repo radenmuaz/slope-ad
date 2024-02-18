@@ -1,22 +1,25 @@
+"""
+.. include:: ../../README.md
+"""
+__all__ = ["core"]
+__docformat__ = "markdown"
 import os
 from slope import core
 import importlib
 import numpy as np
-__all__ = ["core"]
-__docformat__ = "..."
 np.set_printoptions(precision=5, threshold=1000, edgeitems=5, linewidth=120)
 # SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "iree")
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "onnxruntime")
 # SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "numpy")
-try:
-    core.set_backend(SLOPE_BACKEND)
+# try:
+core.set_backend(SLOPE_BACKEND)
 
-except Exception as e:
-    import traceback
+# except Exception as e:
+#     import traceback
 
-    traceback.print_stack()
-    print(e)
-    print(f"\n  -- Warning: failed to set {SLOPE_BACKEND} as backend. Error above \n")
+#     traceback.print_stack()
+#     print(e)
+#     print(f"\n  -- Warning: failed to set {SLOPE_BACKEND} as backend. Error above \n")
 
 
 def __getattr__(attr):

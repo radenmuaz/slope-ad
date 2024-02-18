@@ -1,3 +1,4 @@
+
 import slope
 from slope.core import Tensor, SymbolicTensor, TreeDef
 from typing import Tuple, List, Optional
@@ -139,7 +140,10 @@ class Module:
         return
 
 
-slope.core.backend.register_node(Module, Module.flatten, Module.unflatten, "Module")
+try:
+    slope.core.backend.register_node(Module, Module.flatten, Module.unflatten, "Module")
+except:
+    pass
 
 # ====================
 # Optimizers
@@ -393,7 +397,7 @@ def compute_fans(shape: Sequence, in_dim=-2, out_dim=-1, batch_dim=()):
     return fan_in, fan_out
 
 
-def normal(dtype=slope.core.backend.DEFAULT_DTYPE) -> Callable:
+def normal(dtype=None) -> Callable:
     def init(shape, dtype=dtype):
         return slope.randn(shape)
 
@@ -407,7 +411,7 @@ def variance_scaling(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.core.backend.DEFAULT_DTYPE,
+    dtype=None,
 ) -> Callable:
     def init(shape, dtype=dtype):
         fan_in, fan_out = compute_fans(shape, in_dim, out_dim, batch_dim)
@@ -435,7 +439,7 @@ def glorot_normal(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.core.backend.DEFAULT_DTYPE,
+    dtype=None,
 ) -> Callable:
     return variance_scaling(
         1.0,
@@ -452,7 +456,7 @@ def glorot_uniform(
     in_dim: Union[int, Sequence[int]] = 1,
     out_dim: Union[int, Sequence[int]] = 0,
     batch_dim: Sequence[int] = (),
-    dtype=slope.core.backend.DEFAULT_DTYPE,
+    dtype=None,
 ) -> Callable:
     return variance_scaling(
         1.0,

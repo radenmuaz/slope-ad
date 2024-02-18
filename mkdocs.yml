@@ -1,0 +1,5 @@
+site_name: Slope
+site_url: https://radenmuaz.github.io/slope
+#nav:
+#  - Home: index.md
+theme: readthedocs

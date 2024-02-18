@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 import os
 import json
@@ -1859,7 +1858,8 @@ backend = UndefBackend()
 def set_backend(name, where="slope.backends"):
     global backend
     backend = importlib.import_module(f"{where}.{name}").backend
-    import slope.nn
+    import slope.nn as nn
+    # backend.register_node(nn.Module, nn.Module.flatten, nn.Module.unflatten, "Module")
 
     dblog(f"slope backend is {backend}", enable=backend.LOG_INIT)
 

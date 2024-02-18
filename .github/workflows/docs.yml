@@ -9,9 +9,10 @@ on:
     # tags:
     #   - '*'
 
-# security: restrict permissions for CI jobs.
 permissions:
   contents: read
+  pages: write
+  id-token: write
 
 jobs:
   # Build the documentation and upload the static HTML files as an artifact.
@@ -22,15 +23,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      # ADJUST THIS: install all dependencies (including pdoc)
       - run: pip install -e .
-      # ADJUST THIS: build your documentation into docs/.
-      # We use a custom build script for pdoc itself, ideally you just run `pdoc -o docs/ ...` here.
       - run: python docs/make.py
       - run: git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
       - run: mkdocs gh-deploy
-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/

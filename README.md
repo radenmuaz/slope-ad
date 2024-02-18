@@ -1,4 +1,4 @@
-![some bing AI image](./assets/logo.jpeg)
+![logo](./assets/logo.jpeg)
 
 # Slope
 

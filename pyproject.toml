@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "slope"
+name = "slope-ad"
 version = "0.1"
 authors = [
   { name="Raden Muaz", email="raden.m.muaz@gmail.com" },

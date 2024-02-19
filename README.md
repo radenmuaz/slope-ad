@@ -44,11 +44,21 @@ pip install -e .
 
 Or you can just copy `src/slope` to your projects.
 
-# Docs
+# Usage
 
-Docs are in [radenmuaz.github.io/slope-ad](https://radenmuaz.github.io/slope-ad)
+## Tutorials
 
-For a quick overview on how to train and backprop something, go to the [Quickstart Tutorial](./docs/tutorials/quickstart.md)
+[Quickstart Tutorial](./docs/tutorials/quickstart.md): How Tensors work, how to write and jit compile functions and train something
+
+[NN Training](./docs/tutorials/quickstart.md): Train a MLP on MNIST and ResNet on CIFAR-10
+
+[Internals Walkthrough](./docs/tutorials/internals_walkthrough.md): Understand the core of SlopeAD (hint: like JAX)
+
+[Extending SlopeAD](./docs/tutorials/internals_walkthrough.md): Add new backend, operators, procedures. Modify the core functions.
+
+## Docs and API reference
+
+Docs are available online at [radenmuaz.github.io/slope-ad](https://radenmuaz.github.io/slope-ad)
 
 # Features
 
@@ -76,11 +86,11 @@ For a quick overview on how to train and backprop something, go to the [Quicksta
         - Init: `full arange random_normal random_uniform`
         - GeneralReduce: `matmul conv gather_nd scatter_nd`
     - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py)
-        - Procedures are functions containing calls to operators, exposed with `Tensor.procedure_name(*args)` syntax.
-        - Useful for definitions like:
+        - For defining Tensor functions composed with core operators, e.g.
           - `x.cos()`, where `def cos(x): return (math.pi/2 - x).sin()`
           - `x.conv_transpose(w)`: where `def conv_transpose(x, w): ...` is a very long function.
-    - An operator can be directly implemented as code translation to backend, or _fallback_ to a procedure, e.g. there is `conv` procedure in case the backend has no implementation for it.
+        - Procedures are functions containing calls to operators, exposed with `Tensor.procedure_name(*args)` syntax.
+        
 
 6. Extensible
     - Add new backend by defining implementation translations [slope/backends](./src/slope/backends)

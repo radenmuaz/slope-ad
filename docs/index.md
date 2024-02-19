@@ -31,18 +31,36 @@ shape=(3,), dtype=float32, device='cpu:0'>
     - `grad vjp jvp jit vmap`
     - `register_node tree_flatten tree_unflatten`
 
-3. Just-in-time compilation, code is compiled to one of these backends: [ONNX Runtime](https://onnxruntime.ai/), [OpenXLA IREE](https://iree.dev/) and NumPy.
+2. Just-in-time compilation, where code is compiled to these supported backends running on either CPU, CUDA and Metal:
+    - [ONNX Runtime](https://onnxruntime.ai/) (ONNX graph)
+    - [OpenXLA IREE](https://iree.dev/) (StableHLO MLIR)
+    - NumPy (Python code)
 
-4. Training and inference, like [MLP on MNIST](examples/nn/mnist_mlp.py), [ResNet on CIFAR-10](examples/nn/cifar_resnet.py) and [export jitted function](examples/simple/export.py).
+3. Training and inference, examples:
+    - [MLP on MNIST](examples/nn/mnist_mlp.py)
+    - [ResNet on CIFAR-10](examples/nn/cifar_resnet.py)
+    - [Export jitted function](examples/simple/export.py)
 
-5. Small (?), less than 3000 lines of core code [slope/core.py](./src/slope/core.py), after `black src --line-length 140`
+4. Small (?)
+    - <3000 lines of core code [slope/core.py](./src/slope/core.py), after run with `black src --line-length 140`
 
-6. Operators and procedures system
+5. Operators and procedures system
     - 33 core operators defined in [slope/operators.py](./src/slope/operators.py)
-    - `exp log sin sqrt invert cast stop_gradient add mul sub div pow equal less greater maximum sum max reshape expand permute slice pad flip cat full arange random_normal random_uniform matmul conv gather_nd scatter_nd`
-    - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py), for defining functions like `cos`, `conv` and `avgpool2d` as functions calling core operators.
+        - Unary: `exp log sin sqrt invert cast stop_gradient`
+        - Binary: `add mul sub div pow equal less greater maximum`
+        - Reduce: `sum max`
+        - Shape: `reshape expand permute slice pad flip cat`
+        - Init: `full arange random_normal random_uniform`
+        - GeneralReduce: `matmul conv gather_nd scatter_nd`
+    - Composite operators system with "procedures" [slope/procedures.py](./src/slope/procedures.py)
+        - For defining Tensor functions composed with core operators, e.g.
+          - `x.cos()`, where `def cos(x): return (math.pi/2 - x).sin()`
+          - `x.conv_transpose(w)`: where `def conv_transpose(x, w): ...` is a very long function.
+        - Procedures are functions containing calls to operators, exposed with `Tensor.procedure_name(*args)` syntax.
 
-7. Extensible, by writing new backend by defining implementation translations [slope/backends](./src/slope/backends), and adding more modules using [slope/nn.py](./src/slope/nn.py)
+6. Extensible
+    - Add new backend by defining implementation translations [slope/backends](./src/slope/backends)
+    - Define new modules with NN module [slope/nn.py](./src/slope/nn.py)
 
 
 # Install
@@ -63,24 +81,29 @@ pip install -e .
 
 Or you can just copy `src/slope` to your projects.
 
-# Usage
+# Docs
 
 ## Tutorials
 
-[Quickstart Tutorial](./docs/tutorials/quickstart.md): How Tensors work, how to write and jit compile functions and train something
+[Quickstart](./docs/tutorials/quickstart.md): How Tensors work, how to write and jit compile functions and train something.
 
-[NN Training](./docs/tutorials/quickstart.md): Train a MLP on MNIST and ResNet on CIFAR-10
+[NN Training](./docs/tutorials/nn_training.md): NN module overview.
 
-[Internals Walkthrough](./docs/tutorials/internals_walkthrough.md): Understand the core of SlopeAD (hint: like JAX)
+[Internals Walkthrough](./docs/tutorials/internals_walkthrough.md): Understand the core of SlopeAD (hint: like JAX). Useful if you want to start contributing to SlopeAD
 
 [Extending SlopeAD](./docs/tutorials/internals_walkthrough.md): Add new backend, operators, procedures. Modify the core functions.
 
-## Docs and API reference
+## Examples
+
+Examples are shorter and have less explanation, more code
+
+[Linear Regression](./docs/tutorials/linear_regression.md)
+
+[MLP on MNIST](./docs/tutorials/linear_regression.md)
+
+## API reference
 
 Docs are available online at [radenmuaz.github.io/slope-ad](https://radenmuaz.github.io/slope-ad)
-
-
-
 
 
 # Contributing

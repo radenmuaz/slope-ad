@@ -1,9 +1,9 @@
 ![logo](./assets/logo.jpeg)
 # SlopeAD
 
-Slope is a small automatic differentation (AD) engine, focused on machine learning (ML)
+Slope is a small automatic differentation (AD) engine, focused on machine learning (ML), supporting forward, reverse and higher-order AD.
 
-This project is designed to be a **hackable**, **educational** AD engine focused on ML, yet able to do things **end-to-end from training to deployment**, instead of just some simple toy examples.
+This project is designed to be a **small**, **hackable** and **educational** AD engine focused on ML, yet able to do things **end-to-end from training to deployment**, instead of just some simple toy examples. The [core](./src/core.py) is under 3000 lines of code.
 
 Tensor semantics are similar to Pytorch, functional API is similar to [JAX](https://github.com/google/jax), tensor operators code is heavily derived from [tinygrad](https://tinygrad.org/).
 

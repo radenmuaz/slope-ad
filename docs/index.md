@@ -46,6 +46,8 @@ Or you can just copy `src/slope` to your projects.
 
 # Features
 
+4. Small (?)
+    - <3000 lines of core code [slope/core.py](./src/slope/core.py), after `black src --line-length 140`
 1. Functional API for forward-mode, reverse-mode, and higher-order AD, like in JAX:
     - `grad vjp jvp jit vmap`
     - `register_node tree_flatten tree_unflatten`
@@ -61,8 +63,7 @@ Or you can just copy `src/slope` to your projects.
     - [ResNet on CIFAR-10](examples/nn/cifar_resnet.py)
     - [Export jitted function](examples/simple/export.py)
 
-4. Small (?)
-    - <3000 lines of core code [slope/core.py](./src/slope/core.py), after `black src --line-length 140`
+
 
 5. Operators and procedures system
     - 33 core operators defined in [slope/operators.py](./src/slope/operators.py)
@@ -87,27 +88,24 @@ Or you can just copy `src/slope` to your projects.
 
 # Docs
 
+Docs are online at: [radenmuaz.github.io/slope-ad](https://radenmuaz.github.io/slope-ad)
+
+API reference is at: [radenmuaz.github.io/slope-ad/api](https://radenmuaz.github.io/slope-ad/api])
+
 ## Tutorials
 
 [Quickstart](./docs/tutorials/quickstart.md): How Tensors work, how to write and jit compile functions and train something.
 
-[NN Training](./docs/tutorials/nn_training.md): NN module overview.
+[Linear Regression](./docs/tutorials/linear_regression.md)
+
+[MLP on MNIST with NN Modules](./docs/tutorials/linear_regression.md)
 
 [Internals Walkthrough](./docs/tutorials/internals_walkthrough.md): Understand the core of SlopeAD (hint: like JAX). Useful if you want to start contributing to SlopeAD
 
 [Extending SlopeAD](./docs/tutorials/internals_walkthrough.md): Add new backend, operators, procedures. Modify the core functions.
 
-## Examples
 
-Examples are shorter and have less explanation, more code
 
-[Linear Regression](./docs/tutorials/linear_regression.md)
-
-[MLP on MNIST](./docs/tutorials/linear_regression.md)
-
-## API reference
-
-Docs are available online at [radenmuaz.github.io/slope-ad](https://radenmuaz.github.io/slope-ad)
 
 # Contributing
 

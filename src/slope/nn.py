@@ -1,4 +1,3 @@
-
 import slope
 from slope.core import Tensor, SymbolicTensor, TreeDef
 from typing import Tuple, List, Optional

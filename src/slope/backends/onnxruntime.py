@@ -260,16 +260,44 @@ class ONNXRuntimeBackend(Backend):
 
         return fn, code
 
-    def export(self, jit_output: slope.core.JitOutput, output_path, export_params, input_names, output_names, **kwargs):
+    def export(
+        self, jit_output: slope.core.JitOutput, output_path, export_params, input_names=None, output_names=None, dynamic_axes=None, **kwargs
+    ):
         code = jit_output.code
+        # code = code.replace("float[3","float[batch")
+        # print(code)
+        # breakpoint()
+        # if dynamic_axes:
+        #     if dims := dynamic_axes.get(input_name, None):
+        #         if isinstance(dims, list):
+        #             assert all(isinstance(d, int) for d in dims)
+        #             dims = {d: f"{input_name}_dim{d}" for d in dims}
+        #         else:
+        #             assert isinstance(dims, dict)
+        #         input_shape = list(input_shape)
+        #         for dim, dim_name in dims.items():
+        #             input_shape[dim] = dim_name
+        #         input_shape = tuple(input_shape)
+
         model = onnx.parser.parse_model(code)
         os.makedirs(output_path, exist_ok=True)
-        in_binders = jit_output.codegen_output["in_binders"]
-        outs = jit_output.codegen_output["outs"]
+        in_binders = jit_output.codegen_output.in_binders
+        outs = jit_output.codegen_output.outs
         num_consts = jit_output.program.num_consts
+
+        if input_names is None:
+            input_names = [inb.name for inb in in_binders]
+        else:
+            input_names = [inb.name for inb in in_binders][:num_consts] + list(input_names)
+            assert len(input_names) == len(in_binders)
+        if output_names is None:
+            output_names = [out.name for out in outs]
+        else:
+            assert len(output_names) == len(outs)
+
         for i in range(num_consts):
-            const_array = in_binders[i]["type"].numpy()
-            const_name = in_binders[i].name
+            const_array = in_binders[i].symval.numpy()
+            const_name = input_names[i]
             const = onnx.numpy_helper.from_array(const_array, name=const_name)
             model.graph.initializer.append(const)
 
@@ -280,9 +308,9 @@ class ONNXRuntimeBackend(Backend):
 
         test_input_code = ""
         for i in range(num_consts, len(in_binders)):
-            input_name = in_binders[i].name
-            input_shape = in_binders[i]["type"].shape
-            dtype = in_binders[i]["type"].dtype
+            input_name = input_names[i]
+            input_shape = in_binders[i].symval.shape
+            dtype = in_binders[i].symval.dtype
             input_dtype = ("np." + dtype.numpy.__name__) if dtype is not dtypes.bool else "bool"
             test_input_code += f"""    {input_name} = np.ones({input_shape}, dtype={input_dtype})\n"""
 

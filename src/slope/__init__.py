@@ -3,9 +3,11 @@ __docformat__ = "markdown"
 import os
 from slope import core
 import numpy as np
+
 np.set_printoptions(precision=5, threshold=1000, edgeitems=5, linewidth=120)
 SLOPE_BACKEND = os.environ.get("SLOPE_BACKEND", "onnxruntime")
 core.set_backend(SLOPE_BACKEND)
+
 
 def __getattr__(attr):
     if attr in (globals_dict := globals()):

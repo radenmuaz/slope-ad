@@ -1859,6 +1859,7 @@ def set_backend(name, where="slope.backends"):
     global backend
     backend = importlib.import_module(f"{where}.{name}").backend
     import slope.nn as nn
+
     # backend.register_node(nn.Module, nn.Module.flatten, nn.Module.unflatten, "Module")
 
     dblog(f"slope backend is {backend}", enable=backend.LOG_INIT)
@@ -2770,7 +2771,7 @@ class jit:
         jit_output = backend.jit_program(hashed_program, hashed_consts)
         return jit_output
 
-    def export(self, args, output_path, export_params=True, input_names=None, output_names=None, **kwargs):
+    def export(self, output_path, args, export_params=True, input_names=None, output_names=None, **kwargs):
         if isinstance(args, Tensor):
             args, static_args = (args,), dict()
         elif not isinstance(args[-1], dict):

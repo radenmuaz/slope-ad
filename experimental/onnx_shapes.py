@@ -1521,6 +1521,7 @@ class SymbolicShapeInference:
                         output_shape,
                     )
                 )
+                breakpoint()
 
     def _infer_ReduceProd(self, node):  # noqa: N802
         axes = get_attribute(node, "axes")
@@ -2595,6 +2596,7 @@ class SymbolicShapeInference:
                         break
 
             if self.verbose_ > 2:
+                breakpoint()
                 logger.debug(node.op_type + ": " + node.name)
                 for i, name in enumerate(node.input):
                     logger.debug("  Input {}: {} {}".format(i, name, "initializer" if name in self.initializers_ else ""))

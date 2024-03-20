@@ -425,11 +425,12 @@ class Tensor:
 
 
 class SymbolicTensor(Tensor):
-    def __init__(self, shape, dtype, device):
+    def __init__(self, shape, dtype, device, dynamic_axes=()):
         assert isinstance(dtype, DType)
         self._shape = tuple(int(i) for i in shape)
         self._dtype = dtype
         self._device = device
+        self.dynamic_axes = dynamic_axes
 
     @property
     def symval(self):
@@ -451,25 +452,30 @@ class SymbolicTensor(Tensor):
     def device(self):
         return self._device
 
-    def like(self, **but):
-        shape = but.get("shape", self.shape)
-        dtype = but.get("dtype", self.dtype)
-        device = but.get("device", self.device)
-        return SymbolicTensor(shape, dtype, device)
+    @staticmethod
+    def like(self, **overrides):
+        shape = overrides.get("shape", self.shape)
+        dtype = overrides.get("dtype", self.dtype)
+        device = overrides.get("device", self.device)
+        dynamic_axes = overrides.get("dynamic_axes", getattr(self, "dynamic_axes", ()))
+        return SymbolicTensor(shape, dtype, device, dynamic_axes)
+
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
 
     def __hash__(self):
-        return hash((self.shape, self.dtype))
+        return hash((self.shape, self.dtype, self.dynamic_axes))
 
     def __eq__(self, other):
         if type(self) != type(other):
             return False
-        return tuple(self.shape) == tuple(other.shape) and self.dtype == other.dtype
+        return ((self.shape == other.shape) and
+                (self.dtype == other.dtype) and
+                (self.dynamic_axes == other.dynamic_axes))
 
     def __repr__(self):
-        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
+        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}, dynamic_axes={self.dynamic_axes}>"
 
 
 # =================================
@@ -585,7 +591,7 @@ class UnaryOperator(Operator):
         return [self(x, **params)], [x_bdim]
 
     def typecheck(self, x, **params):
-        return [x.like()]
+        return [SymbolicTensor.like(x)]
 
     def jvp(self, primals, tangents, **params):
         (x,), (x_dot,) = primals, tangents
@@ -651,10 +657,7 @@ class BinaryOperator(Operator):
         return [self(x, w, **params)], [x_bdim]
 
     def typecheck(self, x: SymbolicTensor, y: SymbolicTensor, **params) -> List[SymbolicTensor]:
-        if not type(x) in (Tensor, SymbolicTensor) or not type(x) in (
-            Tensor,
-            SymbolicTensor,
-        ):
+        if not isinstance(x, (Tensor, SymbolicTensor)) or not isinstance(y, (Tensor, SymbolicTensor)):
             raise TypeError
         symx = SymbolicTensor.like(x, dtype=dtypes.bool if self.boolean_output else x.dtype)
         symy = SymbolicTensor.like(y, dtype=dtypes.bool if self.boolean_output else y.dtype)
@@ -664,10 +667,9 @@ class BinaryOperator(Operator):
             return [symx]
         shape_delta = len(symx.shape) - len(symy.shape)
         if shape_delta > 0:
-            symy = symy.like(shape=(1,) * shape_delta + symy.shape)
+            symy = symy.like(shape=(1,) * shape_delta + symy.shape, dynamic_axes=symx.dynamic_axes)
         elif shape_delta < 0:
-            x = x.reshape((1,) * -shape_delta + symx.shape)
-            symx = symx.like(shape=(1,) * -shape_delta + symx.shape)
+            symx = symx.like(shape=(1,) * -shape_delta + symx.shape, dynamic_axes=symy.dynamic_axes)
         if symx == symy:
             return [symx]
         else:
@@ -690,8 +692,10 @@ class BinaryOperator(Operator):
             gL_y = gL_y.cast(x.dtype)
         if isinstance(x, UndefinedPrimal):
             return [gL_y, NullCotangent]
-        elif type(w) is UndefinedPrimal:
+        elif isinstance(w, UndefinedPrimal):
             return [NullCotangent, gL_y]
+        else:
+            raise ValueError
 
 
 class ReduceOperator(Operator):
@@ -712,11 +716,15 @@ class ReduceOperator(Operator):
     def typecheck(self, x: SymbolicTensor, *, dim=None, keepdim=False) -> List[SymbolicTensor]:
         dim = [a + len(x.shape) if a < 0 else a for a in dim]
         dim_ = set(dim)
+        new_dynamic_axes = list(sorted(x.dynamic_axes))
         if keepdim:
             new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
         else:
             new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
-        return [x.like(shape=tuple(new_shape))]
+            for i in reversed(range(len((new_dynamic_axes)))):
+                if new_dynamic_axes[i] in dim:
+                    new_dynamic_axes.pop(i)
+        return [SymbolicTensor.like(x, shape=tuple(new_shape), dynamic_axes=tuple(new_dynamic_axes))]
 
 
 class InitOperator(Operator):
@@ -729,7 +737,6 @@ class InitOperator(Operator):
     def jvp(self, primals, tangents, **params):
         y = self(**params)
         y_dot = NullCotangent(y.symval)
-        # y_dot = y.ones_like()
         return [y], [y_dot]
 
     def T(self, cotangents, **params):
@@ -2692,18 +2699,18 @@ def jit_partial_run(trace, tracers, *, program):
 
 
 class jit:
-    def __init__(self, f, static_argnames=(), name=None):
+    def __init__(self, f, static_argnames=(), name=None, dynamic_axes=None):
         if isinstance(static_argnames, str):
             static_argnames = tuple(static_argnames.split(" "))
         assert type(static_argnames) is tuple and all(type(s) is str for s in static_argnames)
         self.f = f
         self.name = name if name is not None else self.f.__name__
-
         self.static_argnames = static_argnames
+        self.dynamic_axes = dynamic_axes
 
     @classmethod
-    def with_options(cls, static_argnames=(), name=None):
-        return partial(cls, static_argnames=static_argnames, name=name)
+    def with_options(cls, **kwargs):
+        return partial(cls, **kwargs)
 
     @classmethod
     def get_jit_name(cls, args, static_args, prefix="jit", short=False):
@@ -2717,11 +2724,11 @@ class jit:
                 name += f"shape_{a.shape}_dtype_{a.dtype.name}_"
             for k, v in static_args.items():
                 name += f"{k}_{v}_"
-            name = name.replace("(", "_lp_")
-            name = name.replace(")", "_rp_")
-            name = name.replace(",", "_cm_")
+            name = name.replace("(", "L")
+            name = name.replace(")", "R")
+            name = name.replace(",", "C")
             name = name.replace(" ", "")
-            name = name.replace(".", "_dt_")
+            name = name.replace(".", "D")
 
         return name
 

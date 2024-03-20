@@ -510,7 +510,7 @@ render_python: Dict[Type, Callable] = {
 }
 
 if __name__ == "__main__":
-    v = Variable("a", 0, 8)+1 
-    print(v.render()) # "(1+a)"
-    print(v.min) # 1
-    print(v.max) # 9
+    v = Variable("a", 0, 8) + 1
+    print(v.render())  # "(1+a)"
+    print(v.min)  # 1
+    print(v.max)  # 9

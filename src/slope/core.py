@@ -425,12 +425,11 @@ class Tensor:
 
 
 class SymbolicTensor(Tensor):
-    def __init__(self, shape, dtype, device, dynamic_axes=()):
+    def __init__(self, shape, dtype, device):
         assert isinstance(dtype, DType)
         self._shape = tuple(int(i) for i in shape)
         self._dtype = dtype
         self._device = device
-        self.dynamic_axes = dynamic_axes
 
     @property
     def symval(self):
@@ -452,30 +451,25 @@ class SymbolicTensor(Tensor):
     def device(self):
         return self._device
 
-    @staticmethod
     def like(self, **overrides):
         shape = overrides.get("shape", self.shape)
         dtype = overrides.get("dtype", self.dtype)
         device = overrides.get("device", self.device)
-        dynamic_axes = overrides.get("dynamic_axes", getattr(self, "dynamic_axes", ()))
-        return SymbolicTensor(shape, dtype, device, dynamic_axes)
-
+        return SymbolicTensor(shape, dtype, device)
 
     def str_short(self):
         return f'{str(self.dtype)}[{",".join(str(d) for d in self.shape)}]'
 
     def __hash__(self):
-        return hash((self.shape, self.dtype, self.dynamic_axes))
+        return hash((self.shape, self.dtype))
 
     def __eq__(self, other):
         if type(self) != type(other):
             return False
-        return ((self.shape == other.shape) and
-                (self.dtype == other.dtype) and
-                (self.dynamic_axes == other.dynamic_axes))
+        return (self.shape == other.shape) and (self.dtype == other.dtype)
 
     def __repr__(self):
-        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}, dynamic_axes={self.dynamic_axes}>"
+        return f"<SymbolicTensor: shape={self.shape}, dtype={self.dtype.name}, device={self.device}>"
 
 
 # =================================
@@ -667,9 +661,9 @@ class BinaryOperator(Operator):
             return [symx]
         shape_delta = len(symx.shape) - len(symy.shape)
         if shape_delta > 0:
-            symy = symy.like(shape=(1,) * shape_delta + symy.shape, dynamic_axes=symx.dynamic_axes)
+            symy = symy.like(shape=(1,) * shape_delta + symy.shape)
         elif shape_delta < 0:
-            symx = symx.like(shape=(1,) * -shape_delta + symx.shape, dynamic_axes=symy.dynamic_axes)
+            symx = symx.like(shape=(1,) * -shape_delta + symx.shape)
         if symx == symy:
             return [symx]
         else:
@@ -714,17 +708,12 @@ class ReduceOperator(Operator):
         return [self(x, dim=dim, keepdim=keepdim)], [out_bdim]
 
     def typecheck(self, x: SymbolicTensor, *, dim=None, keepdim=False) -> List[SymbolicTensor]:
-        dim = [a + len(x.shape) if a < 0 else a for a in dim]
-        dim_ = set(dim)
-        new_dynamic_axes = list(sorted(x.dynamic_axes))
+        dim = list(set([a + len(x.shape) if a < 0 else a for a in dim]))
         if keepdim:
-            new_shape = [d if i not in dim_ else 1 for i, d in enumerate(x.shape)]
+            new_shape = [d if i not in dim else 1 for i, d in enumerate(x.shape)]
         else:
-            new_shape = [d for i, d in enumerate(x.shape) if i not in dim_]
-            for i in reversed(range(len((new_dynamic_axes)))):
-                if new_dynamic_axes[i] in dim:
-                    new_dynamic_axes.pop(i)
-        return [SymbolicTensor.like(x, shape=tuple(new_shape), dynamic_axes=tuple(new_dynamic_axes))]
+            new_shape = [d for i, d in enumerate(x.shape) if i not in dim]
+        return [SymbolicTensor.like(x, shape=tuple(new_shape))]
 
 
 class InitOperator(Operator):
@@ -2764,7 +2753,6 @@ class jit:
     def __call__(self, *args, **static_args):
         program, consts, out_tree = self.get_program(*args, **static_args)
         args, in_tree = tree_flatten(args)
-        # with Timing(f"JIT {self}"): outs = bind(backend.jit_op, *consts, *args, program=program)
         outs = bind(backend.jit_op, *consts, *args, program=program)
         return tree_unflatten(out_tree, outs)
 

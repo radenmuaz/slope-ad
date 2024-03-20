@@ -14,4 +14,4 @@ def f(x):
 # print(f(x,))
 # f_jitobj = f.lower(x)
 # f.export("/tmp/f", (x,), input_names=['x'], output_names=['y'], dynamic_axes=dict(x=[0], y=[0]))
-f.export("/tmp/f", (x,), input_names=['x'], output_names=['y'], dynamic_axes=dict(x={0:'batch'}), y={0:'batch'})
+f.export("/tmp/f", (x,), input_names=["x"], output_names=["y"], dynamic_axes=dict(x={0: "batch"}), y={0: "batch"})

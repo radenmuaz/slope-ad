@@ -11,6 +11,7 @@ def my_relu(x):
 # To override a procedure gradient rule, define a new operator with the same name as procedure
 # the impl will default to tracing procedure as a Program if not defined.
 
+
 @slope.backend.operator_set.register("my_relu")
 class ReLUOp(slope.core.UnaryOperator):
     def jvp(self, primals, tangents):
@@ -23,6 +24,7 @@ class ReLUOp(slope.core.UnaryOperator):
         (gL_y,) = cotangents
         gL_x = (x.my_relu() > x.zeros_like()).cast(gL_y.dtype) * gL_y
         return [gL_x]
+
 
 @slope.jit
 def f(x):

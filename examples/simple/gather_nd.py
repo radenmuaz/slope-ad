@@ -9,6 +9,7 @@ print(f"{w=}")
 y = x.gather_nd(w, 0)
 print(f"{y=}")
 
+
 @slope.jit
 def f(x, w):
     y = x.gather_nd(w, 0)

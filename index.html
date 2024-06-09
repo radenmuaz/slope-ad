@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="description" content="None" /><link rel="canonical" href="https://radenmuaz.github.io/slope/" />
+      <link rel="shortcut icon" href="img/favicon.ico" />
+    <title>Slope</title>
+    <link rel="stylesheet" href="css/theme.css" />
+    <link rel="stylesheet" href="css/theme_extra.css" />
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" />
+    
+      <script>
+        // Current page data
+        var mkdocs_page_name = "SlopeAD";
+        var mkdocs_page_input_path = "index.md";
+        var mkdocs_page_url = "/slope/";
+      </script>
+    
+    <!--[if lt IE 9]>
+      <script src="js/html5shiv.min.js"></script>
+    <![endif]-->
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+      <script>hljs.highlightAll();</script> 
+</head>
+
+<body class="wy-body-for-nav" role="document">
+
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side stickynav">
+    <div class="wy-side-scroll">
+      <div class="wy-side-nav-search">
+          <a href="." class="icon icon-home"> Slope
+        </a><div role="search">
+  <form id ="rtd-search-form" class="wy-form" action="./search.html" method="get">
+      <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" title="Type search term here" />
+  </form>
+</div>
+      </div>
+
+      <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <ul class="current">
+                <li class="toctree-l1 current"><a class="reference internal current" href="#">SlopeAD</a>
+    <ul class="current">
+    </ul>
+                </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Api</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="api/">Index</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" >Slope</a>
+    <ul>
+                <li class="toctree-l2"><a class="reference internal" href="api/slope/core/">slope.core</a>
+                </li>
+    </ul>
+                  </li>
+              </ul>
+              <p class="caption"><span class="caption-text">Tutorials</span></p>
+              <ul>
+                  <li class="toctree-l1"><a class="reference internal" href="tutorials/adding_new_backend/">Adding new backend</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="tutorials/internals_walkthrough/">Internals walkthrough</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="tutorials/quickstart/">Quickstart</a>
+                  </li>
+                  <li class="toctree-l1"><a class="reference internal" href="tutorials/training_nn/">Training nn</a>
+                  </li>
+              </ul>
+      </div>
+    </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" role="navigation" aria-label="Mobile navigation menu">
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href=".">Slope</a>
+        
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content"><div role="navigation" aria-label="breadcrumbs navigation">
+  <ul class="wy-breadcrumbs">
+    <li><a href="." class="icon icon-home" aria-label="Docs"></a></li>
+      <li class="breadcrumb-item active">SlopeAD</li>
+    <li class="wy-breadcrumbs-aside">
+    </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div class="section" itemprop="articleBody">
+              
+                <h1 id="slopead">SlopeAD</h1>
+<p>Slope is a small automatic differentation (AD) engine, focused on machine learning (ML), supporting forward, reverse and higher-order AD.</p>
+<p>This project is designed to be a <strong>small</strong>, <strong>hackable</strong> and <strong>educational</strong> AD engine focused on ML, yet able to do things <strong>end-to-end from training to deployment</strong>, instead of just some simple toy examples.</p>
+<p>Tensor semantics are similar to Pytorch, functional API is similar to <a href="https://github.com/google/jax">JAX</a>, tensor operators code is heavily derived from <a href="https://tinygrad.org/">tinygrad</a>.</p>
+<p>Example:</p>
+<pre><code class="language-python">import slope
+
+def f(x):
+    y = x * 2.0
+    return y.sum()
+
+x = slope.tensor([1.,2.,3.])
+gf_x = slope.grad(f)(x)
+print(f&quot;{gf_x=}&quot;)
+</code></pre>
+<pre><code>gf_x=&lt;Tensor: val=
+[2. 2. 2.]
+shape=(3,), dtype=float32, device='cpu:0'&gt;
+</code></pre>
+<h1 id="install">Install</h1>
+<h2 id="stable-release">Stable release</h2>
+<pre><code>pip install slope-ad
+</code></pre>
+<h2 id="latest">Latest</h2>
+<pre><code>git clone https://github.com/radenmuaz/slope-ad
+cd slope
+pip install -e .
+</code></pre>
+<p>Or you can just copy <code>src/slope</code> to your projects.</p>
+<h1 id="features">Features</h1>
+<ol>
+<li>Small (?)<ul>
+<li>&lt;3000 lines of core code <a href="./src/slope/core.py">slope/core.py</a>, after <code>black src --line-length 140</code></li>
+</ul>
+</li>
+<li>
+<p>Functional API for forward-mode, reverse-mode, and higher-order AD, like in JAX:</p>
+<ul>
+<li><code>grad vjp jvp jit vmap</code></li>
+<li><code>register_node tree_flatten tree_unflatten</code></li>
+</ul>
+</li>
+<li>
+<p>Just-in-time compilation, where code is compiled to these supported backends running on either CPU, CUDA and Metal:</p>
+<ul>
+<li><a href="https://onnxruntime.ai/">ONNX Runtime</a> (ONNX graph)</li>
+<li><a href="https://iree.dev/">OpenXLA IREE</a> (StableHLO MLIR)</li>
+<li>NumPy (Python code)</li>
+</ul>
+</li>
+<li>
+<p>Training and inference, examples:</p>
+<ul>
+<li><a href="examples/nn/mnist_mlp.py">MLP on MNIST</a></li>
+<li><a href="examples/nn/cifar_resnet.py">ResNet on CIFAR-10</a></li>
+<li><a href="examples/simple/export.py">Export jitted function</a></li>
+</ul>
+</li>
+<li>
+<p>Operators and procedures system</p>
+<ul>
+<li>33 core operators defined in <a href="./src/slope/operators.py">slope/operators.py</a><ul>
+<li>Unary: <code>exp log sin sqrt invert cast stop_gradient</code></li>
+<li>Binary: <code>add mul sub div pow equal less greater maximum</code></li>
+<li>Reduce: <code>sum max</code></li>
+<li>Shape: <code>reshape expand permute slice pad flip cat</code></li>
+<li>Init: <code>full arange random_normal random_uniform</code></li>
+<li>GeneralReduce: <code>matmul conv gather_nd scatter_nd</code></li>
+</ul>
+</li>
+<li>Composite operators system with "procedures" <a href="./src/slope/procedures.py">slope/procedures.py</a><ul>
+<li>For defining Tensor functions composed with core operators, e.g.</li>
+<li><code>x.cos()</code>, where <code>def cos(x): return (math.pi/2 - x).sin()</code></li>
+<li><code>x.conv_transpose(w)</code>: where <code>def conv_transpose(x, w, ... ): ...</code> is a very long function.</li>
+<li>Procedures are exposed with <code>Tensor.procedure_name(*args)</code> syntax.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+<p>Extensible</p>
+<ul>
+<li>Add new backend by defining implementation translations <a href="./src/slope/backends">slope/backends</a></li>
+<li>Define new modules with NN module <a href="./src/slope/nn.py">slope/nn.py</a></li>
+</ul>
+</li>
+</ol>
+<h1 id="docs">Docs</h1>
+<p>Docs are online at: <a href="https://radenmuaz.github.io/slope-ad">radenmuaz.github.io/slope-ad</a></p>
+<p>API reference is at: <a href="https://radenmuaz.github.io/slope-ad/api]">radenmuaz.github.io/slope-ad/api</a></p>
+<h2 id="tutorials">Tutorials</h2>
+<p><a href="./docs/tutorials/quickstart.md">Quickstart</a>: How Tensors work, how to write and jit compile functions and train something.</p>
+<p><a href="./docs/tutorials/linear_regression.md">Linear Regression</a></p>
+<p><a href="./docs/tutorials/linear_regression.md">MLP on MNIST with NN Modules</a></p>
+<p><a href="./docs/tutorials/internals_walkthrough.md">Internals Walkthrough</a>: Understand the core of SlopeAD (hint: like JAX). Useful if you want to start contributing to SlopeAD</p>
+<p><a href="./docs/tutorials/internals_walkthrough.md">Extending SlopeAD</a>: Add new backend, operators, procedures. Modify the core functions.</p>
+<h1 id="contributing">Contributing</h1>
+<p>Open a PR, things on the roadmap below need to be done.</p>
+<h1 id="roadmap">Roadmap</h1>
+<ul>
+<li>Docs</li>
+<li>Symbolic shape inference </li>
+<li>Dynamic shape jit</li>
+<li>Optimizer filter frozen params</li>
+<li>vmap vjp and jvp to compute jacobian and hessian</li>
+<li>iree backend currently has fixed seed random, implement threefry and JAX-like random</li>
+<li>make things fast</li>
+<li>llama (gpt) training</li>
+<li>whisper inference</li>
+<li>core tests, operators tests on all Trace types</li>
+</ul>
+              
+            </div>
+          </div><footer>
+    <div class="rst-footer-buttons" role="navigation" aria-label="Footer Navigation">
+        <a href="api/" class="btn btn-neutral float-right" title="Index">Next <span class="icon icon-circle-arrow-right"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <!-- Copyright etc -->
+  </div>
+
+  Built with <a href="https://www.mkdocs.org/">MkDocs</a> using a <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>.
+</footer>
+          
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+
+  <div class="rst-versions" role="note" aria-label="Versions">
+  <span class="rst-current-version" data-toggle="rst-current-version">
+    
+    
+    
+      <span><a href="api/" style="color: #fcfcfc">Next &raquo;</a></span>
+    
+  </span>
+</div>
+    <script src="js/jquery-3.6.0.min.js"></script>
+    <script>var base_url = ".";</script>
+    <script src="js/theme_extra.js"></script>
+    <script src="js/theme.js"></script>
+      <script src="search/main.js"></script>
+    <script>
+        jQuery(function () {
+            SphinxRtdTheme.Navigation.enable(true);
+        });
+    </script>
+
+</body>
+</html>
+
+<!--
+MkDocs version : 1.6.0
+Build Date UTC : 2024-06-09 11:03:03.576794+00:00
+-->

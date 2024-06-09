@@ -1,8 +1,7 @@
 import slope
 from slope.core import Tensor, SymbolicTensor, TreeDef
 from typing import Tuple, List, Optional
-
-import operator as operator_py
+from operator import attrgetter
 
 from typing import Sequence, Callable, Union, Callable, NamedTuple
 import math
@@ -11,7 +10,9 @@ import numpy as np
 # ====================
 # Module
 # ====================
-
+def attrsetter(obj, attr, val):
+    pre, _, post = attr.rpartition('.')
+    return setattr(attrgetter(obj, pre) if pre else obj, post, val)
 
 class Module:
     def __hash__(self):
@@ -98,13 +99,20 @@ class Module:
             module_attrs=tuple(module_attrs),
             static_dict=static_dict,
         )
+    def state_dict(self):
+        return self.leaf_get_metadata["tensor_attrs"]
+    
+    def load_state_dict(self, state_dict):
+        for k, v in state_dict.items():
+            attrsetter(self, k, v)
+
 
     def leaf_flatten(self):
         metadata = self.get_metadata()
-        tensors = tuple(operator_py.attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
+        tensors = tuple(attrgetter(attr)(self) for attr in metadata["tensor_attrs"])
         rest = dict()
         for mod_attr in metadata["module_attrs"]:
-            mod = operator_py.attrgetter(mod_attr)(self)
+            mod = attrgetter(mod_attr)(self)
             mod_rest, _ = mod.flatten()
             rest[mod_attr] = mod_rest
 

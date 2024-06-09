@@ -134,16 +134,6 @@ def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
     return lst[:n], lst[n:]
 
 
-# def partition_list(bs: List[bool], l: List[Any]) -> Tuple[List[Any], List[Any]]:
-#     assert len(bs) == len(l)
-#     lists = lst1, lst2 = [], []
-#     for b, x in list_zip(bs, l):
-#         lst = lists[int(b)]
-#         lst += [x]
-#     breakpoint()
-#     return lst1, lst2
-
-
 def split_list(lst: List[Any], n: int) -> Tuple[List[Any], List[Any]]:
     assert 0 <= n <= len(lst)
     return lst[:n], lst[n:]
@@ -251,6 +241,8 @@ class dtypes:
     int64: Final[DType] = DType(2, 8, "int64", "i64", np.int64)
     uint64: Final[DType] = DType(2, 8, "uint64", "ui64", np.uint64)
     float16: Final[DType] = DType(0, 2, "float16", "f16", np.float16)
+    half = float16
+    # bfloat16: Final[DType] = DType(0, 2, "bfloat16", "bf16", np.float16)
 
     all_dtypes = (bool, float16, float32, int8, int32, int64, uint8, uint64)
     name_dtype_map = {k.name: k for k in all_dtypes}
@@ -264,7 +256,7 @@ class dtypes:
 
     @classmethod
     def is_float(cls, dtype):
-        return dtype in (cls.float16, cls.float32)
+        return dtype in (cls.float16, cls.bfloat16, cls.float32)
 
 
 class Device(NamedTuple):
@@ -1042,7 +1034,6 @@ class Program:
         self.in_binders: Any = in_binders
         self.outs: Any = outs
         self.instructions = self.prune_instructions(instructions, outs)
-        # self.instructions = instructions
         self.num_consts: int = num_consts
         self.static_args = static_args
         self.name: str = name
@@ -1419,11 +1410,6 @@ class JitOp(MetaOperator):
         instruction1 = Instruction(self, ins1, dict(program=program1), out_binders1 + res)
         instruction2 = Instruction(self, res + ins2, dict(program=program2), out_binders2)
         return instruction1, instruction2, out_unknowns, res
-
-
-# =================================
-#   Compiler
-# =================================
 
 
 class MainTrace(NamedTuple):
@@ -2182,11 +2168,24 @@ def jvp(f, primals, tangents, *, has_aux=False, global_data=None, **static_args)
     return ((primals_out, tangents_out), aux) if has_aux else (primals_out, tangents_out)
 
 
-def jacfwd(f, x):
-    pushfwd = lambda v: jvp(f, (x,), (v,))[1]
-    vecs_in = backend.eye(math.prod(x.shape)).reshape(x.shape * 2)
-    return vmap(pushfwd, (0,))(vecs_in)
+def jacfwd(f, argnums=0, has_aux=False):
+    def jvp_fn(x):
+        return jvp(f, x, (backend.eye(len(x)),), has_aux=has_aux)
+    return vmap(jvp_fn, in_dim=argnums)
 
+def jacrev(f, argnums=0, has_aux=False):
+    def grad_f(x):
+        return grad(lambda x: f(x) @ backend.eye(f(x).shape[0]), argnums=argnums, has_aux=has_aux)(x)
+    return vmap(grad_f)
+
+## arange version
+# def jacrev(f, x):
+#     def grad_f_i(x, i):
+#         return grad(lambda x: f(x)[i])(x)
+#     return vmap(lambda i: grad_i(x, i))(backend.arange(f(x).shape[0]))
+
+def hessian(fn, argnums=0, has_aux=False):
+    return jacrev(jacrev(fn, argnums=argnums, has_aux=has_aux))
 
 @contextmanager
 def stash_trace(main: MainTrace):
@@ -2741,13 +2740,6 @@ class jit:
         if self.name is None:
             self.name = f"jit_{str(hash((self.f, symvals_in, static_args)))[-5:]}"
         program, consts, out_tree = make_program(self.f, *symvals_in, static_args=static_args, name=self.name)
-        return program, consts, out_tree
-        program, consts, out_tree = make_program(
-            self.f,
-            *symvals_in,
-            static_args=tuple(static_args.items()),
-            name=self.name,
-        )
         return program, consts, out_tree
 
     def __call__(self, *args, **static_args):
